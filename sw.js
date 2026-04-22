@@ -3,7 +3,7 @@
 // Stratégie : Network First pour HTML (toujours à jour sur refresh)
 //             Cache First pour assets statiques (icons, fonts)
 // ============================================================
-const CACHE_NAME = 'boutique-pos-v4';
+const CACHE_NAME = 'boutique-pos-v5';
 const OFFLINE_URL = './index.html';
 
 const STATIC_ASSETS = [

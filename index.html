@@ -2130,15 +2130,13 @@ localStorage.setItem('pos-script-url', APPS_SCRIPT_URL);
 let syncEnabled = !!APPS_SCRIPT_URL;
 
 // ── Requête générique ─────────────────────────────────────
-// GET  → lectures  (ping, getProducts, getSales, login, initSheets)
-// POST no-cors → écritures (addSale, saveProduct, deleteProduct, stockMove)
-//   no-cors : le navigateur envoie les données SANS vérifier les headers CORS
-//   → élimine définitivement "Failed to fetch"
+// Lectures : GET ?action=xxx  (réponse JSON lisible)
+// Écritures : GET ?payload=JSON  (Apps Script lit e.parameter.payload)
 async function apiCall(payload) {
   if (!APPS_SCRIPT_URL) return null;
 
-  // ── LECTURES & LOGIN : requête GET lisible ────────────────
-  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login'];
+  // ── LECTURES & LOGIN : requête GET avec params individuels ─
+  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers'];
   if (getActions.includes(payload.action)) {
     try {
       let url = APPS_SCRIPT_URL + '?action=' + payload.action;
@@ -2152,19 +2150,17 @@ async function apiCall(payload) {
     } catch(e) { console.warn('GET error:', e.message); return null; }
   }
 
-  // ── ÉCRITURES : POST mode no-cors ────────────────────────
-  // text/plain est autorisé en no-cors et évite le preflight OPTIONS
-  // Apps Script reçoit les données via e.postData.contents
+  // ── ÉCRITURES : GET ?payload=JSON ───────────────────────
+  // Apps Script lit e.parameter.payload dans doGet → pas de CORS
   try {
-    await fetch(APPS_SCRIPT_URL, {
-      method:  'POST',
-      mode:    'no-cors',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body:    JSON.stringify(payload)
-    });
-    return { ok: true };
+    const encoded = encodeURIComponent(JSON.stringify(payload));
+    const url = APPS_SCRIPT_URL + '?payload=' + encoded;
+    const res  = await fetch(url);
+    const text = await res.text();
+    try { return JSON.parse(text); }
+    catch(e) { return { ok: true }; }
   } catch(e) {
-    console.warn('POST no-cors error:', e.message);
+    console.warn('apiCall write error:', e.message);
     return null;
   }
 }
