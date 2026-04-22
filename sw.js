@@ -2,7 +2,7 @@
 // SERVICE WORKER — Boutique POS
 // Version à incrémenter à chaque mise à jour
 // ============================================================
-const CACHE_NAME = 'boutique-pos-v1';
+const CACHE_NAME = 'boutique-pos-v4';
 const OFFLINE_URL = './index.html';
 
 const ASSETS_TO_CACHE = [
