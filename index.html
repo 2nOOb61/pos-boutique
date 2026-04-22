@@ -1678,13 +1678,17 @@ let swRegistration = null;
 function initPWA() {
   // Register Service Worker
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').then(reg => {
+    navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then(reg => {
       swRegistration = reg;
+      // Vérifier une mise à jour immédiatement et toutes les 60s
+      reg.update();
+      setInterval(() => reg.update(), 60000);
       reg.addEventListener('updatefound', () => {
         const newWorker = reg.installing;
         newWorker.addEventListener('statechange', () => {
-          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-            document.getElementById('updateBanner').classList.add('show');
+          // Nouveau SW prêt : l'activer immédiatement sans bannière
+          if (newWorker.state === 'installed') {
+            newWorker.postMessage({ type: 'SKIP_WAITING' });
           }
         });
       });
