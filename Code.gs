@@ -7,7 +7,7 @@
 //   → Accès : Tout le monde
 // ============================================================
 
-const SHEET_ID = 'VOTRE_SPREADSHEET_ID'; // ← REMPLACER ICI
+const SHEET_ID = '1Lsf_OhhuKYlSE3S_OpJwzUEy78LBdFDj_1dmYuT70eo';
 
 // Noms des feuilles
 const SHEET_PRODUCTS  = 'Produits';
