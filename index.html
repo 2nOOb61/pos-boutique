@@ -18,6 +18,8 @@
 <link rel="apple-touch-icon" sizes="192x192" href="./icons/icon-192.png">
 <!-- Favicon -->
 <link rel="icon" type="image/png" sizes="32x32" href="./icons/icon-96.png">
+<!-- QR/Barcode Scanner library -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
@@ -316,24 +318,43 @@
 
   /* ===== SCANNER OVERLAY ===== */
   #scannerOverlay {
-    position:fixed; inset:0; background:rgba(0,0,0,.9); z-index:900;
+    position:fixed; inset:0; background:#000; z-index:900;
     display:none; flex-direction:column; align-items:center; justify-content:center;
+    padding:20px;
   }
   #scannerOverlay.open { display:flex; }
-  .scanner-frame { width:280px; height:280px; border:3px solid var(--accent); border-radius:20px; position:relative; display:flex; align-items:center; justify-content:center; }
-  .scanner-line { width:100%; height:2px; background:var(--accent); opacity:.8; animation:scan 2s linear infinite; }
-  @keyframes scan { 0%{transform:translateY(-130px)} 100%{transform:translateY(130px)} }
-  .scanner-corner { position:absolute; width:24px; height:24px; border-color:var(--accent); border-style:solid; }
-  .corner-tl { top:0; left:0; border-width:3px 0 0 3px; border-radius:4px 0 0 0; }
-  .corner-tr { top:0; right:0; border-width:3px 3px 0 0; border-radius:0 4px 0 0; }
-  .corner-bl { bottom:0; left:0; border-width:0 0 3px 3px; border-radius:0 0 0 4px; }
-  .corner-br { bottom:0; right:0; border-width:0 3px 3px 0; border-radius:0 0 4px 0; }
-  .scanner-label { color:var(--text); margin-top:24px; font-size:16px; }
-  .scanner-manual { display:flex; gap:10px; margin-top:20px; }
-  .scanner-manual input { padding:12px 16px; background:var(--surface); border:1px solid var(--border); border-radius:10px; color:var(--text); font-size:15px; outline:none; width:200px; }
+  #qr-reader {
+    width:100%; max-width:340px; border-radius:16px; overflow:hidden;
+    border:2px solid var(--accent);
+  }
+  #qr-reader video { border-radius:14px !important; }
+  #qr-reader__scan_region { background:transparent !important; }
+  #qr-reader__dashboard { background:var(--surface) !important; border-radius:0 0 14px 14px !important; padding:10px !important; }
+  #qr-reader__dashboard_section_csr button {
+    background:var(--accent) !important; color:#0a0e1a !important;
+    border:none !important; border-radius:8px !important; padding:8px 16px !important;
+    font-weight:700 !important; cursor:pointer !important;
+  }
+  #qr-reader__dashboard_section_swaplink { color:var(--muted) !important; font-size:12px !important; }
+  #qr-reader__status_span { color:var(--muted) !important; font-size:12px !important; }
+  .scanner-top-label { color:var(--text); font-size:16px; font-weight:600; margin-bottom:16px; text-align:center; }
+  .scanner-result-box {
+    margin-top:14px; background:var(--surface); border:1px solid var(--accent);
+    border-radius:12px; padding:12px 18px; color:var(--accent); font-size:14px;
+    font-weight:600; display:none; text-align:center; max-width:340px; width:100%;
+  }
+  .scanner-manual { display:flex; gap:10px; margin-top:14px; width:100%; max-width:340px; }
+  .scanner-manual input {
+    flex:1; padding:12px 16px; background:var(--surface); border:1px solid var(--border);
+    border-radius:10px; color:var(--text); font-size:15px; outline:none;
+  }
   .scanner-manual input:focus { border-color:var(--accent); }
   .scanner-manual button { padding:12px 20px; background:var(--accent); color:#0a0e1a; border:none; border-radius:10px; cursor:pointer; font-weight:700; }
-  .btn-close-scanner { margin-top:16px; background:none; border:1px solid var(--border); color:var(--muted); padding:10px 24px; border-radius:10px; cursor:pointer; }
+  .btn-close-scanner {
+    margin-top:14px; background:none; border:1px solid var(--border);
+    color:var(--muted); padding:10px 32px; border-radius:10px; cursor:pointer; font-size:14px;
+  }
+  .btn-close-scanner:hover { border-color:var(--red); color:var(--red); }
 
   /* scrollbar */
   ::-webkit-scrollbar { width:6px; height:6px; }
@@ -559,16 +580,11 @@
 
 <!-- SCANNER OVERLAY -->
 <div id="scannerOverlay">
-  <div class="scanner-frame">
-    <div class="scanner-corner corner-tl"></div>
-    <div class="scanner-corner corner-tr"></div>
-    <div class="scanner-corner corner-bl"></div>
-    <div class="scanner-corner corner-br"></div>
-    <div class="scanner-line"></div>
-  </div>
-  <div class="scanner-label">📷 Pointez la caméra vers le code-barres</div>
+  <div class="scanner-top-label">📷 Scanner un code-barres</div>
+  <div id="qr-reader"></div>
+  <div class="scanner-result-box" id="scannerResult">En attente...</div>
   <div class="scanner-manual">
-    <input type="text" id="manualCode" placeholder="Ou saisir le code..." onkeydown="if(event.key==='Enter')scanManual()" />
+    <input type="text" id="manualCode" placeholder="Saisir le code manuellement..." onkeydown="if(event.key==='Enter')scanManual()" />
     <button onclick="scanManual()">OK</button>
   </div>
   <button class="btn-close-scanner" onclick="closeScanner()">✖ Fermer</button>
@@ -991,27 +1007,87 @@ function printTicket(sale) {
 }
 
 // ============================================================
-// SCANNER
+// SCANNER — html5-qrcode (caméra réelle)
 // ============================================================
+let html5QrCode = null;
+let scannerRunning = false;
+
 function openScanner() {
   document.getElementById('scannerOverlay').classList.add('open');
-  document.getElementById('manualCode').focus();
+  document.getElementById('scannerResult').style.display = 'none';
+  startCamera();
 }
-function closeScanner() {
-  document.getElementById('scannerOverlay').classList.remove('open');
-  document.getElementById('manualCode').value='';
+
+async function startCamera() {
+  if (scannerRunning) return;
+  try {
+    if (!html5QrCode) {
+      html5QrCode = new Html5Qrcode('qr-reader');
+    }
+    const cameras = await Html5Qrcode.getCameras();
+    if (!cameras || cameras.length === 0) {
+      showToast('❌ Aucune caméra détectée', 'error');
+      return;
+    }
+    // Préférer la caméra arrière
+    const cam = cameras.find(c => /back|rear|environment/i.test(c.label)) || cameras[cameras.length - 1];
+    await html5QrCode.start(
+      cam.id,
+      { fps: 10, qrbox: { width: 250, height: 180 }, aspectRatio: 1.0 },
+      (decodedText) => { onScanSuccess(decodedText); },
+      () => {} // ignore errors silencieux
+    );
+    scannerRunning = true;
+  } catch (err) {
+    console.warn('Caméra error:', err);
+    showToast('⚠️ Impossible d\'accéder à la caméra — utilisez la saisie manuelle', 'info');
+  }
 }
-function scanManual() {
-  const code = document.getElementById('manualCode').value.trim();
-  if(!code) return;
-  const p = products.find(pr=>pr.code===code || pr.id===parseInt(code));
-  if(p) {
+
+async function stopCamera() {
+  if (html5QrCode && scannerRunning) {
+    try { await html5QrCode.stop(); } catch(e) {}
+    scannerRunning = false;
+  }
+}
+
+function onScanSuccess(code) {
+  // Vibration feedback sur mobile
+  if (navigator.vibrate) navigator.vibrate(100);
+  const resultBox = document.getElementById('scannerResult');
+  resultBox.style.display = 'block';
+  resultBox.textContent = '🔍 Code : ' + code;
+
+  const p = products.find(pr => pr.code === code || String(pr.id) === code);
+  if (p) {
     addToCart(p.id);
-    showToast(`✅ ${p.name} ajouté au panier`);
-    document.getElementById('manualCode').value='';
+    showToast('✅ ' + p.name + ' ajouté au panier');
     closeScanner();
   } else {
-    showToast('Article introuvable : '+code,'error');
+    resultBox.textContent = '❌ Article introuvable : ' + code;
+    resultBox.style.color = 'var(--red)';
+    setTimeout(() => { resultBox.style.color = 'var(--accent)'; }, 2000);
+  }
+}
+
+async function closeScanner() {
+  await stopCamera();
+  document.getElementById('scannerOverlay').classList.remove('open');
+  document.getElementById('manualCode').value = '';
+  document.getElementById('scannerResult').style.display = 'none';
+}
+
+function scanManual() {
+  const code = document.getElementById('manualCode').value.trim();
+  if (!code) return;
+  const p = products.find(pr => pr.code === code || pr.id === parseInt(code));
+  if (p) {
+    addToCart(p.id);
+    showToast('✅ ' + p.name + ' ajouté au panier');
+    document.getElementById('manualCode').value = '';
+    closeScanner();
+  } else {
+    showToast('Article introuvable : ' + code, 'error');
   }
 }
 
