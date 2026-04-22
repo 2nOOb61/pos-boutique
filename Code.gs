@@ -40,11 +40,29 @@ function doPost(e) {
 }
 
 function doGet(e) {
+  // Actions d'écriture passées via ?payload=JSON (pour contourner CORS du POST)
+  if (e.parameter.payload) {
+    try {
+      const data = JSON.parse(e.parameter.payload);
+      const action = data.action;
+      let result;
+      if      (action === 'addSale')       result = handleAddSale(data);
+      else if (action === 'saveProduct')   result = handleSaveProduct(data);
+      else if (action === 'deleteProduct') result = handleDeleteProduct(data);
+      else if (action === 'stockMove')     result = handleStockMove(data);
+      else result = { ok: false, error: 'Action payload inconnue: ' + action };
+      return jsonResponse(result);
+    } catch(err) {
+      return jsonResponse({ ok: false, error: 'Payload invalide: ' + err.message });
+    }
+  }
+
   const action = e.parameter.action || 'ping';
-  if (action === 'ping') return jsonResponse({ ok: true, message: 'POS Backend actif ✅' });
+  if (action === 'ping')        return jsonResponse({ ok: true, message: 'POS Backend actif ✅' });
+  if (action === 'login')       return jsonResponse(handleLogin({ username: e.parameter.username || '', password: e.parameter.password || '' }));
   if (action === 'getProducts') return jsonResponse(handleGetProducts());
   if (action === 'getSales')    return jsonResponse(handleGetSales(e.parameter));
-  return jsonResponse({ ok: false, error: 'Action GET inconnue' });
+  return jsonResponse({ ok: false, error: 'Action GET inconnue: ' + action });
 }
 
 function jsonResponse(data) {

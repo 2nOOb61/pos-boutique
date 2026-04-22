@@ -1411,24 +1411,34 @@ function updatePendingBadge() {
 // ============================================================
 // GOOGLE APPS SCRIPT — CONNEXION COMPLÈTE
 // ============================================================
-let APPS_SCRIPT_URL = localStorage.getItem('pos-script-url') || 'https://script.google.com/macros/s/AKfycbx8ipu3hJ-tKj3I2DyfpoLhmahLp5_92gUMkj9yNBEZpMwlYH5s_7ddOFRxn_lg24-lSw/exec';
+let APPS_SCRIPT_URL = localStorage.getItem('pos-script-url') || 'https://script.google.com/macros/s/AKfycbyocBoHVEPVUVqEJ7WlYq1pAJNJR_SPgcYqNvFrR2wQxFs1mmncEvCfUGxFQI2d5NSMag/exec';
 let syncEnabled = !!APPS_SCRIPT_URL;
 
-// ── Requête générique ─────────────────────────────────────
+// ── Requête générique (GET uniquement pour éviter CORS) ───
 async function apiCall(payload) {
   if (!APPS_SCRIPT_URL) return null;
   try {
-    const res = await fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(payload),
-      redirect: 'follow'
-    });
+    let url;
+    const readActions = ['getProducts', 'getSales', 'ping'];
+    if (readActions.includes(payload.action)) {
+      const params = new URLSearchParams({ action: payload.action });
+      if (payload.limit) params.append('limit', String(payload.limit));
+      url = APPS_SCRIPT_URL + '?' + params.toString();
+    } else if (payload.action === 'login') {
+      url = APPS_SCRIPT_URL + '?action=login&username=' +
+            encodeURIComponent(payload.username) + '&password=' +
+            encodeURIComponent(payload.password);
+    } else {
+      // addSale, saveProduct, deleteProduct, stockMove → payload JSON encodé en GET
+      url = APPS_SCRIPT_URL + '?payload=' + encodeURIComponent(JSON.stringify(payload));
+    }
+    const res = await fetch(url);
     const text = await res.text();
     try {
       return JSON.parse(text);
-    } catch(jsonErr) {
-      console.warn('API response non-JSON:', text.slice(0, 300));
+    } catch(e) {
+      console.warn('API réponse non-JSON (300 premiers chars):', text.substring(0, 300));
+      if (res.ok) return { ok: true };
       return { ok: false, error: 'Réponse invalide du serveur (vérifiez le SHEET_ID dans Code.gs)' };
     }
   } catch (e) {
