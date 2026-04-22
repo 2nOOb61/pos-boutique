@@ -1172,7 +1172,7 @@ async function doLogin() {
     if (APPS_SCRIPT_URL) {
       await loadProductsFromScript();
       await loadSalesFromScript();
-      // Synchroniser les ventes en attente (hors ligne précédemment)
+      await loadUsersFromScript();
       await syncPendingOfflineSales();
     }
     applyRolePermissions(currentUser.role);
@@ -2048,15 +2048,20 @@ function saveUser() {
   saveUsers();
   closeModal('userModal');
   renderUsersPage();
+  // Sync vers Google Sheet
+  const syncUser = isNew ? localUsers[localUsers.length-1] : localUsers[editingUserId];
+  if (syncUser) saveUserToScript(syncUser);
 }
 
 function deleteUser(idx) {
   const u = localUsers[idx];
   if (!confirm(`Supprimer l'utilisateur "${u.label}" (@${u.username}) ?`)) return;
+  const username = u.username;
   localUsers.splice(idx, 1);
   saveUsers();
   renderUsersPage();
   showToast(`Utilisateur supprimé`);
+  deleteUserFromScript(username);
 }
 
 function toggleUserActive(idx) {
@@ -2069,6 +2074,7 @@ function toggleUserActive(idx) {
   saveUsers();
   renderUsersPage();
   showToast(u.actif ? `✅ ${u.label} activé` : `⏸ ${u.label} désactivé`);
+  saveUserToScript(u);
 }
 
 // Ventes en attente (hors ligne)
@@ -2250,6 +2256,31 @@ async function loadSalesFromScript() {
     sales = [...r.sales, ...localOnly];
     saveData();
   }
+}
+
+// ── Charger les utilisateurs depuis Sheet ────────────────
+async function loadUsersFromScript() {
+  if (!APPS_SCRIPT_URL) return;
+  const r = await apiCall({ action: 'getUsers' });
+  if (r && r.ok && Array.isArray(r.users) && r.users.length > 0) {
+    // Fusionner : le Sheet fait autorité, on garde les locaux absents du Sheet
+    const sheetUsernames = new Set(r.users.map(u => u.username.toLowerCase()));
+    const localOnly = localUsers.filter(u => !sheetUsernames.has(u.username.toLowerCase()));
+    localUsers = [...r.users, ...localOnly];
+    saveUsers();
+  }
+}
+
+// ── Sauvegarder un utilisateur vers Sheet ────────────────
+async function saveUserToScript(user) {
+  if (!APPS_SCRIPT_URL) return;
+  await apiCall({ action: 'saveUser', user });
+}
+
+// ── Supprimer un utilisateur du Sheet ────────────────────
+async function deleteUserFromScript(username) {
+  if (!APPS_SCRIPT_URL) return;
+  await apiCall({ action: 'deleteUser', username });
 }
 
 // ── UI Loader ─────────────────────────────────────────────

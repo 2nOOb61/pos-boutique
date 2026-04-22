@@ -16,7 +16,7 @@ const SHEET_STOCK_LOG = 'MouvementsStock';
 const SHEET_USERS     = 'Utilisateurs';
 
 // ============================================================
-// ROUTEUR PRINCIPAL
+// ROUTEUR PRINCIPAL — POST
 // ============================================================
 function doPost(e) {
   try {
@@ -24,13 +24,16 @@ function doPost(e) {
     const action = data.action;
     let result;
 
-    if      (action === 'login')          result = handleLogin(data);
-    else if (action === 'getProducts')    result = handleGetProducts();
-    else if (action === 'saveProduct')    result = handleSaveProduct(data);
-    else if (action === 'deleteProduct')  result = handleDeleteProduct(data);
-    else if (action === 'addSale')        result = handleAddSale(data);
-    else if (action === 'stockMove')      result = handleStockMove(data);
-    else if (action === 'getSales')       result = handleGetSales(data);
+    if      (action === 'login')         result = handleLogin(data);
+    else if (action === 'getProducts')   result = handleGetProducts();
+    else if (action === 'saveProduct')   result = handleSaveProduct(data);
+    else if (action === 'deleteProduct') result = handleDeleteProduct(data);
+    else if (action === 'addSale')       result = handleAddSale(data);
+    else if (action === 'stockMove')     result = handleStockMove(data);
+    else if (action === 'getSales')      result = handleGetSales(data);
+    else if (action === 'getUsers')      result = handleGetUsers();
+    else if (action === 'saveUser')      result = handleSaveUser(data);
+    else if (action === 'deleteUser')    result = handleDeleteUser(data);
     else result = { ok: false, error: 'Action inconnue: ' + action };
 
     return jsonResponse(result);
@@ -39,17 +42,22 @@ function doPost(e) {
   }
 }
 
+// ============================================================
+// ROUTEUR PRINCIPAL — GET
+// ============================================================
 function doGet(e) {
-  // Actions d'écriture passées via ?payload=JSON (pour contourner CORS du POST)
+  // Écritures passées via ?payload=JSON (contournement CORS)
   if (e.parameter.payload) {
     try {
       const data = JSON.parse(e.parameter.payload);
       const action = data.action;
       let result;
-      if      (action === 'addSale')       result = handleAddSale(data);
-      else if (action === 'saveProduct')   result = handleSaveProduct(data);
-      else if (action === 'deleteProduct') result = handleDeleteProduct(data);
-      else if (action === 'stockMove')     result = handleStockMove(data);
+      if      (action === 'addSale')      result = handleAddSale(data);
+      else if (action === 'saveProduct')  result = handleSaveProduct(data);
+      else if (action === 'deleteProduct')result = handleDeleteProduct(data);
+      else if (action === 'stockMove')    result = handleStockMove(data);
+      else if (action === 'saveUser')     result = handleSaveUser(data);
+      else if (action === 'deleteUser')   result = handleDeleteUser(data);
       else result = { ok: false, error: 'Action payload inconnue: ' + action };
       return jsonResponse(result);
     } catch(err) {
@@ -62,6 +70,7 @@ function doGet(e) {
   if (action === 'login')       return jsonResponse(handleLogin({ username: e.parameter.username || '', password: e.parameter.password || '' }));
   if (action === 'getProducts') return jsonResponse(handleGetProducts());
   if (action === 'getSales')    return jsonResponse(handleGetSales(e.parameter));
+  if (action === 'getUsers')    return jsonResponse(handleGetUsers());
   if (action === 'initSheets')  return jsonResponse(initSheets());
   return jsonResponse({ ok: false, error: 'Action GET inconnue: ' + action });
 }
@@ -73,18 +82,17 @@ function jsonResponse(data) {
 }
 
 // ============================================================
-// INITIALISATION DES FEUILLES
+// INITIALISATION ET MIGRATION DES FEUILLES
 // ============================================================
 function initSheets() {
   const ss = SpreadsheetApp.openById(SHEET_ID);
 
-  // Feuille Produits
+  // ── Produits ────────────────────────────────────────────────
   let sp = ss.getSheetByName(SHEET_PRODUCTS);
   if (!sp) {
     sp = ss.insertSheet(SHEET_PRODUCTS);
     sp.appendRow(['ID','Nom','Categorie','Emoji','Code','Prix_Vente','Prix_Achat','Stock','Stock_Min','Date_MAJ']);
     sp.getRange(1,1,1,10).setBackground('#0a0e1a').setFontColor('#00e5a0').setFontWeight('bold');
-    // Données de démonstration
     const demo = [
       [1,'Riz 1kg','Alimentation','🍚','001',2500,1800,50,10,new Date()],
       [2,'Huile 1L','Alimentation','🫙','002',4500,3200,24,5,new Date()],
@@ -93,18 +101,32 @@ function initSheets() {
       [5,'Eau minérale','Boissons','💧','005',1500,900,36,12,new Date()],
       [6,'Savon Protex','Hygiène','🧼','006',1800,1200,18,5,new Date()],
     ];
-    demo.forEach(row => sp.appendRow(row));
+    demo.forEach(r => sp.appendRow(r));
   }
 
-  // Feuille Ventes
+  // ── Ventes (16 colonnes) ────────────────────────────────────
   let sv = ss.getSheetByName(SHEET_SALES);
+  const VENTES_HEADERS = [
+    'ID','Date','Heure','Article','Quantite','Prix_Unitaire',
+    'Sous_Total_Article','Sous_Total_Vente','Remise','Net_A_Payer',
+    'Accompte','Reste_Du','Mode_Paiement','Fournisseur_Mobile','Reference','Caissier'
+  ];
   if (!sv) {
     sv = ss.insertSheet(SHEET_SALES);
-    sv.appendRow(['ID','Date','Heure','Article','Quantite','Prix_Unitaire','Sous_Total','Total_Vente','Mode_Paiement','Fournisseur_Mobile','Reference','Caissier']);
-    sv.getRange(1,1,1,12).setBackground('#0a0e1a').setFontColor('#00e5a0').setFontWeight('bold');
+    sv.appendRow(VENTES_HEADERS);
+    sv.getRange(1,1,1,VENTES_HEADERS.length).setBackground('#0a0e1a').setFontColor('#00e5a0').setFontWeight('bold');
+  } else {
+    // Migration : ajouter les colonnes manquantes si feuille existante (ancienne version 12 col)
+    const existingHeaders = sv.getRange(1, 1, 1, sv.getLastColumn()).getValues()[0];
+    if (existingHeaders.length < VENTES_HEADERS.length) {
+      const missing = VENTES_HEADERS.slice(existingHeaders.length);
+      const startCol = existingHeaders.length + 1;
+      sv.getRange(1, startCol, 1, missing.length).setValues([missing])
+        .setBackground('#0a0e1a').setFontColor('#00e5a0').setFontWeight('bold');
+    }
   }
 
-  // Feuille MouvementsStock
+  // ── MouvementsStock ─────────────────────────────────────────
   let sm = ss.getSheetByName(SHEET_STOCK_LOG);
   if (!sm) {
     sm = ss.insertSheet(SHEET_STOCK_LOG);
@@ -112,7 +134,7 @@ function initSheets() {
     sm.getRange(1,1,1,8).setBackground('#0a0e1a').setFontColor('#00e5a0').setFontWeight('bold');
   }
 
-  // Feuille Utilisateurs
+  // ── Utilisateurs ────────────────────────────────────────────
   let su = ss.getSheetByName(SHEET_USERS);
   if (!su) {
     su = ss.insertSheet(SHEET_USERS);
@@ -122,7 +144,7 @@ function initSheets() {
     su.appendRow(['caissier','0000','caissier','Caissier',true]);
   }
 
-  return { ok: true, message: 'Feuilles initialisées ✅' };
+  return { ok: true, message: 'Feuilles initialisées / migrées ✅' };
 }
 
 // ============================================================
@@ -158,9 +180,13 @@ function handleGetProducts() {
   const rows = sheet.getDataRange().getValues();
   const products = [];
   for (let i = 1; i < rows.length; i++) {
-    const [id, name, cat, emoji, code, price, cost, stock, minStock, dateMaj] = rows[i];
+    const [id, name, cat, emoji, code, price, cost, stock, minStock] = rows[i];
     if (!name) continue;
-    products.push({ id: Number(id), name, cat, emoji, code: String(code), price: Number(price), cost: Number(cost), stock: Number(stock), minStock: Number(minStock) });
+    products.push({
+      id: Number(id), name, cat, emoji,
+      code: String(code), price: Number(price), cost: Number(cost),
+      stock: Number(stock), minStock: Number(minStock)
+    });
   }
   return { ok: true, products };
 }
@@ -168,16 +194,16 @@ function handleGetProducts() {
 function handleSaveProduct(data) {
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const sheet = ss.getSheetByName(SHEET_PRODUCTS);
+  if (!sheet) return { ok: false, error: 'Feuille Produits introuvable' };
   const p = data.product;
   const rows = sheet.getDataRange().getValues();
   const now = new Date();
 
   if (p.id) {
-    // Mise à jour
     for (let i = 1; i < rows.length; i++) {
       if (Number(rows[i][0]) === Number(p.id)) {
         sheet.getRange(i+1, 1, 1, 10).setValues([[
-          p.id, p.name, p.cat, p.emoji, p.code,
+          p.id, p.name, p.cat, p.emoji||'📦', p.code,
           p.price, p.cost, p.stock, p.minStock, now
         ]]);
         return { ok: true, action: 'updated', id: p.id };
@@ -185,7 +211,6 @@ function handleSaveProduct(data) {
     }
   }
 
-  // Nouveau produit — générer un ID
   const maxId = rows.slice(1).reduce((m, r) => Math.max(m, Number(r[0]) || 0), 0);
   const newId = maxId + 1;
   sheet.appendRow([newId, p.name, p.cat, p.emoji||'📦', p.code||String(newId), p.price, p.cost, p.stock||0, p.minStock||5, now]);
@@ -195,6 +220,7 @@ function handleSaveProduct(data) {
 function handleDeleteProduct(data) {
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const sheet = ss.getSheetByName(SHEET_PRODUCTS);
+  if (!sheet) return { ok: false, error: 'Feuille Produits introuvable' };
   const rows = sheet.getDataRange().getValues();
   for (let i = 1; i < rows.length; i++) {
     if (Number(rows[i][0]) === Number(data.id)) {
@@ -213,26 +239,34 @@ function updateProductStock(ss, productName, delta) {
       const newStock = Math.max(0, Number(rows[i][7]) + delta);
       sheet.getRange(i+1, 8).setValue(newStock);
       sheet.getRange(i+1, 10).setValue(new Date());
-      return Number(rows[i][7]); // retourne l'ancien stock
+      return Number(rows[i][7]);
     }
   }
   return null;
 }
 
 // ============================================================
-// VENTES
+// VENTES  (16 colonnes)
+// ID | Date | Heure | Article | Quantite | Prix_Unitaire |
+// Sous_Total_Article | Sous_Total_Vente | Remise | Net_A_Payer |
+// Accompte | Reste_Du | Mode_Paiement | Fournisseur_Mobile | Reference | Caissier
 // ============================================================
 function handleAddSale(data) {
-  if (SHEET_ID === 'VOTRE_SPREADSHEET_ID') {
-    return { ok: false, error: 'SHEET_ID non configuré dans Code.gs — remplacez VOTRE_SPREADSHEET_ID par l\'ID de votre Google Sheet' };
-  }
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const sheet = ss.getSheetByName(SHEET_SALES);
   if (!sheet) return { ok: false, error: 'Feuille "Ventes" introuvable. Lancez initSheets() d\'abord.' };
+
   const sale = data.sale;
   const d = new Date(sale.date);
   const dateStr = Utilities.formatDate(d, Session.getScriptTimeZone(), 'dd/MM/yyyy');
   const timeStr = Utilities.formatDate(d, Session.getScriptTimeZone(), 'HH:mm:ss');
+
+  const subtotal  = Number(sale.subtotal  || sale.total || 0);
+  const remise    = Number(sale.remise    || 0);
+  const netPayer  = Number(sale.total     || 0);
+  const accompte  = Number(sale.accompte  || 0);
+  const resteDu   = Number(sale.due       || 0);
+  const methode   = sale.method === 'cash' ? 'Espèces' : 'Mobile Money';
 
   sale.items.forEach(item => {
     sheet.appendRow([
@@ -242,60 +276,84 @@ function handleAddSale(data) {
       item.name,
       item.qty,
       item.price,
-      item.price * item.qty,
-      sale.total,
-      sale.method === 'cash' ? 'Espèces' : 'Mobile Money',
+      item.price * item.qty,   // Sous_Total_Article
+      subtotal,                 // Sous_Total_Vente (avant remise)
+      remise,                   // Remise
+      netPayer,                 // Net_A_Payer (après remise)
+      accompte,                 // Accompte
+      resteDu,                  // Reste_Du
+      methode,
       sale.provider || '',
-      sale.ref || '',
-      sale.caissier || 'caissier'
+      sale.ref      || '',
+      sale.caissier || ''
     ]);
-    // Déduire le stock
     updateProductStock(ss, item.name, -item.qty);
-    // Logger le mouvement
-    logStockMove(ss, item.name, 'Vente', -item.qty, `Vente #${sale.id}`, sale.caissier || '');
+    logStockMove(ss, item.name, 'Vente', -item.qty, 'Vente #' + sale.id, sale.caissier || '');
   });
 
   return { ok: true, saleId: sale.id };
 }
 
 function handleGetSales(params) {
-  if (SHEET_ID === 'VOTRE_SPREADSHEET_ID') return { ok: false, error: 'SHEET_ID non configuré' };
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const sheet = ss.getSheetByName(SHEET_SALES);
   if (!sheet) return { ok: true, sales: [] };
 
   const rows = sheet.getDataRange().getValues();
   const salesMap = {};
+
   for (let i = 1; i < rows.length; i++) {
-    const [id, date, time, article, qty, prixUnit, sousTotal, total, method, provider, ref, caissier] = rows[i];
+    const r = rows[i];
+    const id = r[0];
     if (!id) continue;
+
+    // Compatibilité ancienne structure (12 col) et nouvelle (16 col)
+    const date       = r[1];
+    const time       = r[2];
+    const article    = r[3];
+    const qty        = r[4];
+    const prixUnit   = r[5];
+    // col 6 = Sous_Total_Article
+    const isNewFmt   = r.length >= 16;
+    const subtotal   = isNewFmt ? Number(r[7]  || 0) : Number(r[7] || 0);
+    const remise     = isNewFmt ? Number(r[8]  || 0) : 0;
+    const netPayer   = isNewFmt ? Number(r[9]  || 0) : Number(r[7] || 0);
+    const accompte   = isNewFmt ? Number(r[10] || 0) : 0;
+    const resteDu    = isNewFmt ? Number(r[11] || 0) : 0;
+    const method     = isNewFmt ? r[12] : r[8];
+    const provider   = isNewFmt ? r[13] : r[9];
+    const ref        = isNewFmt ? r[14] : r[10];
+    const caissier   = isNewFmt ? r[15] : r[11];
+
     if (!salesMap[id]) {
-      // Convertir la date dd/MM/yyyy en ISO pour que JavaScript puisse la parser
       let isoDate;
       try {
         if (date instanceof Date) {
-          isoDate = Utilities.formatDate(date, Session.getScriptTimeZone(), "yyyy-MM-dd") + 'T' + (time || '00:00:00');
+          isoDate = Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd') + 'T' + (time || '00:00:00');
         } else {
           const parts = date.toString().split('/');
           isoDate = parts[2] + '-' + parts[1].padStart(2,'0') + '-' + parts[0].padStart(2,'0') + 'T' + (time || '00:00:00');
         }
-      } catch(e) {
-        isoDate = new Date().toISOString();
-      }
+      } catch(e) { isoDate = new Date().toISOString(); }
+
       salesMap[id] = {
-        id: Number(id),
-        date: isoDate,
-        total: Number(total),
-        method: method === 'Espèces' ? 'cash' : 'mobile',
+        id:       Number(id),
+        date:     isoDate,
+        subtotal, remise,
+        total:    netPayer,
+        accompte, due: resteDu,
+        method:   method === 'Espèces' ? 'cash' : 'mobile',
         provider: provider || '',
-        ref: ref || '',
+        ref:      ref      || '',
         caissier: caissier || '',
-        items: []
+        items:    []
       };
     }
     salesMap[id].items.push({ name: article, qty: Number(qty), price: Number(prixUnit) });
   }
-  const sales = Object.values(salesMap).reverse().slice(0, Number(params.limit) || 100);
+
+  const limit = Number(params.limit) || 100;
+  const sales = Object.values(salesMap).reverse().slice(0, limit);
   return { ok: true, sales };
 }
 
@@ -305,55 +363,124 @@ function handleGetSales(params) {
 function handleStockMove(data) {
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const { productName, type, qty, reason, caissier } = data;
-  const delta = type === 'in' ? qty : -qty;
+  const delta = type === 'in' ? Number(qty) : -Number(qty);
   const oldStock = updateProductStock(ss, productName, delta);
   if (oldStock === null) return { ok: false, error: 'Produit introuvable: ' + productName };
-  logStockMove(ss, productName, type === 'in' ? 'Entrée' : 'Sortie', delta, reason, caissier || '');
+  logStockMove(ss, productName, type === 'in' ? 'Entrée' : 'Sortie', delta, reason || '', caissier || '');
   return { ok: true, newStock: oldStock + delta };
 }
 
 function logStockMove(ss, productName, type, delta, reason, caissier) {
   const sheet = ss.getSheetByName(SHEET_STOCK_LOG);
   if (!sheet) return;
-  const rows = sheet.getDataRange().getValues();
-  let currentStock = 0;
-  // Chercher stock actuel
   const prodSheet = ss.getSheetByName(SHEET_PRODUCTS);
-  const prodRows = prodSheet.getDataRange().getValues();
+  const prodRows  = prodSheet.getDataRange().getValues();
+  let currentStock = 0;
   for (let i = 1; i < prodRows.length; i++) {
     if (prodRows[i][1] === productName) { currentStock = Number(prodRows[i][7]); break; }
   }
-  sheet.appendRow([
-    new Date(), productName, type, delta,
-    currentStock - delta, currentStock,
-    reason, caissier
-  ]);
+  sheet.appendRow([new Date(), productName, type, delta, currentStock - delta, currentStock, reason, caissier]);
+}
+
+// ============================================================
+// UTILISATEURS
+// ============================================================
+function handleGetUsers() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_USERS);
+  if (!sheet) return { ok: false, error: 'Feuille Utilisateurs introuvable' };
+
+  const rows = sheet.getDataRange().getValues();
+  const users = [];
+  for (let i = 1; i < rows.length; i++) {
+    const [username, pass, role, label, actif] = rows[i];
+    if (!username) continue;
+    // On renvoie le mot de passe (chiffré côté app si besoin futur) pour sync locale
+    users.push({
+      username: username.toString(),
+      pass:     pass.toString(),
+      role:     role.toString(),
+      label:    label.toString(),
+      actif:    actif !== false && actif !== 'FALSE'
+    });
+  }
+  return { ok: true, users };
+}
+
+function handleSaveUser(data) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_USERS);
+  if (!sheet) return { ok: false, error: 'Feuille Utilisateurs introuvable' };
+
+  const u = data.user;
+  if (!u || !u.username) return { ok: false, error: 'Données utilisateur manquantes' };
+
+  const rows = sheet.getDataRange().getValues();
+
+  // Chercher si l'utilisateur existe déjà
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][0].toString().toLowerCase() === u.username.toLowerCase()) {
+      // Mise à jour — mot de passe inchangé si non fourni
+      const newPass = u.pass || rows[i][1];
+      sheet.getRange(i+1, 1, 1, 5).setValues([[
+        u.username, newPass, u.role, u.label,
+        u.actif !== false
+      ]]);
+      return { ok: true, action: 'updated' };
+    }
+  }
+
+  // Nouvel utilisateur
+  if (!u.pass) return { ok: false, error: 'Mot de passe obligatoire pour un nouvel utilisateur' };
+  sheet.appendRow([u.username, u.pass, u.role, u.label, u.actif !== false]);
+  return { ok: true, action: 'created' };
+}
+
+function handleDeleteUser(data) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_USERS);
+  if (!sheet) return { ok: false, error: 'Feuille Utilisateurs introuvable' };
+
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][0].toString().toLowerCase() === (data.username || '').toLowerCase()) {
+      sheet.deleteRow(i + 1);
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: 'Utilisateur introuvable' };
 }
 
 // ============================================================
 // FONCTION DE TEST
 // ============================================================
 function testAll() {
-  // Test login
+  Logger.log('=== TEST BOUTIQUE POS ===');
+
   let r = handleLogin({ username: 'admin', password: '1234' });
-  Logger.log('Login: ' + JSON.stringify(r));
+  Logger.log('Login admin: ' + JSON.stringify(r));
 
-  // Test getProducts
   r = handleGetProducts();
-  Logger.log('Products count: ' + (r.products ? r.products.length : 'ERROR'));
+  Logger.log('Produits: ' + (r.products ? r.products.length : 'ERREUR'));
 
-  // Test addSale
+  r = handleGetUsers();
+  Logger.log('Utilisateurs: ' + (r.users ? r.users.length : 'ERREUR'));
+
   r = handleAddSale({ sale: {
     id: 9999,
     date: new Date().toISOString(),
+    caissier: 'admin',
     items: [{ name: 'Riz 1kg', qty: 1, price: 2500 }],
-    total: 2500,
+    subtotal: 2500,
+    remise: 200,
+    total: 2300,
+    accompte: 1000,
+    due: 1300,
     method: 'cash',
-    given: 5000,
-    change: 2500,
-    caissier: 'admin'
+    given: 1300,
+    change: 0
   }});
-  Logger.log('Sale: ' + JSON.stringify(r));
+  Logger.log('Vente test: ' + JSON.stringify(r));
 
-  Logger.log('✅ Tous les tests passés !');
+  Logger.log('✅ Tests terminés !');
 }
