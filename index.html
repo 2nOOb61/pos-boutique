@@ -466,6 +466,7 @@
     <div class="topbar-right">
       <div class="user-badge"><div class="user-dot"></div><span id="currentUserLabel">Admin</span></div>
       <button class="btn-logout" onclick="openScriptSettings()" title="Configurer Apps Script" style="border-color:rgba(0,229,160,0.3);color:var(--accent)">⚙️ Google Sheets</button>
+      <span id="pendingBadge" title="Ventes en attente de sync" style="display:none;background:var(--red);color:#fff;border-radius:20px;padding:3px 10px;font-size:12px;font-weight:700;cursor:pointer" onclick="syncPendingOfflineSales()">⏳ <span id="pendingCount">0</span> en attente</span>
       <button class="btn-logout" onclick="doLogout()">Déconnexion</button>
     </div>
   </div>
@@ -794,7 +795,10 @@ async function doLogin() {
     if (APPS_SCRIPT_URL) {
       await loadProductsFromScript();
       await loadSalesFromScript();
+      // Synchroniser les ventes en attente (hors ligne précédemment)
+      await syncPendingOfflineSales();
     }
+    updatePendingBadge();
     renderProducts();
     renderStockTable();
     renderStats();
@@ -1370,12 +1374,38 @@ async function syncPendingOfflineSales() {
   if (!APPS_SCRIPT_URL) return;
   const pending = JSON.parse(localStorage.getItem('pos-pending-sales') || '[]');
   if (pending.length === 0) return;
-  showToast(`🔄 Synchronisation de ${pending.length} vente(s)...`, 'info');
+  showToast(`🔄 Synchronisation de ${pending.length} vente(s) en attente...`, 'info');
+  const succeeded = [];
+  const failed = [];
   for (const sale of pending) {
-    await syncToAppsScript(sale);
+    sale.caissier = sale.caissier || (currentUser ? currentUser.username : 'caissier');
+    const r = await apiCall({ action: 'addSale', sale });
+    if (r && r.ok) {
+      succeeded.push(sale);
+    } else {
+      failed.push(sale);
+    }
   }
-  localStorage.removeItem('pos-pending-sales');
-  showToast(`✅ ${pending.length} vente(s) synchronisée(s)`);
+  if (failed.length > 0) {
+    localStorage.setItem('pos-pending-sales', JSON.stringify(failed));
+    showToast(`⚠️ ${succeeded.length} sync. — ${failed.length} encore en attente`, 'error');
+  } else {
+    localStorage.removeItem('pos-pending-sales');
+    showToast(`✅ ${succeeded.length} vente(s) synchronisée(s) dans Google Sheets`);
+  }
+  updatePendingBadge();
+}
+
+function updatePendingBadge() {
+  const pending = JSON.parse(localStorage.getItem('pos-pending-sales') || '[]');
+  const badge = document.getElementById('pendingBadge');
+  if (!badge) return;
+  if (pending.length > 0) {
+    document.getElementById('pendingCount').textContent = pending.length;
+    badge.style.display = 'inline-block';
+  } else {
+    badge.style.display = 'none';
+  }
 }
 
 // ============================================================
@@ -1390,12 +1420,19 @@ async function apiCall(payload) {
   try {
     const res = await fetch(APPS_SCRIPT_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify(payload)
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+      redirect: 'follow'
     });
-    return await res.json();
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch(jsonErr) {
+      console.warn('API response non-JSON:', text.slice(0, 300));
+      return { ok: false, error: 'Réponse invalide du serveur (vérifiez le SHEET_ID dans Code.gs)' };
+    }
   } catch (e) {
-    console.warn('API error:', e);
+    console.warn('API fetch error:', e.message);
     return null;
   }
 }
@@ -1447,14 +1484,20 @@ async function syncToAppsScript(sale) {
   if (!APPS_SCRIPT_URL) return;
   if (!navigator.onLine) {
     savePendingSale(sale);
-    showToast('📡 Hors ligne — vente mise en file', 'info');
+    updatePendingBadge();
+    showToast('📡 Hors ligne — vente mise en file d\'attente', 'info');
     return;
   }
   sale.caissier = currentUser ? currentUser.username : 'caissier';
   const r = await apiCall({ action: 'addSale', sale });
-  if (!r || !r.ok) {
+  if (r && r.ok) {
+    showToast('☁️ Vente enregistrée dans Google Sheets ✅');
+  } else {
+    const errMsg = r ? (r.error || 'Erreur inconnue') : 'Connexion impossible';
+    console.error('Sync vente échouée:', errMsg);
     savePendingSale(sale);
-    showToast('⚠️ Sync échouée, mise en file', 'error');
+    updatePendingBadge();
+    showToast('⚠️ Google Sheets inaccessible — vente mise en file. ' + errMsg, 'error');
   }
 }
 

@@ -204,8 +204,12 @@ function updateProductStock(ss, productName, delta) {
 // VENTES
 // ============================================================
 function handleAddSale(data) {
+  if (SHEET_ID === 'VOTRE_SPREADSHEET_ID') {
+    return { ok: false, error: 'SHEET_ID non configuré dans Code.gs — remplacez VOTRE_SPREADSHEET_ID par l\'ID de votre Google Sheet' };
+  }
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const sheet = ss.getSheetByName(SHEET_SALES);
+  if (!sheet) return { ok: false, error: 'Feuille "Ventes" introuvable. Lancez initSheets() d\'abord.' };
   const sale = data.sale;
   const d = new Date(sale.date);
   const dateStr = Utilities.formatDate(d, Session.getScriptTimeZone(), 'dd/MM/yyyy');
@@ -236,6 +240,7 @@ function handleAddSale(data) {
 }
 
 function handleGetSales(params) {
+  if (SHEET_ID === 'VOTRE_SPREADSHEET_ID') return { ok: false, error: 'SHEET_ID non configuré' };
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const sheet = ss.getSheetByName(SHEET_SALES);
   if (!sheet) return { ok: true, sales: [] };
@@ -246,11 +251,32 @@ function handleGetSales(params) {
     const [id, date, time, article, qty, prixUnit, sousTotal, total, method, provider, ref, caissier] = rows[i];
     if (!id) continue;
     if (!salesMap[id]) {
-      salesMap[id] = { id, date: date + ' ' + time, total, method, provider, ref, caissier, items: [] };
+      // Convertir la date dd/MM/yyyy en ISO pour que JavaScript puisse la parser
+      let isoDate;
+      try {
+        if (date instanceof Date) {
+          isoDate = Utilities.formatDate(date, Session.getScriptTimeZone(), "yyyy-MM-dd") + 'T' + (time || '00:00:00');
+        } else {
+          const parts = date.toString().split('/');
+          isoDate = parts[2] + '-' + parts[1].padStart(2,'0') + '-' + parts[0].padStart(2,'0') + 'T' + (time || '00:00:00');
+        }
+      } catch(e) {
+        isoDate = new Date().toISOString();
+      }
+      salesMap[id] = {
+        id: Number(id),
+        date: isoDate,
+        total: Number(total),
+        method: method === 'Espèces' ? 'cash' : 'mobile',
+        provider: provider || '',
+        ref: ref || '',
+        caissier: caissier || '',
+        items: []
+      };
     }
     salesMap[id].items.push({ name: article, qty: Number(qty), price: Number(prixUnit) });
   }
-  const sales = Object.values(salesMap).reverse().slice(0, params.limit || 100);
+  const sales = Object.values(salesMap).reverse().slice(0, Number(params.limit) || 100);
   return { ok: true, sales };
 }
 
