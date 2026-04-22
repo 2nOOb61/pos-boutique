@@ -725,6 +725,7 @@
   <div class="page" id="page-stock">
     <div class="stock-toolbar">
       <button class="btn-add-product" onclick="openProductModal()">➕ Nouvel article</button>
+      <button class="btn-add-product" style="background:var(--accent2)" onclick="openScanner('stock')">📷 Scanner un article</button>
       <div style="position:relative;flex:1;max-width:300px">
         <input class="filter-input" id="stockFilter" placeholder="🔍 Filtrer le stock..." oninput="renderStockTable()" />
       </div>
@@ -836,9 +837,10 @@
 
 <!-- SCANNER OVERLAY -->
 <div id="scannerOverlay">
-  <div class="scanner-top-label">📷 Scanner un code-barres</div>
+  <div class="scanner-top-label" id="scannerLabel">📷 Scanner un code-barres</div>
   <div id="qr-reader"></div>
   <div class="scanner-result-box" id="scannerResult">En attente...</div>
+  <button id="scanActionBtn" style="display:none;margin-top:10px;padding:12px 24px;background:var(--accent);color:#0a0e1a;border:none;border-radius:12px;font-weight:700;font-size:14px;cursor:pointer;width:100%;max-width:340px"></button>
   <div class="scanner-manual">
     <input type="text" id="manualCode" placeholder="Saisir le code manuellement..." onkeydown="if(event.key==='Enter')scanManual()" />
     <button onclick="scanManual()">OK</button>
@@ -1397,10 +1399,16 @@ function printTicket(sale) {
 // ============================================================
 let html5QrCode = null;
 let scannerRunning = false;
+let scannerMode = 'caisse'; // 'caisse' | 'stock'
 
-function openScanner() {
-  document.getElementById('scannerOverlay').classList.add('open');
+function openScanner(mode='caisse') {
+  scannerMode = mode;
+  document.getElementById('scannerLabel').textContent =
+    mode === 'stock' ? '📦 Scanner pour ajouter ou créer un article' : '🛒 Scanner un article (caisse)';
   document.getElementById('scannerResult').style.display = 'none';
+  document.getElementById('scanActionBtn').style.display = 'none';
+  document.getElementById('manualCode').value = '';
+  document.getElementById('scannerOverlay').classList.add('open');
   startCamera();
 }
 
@@ -1438,21 +1446,44 @@ async function stopCamera() {
 }
 
 function onScanSuccess(code) {
-  // Vibration feedback sur mobile
   if (navigator.vibrate) navigator.vibrate(100);
   const resultBox = document.getElementById('scannerResult');
+  const actionBtn = document.getElementById('scanActionBtn');
   resultBox.style.display = 'block';
-  resultBox.textContent = '🔍 Code : ' + code;
+  resultBox.style.color = 'var(--accent)';
+  actionBtn.style.display = 'none';
 
   const p = products.find(pr => pr.code === code || String(pr.id) === code);
-  if (p) {
-    addToCart(p.id);
-    showToast('✅ ' + p.name + ' ajouté au panier');
-    closeScanner();
-  } else {
-    resultBox.textContent = '❌ Article introuvable : ' + code;
-    resultBox.style.color = 'var(--red)';
-    setTimeout(() => { resultBox.style.color = 'var(--accent)'; }, 2000);
+
+  if (scannerMode === 'caisse') {
+    if (p) {
+      resultBox.textContent = '✅ ' + p.name;
+      addToCart(p.id);
+      showToast('✅ ' + p.name + ' ajouté au panier');
+      closeScanner();
+    } else {
+      resultBox.textContent = '❌ Article introuvable : ' + code;
+      resultBox.style.color = 'var(--red)';
+      actionBtn.textContent = '➕ Créer cet article';
+      actionBtn.style.display = 'block';
+      actionBtn.style.background = 'var(--accent)';
+      actionBtn.onclick = () => { closeScanner(); openProductModal(null, code); };
+    }
+  } else { // mode stock
+    if (p) {
+      resultBox.textContent = '📦 ' + p.name + ' — Stock : ' + p.stock;
+      actionBtn.textContent = '📥 Ajuster le stock';
+      actionBtn.style.display = 'block';
+      actionBtn.style.background = 'var(--accent3)';
+      actionBtn.onclick = () => { closeScanner(); openMouvement(p.id); };
+    } else {
+      resultBox.textContent = '🆕 Code inconnu : ' + code;
+      resultBox.style.color = 'var(--yellow)';
+      actionBtn.textContent = '➕ Créer cet article avec ce code';
+      actionBtn.style.display = 'block';
+      actionBtn.style.background = 'var(--accent)';
+      actionBtn.onclick = () => { closeScanner(); openProductModal(null, code); };
+    }
   }
 }
 
@@ -1466,15 +1497,8 @@ async function closeScanner() {
 function scanManual() {
   const code = document.getElementById('manualCode').value.trim();
   if (!code) return;
-  const p = products.find(pr => pr.code === code || pr.id === parseInt(code));
-  if (p) {
-    addToCart(p.id);
-    showToast('✅ ' + p.name + ' ajouté au panier');
-    document.getElementById('manualCode').value = '';
-    closeScanner();
-  } else {
-    showToast('Article introuvable : ' + code, 'error');
-  }
+  document.getElementById('manualCode').value = '';
+  onScanSuccess(code);
 }
 
 // ============================================================
@@ -1526,7 +1550,7 @@ function renderStockTable() {
       </div>
     </div>`).join('');
 }
-function openProductModal(id=null) {
+function openProductModal(id=null, prefillCode=null) {
   editingProductId = id;
   document.getElementById('productModalTitle').textContent = id ? '✏️ Modifier l\'article' : '➕ Nouvel article';
   syncCategorySelect();
@@ -1541,8 +1565,11 @@ function openProductModal(id=null) {
     document.getElementById('pStock').value=p.stock;
     document.getElementById('pMinStock').value=p.minStock||5;
   } else {
-    ['pName','pEmoji','pCode','pPrice','pCost','pStock'].forEach(f=>document.getElementById(f).value='');
+    ['pName','pEmoji','pPrice','pCost','pStock'].forEach(f=>document.getElementById(f).value='');
+    document.getElementById('pCode').value = prefillCode || '';
     document.getElementById('pMinStock').value=5;
+    // Focus sur le nom si le code est déjà rempli
+    setTimeout(()=>document.getElementById(prefillCode ? 'pName' : 'pCode').focus(), 100);
   }
   openModal('productModal');
 }
@@ -1585,11 +1612,13 @@ function saveProduct() {
 // ============================================================
 // MOUVEMENT
 // ============================================================
-function openMouvement() {
+function openMouvement(productId=null) {
   const sel = document.getElementById('mouvProduct');
   sel.innerHTML = products.map(p=>`<option value="${p.id}">${p.name} (stock: ${p.stock})</option>`).join('');
+  if (productId) sel.value = productId;
   document.getElementById('mouvQty').value='';
   document.getElementById('mouvReason').value='';
+  document.getElementById('mouvType').value='in';
   openModal('mouvModal');
 }
 function saveMouvement() {
