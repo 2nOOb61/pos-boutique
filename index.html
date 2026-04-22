@@ -766,14 +766,25 @@ async function doLogin() {
   // Essayer Apps Script en premier si URL configurée
   if (APPS_SCRIPT_URL) {
     const r = await loginViaScript(u, p);
-    if (r && r.ok) { loginOk = true; userInfo = r.user; }
-    else if (r && !r.ok) {
-      btn.disabled = false; btn.textContent = 'Se connecter';
-      err.textContent = '❌ ' + (r.error || 'Identifiant incorrect');
-      err.style.display = 'block';
-      return;
+    if (r && r.ok) {
+      loginOk = true; userInfo = r.user;
+    } else if (r && !r.ok) {
+      const errMsg = r.error || '';
+      // Si c'est une erreur d'identifiants → bloquer, ne pas utiliser le fallback local
+      const isCredError = errMsg.toLowerCase().includes('identifiant') ||
+                          errMsg.toLowerCase().includes('mot de passe') ||
+                          errMsg.toLowerCase().includes('incorrect') ||
+                          errMsg.toLowerCase().includes('password');
+      if (isCredError) {
+        btn.disabled = false; btn.textContent = 'Se connecter';
+        err.textContent = '❌ ' + errMsg;
+        err.style.display = 'block';
+        return;
+      }
+      // Erreur de config (feuille manquante, SHEET_ID, etc.) → avertir et utiliser le fallback local
+      showToast('⚠️ Google Sheets inaccessible — connexion locale. ' + errMsg, 'info');
     }
-    // Si r === null (réseau KO), tomber sur le fallback local
+    // r === null (réseau KO) → tomber sur le fallback local silencieusement
   }
 
   // Fallback local (hors ligne ou pas de script URL)
@@ -1559,31 +1570,72 @@ function hideLoader() {
 
 // ── Paramètres Apps Script (modal) ──────────────────────
 function openScriptSettings() {
-  const url = prompt('🔗 Coller l\'URL de votre Apps Script Web App:\n\n(Laisser vide pour désactiver la sync)', APPS_SCRIPT_URL);
-  if (url === null) return;
-  APPS_SCRIPT_URL = url.trim();
-  localStorage.setItem('pos-script-url', APPS_SCRIPT_URL);
-  syncEnabled = !!APPS_SCRIPT_URL;
-  if (APPS_SCRIPT_URL) {
-    showToast('✅ URL enregistrée ! Test de connexion...');
+  const choice = prompt(
+    '⚙️ Google Sheets — Que voulez-vous faire ?\n\n' +
+    '1 → Changer l\'URL du script\n' +
+    '2 → Tester la connexion\n' +
+    '3 → Initialiser les feuilles (1ère utilisation)\n' +
+    '4 → Synchroniser les ventes en attente\n\n' +
+    'Tapez le numéro :',
+    '2'
+  );
+  if (!choice) return;
+  if (choice.trim() === '1') {
+    const url = prompt('🔗 Nouvelle URL Apps Script Web App :', APPS_SCRIPT_URL);
+    if (url === null) return;
+    APPS_SCRIPT_URL = url.trim();
+    localStorage.setItem('pos-script-url', APPS_SCRIPT_URL);
+    syncEnabled = !!APPS_SCRIPT_URL;
+    if (APPS_SCRIPT_URL) { showToast('✅ URL enregistrée !'); testScriptConnection(); }
+    else showToast('⚠️ Sync désactivée', 'info');
+  } else if (choice.trim() === '2') {
     testScriptConnection();
-  } else {
-    showToast('⚠️ Sync Google Sheets désactivée', 'info');
+  } else if (choice.trim() === '3') {
+    initSheetsFromApp();
+  } else if (choice.trim() === '4') {
+    syncPendingOfflineSales();
   }
 }
 
 async function testScriptConnection() {
+  showLoader('Test de connexion...');
   try {
     const res = await fetch(APPS_SCRIPT_URL + '?action=ping');
-    const data = await res.json();
+    const text = await res.text();
+    const data = JSON.parse(text);
+    hideLoader();
     if (data.ok) {
-      showToast('🟢 Connexion Apps Script OK !');
+      showToast('🟢 Connexion Apps Script OK ! Chargement des données...');
       await loadProductsFromScript();
+      await loadSalesFromScript();
+      renderProducts(); renderStockTable(); renderStats();
     } else {
-      showToast('⚠️ Apps Script répond mais avec erreur', 'error');
+      showToast('⚠️ Apps Script répond : ' + (data.message || data.error), 'error');
     }
   } catch (e) {
-    showToast('❌ Connexion impossible. Vérifiez l\'URL.', 'error');
+    hideLoader();
+    showToast('❌ Connexion impossible — ' + e.message, 'error');
+  }
+}
+
+async function initSheetsFromApp() {
+  showLoader('Initialisation des feuilles Google Sheets...');
+  try {
+    const res = await fetch(APPS_SCRIPT_URL + '?action=initSheets');
+    const text = await res.text();
+    const data = JSON.parse(text);
+    hideLoader();
+    if (data.ok) {
+      showToast('✅ Feuilles initialisées ! Chargement des données...');
+      await loadProductsFromScript();
+      await loadSalesFromScript();
+      renderProducts(); renderStockTable(); renderStats();
+    } else {
+      showToast('❌ Erreur init : ' + (data.error || ''), 'error');
+    }
+  } catch (e) {
+    hideLoader();
+    showToast('❌ Erreur : ' + e.message, 'error');
   }
 }
 

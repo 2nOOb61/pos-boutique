@@ -62,6 +62,7 @@ function doGet(e) {
   if (action === 'login')       return jsonResponse(handleLogin({ username: e.parameter.username || '', password: e.parameter.password || '' }));
   if (action === 'getProducts') return jsonResponse(handleGetProducts());
   if (action === 'getSales')    return jsonResponse(handleGetSales(e.parameter));
+  if (action === 'initSheets')  return jsonResponse(initSheets());
   return jsonResponse({ ok: false, error: 'Action GET inconnue: ' + action });
 }
 
