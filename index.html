@@ -362,6 +362,45 @@
   ::-webkit-scrollbar-thumb { background:var(--surface3); border-radius:3px; }
 
 
+  /* ===== CONFIG PAGE ===== */
+  .config-section {
+    background:var(--surface); border:1px solid var(--border); border-radius:18px;
+    padding:24px; margin-bottom:20px;
+  }
+  .config-section-title {
+    font-family:'Syne',sans-serif; font-weight:700; font-size:16px; margin-bottom:18px;
+    padding-bottom:12px; border-bottom:1px solid var(--border);
+  }
+  .config-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:16px; }
+  .cat-tag {
+    display:inline-flex; align-items:center; gap:6px; padding:6px 12px;
+    background:var(--surface2); border:1px solid var(--border); border-radius:20px;
+    font-size:13px; font-weight:500;
+  }
+  .cat-tag button { background:none; border:none; color:var(--muted); cursor:pointer; font-size:14px; padding:0; line-height:1; }
+  .cat-tag button:hover { color:var(--red); }
+  .article-config-card {
+    background:var(--surface2); border:1px solid var(--border); border-radius:14px;
+    padding:16px; display:flex; flex-direction:column; gap:10px;
+  }
+  .article-config-card-header { display:flex; align-items:center; gap:10px; }
+  .article-config-card-emoji { font-size:28px; }
+  .article-config-card-info { flex:1; }
+  .article-config-card-name { font-weight:700; font-size:14px; margin-bottom:2px; }
+  .article-config-card-cat { font-size:12px; color:var(--muted); }
+  .article-config-fields { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .article-config-field label { font-size:11px; color:var(--muted); display:block; margin-bottom:3px; text-transform:uppercase; letter-spacing:.4px; }
+  .article-config-field input {
+    width:100%; padding:8px 10px; background:var(--surface); border:1px solid var(--border);
+    border-radius:8px; color:var(--text); font-size:13px; outline:none;
+  }
+  .article-config-field input:focus { border-color:var(--accent); }
+  .article-config-actions { display:flex; gap:8px; }
+  .btn-save-article { flex:1; padding:8px; background:var(--accent); color:#0a0e1a; border:none; border-radius:8px; font-weight:700; font-size:13px; cursor:pointer; }
+  .btn-save-article:hover { opacity:.85; }
+  .btn-del-article { padding:8px 12px; background:rgba(255,71,87,0.1); border:1px solid rgba(255,71,87,0.3); color:var(--red); border-radius:8px; cursor:pointer; font-size:13px; }
+  .btn-del-article:hover { background:rgba(255,71,87,0.2); }
+
   /* ===== PWA INSTALL BANNER ===== */
   #installBanner {
     position:fixed; bottom:0; left:0; right:0; z-index:2000;
@@ -462,6 +501,7 @@
       <button class="nav-btn active" onclick="showPage('caisse',this)">🛒 Caisse</button>
       <button class="nav-btn" onclick="showPage('stock',this)">📦 Stock</button>
       <button class="nav-btn" onclick="showPage('stats',this)">📊 Statistiques</button>
+      <button class="nav-btn" onclick="showPage('config',this)">⚙️ Configuration</button>
     </nav>
     <div class="topbar-right">
       <div class="user-badge"><div class="user-dot"></div><span id="currentUserLabel">Admin</span></div>
@@ -579,6 +619,45 @@
   </div>
 </div>
 
+  <!-- CONFIG -->
+  <div class="page" id="page-config">
+
+    <!-- Section Boutique -->
+    <div class="config-section">
+      <div class="config-section-title">🏪 Informations de la boutique</div>
+      <div class="config-grid">
+        <div class="form-group"><label>Nom de la boutique</label><input id="cfgShopName" placeholder="MA BOUTIQUE" oninput="saveConfig()" /></div>
+        <div class="form-group"><label>Adresse / Ville</label><input id="cfgAddress" placeholder="Antananarivo, Madagascar" oninput="saveConfig()" /></div>
+        <div class="form-group"><label>Téléphone</label><input id="cfgPhone" placeholder="+261 XX XX XXX XX" oninput="saveConfig()" /></div>
+        <div class="form-group"><label>Message de bas de ticket</label><input id="cfgFooter" placeholder="Merci de votre visite !" oninput="saveConfig()" /></div>
+      </div>
+    </div>
+
+    <!-- Section Catégories -->
+    <div class="config-section">
+      <div class="config-section-title">🏷️ Catégories d'articles</div>
+      <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+        <input id="newCatInput" class="filter-input" placeholder="Nouvelle catégorie..." style="max-width:240px" onkeydown="if(event.key==='Enter')addCategory()" />
+        <button class="btn-add-product" onclick="addCategory()">➕ Ajouter</button>
+      </div>
+      <div id="categoriesList" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+    </div>
+
+    <!-- Section Articles -->
+    <div class="config-section">
+      <div class="config-section-title" style="display:flex;align-items:center;justify-content:space-between">
+        <span>📦 Gestion des articles</span>
+        <div style="display:flex;gap:8px">
+          <input class="filter-input" id="configSearch" placeholder="🔍 Rechercher..." oninput="renderConfigArticles()" style="max-width:200px;padding:8px 12px" />
+          <button class="btn-add-product" onclick="openProductModal()">➕ Nouvel article</button>
+        </div>
+      </div>
+      <div id="configArticlesGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-top:16px"></div>
+    </div>
+
+  </div>
+</div>
+
 <!-- SCANNER OVERLAY -->
 <div id="scannerOverlay">
   <div class="scanner-top-label">📷 Scanner un code-barres</div>
@@ -600,10 +679,7 @@
     </div>
     <div class="form-group"><label>Nom de l'article</label><input id="pName" placeholder="Ex: Riz 1kg" /></div>
     <div class="form-group"><label>Catégorie</label>
-      <select id="pCat">
-        <option>Alimentation</option><option>Boissons</option><option>Hygiène</option>
-        <option>Électronique</option><option>Vêtements</option><option>Autres</option>
-      </select>
+      <select id="pCat"></select>
     </div>
     <div class="form-group"><label>Emoji (icône)</label><input id="pEmoji" placeholder="🍚" maxlength="2" /></div>
     <div class="form-group"><label>Code-barres / Référence</label><input id="pCode" placeholder="Ex: 1234567890123" /></div>
@@ -835,7 +911,8 @@ function showPage(id, btn) {
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
   document.getElementById('page-'+id).classList.add('active');
   btn.classList.add('active');
-  if(id==='stats') renderStats();
+  if (id==='stats')  renderStats();
+  if (id==='config') renderConfigPage();
 }
 
 // ============================================================
@@ -1004,8 +1081,9 @@ function printTicket(sale) {
       .bold{font-weight:bold}
       hr{border:none;border-top:1px dashed #000}
     </style></head><body onload="window.print()">
-      <div class="center bold" style="font-size:15px">MA BOUTIQUE</div>
-      <div class="center">Antananarivo, Madagascar</div>
+      <div class="center bold" style="font-size:15px">${shopConfig.name}</div>
+      <div class="center">${shopConfig.address}</div>
+      ${shopConfig.phone ? `<div class="center">${shopConfig.phone}</div>` : ''}
       <div class="center">${new Date(sale.date).toLocaleString('fr-MG')}</div>
       <hr/>
       ${sale.items.map(i=>`<div class="row"><span>${i.name} x${i.qty}</span><span>${(i.price*i.qty).toLocaleString()} Ar</span></div>`).join('')}
@@ -1015,7 +1093,7 @@ function printTicket(sale) {
       <div class="row"><span>Monnaie</span><span>${fmt(sale.change)}</span></div>`:
       `<div class="row"><span>📱 ${sale.provider}</span><span>${sale.ref||''}</span></div>`}
       <hr/>
-      <div class="center">Merci de votre visite !</div>
+      <div class="center">${shopConfig.footer||'Merci de votre visite !'}</div>
     </body></html>`);
     w.document.close();
   }, 200);
@@ -1136,6 +1214,7 @@ function renderStockTable() {
 function openProductModal(id=null) {
   editingProductId = id;
   document.getElementById('productModalTitle').textContent = id ? '✏️ Modifier l\'article' : '➕ Nouvel article';
+  syncCategorySelect();
   if(id) {
     const p = products.find(pr=>pr.id===id);
     document.getElementById('pName').value=p.name;
@@ -1664,8 +1743,144 @@ async function initSheetsFromApp() {
 }
 
 // ============================================================
+// CONFIGURATION — Boutique, Catégories, Articles
+// ============================================================
+let shopConfig = { name:'MA BOUTIQUE', address:'Antananarivo, Madagascar', phone:'', footer:'Merci de votre visite !' };
+let categories = ['Alimentation','Boissons','Hygiène','Électronique','Vêtements','Autres'];
+
+function loadConfig() {
+  try {
+    const c = localStorage.getItem('pos-config');
+    const k = localStorage.getItem('pos-categories');
+    if (c) shopConfig = { ...shopConfig, ...JSON.parse(c) };
+    if (k) categories = JSON.parse(k);
+  } catch(e) {}
+}
+
+function saveConfig() {
+  shopConfig.name    = document.getElementById('cfgShopName').value || 'MA BOUTIQUE';
+  shopConfig.address = document.getElementById('cfgAddress').value  || 'Antananarivo, Madagascar';
+  shopConfig.phone   = document.getElementById('cfgPhone').value    || '';
+  shopConfig.footer  = document.getElementById('cfgFooter').value   || 'Merci de votre visite !';
+  localStorage.setItem('pos-config', JSON.stringify(shopConfig));
+  showToast('✅ Boutique enregistrée', 'success');
+}
+
+function renderConfigPage() {
+  // Remplir champs boutique
+  document.getElementById('cfgShopName').value = shopConfig.name;
+  document.getElementById('cfgAddress').value  = shopConfig.address;
+  document.getElementById('cfgPhone').value    = shopConfig.phone;
+  document.getElementById('cfgFooter').value   = shopConfig.footer;
+  // Catégories
+  renderCategories();
+  // Articles
+  renderConfigArticles();
+  // Sync select catégorie du modal produit
+  syncCategorySelect();
+}
+
+function renderCategories() {
+  const el = document.getElementById('categoriesList');
+  el.innerHTML = categories.map(c => `
+    <span class="cat-tag">
+      ${c}
+      <button onclick="removeCategory('${c}')" title="Supprimer">✕</button>
+    </span>`).join('');
+}
+
+function addCategory() {
+  const input = document.getElementById('newCatInput');
+  const val = input.value.trim();
+  if (!val) return;
+  if (categories.includes(val)) { showToast('Catégorie déjà existante','info'); return; }
+  categories.push(val);
+  localStorage.setItem('pos-categories', JSON.stringify(categories));
+  input.value = '';
+  renderCategories();
+  syncCategorySelect();
+  showToast('✅ Catégorie ajoutée');
+}
+
+function removeCategory(cat) {
+  if (!confirm(`Supprimer la catégorie "${cat}" ?`)) return;
+  categories = categories.filter(c => c !== cat);
+  localStorage.setItem('pos-categories', JSON.stringify(categories));
+  renderCategories();
+  syncCategorySelect();
+  showToast('Catégorie supprimée');
+}
+
+function syncCategorySelect() {
+  const sel = document.getElementById('pCat');
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = categories.map(c => `<option${c===current?' selected':''}>${c}</option>`).join('');
+}
+
+function renderConfigArticles() {
+  const q = (document.getElementById('configSearch')?.value || '').toLowerCase();
+  const grid = document.getElementById('configArticlesGrid');
+  const filtered = products.filter(p =>
+    p.name.toLowerCase().includes(q) || (p.cat||'').toLowerCase().includes(q) || p.code.includes(q)
+  );
+  if (filtered.length === 0) {
+    grid.innerHTML = '<div style="color:var(--muted);padding:20px;grid-column:1/-1;text-align:center">Aucun article trouvé</div>';
+    return;
+  }
+  grid.innerHTML = filtered.map(p => `
+    <div class="article-config-card">
+      <div class="article-config-card-header">
+        <span class="article-config-card-emoji">${p.emoji||'📦'}</span>
+        <div class="article-config-card-info">
+          <div class="article-config-card-name">${p.name}</div>
+          <div class="article-config-card-cat">${p.cat} · Code: ${p.code}</div>
+        </div>
+      </div>
+      <div class="article-config-fields">
+        <div class="article-config-field">
+          <label>Prix vente (Ar)</label>
+          <input type="number" id="cfg_price_${p.id}" value="${p.price}" min="0" />
+        </div>
+        <div class="article-config-field">
+          <label>Prix achat (Ar)</label>
+          <input type="number" id="cfg_cost_${p.id}" value="${p.cost}" min="0" />
+        </div>
+        <div class="article-config-field">
+          <label>Stock actuel</label>
+          <input type="number" id="cfg_stock_${p.id}" value="${p.stock}" min="0" />
+        </div>
+        <div class="article-config-field">
+          <label>Stock min (alerte)</label>
+          <input type="number" id="cfg_min_${p.id}" value="${p.minStock||5}" min="0" />
+        </div>
+      </div>
+      <div class="article-config-actions">
+        <button class="btn-save-article" onclick="saveArticleConfig(${p.id})">💾 Enregistrer</button>
+        <button class="btn-icon btn-edit" onclick="editProduct(${p.id})" title="Édition complète" style="border:1px solid var(--border);border-radius:8px;padding:8px 10px">✏️</button>
+        <button class="btn-del-article" onclick="deleteProduct(${p.id})">🗑</button>
+      </div>
+    </div>`).join('');
+}
+
+function saveArticleConfig(id) {
+  const p = products.find(pr => pr.id === id);
+  if (!p) return;
+  p.price    = parseFloat(document.getElementById('cfg_price_' + id).value) || p.price;
+  p.cost     = parseFloat(document.getElementById('cfg_cost_'  + id).value) || p.cost;
+  p.stock    = parseInt(document.getElementById('cfg_stock_'   + id).value) || 0;
+  p.minStock = parseInt(document.getElementById('cfg_min_'     + id).value) || 5;
+  saveData();
+  renderProducts();
+  renderStockTable();
+  saveProductToScript(p);
+  showToast(`✅ ${p.name} mis à jour`);
+}
+
+// ============================================================
 // INIT
 // ============================================================
+loadConfig();
 loadData();
 initPWA();
 renderCart();
