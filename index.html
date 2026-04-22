@@ -1425,65 +1425,43 @@ function updatePendingBadge() {
 let APPS_SCRIPT_URL = localStorage.getItem('pos-script-url') || 'https://script.google.com/macros/s/AKfycbyocBoHVEPVUVqEJ7WlYq1pAJNJR_SPgcYqNvFrR2wQxFs1mmncEvCfUGxFQI2d5NSMag/exec';
 let syncEnabled = !!APPS_SCRIPT_URL;
 
-// ── Requête générique — GET pour lectures, POST+fallback pour écritures ──
+// ── Requête générique ─────────────────────────────────────
+// GET  → lectures  (ping, getProducts, getSales, login, initSheets)
+// POST no-cors → écritures (addSale, saveProduct, deleteProduct, stockMove)
+//   no-cors : le navigateur envoie les données SANS vérifier les headers CORS
+//   → élimine définitivement "Failed to fetch"
 async function apiCall(payload) {
   if (!APPS_SCRIPT_URL) return null;
 
-  // ── LECTURES : GET simple (aucun problème CORS) ──────────
-  if (['getProducts', 'getSales', 'ping', 'initSheets'].includes(payload.action)) {
+  // ── LECTURES & LOGIN : requête GET lisible ────────────────
+  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login'];
+  if (getActions.includes(payload.action)) {
     try {
-      const params = new URLSearchParams({ action: payload.action });
-      if (payload.limit) params.append('limit', String(payload.limit));
-      const res = await fetch(APPS_SCRIPT_URL + '?' + params.toString());
+      let url = APPS_SCRIPT_URL + '?action=' + payload.action;
+      if (payload.limit)    url += '&limit='    + encodeURIComponent(payload.limit);
+      if (payload.username) url += '&username=' + encodeURIComponent(payload.username);
+      if (payload.password) url += '&password=' + encodeURIComponent(payload.password);
+      const res  = await fetch(url);
       const text = await res.text();
       try { return JSON.parse(text); }
       catch(e) { console.warn('GET réponse non-JSON:', text.substring(0,200)); return null; }
     } catch(e) { console.warn('GET error:', e.message); return null; }
   }
 
-  // ── LOGIN : GET avec paramètres ──────────────────────────
-  if (payload.action === 'login') {
-    try {
-      const url = APPS_SCRIPT_URL + '?action=login&username=' +
-        encodeURIComponent(payload.username) + '&password=' +
-        encodeURIComponent(payload.password);
-      const res = await fetch(url);
-      const text = await res.text();
-      try { return JSON.parse(text); }
-      catch(e) { return null; }
-    } catch(e) { return null; }
-  }
-
-  // ── ÉCRITURES : POST d'abord (text/plain = pas de preflight CORS) ──
+  // ── ÉCRITURES : POST mode no-cors ────────────────────────
+  // text/plain est autorisé en no-cors et évite le preflight OPTIONS
+  // Apps Script reçoit les données via e.postData.contents
   try {
-    const res = await fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
+    await fetch(APPS_SCRIPT_URL, {
+      method:  'POST',
+      mode:    'no-cors',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(payload),
-      redirect: 'follow'
+      body:    JSON.stringify(payload)
     });
-    const text = await res.text();
-    try {
-      const json = JSON.parse(text);
-      return json;
-    } catch(e) {
-      // Apps Script a répondu mais pas en JSON (erreur HTML) → tenter GET
-      console.warn('POST réponse non-JSON, fallback GET. Début:', text.substring(0,200));
-      throw new Error('non-json');
-    }
-  } catch(postErr) {
-    // POST bloqué (CORS) ou non-JSON → fallback GET avec payload encodé
-    console.warn('POST échoué (' + postErr.message + '), tentative GET...');
-    try {
-      const url = APPS_SCRIPT_URL + '?payload=' + encodeURIComponent(JSON.stringify(payload));
-      const res = await fetch(url);
-      const text = await res.text();
-      try { return JSON.parse(text); }
-      catch(e) { return res.ok ? { ok: true } : { ok: false, error: 'Réponse invalide du serveur' }; }
-    } catch(getErr) {
-      console.warn('GET fallback échoué:', getErr.message);
-      return null;
-    }
+    return { ok: true };
+  } catch(e) {
+    console.warn('POST no-cors error:', e.message);
+    return null;
   }
 }
 
@@ -1629,53 +1607,38 @@ function openScriptSettings() {
 async function testScriptConnection() {
   showLoader('Diagnostic en cours...');
   const log = [];
-  let ok = true;
 
-  // 1. Ping
+  // 1. Ping (GET lisible)
   try {
-    const res = await fetch(APPS_SCRIPT_URL + '?action=ping');
+    const res  = await fetch(APPS_SCRIPT_URL + '?action=ping');
     const data = JSON.parse(await res.text());
-    if (data.ok) log.push('✅ Ping OK');
-    else { log.push('❌ Ping KO: ' + data.message); ok = false; }
-  } catch(e) { log.push('❌ Ping impossible: ' + e.message); ok = false; }
+    log.push(data.ok ? '✅ Script accessible' : '❌ Script KO: ' + data.error);
+  } catch(e) { log.push('❌ Script inaccessible: ' + e.message); }
 
   // 2. Lecture produits
-  if (ok) {
-    try {
-      const res = await fetch(APPS_SCRIPT_URL + '?action=getProducts');
-      const data = JSON.parse(await res.text());
-      if (data.ok) log.push('✅ Produits: ' + data.products.length + ' articles');
-      else { log.push('⚠️ Produits: ' + data.error); }
-    } catch(e) { log.push('❌ Produits: ' + e.message); }
-  }
+  try {
+    const res  = await fetch(APPS_SCRIPT_URL + '?action=getProducts');
+    const data = JSON.parse(await res.text());
+    if (data.ok)    log.push('✅ Produits: ' + data.products.length + ' articles lus');
+    else            log.push('⚠️ Produits: ' + data.error + ' → lancez option 3');
+  } catch(e) { log.push('❌ Lecture produits: ' + e.message); }
 
-  // 3. Test écriture (vente test)
-  if (ok) {
-    try {
-      const testSale = { action: 'addSale', sale: {
-        id: 'TEST_' + Date.now(), date: new Date().toISOString(),
-        items: [{ name: 'TEST', qty: 0, price: 0 }],
-        total: 0, method: 'cash', given: 0, change: 0,
-        caissier: 'diagnostic', provider: null, ref: null
-      }};
-      // Test POST
-      const res = await fetch(APPS_SCRIPT_URL, {
-        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify(testSale), redirect: 'follow'
-      });
-      const text = await res.text();
-      try {
-        const data = JSON.parse(text);
-        if (data.ok) log.push('✅ Écriture POST OK');
-        else log.push('⚠️ Écriture POST: ' + data.error);
-      } catch(e) { log.push('⚠️ POST réponse non-JSON — tentative GET...'); }
-    } catch(e) { log.push('❌ Écriture POST CORS: ' + e.message); }
-  }
+  // 3. Test écriture no-cors (ne peut pas lire la réponse → on vérifie via lecture)
+  try {
+    await fetch(APPS_SCRIPT_URL, {
+      method: 'POST', mode: 'no-cors',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'ping' })
+    });
+    log.push('✅ Écriture POST envoyée (no-cors OK)');
+  } catch(e) { log.push('❌ Écriture POST: ' + e.message); }
 
   hideLoader();
-  alert('🔍 Diagnostic Google Sheets :\n\n' + log.join('\n') + '\n\n' +
-    (ok ? '→ Si écriture KO : lancez "Initialiser les feuilles" (option 3)' :
-           '→ Vérifiez l\'URL et que le script est déployé "Accès: Tout le monde"'));
+  alert('🔍 Diagnostic Google Sheets\n\n' + log.join('\n') +
+    '\n\n━━━━━━━━━━━━━━━━━━━━━\n' +
+    '→ Si "Script inaccessible" : vérifiez l\'URL\n' +
+    '→ Si "Feuille introuvable" : faites option 3 (Initialiser)\n' +
+    '→ Si tout est ✅ mais ventes absentes : vérifiez les logs Apps Script');
 }
 
 async function initSheetsFromApp() {
