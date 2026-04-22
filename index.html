@@ -1425,36 +1425,65 @@ function updatePendingBadge() {
 let APPS_SCRIPT_URL = localStorage.getItem('pos-script-url') || 'https://script.google.com/macros/s/AKfycbyocBoHVEPVUVqEJ7WlYq1pAJNJR_SPgcYqNvFrR2wQxFs1mmncEvCfUGxFQI2d5NSMag/exec';
 let syncEnabled = !!APPS_SCRIPT_URL;
 
-// ── Requête générique (GET uniquement pour éviter CORS) ───
+// ── Requête générique — GET pour lectures, POST+fallback pour écritures ──
 async function apiCall(payload) {
   if (!APPS_SCRIPT_URL) return null;
-  try {
-    let url;
-    const readActions = ['getProducts', 'getSales', 'ping'];
-    if (readActions.includes(payload.action)) {
+
+  // ── LECTURES : GET simple (aucun problème CORS) ──────────
+  if (['getProducts', 'getSales', 'ping', 'initSheets'].includes(payload.action)) {
+    try {
       const params = new URLSearchParams({ action: payload.action });
       if (payload.limit) params.append('limit', String(payload.limit));
-      url = APPS_SCRIPT_URL + '?' + params.toString();
-    } else if (payload.action === 'login') {
-      url = APPS_SCRIPT_URL + '?action=login&username=' +
-            encodeURIComponent(payload.username) + '&password=' +
-            encodeURIComponent(payload.password);
-    } else {
-      // addSale, saveProduct, deleteProduct, stockMove → payload JSON encodé en GET
-      url = APPS_SCRIPT_URL + '?payload=' + encodeURIComponent(JSON.stringify(payload));
-    }
-    const res = await fetch(url);
+      const res = await fetch(APPS_SCRIPT_URL + '?' + params.toString());
+      const text = await res.text();
+      try { return JSON.parse(text); }
+      catch(e) { console.warn('GET réponse non-JSON:', text.substring(0,200)); return null; }
+    } catch(e) { console.warn('GET error:', e.message); return null; }
+  }
+
+  // ── LOGIN : GET avec paramètres ──────────────────────────
+  if (payload.action === 'login') {
+    try {
+      const url = APPS_SCRIPT_URL + '?action=login&username=' +
+        encodeURIComponent(payload.username) + '&password=' +
+        encodeURIComponent(payload.password);
+      const res = await fetch(url);
+      const text = await res.text();
+      try { return JSON.parse(text); }
+      catch(e) { return null; }
+    } catch(e) { return null; }
+  }
+
+  // ── ÉCRITURES : POST d'abord (text/plain = pas de preflight CORS) ──
+  try {
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+      redirect: 'follow'
+    });
     const text = await res.text();
     try {
-      return JSON.parse(text);
+      const json = JSON.parse(text);
+      return json;
     } catch(e) {
-      console.warn('API réponse non-JSON (300 premiers chars):', text.substring(0, 300));
-      if (res.ok) return { ok: true };
-      return { ok: false, error: 'Réponse invalide du serveur (vérifiez le SHEET_ID dans Code.gs)' };
+      // Apps Script a répondu mais pas en JSON (erreur HTML) → tenter GET
+      console.warn('POST réponse non-JSON, fallback GET. Début:', text.substring(0,200));
+      throw new Error('non-json');
     }
-  } catch (e) {
-    console.warn('API fetch error:', e.message);
-    return null;
+  } catch(postErr) {
+    // POST bloqué (CORS) ou non-JSON → fallback GET avec payload encodé
+    console.warn('POST échoué (' + postErr.message + '), tentative GET...');
+    try {
+      const url = APPS_SCRIPT_URL + '?payload=' + encodeURIComponent(JSON.stringify(payload));
+      const res = await fetch(url);
+      const text = await res.text();
+      try { return JSON.parse(text); }
+      catch(e) { return res.ok ? { ok: true } : { ok: false, error: 'Réponse invalide du serveur' }; }
+    } catch(getErr) {
+      console.warn('GET fallback échoué:', getErr.message);
+      return null;
+    }
   }
 }
 
@@ -1598,24 +1627,55 @@ function openScriptSettings() {
 }
 
 async function testScriptConnection() {
-  showLoader('Test de connexion...');
+  showLoader('Diagnostic en cours...');
+  const log = [];
+  let ok = true;
+
+  // 1. Ping
   try {
     const res = await fetch(APPS_SCRIPT_URL + '?action=ping');
-    const text = await res.text();
-    const data = JSON.parse(text);
-    hideLoader();
-    if (data.ok) {
-      showToast('🟢 Connexion Apps Script OK ! Chargement des données...');
-      await loadProductsFromScript();
-      await loadSalesFromScript();
-      renderProducts(); renderStockTable(); renderStats();
-    } else {
-      showToast('⚠️ Apps Script répond : ' + (data.message || data.error), 'error');
-    }
-  } catch (e) {
-    hideLoader();
-    showToast('❌ Connexion impossible — ' + e.message, 'error');
+    const data = JSON.parse(await res.text());
+    if (data.ok) log.push('✅ Ping OK');
+    else { log.push('❌ Ping KO: ' + data.message); ok = false; }
+  } catch(e) { log.push('❌ Ping impossible: ' + e.message); ok = false; }
+
+  // 2. Lecture produits
+  if (ok) {
+    try {
+      const res = await fetch(APPS_SCRIPT_URL + '?action=getProducts');
+      const data = JSON.parse(await res.text());
+      if (data.ok) log.push('✅ Produits: ' + data.products.length + ' articles');
+      else { log.push('⚠️ Produits: ' + data.error); }
+    } catch(e) { log.push('❌ Produits: ' + e.message); }
   }
+
+  // 3. Test écriture (vente test)
+  if (ok) {
+    try {
+      const testSale = { action: 'addSale', sale: {
+        id: 'TEST_' + Date.now(), date: new Date().toISOString(),
+        items: [{ name: 'TEST', qty: 0, price: 0 }],
+        total: 0, method: 'cash', given: 0, change: 0,
+        caissier: 'diagnostic', provider: null, ref: null
+      }};
+      // Test POST
+      const res = await fetch(APPS_SCRIPT_URL, {
+        method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(testSale), redirect: 'follow'
+      });
+      const text = await res.text();
+      try {
+        const data = JSON.parse(text);
+        if (data.ok) log.push('✅ Écriture POST OK');
+        else log.push('⚠️ Écriture POST: ' + data.error);
+      } catch(e) { log.push('⚠️ POST réponse non-JSON — tentative GET...'); }
+    } catch(e) { log.push('❌ Écriture POST CORS: ' + e.message); }
+  }
+
+  hideLoader();
+  alert('🔍 Diagnostic Google Sheets :\n\n' + log.join('\n') + '\n\n' +
+    (ok ? '→ Si écriture KO : lancez "Initialiser les feuilles" (option 3)' :
+           '→ Vérifiez l\'URL et que le script est déployé "Accès: Tout le monde"'));
 }
 
 async function initSheetsFromApp() {
