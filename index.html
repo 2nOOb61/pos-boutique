@@ -1422,7 +1422,8 @@ function updatePendingBadge() {
 // ============================================================
 // GOOGLE APPS SCRIPT — CONNEXION COMPLÈTE
 // ============================================================
-let APPS_SCRIPT_URL = localStorage.getItem('pos-script-url') || 'https://script.google.com/macros/s/AKfycbyocBoHVEPVUVqEJ7WlYq1pAJNJR_SPgcYqNvFrR2wQxFs1mmncEvCfUGxFQI2d5NSMag/exec';
+let APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxFsymwddqXY-_iUJwFsTTWowmsXgtheFDX8YGpDeU5sIk8sjJ_z5_DkDaOnK8rX5bmOg/exec';
+localStorage.setItem('pos-script-url', APPS_SCRIPT_URL);
 let syncEnabled = !!APPS_SCRIPT_URL;
 
 // ── Requête générique ─────────────────────────────────────
