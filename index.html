@@ -454,6 +454,50 @@
   .btn-update { padding:8px 14px; background:var(--accent3); color:white; border:none; border-radius:8px; cursor:pointer; font-size:12px; font-weight:700; }
   body { padding-bottom: env(safe-area-inset-bottom); }
 
+  /* ===== USERS PAGE ===== */
+  .users-toolbar { display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap; align-items:center; }
+  .users-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:16px; }
+  .user-card {
+    background:var(--surface); border:1px solid var(--border); border-radius:18px;
+    padding:20px; display:flex; flex-direction:column; gap:14px;
+  }
+  .user-card-top { display:flex; align-items:center; gap:14px; }
+  .user-avatar {
+    width:52px; height:52px; border-radius:16px; display:flex; align-items:center;
+    justify-content:center; font-size:22px; flex-shrink:0; font-weight:700;
+  }
+  .user-avatar.role-admin   { background:rgba(0,229,160,0.15); border:2px solid rgba(0,229,160,0.4); }
+  .user-avatar.role-caissier { background:rgba(74,158,255,0.15); border:2px solid rgba(74,158,255,0.4); }
+  .user-card-info { flex:1; min-width:0; }
+  .user-card-name { font-weight:700; font-size:15px; }
+  .user-card-username { font-size:12px; color:var(--muted); font-family:'DM Mono',monospace; margin-top:2px; }
+  .user-card-meta { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .badge-admin   { background:rgba(0,229,160,0.12); color:var(--green); }
+  .badge-caissier { background:rgba(74,158,255,0.12); color:var(--blue); }
+  .badge-inactive { background:rgba(255,71,87,0.1); color:var(--red); }
+  .user-card-actions { display:flex; gap:8px; padding-top:12px; border-top:1px solid var(--border); }
+  .user-card-actions button { flex:1; padding:9px; border-radius:10px; font-size:13px; font-weight:600; cursor:pointer; transition:.2s; border:none; }
+  .btn-edit-user  { background:rgba(74,158,255,0.12); color:var(--blue); }
+  .btn-edit-user:hover { background:rgba(74,158,255,0.22); }
+  .btn-del-user   { background:rgba(255,71,87,0.1); color:var(--red); }
+  .btn-del-user:hover { background:rgba(255,71,87,0.2); }
+  .btn-toggle-user { background:var(--surface2); color:var(--muted); }
+  .btn-toggle-user:hover { color:var(--text); }
+  /* Toggle switch */
+  .toggle-wrap { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--muted); }
+  .toggle { position:relative; width:40px; height:22px; }
+  .toggle input { opacity:0; width:0; height:0; }
+  .toggle-slider {
+    position:absolute; inset:0; background:var(--surface3); border-radius:22px;
+    cursor:pointer; transition:.2s;
+  }
+  .toggle-slider::before {
+    content:''; position:absolute; width:16px; height:16px; left:3px; top:3px;
+    background:var(--muted); border-radius:50%; transition:.2s;
+  }
+  .toggle input:checked + .toggle-slider { background:rgba(0,229,160,0.3); }
+  .toggle input:checked + .toggle-slider::before { transform:translateX(18px); background:var(--accent); }
+
   /* ===== BOTTOM NAV (mobile) ===== */
   #bottomNav {
     display:none; /* shown via JS after login */
@@ -612,14 +656,17 @@
     <button class="bnav-btn active" id="bnav-caisse" onclick="showPage('caisse',null,this)">
       <span class="bnav-icon">🛒</span>Caisse
     </button>
-    <button class="bnav-btn" id="bnav-stock" onclick="showPage('stock',null,this)">
+    <button class="bnav-btn admin-only" id="bnav-stock" onclick="showPage('stock',null,this)">
       <span class="bnav-icon">📦</span>Stock
     </button>
-    <button class="bnav-btn" id="bnav-stats" onclick="showPage('stats',null,this)">
+    <button class="bnav-btn admin-only" id="bnav-stats" onclick="showPage('stats',null,this)">
       <span class="bnav-icon">📊</span>Stats
     </button>
-    <button class="bnav-btn" id="bnav-config" onclick="showPage('config',null,this)">
+    <button class="bnav-btn admin-only" id="bnav-config" onclick="showPage('config',null,this)">
       <span class="bnav-icon">⚙️</span>Config
+    </button>
+    <button class="bnav-btn admin-only" id="bnav-users" onclick="showPage('users',null,this)">
+      <span class="bnav-icon">👥</span>Comptes
     </button>
   </div>
 </nav>
@@ -651,9 +698,10 @@
     <div class="topbar-brand">🏪 Boutique <span>POS</span></div>
     <nav class="topbar-nav">
       <button class="nav-btn active" onclick="showPage('caisse',this)">🛒 Caisse</button>
-      <button class="nav-btn" onclick="showPage('stock',this)">📦 Stock</button>
-      <button class="nav-btn" onclick="showPage('stats',this)">📊 Statistiques</button>
-      <button class="nav-btn" onclick="showPage('config',this)">⚙️ Configuration</button>
+      <button class="nav-btn admin-only" onclick="showPage('stock',this)">📦 Stock</button>
+      <button class="nav-btn admin-only" onclick="showPage('stats',this)">📊 Statistiques</button>
+      <button class="nav-btn admin-only" onclick="showPage('config',this)">⚙️ Configuration</button>
+      <button class="nav-btn admin-only" onclick="showPage('users',this)">👥 Utilisateurs</button>
     </nav>
     <div class="topbar-right">
       <div class="user-badge"><div class="user-dot"></div><span id="currentUserLabel">Admin</span></div>
@@ -796,6 +844,15 @@
   </div>
 </div>
 
+  <!-- UTILISATEURS -->
+  <div class="page" id="page-users">
+    <div class="users-toolbar">
+      <button class="btn-add-product" onclick="openUserModal()">➕ Nouvel utilisateur</button>
+      <span style="color:var(--muted);font-size:13px" id="usersCount"></span>
+    </div>
+    <div class="users-grid" id="usersGrid"></div>
+  </div>
+
   <!-- CONFIG -->
   <div class="page" id="page-config" style="padding-top:0">
 
@@ -846,6 +903,49 @@
     <button onclick="scanManual()">OK</button>
   </div>
   <button class="btn-close-scanner" onclick="closeScanner()">✖ Fermer</button>
+</div>
+
+<!-- MODAL UTILISATEUR -->
+<div class="modal-overlay" id="userModal">
+  <div class="modal">
+    <div class="modal-title">
+      <span id="userModalTitle">➕ Nouvel utilisateur</span>
+      <button class="modal-close" onclick="closeModal('userModal')">✕</button>
+    </div>
+    <div class="form-group">
+      <label>Identifiant (login)</label>
+      <input id="uUsername" placeholder="ex: marie" autocomplete="off" />
+    </div>
+    <div class="form-group">
+      <label>Nom complet</label>
+      <input id="uLabel" placeholder="ex: Marie Dupont" />
+    </div>
+    <div class="form-group">
+      <label id="uPassLabel">Mot de passe</label>
+      <div style="position:relative">
+        <input id="uPass" type="password" placeholder="••••••" autocomplete="new-password" style="width:100%;padding-right:44px" />
+        <button type="button" onclick="togglePassVis()" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px" id="passVisBtn">👁</button>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Rôle</label>
+      <select id="uRole">
+        <option value="admin">👑 Administrateur — accès complet</option>
+        <option value="caissier">🛒 Caissier — caisse uniquement</option>
+      </select>
+    </div>
+    <div class="form-group" style="display:flex;align-items:center;gap:12px">
+      <label class="toggle">
+        <input type="checkbox" id="uActif" checked />
+        <span class="toggle-slider"></span>
+      </label>
+      <span style="font-size:14px">Compte actif</span>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal('userModal')">Annuler</button>
+      <button class="btn-primary" onclick="saveUser()">💾 Enregistrer</button>
+    </div>
+  </div>
 </div>
 
 <!-- MODAL PRODUIT -->
@@ -966,10 +1066,12 @@
 // ============================================================
 // DATA & STATE
 // ============================================================
-const USERS = {
-  admin: { pass:'1234', role:'admin', label:'Admin' },
-  caissier: { pass:'0000', role:'caissier', label:'Caissier' }
-};
+// Utilisateurs locaux (persistés dans localStorage)
+let localUsers = [
+  { username:'admin',    pass:'1234', role:'admin',    label:'Administrateur', actif:true },
+  { username:'caissier', pass:'0000', role:'caissier', label:'Caissier',       actif:true }
+];
+let editingUserId = null; // index dans localUsers
 
 let currentUser = null;
 let cart = [];
@@ -1051,9 +1153,9 @@ async function doLogin() {
   }
 
   // Fallback local (hors ligne ou pas de script URL)
-  if (!loginOk && USERS[u] && USERS[u].pass === p) {
-    loginOk = true;
-    userInfo = { username: u, role: USERS[u].role, label: USERS[u].label };
+  if (!loginOk) {
+    const lu = localUsers.find(x => x.username.toLowerCase() === u && x.pass === p && x.actif !== false);
+    if (lu) { loginOk = true; userInfo = { username: lu.username, role: lu.role, label: lu.label }; }
   }
 
   btn.disabled = false; btn.textContent = 'Se connecter';
@@ -1073,6 +1175,7 @@ async function doLogin() {
       // Synchroniser les ventes en attente (hors ligne précédemment)
       await syncPendingOfflineSales();
     }
+    applyRolePermissions(currentUser.role);
     updatePendingBadge();
     renderProducts();
     renderStockTable();
@@ -1112,6 +1215,12 @@ function showPage(id, btn, bnavBtn) {
   });
   if (id==='stats')  renderStats();
   if (id==='config') renderConfigPage();
+  if (id==='users')  renderUsersPage();
+  // Garde : caissier ne peut accéder qu'à la caisse
+  if (currentUser && currentUser.role !== 'admin' && id !== 'caisse') {
+    showPage('caisse', null, null);
+    showToast('⛔ Accès réservé aux administrateurs', 'error');
+  }
 }
 
 function switchCaisseTab(tab) {
@@ -1801,6 +1910,167 @@ function loadData() {
   } catch(e) { console.warn('loadData error:', e); }
 }
 
+function saveUsers() {
+  try { localStorage.setItem('pos-users', JSON.stringify(localUsers)); } catch(e) {}
+}
+
+function loadUsers() {
+  try {
+    const u = localStorage.getItem('pos-users');
+    if (u) localUsers = JSON.parse(u);
+  } catch(e) {}
+}
+
+// ============================================================
+// PERMISSIONS PAR RÔLE
+// ============================================================
+function applyRolePermissions(role) {
+  const isAdmin = role === 'admin';
+  // Top nav & bottom nav: montrer/cacher les éléments admin-only
+  document.querySelectorAll('.admin-only').forEach(el => {
+    el.style.display = isAdmin ? '' : 'none';
+  });
+  // Bouton Google Sheets (admin only)
+  const sheetsBtn = document.querySelector('[onclick="openScriptSettings()"]');
+  if (sheetsBtn) sheetsBtn.style.display = isAdmin ? '' : 'none';
+}
+
+// ============================================================
+// GESTION DES UTILISATEURS
+// ============================================================
+function renderUsersPage() {
+  const grid = document.getElementById('usersGrid');
+  const count = document.getElementById('usersCount');
+  if (!grid) return;
+  count.textContent = `${localUsers.length} compte(s)`;
+  grid.innerHTML = localUsers.map((u, idx) => {
+    const roleLabel = u.role === 'admin' ? 'Administrateur' : 'Caissier';
+    const isMe = currentUser && u.username === currentUser.username;
+    const isLastAdmin = u.role === 'admin' && localUsers.filter(x => x.role === 'admin' && x.actif !== false).length === 1;
+    return `
+    <div class="user-card">
+      <div class="user-card-top">
+        <div class="user-avatar role-${u.role}">${u.role === 'admin' ? '👑' : '🛒'}</div>
+        <div class="user-card-info">
+          <div class="user-card-name">${u.label}${isMe ? ' <span style="font-size:11px;color:var(--accent)">(vous)</span>' : ''}</div>
+          <div class="user-card-username">@${u.username}</div>
+        </div>
+      </div>
+      <div class="user-card-meta">
+        <span class="badge badge-${u.role}">${roleLabel}</span>
+        ${u.actif !== false
+          ? '<span class="badge badge-ok">Actif</span>'
+          : '<span class="badge badge-inactive">Inactif</span>'}
+      </div>
+      <div class="user-card-actions">
+        <button class="btn-edit-user" onclick="openUserModal(${idx})">✏️ Modifier</button>
+        ${!isMe && !isLastAdmin
+          ? `<button class="btn-del-user" onclick="deleteUser(${idx})">🗑 Supprimer</button>`
+          : `<button class="btn-toggle-user" onclick="toggleUserActive(${idx})" ${isMe?'disabled':''}>
+               ${u.actif!==false?'⏸ Désactiver':'▶ Activer'}</button>`}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openUserModal(idx=null) {
+  editingUserId = idx;
+  const isNew = idx === null;
+  document.getElementById('userModalTitle').textContent = isNew ? '➕ Nouvel utilisateur' : '✏️ Modifier l\'utilisateur';
+  document.getElementById('uPassLabel').textContent = isNew ? 'Mot de passe' : 'Nouveau mot de passe (laisser vide = inchangé)';
+  document.getElementById('uPass').placeholder = isNew ? '••••••' : '(inchangé)';
+  document.getElementById('uPass').type = 'password';
+  document.getElementById('passVisBtn').textContent = '👁';
+  if (isNew) {
+    document.getElementById('uUsername').value = '';
+    document.getElementById('uUsername').disabled = false;
+    document.getElementById('uLabel').value = '';
+    document.getElementById('uPass').value = '';
+    document.getElementById('uRole').value = 'caissier';
+    document.getElementById('uActif').checked = true;
+  } else {
+    const u = localUsers[idx];
+    document.getElementById('uUsername').value = u.username;
+    document.getElementById('uUsername').disabled = true;
+    document.getElementById('uLabel').value = u.label;
+    document.getElementById('uPass').value = '';
+    document.getElementById('uRole').value = u.role;
+    document.getElementById('uActif').checked = u.actif !== false;
+  }
+  openModal('userModal');
+}
+
+function togglePassVis() {
+  const inp = document.getElementById('uPass');
+  const btn = document.getElementById('passVisBtn');
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+  btn.textContent = inp.type === 'password' ? '👁' : '🙈';
+}
+
+function saveUser() {
+  const username = document.getElementById('uUsername').value.trim().toLowerCase();
+  const label    = document.getElementById('uLabel').value.trim();
+  const pass     = document.getElementById('uPass').value;
+  const role     = document.getElementById('uRole').value;
+  const actif    = document.getElementById('uActif').checked;
+  const isNew    = editingUserId === null;
+
+  if (!username) { showToast('Identifiant obligatoire', 'error'); return; }
+  if (!label)    { showToast('Nom complet obligatoire', 'error'); return; }
+  if (isNew && !pass) { showToast('Mot de passe obligatoire', 'error'); return; }
+
+  // Vérifier unicité du username (seulement pour les nouveaux)
+  if (isNew && localUsers.find(u => u.username.toLowerCase() === username)) {
+    showToast('Cet identifiant existe déjà', 'error'); return;
+  }
+
+  // Empêcher de retirer le rôle admin au dernier admin
+  if (!isNew) {
+    const u = localUsers[editingUserId];
+    const otherAdmins = localUsers.filter((x,i) => i !== editingUserId && x.role === 'admin' && x.actif !== false);
+    if (u.role === 'admin' && role !== 'admin' && otherAdmins.length === 0) {
+      showToast('Impossible : c\'est le dernier administrateur actif', 'error'); return;
+    }
+  }
+
+  if (isNew) {
+    localUsers.push({ username, pass, role, label, actif });
+    showToast(`✅ Utilisateur ${label} créé`);
+  } else {
+    const u = localUsers[editingUserId];
+    u.label = label;
+    u.role  = role;
+    u.actif = actif;
+    if (pass) u.pass = pass;
+    showToast(`✅ ${label} mis à jour`);
+  }
+
+  saveUsers();
+  closeModal('userModal');
+  renderUsersPage();
+}
+
+function deleteUser(idx) {
+  const u = localUsers[idx];
+  if (!confirm(`Supprimer l'utilisateur "${u.label}" (@${u.username}) ?`)) return;
+  localUsers.splice(idx, 1);
+  saveUsers();
+  renderUsersPage();
+  showToast(`Utilisateur supprimé`);
+}
+
+function toggleUserActive(idx) {
+  const u = localUsers[idx];
+  const otherAdmins = localUsers.filter((x,i) => i !== idx && x.role === 'admin' && x.actif !== false);
+  if (u.role === 'admin' && u.actif !== false && otherAdmins.length === 0) {
+    showToast('Impossible : c\'est le dernier administrateur actif', 'error'); return;
+  }
+  u.actif = u.actif === false ? true : false;
+  saveUsers();
+  renderUsersPage();
+  showToast(u.actif ? `✅ ${u.label} activé` : `⏸ ${u.label} désactivé`);
+}
+
 // Ventes en attente (hors ligne)
 function savePendingSale(sale) {
   const pending = JSON.parse(localStorage.getItem('pos-pending-sales') || '[]');
@@ -2230,6 +2500,7 @@ function saveArticleConfig(id) {
 // ============================================================
 loadConfig();
 loadData();
+loadUsers();
 initPWA();
 renderCart();
 </script>
