@@ -1754,14 +1754,33 @@ function saveMouvement() {
   syncStockMove(p.name, type, qty, document.getElementById('mouvReason').value || 'Manuel');
 }
 
+// Gère les dates malformées venant de Sheets : "2026-04-23TSat Dec 30 1899 08:52:31..."
+function parseSaleDate(str) {
+  if (!str) return null;
+  const d = new Date(str);
+  if (!isNaN(d)) return d;
+  // Extraire YYYY-MM-DD + HH:MM:SS s'ils existent
+  const dateM = str.match(/(\d{4}-\d{2}-\d{2})/);
+  const timeM = str.match(/(\d{2}:\d{2}:\d{2})/);
+  if (!dateM) return null;
+  return new Date(dateM[1] + (timeM ? 'T' + timeM[1] : 'T00:00:00'));
+}
+
+// Retourne la portion YYYY-MM-DD pour les comparaisons startsWith
+function saleDateKey(str) {
+  if (!str) return '';
+  const m = str.match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : '';
+}
+
 // ============================================================
 // STATS
 // ============================================================
 function renderStats() {
   const today = new Date().toDateString();
   const thisMonth = new Date().toISOString().slice(0,7);
-  const todaySales = sales.filter(s=>new Date(s.date).toDateString()===today);
-  const monthSales = sales.filter(s=>s.date.startsWith(thisMonth));
+  const todaySales = sales.filter(s => { const d = parseSaleDate(s.date); return d && d.toDateString()===today; });
+  const monthSales = sales.filter(s => saleDateKey(s.date).startsWith(thisMonth));
   const todayTotal = todaySales.reduce((s,i)=>s+(Number(i.total)||0),0);
   const monthTotal = monthSales.reduce((s,i)=>s+(Number(i.total)||0),0);
 
@@ -1784,7 +1803,7 @@ function renderStats() {
   for(let i=6;i>=0;i--) {
     const d = new Date(); d.setDate(d.getDate()-i);
     const ds = d.toDateString();
-    const total = sales.filter(s=>new Date(s.date).toDateString()===ds).reduce((a,b)=>a+b.total,0);
+    const total = sales.filter(s=>{ const d=parseSaleDate(s.date); return d && d.toDateString()===ds; }).reduce((a,b)=>a+(Number(b.total)||0),0);
     days.push({ label:d.toLocaleDateString('fr-MG',{weekday:'short'}), total });
   }
   const max = Math.max(...days.map(d=>d.total),1);
@@ -1805,7 +1824,7 @@ function renderStats() {
       d.setMonth(d.getMonth() - i);
       const key = d.toISOString().slice(0, 7);
       const label = d.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
-      const mSales = sales.filter(s => s.date && s.date.startsWith(key));
+      const mSales = sales.filter(s => saleDateKey(s.date).startsWith(key));
       const total = mSales.reduce((s, v) => s + (Number(v.total) || 0), 0);
       const count = mSales.length;
       months.push({ key, label, total, count });
@@ -1835,8 +1854,8 @@ function renderStats() {
     const due = Number(s.due) || 0;
     const total = Number(s.total) || 0;
     const items = Array.isArray(s.items) ? s.items : [];
-    const d = s.date ? new Date(s.date) : null;
-    const dateStr = d && !isNaN(d) ? d.toLocaleString('fr-FR') : (s.date || '—');
+    const d = parseSaleDate(s.date);
+    const dateStr = d ? d.toLocaleString('fr-FR') : '—';
     const dueCell = due > 0
       ? `<td class="td-mono" style="font-weight:700;color:var(--red)">${fmt(due)}</td>`
       : `<td class="td-mono" style="color:var(--muted)">—</td>`;
