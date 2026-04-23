@@ -596,7 +596,7 @@
     .btn-icon { padding:10px; font-size:18px; }
     .nav-btn { padding:8px 14px; }
 
-    /* History table: hide some cols */
+    /* History table: hide Articles col on mobile */
     .history-table-wrap table th:nth-child(2),
     .history-table-wrap table td:nth-child(2) { display:none; }
 
@@ -837,7 +837,7 @@
     </div>
     <div class="history-table-wrap">
       <table>
-        <thead><tr><th>Date/Heure</th><th>Articles</th><th>Paiement</th><th>Total</th><th>Ticket</th></tr></thead>
+        <thead><tr><th>Date/Heure</th><th>Articles</th><th>Paiement</th><th>Total</th><th>Reste dû</th><th>Ticket</th></tr></thead>
         <tbody id="historyTbody"></tbody>
       </table>
     </div>
@@ -1424,6 +1424,7 @@ function recordSale(total, method, given, change, provider, ref, remise=0, accom
   clearCart();
   renderProducts();
   renderStockTable();
+  renderStats();
   syncToAppsScript(sale);
 }
 
@@ -1792,14 +1793,28 @@ function renderStats() {
 
   // History
   const tbody = document.getElementById('historyTbody');
-  tbody.innerHTML = sales.slice(0,20).map(s=>`
-    <tr>
-      <td>${new Date(s.date).toLocaleString('fr-MG')}</td>
-      <td>${s.items.map(i=>`${i.name} x${i.qty}`).join(', ')}</td>
+  if (!tbody) return;
+  if (sales.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">Aucune vente enregistrée</td></tr>';
+    return;
+  }
+  tbody.innerHTML = sales.slice(0,20).map(s => {
+    const due = Number(s.due) || 0;
+    const total = Number(s.total) || 0;
+    const items = Array.isArray(s.items) ? s.items : [];
+    const dateStr = s.date ? new Date(s.date).toLocaleString('fr-MG') : '—';
+    const dueCell = due > 0
+      ? `<td class="td-mono" style="font-weight:700;color:var(--red)">${fmt(due)}</td>`
+      : `<td class="td-mono" style="color:var(--muted)">—</td>`;
+    return `<tr>
+      <td>${dateStr}</td>
+      <td>${items.map(i=>`${i.name||'?'} x${i.qty||1}`).join(', ')}</td>
       <td>${s.method==='cash'?'💵 Espèces':`📱 ${s.provider||'Mobile'}`}</td>
-      <td class="td-mono" style="font-weight:600;color:var(--accent)">${fmt(s.total)}</td>
+      <td class="td-mono" style="font-weight:600;color:var(--accent)">${fmt(total)}</td>
+      ${dueCell}
       <td><button class="btn-icon" onclick="reprintTicket(${s.id})" title="Réimprimer">🖨️</button></td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 }
 function reprintTicket(id) {
   const s = sales.find(s=>s.id===id);
