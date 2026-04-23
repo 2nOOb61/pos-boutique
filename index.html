@@ -832,7 +832,13 @@
       <div class="chart-title">📈 Ventes des 7 derniers jours</div>
       <div class="bar-chart" id="barChart"></div>
     </div>
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+    <div class="chart-placeholder" style="margin-top:20px">
+      <div class="chart-title">📅 Ventes par mois</div>
+      <div class="bar-chart" id="monthChart"></div>
+      <div id="monthTable" style="margin-top:14px;display:flex;flex-direction:column;gap:6px"></div>
+    </div>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;margin-top:20px">
       <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px">📋 Historique des ventes</div>
       <button onclick="loadSalesFromScript().then(renderStats)" style="padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--muted);cursor:pointer;font-size:13px">🔄 Actualiser depuis Sheets</button>
     </div>
@@ -1787,6 +1793,36 @@ function renderStats() {
       <div class="bar" style="height:${Math.round(d.total/max*100)}%;background:${d.total===0?'var(--surface3)':'var(--accent)'}"></div>
       <span class="bar-label">${d.label}</span>
     </div>`).join('');
+
+  // Monthly chart — last 6 months
+  const monthChart = document.getElementById('monthChart');
+  const monthTable = document.getElementById('monthTable');
+  if (monthChart && monthTable) {
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(1);
+      d.setMonth(d.getMonth() - i);
+      const key = d.toISOString().slice(0, 7);
+      const label = d.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
+      const mSales = sales.filter(s => s.date && s.date.startsWith(key));
+      const total = mSales.reduce((s, v) => s + (Number(v.total) || 0), 0);
+      const count = mSales.length;
+      months.push({ key, label, total, count });
+    }
+    const maxM = Math.max(...months.map(m => m.total), 1);
+    monthChart.innerHTML = months.map(m => `
+      <div class="bar-item">
+        <div class="bar" style="height:${Math.round(m.total/maxM*100)}%;background:${m.total===0?'var(--surface3)':'var(--blue)'}"></div>
+        <span class="bar-label">${m.label}</span>
+      </div>`).join('');
+    monthTable.innerHTML = months.filter(m => m.total > 0).map(m => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--surface2);border-radius:10px;font-size:13px">
+        <span style="color:var(--muted);min-width:70px">${m.label}</span>
+        <span style="color:var(--muted)">${m.count} vente${m.count>1?'s':''}</span>
+        <span style="font-family:'DM Mono',monospace;font-weight:700;color:var(--blue)">${fmt(m.total)}</span>
+      </div>`).join('') || '<div style="color:var(--muted);font-size:13px;text-align:center;padding:12px">Aucune vente sur cette période</div>';
+  }
 
   // History
   const tbody = document.getElementById('historyTbody');
