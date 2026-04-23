@@ -1835,7 +1835,8 @@ function renderStats() {
     const due = Number(s.due) || 0;
     const total = Number(s.total) || 0;
     const items = Array.isArray(s.items) ? s.items : [];
-    const dateStr = s.date ? new Date(s.date).toLocaleString('fr-MG') : '—';
+    const d = s.date ? new Date(s.date) : null;
+    const dateStr = d && !isNaN(d) ? d.toLocaleString('fr-FR') : (s.date || '—');
     const dueCell = due > 0
       ? `<td class="td-mono" style="font-weight:700;color:var(--red)">${fmt(due)}</td>`
       : `<td class="td-mono" style="color:var(--muted)">—</td>`;

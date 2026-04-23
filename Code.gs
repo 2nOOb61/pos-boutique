@@ -328,11 +328,15 @@ function handleGetSales(params) {
     if (!salesMap[id]) {
       let isoDate;
       try {
+        const tz = Session.getScriptTimeZone();
+        const timeStr = time instanceof Date
+          ? Utilities.formatDate(time, tz, 'HH:mm:ss')
+          : (time ? time.toString() : '00:00:00');
         if (date instanceof Date) {
-          isoDate = Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd') + 'T' + (time || '00:00:00');
+          isoDate = Utilities.formatDate(date, tz, 'yyyy-MM-dd') + 'T' + timeStr;
         } else {
           const parts = date.toString().split('/');
-          isoDate = parts[2] + '-' + parts[1].padStart(2,'0') + '-' + parts[0].padStart(2,'0') + 'T' + (time || '00:00:00');
+          isoDate = parts[2] + '-' + parts[1].padStart(2,'0') + '-' + parts[0].padStart(2,'0') + 'T' + timeStr;
         }
       } catch(e) { isoDate = new Date().toISOString(); }
 
