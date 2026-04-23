@@ -247,6 +247,7 @@
   .stat-card.blue::before { background:var(--blue); }
   .stat-card.orange::before { background:var(--accent2); }
   .stat-card.purple::before { background:var(--accent3); }
+  .stat-card.red::before { background:var(--red); }
   .stat-icon { font-size:24px; margin-bottom:12px; }
   .stat-label { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px; }
   .stat-value { font-family:'Syne',sans-serif; font-size:24px; font-weight:800; }
@@ -820,11 +821,11 @@
         <div class="stat-value" id="statItems">0</div>
         <div class="stat-sub" id="statLow">0 en alerte</div>
       </div>
-      <div class="stat-card purple">
-        <div class="stat-icon">💎</div>
-        <div class="stat-label">Bénéfice estimé</div>
-        <div class="stat-value" id="statProfit">0 Ar</div>
-        <div class="stat-sub">Ce mois</div>
+      <div class="stat-card red">
+        <div class="stat-icon">⏳</div>
+        <div class="stat-label">Reste à payer</div>
+        <div class="stat-value" id="statDue">0 Ar</div>
+        <div class="stat-sub" id="statDueCount">0 créances</div>
       </div>
     </div>
     <div class="chart-placeholder">
@@ -1755,17 +1756,12 @@ function renderStats() {
   const thisMonth = new Date().toISOString().slice(0,7);
   const todaySales = sales.filter(s=>new Date(s.date).toDateString()===today);
   const monthSales = sales.filter(s=>s.date.startsWith(thisMonth));
-  const todayTotal = todaySales.reduce((s,i)=>s+i.total,0);
-  const monthTotal = monthSales.reduce((s,i)=>s+i.total,0);
+  const todayTotal = todaySales.reduce((s,i)=>s+(Number(i.total)||0),0);
+  const monthTotal = monthSales.reduce((s,i)=>s+(Number(i.total)||0),0);
 
-  // Profit (rough)
-  let profit = 0;
-  monthSales.forEach(sale=>{
-    sale.items.forEach(si=>{
-      const p = products.find(pr=>pr.name===si.name);
-      if(p) profit += (p.price - p.cost) * si.qty;
-    });
-  });
+  // Créances : ventes avec un reste dû > 0
+  const duesSales = sales.filter(s => (Number(s.due) || 0) > 0);
+  const totalDue  = duesSales.reduce((s,i) => s + (Number(i.due) || 0), 0);
 
   document.getElementById('statToday').textContent = fmt(todayTotal);
   document.getElementById('statTodayCount').textContent = todaySales.length+' transactions';
@@ -1773,7 +1769,8 @@ function renderStats() {
   document.getElementById('statMonthCount').textContent = monthSales.length+' transactions';
   document.getElementById('statItems').textContent = products.length;
   document.getElementById('statLow').textContent = products.filter(p=>p.stock<=p.minStock).length+' en alerte';
-  document.getElementById('statProfit').textContent = fmt(profit);
+  document.getElementById('statDue').textContent = fmt(totalDue);
+  document.getElementById('statDueCount').textContent = duesSales.length+' créance'+(duesSales.length>1?'s':'');
 
   // Bar chart - last 7 days
   const chart = document.getElementById('barChart');
