@@ -155,6 +155,8 @@
   .cart-header { padding:16px 20px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; background:var(--surface); }
   .cart-title { font-family:'Syne',sans-serif; font-weight:700; font-size:16px; }
   .cart-count { background:var(--accent); color:#fff; font-size:12px; font-weight:700; padding:2px 8px; border-radius:20px; }
+  .btn-quick-add { width:28px; height:28px; border-radius:8px; border:none; background:rgba(255,107,0,0.12); color:var(--accent); cursor:pointer; font-size:16px; display:flex; align-items:center; justify-content:center; transition:.2s; flex-shrink:0; }
+  .btn-quick-add:hover { background:var(--accent); color:#fff; transform:scale(1.08); }
   .cart-items { flex:1; overflow-y:auto; padding:12px; }
   .cart-item {
     display:flex; align-items:center; gap:10px; padding:10px; background:var(--surface2);
@@ -706,7 +708,10 @@
       <div class="cart-panel">
         <div class="cart-header">
           <span class="cart-title">🛒 Panier</span>
-          <span class="cart-count" id="cartCount">0</span>
+          <div style="display:flex;align-items:center;gap:8px">
+            <button class="btn-quick-add" onclick="openQuickAddModal()" title="Créer un nouvel article et l'ajouter au panier">➕</button>
+            <span class="cart-count" id="cartCount">0</span>
+          </div>
         </div>
         <div class="cart-items" id="cartItems">
           <div class="cart-empty"><span class="icon">🛍️</span>Le panier est vide</div>
@@ -948,6 +953,31 @@
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeModal('productModal')">Annuler</button>
       <button class="btn-primary" onclick="saveProduct()">💾 Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL AJOUT RAPIDE PANIER -->
+<div class="modal-overlay" id="quickAddModal">
+  <div class="modal">
+    <div class="modal-title">
+      <span>🛒 Nouvel article → Panier</span>
+      <button class="modal-close" onclick="closeModal('quickAddModal')">✕</button>
+    </div>
+    <div class="form-group"><label>Nom de l'article</label><input id="qaName" placeholder="Ex: Sucre 1kg" /></div>
+    <div class="form-group"><label>Emoji (icône)</label><input id="qaEmoji" placeholder="📦" maxlength="2" /></div>
+    <div class="form-group"><label>Catégorie</label><select id="qaCat"></select></div>
+    <div class="form-group"><label>Prix de vente (Ar)</label><input id="qaPrice" type="number" placeholder="0" min="0" /></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group" style="margin-bottom:0"><label>Qté au panier</label><input id="qaQty" type="number" placeholder="1" min="1" value="1" /></div>
+      <div class="form-group" style="margin-bottom:0"><label>Stock initial</label><input id="qaStock" type="number" placeholder="1" min="1" value="1" /></div>
+    </div>
+    <div style="background:rgba(255,107,0,0.08);border-radius:10px;padding:10px 14px;font-size:13px;color:var(--accent);margin-top:16px;margin-bottom:4px">
+      💡 L'article sera créé dans le stock ET ajouté directement au panier
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal('quickAddModal')">Annuler</button>
+      <button class="btn-primary" onclick="saveQuickAdd()">🛒 Ajouter au panier</button>
     </div>
   </div>
 </div>
@@ -1697,6 +1727,41 @@ function saveProduct() {
   // Sync vers Sheet
   const syncProd = editingProductId ? products.find(p=>p.id===editingProductId) : products[products.length-1];
   if (syncProd) saveProductToScript(syncProd);
+}
+
+// ============================================================
+// AJOUT RAPIDE AU PANIER (création article + stock + panier)
+// ============================================================
+function openQuickAddModal() {
+  const sel = document.getElementById('qaCat');
+  sel.innerHTML = categories.map(c => `<option>${c}</option>`).join('');
+  ['qaName','qaEmoji','qaPrice'].forEach(f => document.getElementById(f).value = '');
+  document.getElementById('qaQty').value = 1;
+  document.getElementById('qaStock').value = 1;
+  openModal('quickAddModal');
+  setTimeout(() => document.getElementById('qaName').focus(), 100);
+}
+function saveQuickAdd() {
+  const name = document.getElementById('qaName').value.trim();
+  if (!name) { showToast('Nom requis', 'error'); return; }
+  const price = parseFloat(document.getElementById('qaPrice').value) || 0;
+  if (!price) { showToast('Prix de vente requis', 'error'); return; }
+  const qty = Math.max(parseInt(document.getElementById('qaQty').value) || 1, 1);
+  const stock = Math.max(parseInt(document.getElementById('qaStock').value) || qty, qty);
+  const emoji = document.getElementById('qaEmoji').value || '📦';
+  const cat = document.getElementById('qaCat').value;
+
+  const newProduct = { id: nextId++, name, cat, emoji, code: String(nextId - 1), price, cost: 0, stock, minStock: 5 };
+  products.push(newProduct);
+  saveData();
+  renderStockTable();
+  renderProducts();
+  saveProductToScript(newProduct);
+
+  cart.push({ id: newProduct.id, name: newProduct.name, price: newProduct.price, qty, emoji: newProduct.emoji });
+  renderCart();
+  closeModal('quickAddModal');
+  showToast(`${emoji} ${name} ajouté au panier ✅`);
 }
 
 // ============================================================
