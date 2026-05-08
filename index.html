@@ -146,6 +146,12 @@
   .stock-low { color:var(--yellow) !important; }
   .stock-out { color:var(--red) !important; }
   .product-card.out-of-stock { opacity:.4; pointer-events:none; }
+  .product-img { width:100%; aspect-ratio:1/1; object-fit:cover; border-radius:10px; margin-bottom:8px; display:block; }
+  .img-upload-zone { border:2px dashed var(--border); border-radius:10px; padding:12px; text-align:center; cursor:pointer; transition:.2s; position:relative; }
+  .img-upload-zone:hover { border-color:var(--accent); background:rgba(255,107,0,0.04); }
+  .img-upload-zone input[type=file] { position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%; }
+  .img-modal-preview { width:100%; max-height:130px; object-fit:contain; border-radius:10px; margin-top:8px; display:none; border:1px solid var(--border); }
+  .img-clear-btn { display:none; margin-top:6px; background:rgba(255,71,87,0.12); color:var(--red); border:none; border-radius:8px; padding:4px 12px; font-size:12px; cursor:pointer; }
 
   /* ===== PANIER ===== */
   .cart-panel {
@@ -1175,6 +1181,17 @@
     <div class="form-group"><label>Prix d'achat (Ar)</label><input id="pCost" type="number" placeholder="0" /></div>
     <div class="form-group"><label>Stock initial</label><input id="pStock" type="number" placeholder="0" /></div>
     <div class="form-group"><label>Stock minimum (alerte)</label><input id="pMinStock" type="number" placeholder="5" /></div>
+    <div class="form-group">
+      <label>Photo du produit <span style="font-weight:400;color:var(--muted)">(optionnel)</span></label>
+      <div class="img-upload-zone" onclick="document.getElementById('pImage').click()">
+        <input type="file" id="pImage" accept="image/*" onchange="previewProductImage(this)" />
+        <span style="font-size:22px">🖼️</span>
+        <div style="font-size:12px;color:var(--muted);margin-top:4px">Cliquer pour choisir une image</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">Taille recommandée : <strong>400 × 400 px</strong> (carré)</div>
+      </div>
+      <img id="pImagePreview" class="img-modal-preview" />
+      <button type="button" class="img-clear-btn" id="pImageClear" onclick="clearProductImage()">✕ Supprimer la photo</button>
+    </div>
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeModal('productModal')">Annuler</button>
       <button class="btn-primary" onclick="saveProduct()">💾 Enregistrer</button>
@@ -1419,6 +1436,7 @@ let cart = [];
 let paymentMode = 'cash';
 let selectedProvider = 'MVola';
 let editingProductId = null;
+let editingProductImage = null;
 
 // Demo products
 let products = [
@@ -1599,7 +1617,9 @@ function renderProducts() {
   const filtered = products.filter(p => p.name.toLowerCase().includes(q) || p.code.includes(q));
   grid.innerHTML = filtered.map(p => `
     <div class="product-card ${p.stock===0?'out-of-stock':''}" onclick="addToCart(${p.id})">
-      <span class="product-emoji">${p.emoji||'📦'}</span>
+      ${p.image
+        ? `<img class="product-img" src="${p.image}" alt="${p.name}" loading="lazy" />`
+        : `<span class="product-emoji">${p.emoji||'📦'}</span>`}
       <div class="product-name">${p.name}</div>
       <div class="product-price">${fmt(p.price)}</div>
       <div class="product-stock ${p.stock===0?'stock-out':p.stock<=p.minStock?'stock-low':''}">
@@ -2425,14 +2445,44 @@ function openProductModal(id=null, prefillCode=null) {
     document.getElementById('pCost').value=p.cost;
     document.getElementById('pStock').value=p.stock;
     document.getElementById('pMinStock').value=p.minStock||5;
+    editingProductImage = p.image || null;
+    if(editingProductImage) {
+      const prev = document.getElementById('pImagePreview');
+      prev.src = editingProductImage; prev.style.display='block';
+      document.getElementById('pImageClear').style.display='block';
+    } else { _resetImagePreview(); }
   } else {
     ['pName','pEmoji','pPrice','pCost','pStock'].forEach(f=>document.getElementById(f).value='');
     document.getElementById('pCode').value = prefillCode || '';
     document.getElementById('pMinStock').value=5;
+    editingProductImage = null;
+    _resetImagePreview();
     // Focus sur le nom si le code est déjà rempli
     setTimeout(()=>document.getElementById(prefillCode ? 'pName' : 'pCode').focus(), 100);
   }
   openModal('productModal');
+}
+function _resetImagePreview() {
+  document.getElementById('pImage').value='';
+  const prev = document.getElementById('pImagePreview');
+  prev.src=''; prev.style.display='none';
+  document.getElementById('pImageClear').style.display='none';
+}
+function previewProductImage(input) {
+  const file = input.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    editingProductImage = e.target.result;
+    const prev = document.getElementById('pImagePreview');
+    prev.src = editingProductImage; prev.style.display='block';
+    document.getElementById('pImageClear').style.display='block';
+  };
+  reader.readAsDataURL(file);
+}
+function clearProductImage() {
+  editingProductImage = null;
+  _resetImagePreview();
 }
 function editProduct(id) { openProductModal(id); }
 function deleteProduct(id) {
@@ -2453,7 +2503,8 @@ function saveProduct() {
     price:parseFloat(document.getElementById('pPrice').value)||0,
     cost:parseFloat(document.getElementById('pCost').value)||0,
     stock:parseInt(document.getElementById('pStock').value)||0,
-    minStock:parseInt(document.getElementById('pMinStock').value)||5
+    minStock:parseInt(document.getElementById('pMinStock').value)||5,
+    image:editingProductImage||null
   };
   if(editingProductId) {
     Object.assign(products.find(p=>p.id===editingProductId), data);
