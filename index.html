@@ -203,6 +203,8 @@
   .btn-cash:hover { box-shadow:0 6px 20px rgba(255,107,0,0.35); }
   .btn-mobile { background:var(--accent3); color:#fff; }
   .btn-mobile:hover { box-shadow:0 6px 20px rgba(108,63,197,0.35); }
+  .btn-reserve { background:var(--green); color:#fff; }
+  .btn-reserve:hover { box-shadow:0 6px 20px rgba(0,194,122,0.35); }
   .btn-clear { width:100%; padding:11px; background:transparent; border:1px solid var(--border); border-radius:12px; color:var(--muted); cursor:pointer; font-size:13px; transition:.2s; }
   .btn-clear:hover { border-color:var(--red); color:var(--red); }
   .cart-empty { text-align:center; padding:40px 20px; color:var(--muted); }
@@ -598,6 +600,42 @@
     .page { padding:24px; }
     #page-config { padding-top:24px; }
   }
+
+  /* ===== RÉSERVATIONS ===== */
+  .res-toolbar { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px; margin-bottom:20px; }
+  .res-summary { display:flex; gap:12px; flex-wrap:wrap; }
+  .res-sum-item { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:12px 18px; text-align:center; min-width:120px; }
+  .res-sum-val { display:block; font-family:'DM Mono',monospace; font-size:16px; font-weight:700; color:var(--accent3); }
+  .res-sum-label { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+  .res-card {
+    background:var(--surface); border:1px solid var(--border); border-radius:16px;
+    padding:18px 20px; margin-bottom:14px; box-shadow:var(--shadow);
+  }
+  .res-card-header { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+  .res-card-client { font-family:'Syne',sans-serif; font-weight:700; font-size:16px; }
+  .res-card-contact { font-size:12px; color:var(--muted); margin-top:2px; }
+  .res-card-date { font-size:12px; color:var(--muted); white-space:nowrap; }
+  .res-status { display:inline-block; padding:3px 10px; border-radius:20px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; }
+  .res-status-pending  { background:rgba(255,184,48,0.15); color:var(--yellow); }
+  .res-status-completed{ background:rgba(0,194,122,0.15); color:var(--green); }
+  .res-status-cancelled{ background:rgba(255,71,87,0.12); color:var(--red); }
+  .res-items { font-size:13px; color:var(--muted); margin-bottom:12px; }
+  .res-amounts { display:flex; gap:16px; flex-wrap:wrap; margin-bottom:14px; }
+  .res-amount-item { background:var(--surface2); border-radius:10px; padding:8px 14px; font-size:13px; }
+  .res-amount-item .lbl { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.4px; display:block; margin-bottom:2px; }
+  .res-amount-item .val { font-family:'DM Mono',monospace; font-weight:700; }
+  .res-actions { display:flex; gap:8px; flex-wrap:wrap; }
+  .btn-finalize { padding:9px 18px; background:var(--green); color:#fff; border:none; border-radius:10px; font-weight:700; font-size:13px; cursor:pointer; transition:.2s; }
+  .btn-finalize:hover { box-shadow:0 4px 14px rgba(0,194,122,0.30); transform:translateY(-1px); }
+  .btn-cancel-res { padding:9px 18px; background:transparent; color:var(--red); border:1px solid var(--red); border-radius:10px; font-weight:600; font-size:13px; cursor:pointer; transition:.2s; }
+  .btn-cancel-res:hover { background:rgba(255,71,87,0.08); }
+  .btn-reprint-res { padding:9px 14px; background:var(--surface2); border:1px solid var(--border); border-radius:10px; font-size:13px; cursor:pointer; transition:.2s; color:var(--text); }
+  .res-empty { text-align:center; padding:60px 20px; color:var(--muted); font-size:15px; }
+
+  /* Modal finalisation */
+  .final-amounts { background:var(--surface2); border-radius:12px; padding:14px 16px; margin-bottom:16px; }
+  .final-amounts .row { display:flex; justify-content:space-between; padding:4px 0; font-size:14px; }
+  .final-amounts .row.total { font-weight:700; font-size:16px; border-top:1px solid var(--border); margin-top:6px; padding-top:8px; }
 </style>
 </head>
 <body>
@@ -631,6 +669,9 @@
   <div class="bottom-nav-inner">
     <button class="bnav-btn active" id="bnav-caisse" onclick="showPage('caisse',null,this)">
       <span class="bnav-icon">🛒</span>Caisse
+    </button>
+    <button class="bnav-btn" id="bnav-reservations" onclick="showPage('reservations',null,this)">
+      <span class="bnav-icon">📋</span>Réservations
     </button>
     <button class="bnav-btn admin-only" id="bnav-stock" onclick="showPage('stock',null,this)">
       <span class="bnav-icon">📦</span>Stock
@@ -674,6 +715,7 @@
     <div class="topbar-brand">🏪 Boutique <span>POS</span></div>
     <nav class="topbar-nav">
       <button class="nav-btn active" onclick="showPage('caisse',this)">🛒 Caisse</button>
+      <button class="nav-btn" onclick="showPage('reservations',this)">📋 Réservations <span id="navResBadge" style="display:none;background:var(--accent3);color:#fff;border-radius:20px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:2px">0</span></button>
       <button class="nav-btn admin-only" onclick="showPage('stock',this)">📦 Stock</button>
       <button class="nav-btn admin-only" onclick="showPage('stats',this)">📊 Statistiques</button>
       <button class="nav-btn admin-only" onclick="showPage('config',this)">⚙️ Configuration</button>
@@ -741,6 +783,7 @@
           <div class="payment-btns">
             <button class="btn-pay btn-cash" onclick="openPayment('cash')">💵 Espèces</button>
             <button class="btn-pay btn-mobile" onclick="openPayment('mobile')">📱 Mobile</button>
+            <button class="btn-pay btn-reserve" onclick="openReservation()">📋 Réserver</button>
           </div>
           <button class="btn-clear" onclick="clearCart()">🗑 Vider le panier</button>
         </div>
@@ -816,6 +859,11 @@
       <div id="monthTable" style="margin-top:14px;display:flex;flex-direction:column;gap:6px"></div>
     </div>
 
+    <div id="statsReservationsBlock" style="margin-top:20px;padding:16px;background:rgba(108,63,197,0.06);border:1px solid rgba(108,63,197,0.18);border-radius:16px;display:none">
+      <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:15px;color:var(--accent3);margin-bottom:10px">📋 Réservations en attente</div>
+      <div id="statsResList"></div>
+    </div>
+
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;margin-top:20px">
       <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px">📋 Historique des ventes</div>
       <button onclick="loadSalesFromScript().then(renderStats)" style="padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--muted);cursor:pointer;font-size:13px">🔄 Actualiser depuis Sheets</button>
@@ -828,6 +876,39 @@
     </div>
   </div>
 </div>
+
+  <!-- RÉSERVATIONS -->
+  <div class="page" id="page-reservations">
+    <div class="res-toolbar">
+      <div class="res-summary">
+        <div class="res-sum-item">
+          <span class="res-sum-val" id="resSumCount">0</span>
+          <span class="res-sum-label">En attente</span>
+        </div>
+        <div class="res-sum-item">
+          <span class="res-sum-val" id="resSumTotal">0 Ar</span>
+          <span class="res-sum-label">Total engagé</span>
+        </div>
+        <div class="res-sum-item">
+          <span class="res-sum-val" id="resSumAcc">0 Ar</span>
+          <span class="res-sum-label">Acomptes reçus</span>
+        </div>
+        <div class="res-sum-item">
+          <span class="res-sum-val" id="resSumRestant">0 Ar</span>
+          <span class="res-sum-label">Restant à percevoir</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <select id="resFilter" onchange="renderReservations()" style="padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px">
+          <option value="pending">En attente</option>
+          <option value="completed">Finalisées</option>
+          <option value="cancelled">Annulées</option>
+          <option value="all">Toutes</option>
+        </select>
+      </div>
+    </div>
+    <div id="reservationsList"></div>
+  </div>
 
   <!-- UTILISATEURS -->
   <div class="page" id="page-users">
@@ -1029,6 +1110,102 @@
   </div>
 </div>
 
+<!-- MODAL RÉSERVATION -->
+<div class="modal-overlay" id="reservationModal">
+  <div class="modal">
+    <div class="modal-title">
+      <span>📋 Nouvelle réservation</span>
+      <button class="modal-close" onclick="closeModal('reservationModal')">✕</button>
+    </div>
+    <div class="payment-amount">
+      <div class="label">Total de la réservation</div>
+      <div class="big" id="resTotal">0 Ar</div>
+    </div>
+    <div class="form-group" style="margin-bottom:8px">
+      <label>Nom du client <span style="color:var(--red)">*</span></label>
+      <input id="resClientName" placeholder="Ex: Jean Dupont" autocomplete="off" />
+    </div>
+    <div class="form-group" style="margin-bottom:12px">
+      <label>Contact / Téléphone</label>
+      <input id="resClientContact" placeholder="Ex: +261 34 XX XXX XX" autocomplete="off" />
+    </div>
+    <div class="form-group" style="margin-bottom:12px">
+      <label>Acompte versé (Ar) <span style="color:var(--red)">*</span></label>
+      <div style="display:flex;align-items:center;gap:10px">
+        <input id="resAccompte" type="number" placeholder="0" min="0" oninput="updateResRestant()" style="flex:1" />
+        <span style="color:var(--muted);font-size:13px">— Restant : <strong id="resRestantLabel" style="color:var(--accent3)">0 Ar</strong></span>
+      </div>
+    </div>
+    <div class="form-group" style="margin-bottom:8px">
+      <label>Mode de paiement de l'acompte</label>
+    </div>
+    <div class="payment-tabs" style="margin-bottom:12px">
+      <button class="payment-tab active" id="tabResCash" onclick="switchResPayTab('cash')">💵 Espèces</button>
+      <button class="payment-tab payment-tab-mobile" id="tabResMobile" onclick="switchResPayTab('mobile')">📱 Mobile Money</button>
+    </div>
+    <div id="resCashSection">
+      <div class="form-group"><label>Montant remis (Ar)</label><input id="resGiven" type="number" placeholder="0" oninput="calcResChange()" /></div>
+      <div class="change-display">
+        <span class="label">Monnaie à rendre</span>
+        <span class="val" id="resChangeVal">0 Ar</span>
+      </div>
+    </div>
+    <div id="resMobileSection" style="display:none">
+      <div class="mobile-providers">
+        <button class="provider-btn active" id="resProvMvola" onclick="selectResProvider('MVola')">📱 MVola</button>
+        <button class="provider-btn" id="resProvAirtel" onclick="selectResProvider('Airtel Money')">🔴 Airtel Money</button>
+        <button class="provider-btn" id="resProvOrange" onclick="selectResProvider('Orange Money')">🟠 Orange Money</button>
+        <button class="provider-btn" id="resProvBmoov" onclick="selectResProvider('Bmoov')">🔵 Bmoov</button>
+      </div>
+      <div class="form-group"><label>Référence transaction</label><input id="resMobileRef" placeholder="Ex: TX12345678" /></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal('reservationModal')">Annuler</button>
+      <button class="btn-primary" style="background:var(--green)" onclick="confirmReservation()">📋 Confirmer la réservation</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL FINALISATION RÉSERVATION -->
+<div class="modal-overlay" id="finalizeModal">
+  <div class="modal">
+    <div class="modal-title">
+      <span>✅ Finaliser la réservation</span>
+      <button class="modal-close" onclick="closeModal('finalizeModal')">✕</button>
+    </div>
+    <div id="finalizeClientInfo" style="background:rgba(108,63,197,0.08);border-radius:12px;padding:10px 14px;margin-bottom:14px;font-size:14px;color:var(--accent3);font-weight:600"></div>
+    <div class="final-amounts" id="finalAmountsBlock">
+      <div class="row"><span>Total</span><span id="finalTotal">0 Ar</span></div>
+      <div class="row"><span style="color:var(--green)">Acompte déjà versé</span><span id="finalAcc" style="color:var(--green)">0 Ar</span></div>
+      <div class="row total"><span>Reste à payer</span><span id="finalRestant" style="color:var(--accent)">0 Ar</span></div>
+    </div>
+    <div class="payment-tabs" style="margin-bottom:12px">
+      <button class="payment-tab active" id="tabFinCash" onclick="switchFinPayTab('cash')">💵 Espèces</button>
+      <button class="payment-tab payment-tab-mobile" id="tabFinMobile" onclick="switchFinPayTab('mobile')">📱 Mobile Money</button>
+    </div>
+    <div id="finCashSection">
+      <div class="form-group"><label>Montant remis par le client (Ar)</label><input id="finGiven" type="number" placeholder="0" oninput="calcFinChange()" /></div>
+      <div class="change-display">
+        <span class="label">Monnaie à rendre</span>
+        <span class="val" id="finChangeVal">0 Ar</span>
+      </div>
+    </div>
+    <div id="finMobileSection" style="display:none">
+      <div class="mobile-providers">
+        <button class="provider-btn active" id="finProvMvola" onclick="selectFinProvider('MVola')">📱 MVola</button>
+        <button class="provider-btn" id="finProvAirtel" onclick="selectFinProvider('Airtel Money')">🔴 Airtel Money</button>
+        <button class="provider-btn" id="finProvOrange" onclick="selectFinProvider('Orange Money')">🟠 Orange Money</button>
+        <button class="provider-btn" id="finProvBmoov" onclick="selectFinProvider('Bmoov')">🔵 Bmoov</button>
+      </div>
+      <div class="form-group"><label>Référence transaction</label><input id="finMobileRef" placeholder="Ex: TX12345678" /></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal('finalizeModal')">Annuler</button>
+      <button class="btn-primary" onclick="confirmFinalize()">✅ Valider et encaisser</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL MOUVEMENT -->
 <div class="modal-overlay" id="mouvModal">
   <div class="modal">
@@ -1119,6 +1296,14 @@ let sales = [
 let nextId = 9;
 let nextSaleId = 3;
 
+let reservations = [];
+let nextReservationId = 1;
+let resPaymentMode = 'cash';
+let resSelectedProvider = 'MVola';
+let finPaymentMode = 'cash';
+let finSelectedProvider = 'MVola';
+let currentFinalizeResId = null;
+
 // ============================================================
 // UTILS
 // ============================================================
@@ -1197,6 +1382,7 @@ async function doLogin() {
     }
     applyRolePermissions(currentUser.role);
     updatePendingBadge();
+    updateResBadge();
     renderProducts();
     renderStockTable();
     renderStats();
@@ -1233,11 +1419,12 @@ function showPage(id, btn, bnavBtn) {
   document.querySelectorAll('.nav-btn').forEach(b => {
     if (b.getAttribute('onclick') && b.getAttribute('onclick').includes("'"+id+"'")) b.classList.add('active');
   });
-  if (id==='stats')  renderStats();
-  if (id==='config') renderConfigPage();
-  if (id==='users')  renderUsersPage();
-  // Garde : caissier ne peut accéder qu'à la caisse
-  if (currentUser && currentUser.role !== 'admin' && id !== 'caisse') {
+  if (id==='stats')        renderStats();
+  if (id==='config')       renderConfigPage();
+  if (id==='users')        renderUsersPage();
+  if (id==='reservations') renderReservations();
+  // Garde : caissier ne peut accéder qu'à caisse + réservations
+  if (currentUser && currentUser.role !== 'admin' && id !== 'caisse' && id !== 'reservations') {
     showPage('caisse', null, null);
     showToast('⛔ Accès réservé aux administrateurs', 'error');
   }
@@ -1451,6 +1638,363 @@ function recordSale(total, method, given, change, provider, ref, remise=0, accom
   renderStockTable();
   renderStats();
   syncToAppsScript(sale);
+}
+
+// ============================================================
+// RÉSERVATIONS — CRÉER
+// ============================================================
+function openReservation() {
+  if (cart.length === 0) { showToast('Le panier est vide !', 'error'); return; }
+  const net = getNetTotal();
+  document.getElementById('resTotal').textContent = fmt(net);
+  document.getElementById('resClientName').value = '';
+  document.getElementById('resClientContact').value = '';
+  document.getElementById('resAccompte').value = '';
+  document.getElementById('resRestantLabel').textContent = fmt(net);
+  document.getElementById('resGiven').value = '';
+  document.getElementById('resChangeVal').textContent = '0 Ar';
+  document.getElementById('resMobileRef').value = '';
+  resPaymentMode = 'cash';
+  resSelectedProvider = 'MVola';
+  switchResPayTab('cash');
+  openModal('reservationModal');
+}
+
+function updateResRestant() {
+  const net = getNetTotal();
+  const acc = Math.max(0, parseFloat(document.getElementById('resAccompte').value) || 0);
+  document.getElementById('resRestantLabel').textContent = fmt(Math.max(0, net - acc));
+}
+
+function switchResPayTab(mode) {
+  resPaymentMode = mode;
+  document.getElementById('resCashSection').style.display = mode === 'cash' ? 'block' : 'none';
+  document.getElementById('resMobileSection').style.display = mode === 'mobile' ? 'block' : 'none';
+  document.getElementById('tabResCash').classList.toggle('active', mode === 'cash');
+  document.getElementById('tabResMobile').classList.toggle('active', mode === 'mobile');
+}
+
+function calcResChange() {
+  const given = parseFloat(document.getElementById('resGiven').value) || 0;
+  const acc   = Math.max(0, parseFloat(document.getElementById('resAccompte').value) || 0);
+  const change = given - acc;
+  const el = document.getElementById('resChangeVal');
+  el.textContent = fmt(Math.abs(change));
+  el.className = 'val ' + (change >= 0 ? 'positive' : 'negative');
+}
+
+function selectResProvider(p) {
+  resSelectedProvider = p;
+  document.querySelectorAll('#reservationModal .provider-btn').forEach(b => b.classList.remove('active'));
+  const map = { 'MVola':'resProvMvola','Airtel Money':'resProvAirtel','Orange Money':'resProvOrange','Bmoov':'resProvBmoov' };
+  if (map[p]) document.getElementById(map[p]).classList.add('active');
+}
+
+function confirmReservation() {
+  const clientName    = document.getElementById('resClientName').value.trim();
+  const clientContact = document.getElementById('resClientContact').value.trim();
+  const acc           = Math.max(0, parseFloat(document.getElementById('resAccompte').value) || 0);
+  const net           = getNetTotal();
+
+  if (!clientName) { showToast('Le nom du client est obligatoire !', 'error'); return; }
+  if (acc <= 0)    { showToast('L\'acompte doit être supérieur à 0 !', 'error'); return; }
+  if (acc > net)   { showToast('L\'acompte ne peut pas dépasser le total !', 'error'); return; }
+
+  if (resPaymentMode === 'cash') {
+    const given = parseFloat(document.getElementById('resGiven').value) || 0;
+    if (given < acc) { showToast('Montant remis insuffisant pour l\'acompte !', 'error'); return; }
+    const change = given - acc;
+    saveReservation(acc, 'cash', given, change, null, null, clientName, clientContact);
+  } else {
+    const ref = document.getElementById('resMobileRef').value.trim();
+    saveReservation(acc, 'mobile', acc, 0, resSelectedProvider, ref, clientName, clientContact);
+  }
+}
+
+function saveReservation(accompte, depositMethod, given, change, provider, ref, clientName, clientContact) {
+  const subtotal = getSubtotal();
+  const remise   = getRemise();
+  const total    = getNetTotal();
+  const restant  = Math.max(0, total - accompte);
+
+  // Réduire le stock (article mis de côté)
+  cart.forEach(item => {
+    const p = products.find(pr => pr.id === item.id);
+    if (p) p.stock -= item.qty;
+  });
+
+  const reservation = {
+    id:            nextReservationId++,
+    date:          new Date().toISOString(),
+    caissier:      currentUser?.label || 'Caissier',
+    clientName, clientContact,
+    items:         cart.map(i => ({ name: i.name, qty: i.qty, price: i.price })),
+    subtotal, remise, total, accompte, restant,
+    depositMethod, depositProvider: provider || '', depositRef: ref || '',
+    depositGiven: given, depositChange: change,
+    status: 'pending',
+    dateFinalisation: null,
+    saleId: null
+  };
+
+  reservations.unshift(reservation);
+  saveData();
+  syncReservationToSheets(reservation);
+  printReservationTicket(reservation);
+  closeModal('reservationModal');
+  showToast(`📋 Réservation #${reservation.id} créée — Acompte ${fmt(accompte)}`);
+  clearCart();
+  renderProducts();
+  renderStockTable();
+  updateResBadge();
+}
+
+// ============================================================
+// RÉSERVATIONS — AFFICHER
+// ============================================================
+function renderReservations() {
+  const filter = document.getElementById('resFilter')?.value || 'pending';
+  let list = reservations.filter(r => filter === 'all' ? true : r.status === filter);
+
+  // Summary (pending only)
+  const pending = reservations.filter(r => r.status === 'pending');
+  document.getElementById('resSumCount').textContent   = pending.length;
+  document.getElementById('resSumTotal').textContent   = fmt(pending.reduce((s, r) => s + r.total, 0));
+  document.getElementById('resSumAcc').textContent     = fmt(pending.reduce((s, r) => s + r.accompte, 0));
+  document.getElementById('resSumRestant').textContent = fmt(pending.reduce((s, r) => s + r.restant, 0));
+
+  const container = document.getElementById('reservationsList');
+  if (!container) return;
+
+  if (list.length === 0) {
+    container.innerHTML = `<div class="res-empty">📋 Aucune réservation ${filter === 'pending' ? 'en attente' : ''}</div>`;
+    return;
+  }
+
+  container.innerHTML = list.map(r => {
+    const d = new Date(r.date).toLocaleString('fr-FR');
+    const statusLabel = { pending: 'En attente', completed: 'Finalisée', cancelled: 'Annulée' }[r.status];
+    const statusClass = { pending: 'res-status-pending', completed: 'res-status-completed', cancelled: 'res-status-cancelled' }[r.status];
+    const itemsStr = r.items.map(i => `${i.name} ×${i.qty}`).join(', ');
+    const actions = r.status === 'pending' ? `
+      <button class="btn-finalize" onclick="openFinalizeModal(${r.id})">✅ Finaliser</button>
+      <button class="btn-cancel-res" onclick="cancelReservation(${r.id})">❌ Annuler</button>
+      <button class="btn-reprint-res" onclick="printReservationTicket(reservations.find(x=>x.id===${r.id}))" title="Réimprimer">🖨️</button>
+    ` : `<button class="btn-reprint-res" onclick="printReservationTicket(reservations.find(x=>x.id===${r.id}))" title="Réimprimer">🖨️</button>`;
+
+    return `
+    <div class="res-card">
+      <div class="res-card-header">
+        <div>
+          <div class="res-card-client">👤 ${r.clientName} <span style="font-size:12px;color:var(--muted);font-weight:400">#${r.id}</span></div>
+          ${r.clientContact ? `<div class="res-card-contact">📞 ${r.clientContact}</div>` : ''}
+        </div>
+        <div style="text-align:right">
+          <span class="res-status ${statusClass}">${statusLabel}</span>
+          <div class="res-card-date">${d}</div>
+        </div>
+      </div>
+      <div class="res-items">📦 ${itemsStr}</div>
+      <div class="res-amounts">
+        <div class="res-amount-item"><span class="lbl">Total</span><span class="val">${fmt(r.total)}</span></div>
+        <div class="res-amount-item"><span class="lbl">Acompte versé</span><span class="val" style="color:var(--green)">${fmt(r.accompte)}</span></div>
+        <div class="res-amount-item"><span class="lbl">Restant dû</span><span class="val" style="color:${r.status==='pending'?'var(--accent)':'var(--muted)'}">${fmt(r.restant)}</span></div>
+      </div>
+      <div class="res-actions">${actions}</div>
+    </div>`;
+  }).join('');
+}
+
+function updateResBadge() {
+  const n = reservations.filter(r => r.status === 'pending').length;
+  const badge = document.getElementById('navResBadge');
+  if (badge) { badge.textContent = n; badge.style.display = n > 0 ? 'inline' : 'none'; }
+}
+
+// ============================================================
+// RÉSERVATIONS — FINALISER
+// ============================================================
+function openFinalizeModal(id) {
+  const r = reservations.find(x => x.id === id);
+  if (!r) return;
+  currentFinalizeResId = id;
+  document.getElementById('finalizeClientInfo').textContent = `👤 ${r.clientName}${r.clientContact ? ' — ' + r.clientContact : ''}`;
+  document.getElementById('finalTotal').textContent   = fmt(r.total);
+  document.getElementById('finalAcc').textContent     = fmt(r.accompte);
+  document.getElementById('finalRestant').textContent = fmt(r.restant);
+  document.getElementById('finGiven').value = '';
+  document.getElementById('finChangeVal').textContent = '0 Ar';
+  document.getElementById('finMobileRef').value = '';
+  finPaymentMode = 'cash';
+  finSelectedProvider = 'MVola';
+  switchFinPayTab('cash');
+  openModal('finalizeModal');
+}
+
+function switchFinPayTab(mode) {
+  finPaymentMode = mode;
+  document.getElementById('finCashSection').style.display  = mode === 'cash'   ? 'block' : 'none';
+  document.getElementById('finMobileSection').style.display = mode === 'mobile' ? 'block' : 'none';
+  document.getElementById('tabFinCash').classList.toggle('active', mode === 'cash');
+  document.getElementById('tabFinMobile').classList.toggle('active', mode === 'mobile');
+}
+
+function calcFinChange() {
+  const r = reservations.find(x => x.id === currentFinalizeResId);
+  if (!r) return;
+  const given  = parseFloat(document.getElementById('finGiven').value) || 0;
+  const change = given - r.restant;
+  const el = document.getElementById('finChangeVal');
+  el.textContent = fmt(Math.abs(change));
+  el.className = 'val ' + (change >= 0 ? 'positive' : 'negative');
+}
+
+function selectFinProvider(p) {
+  finSelectedProvider = p;
+  document.querySelectorAll('#finalizeModal .provider-btn').forEach(b => b.classList.remove('active'));
+  const map = { 'MVola':'finProvMvola','Airtel Money':'finProvAirtel','Orange Money':'finProvOrange','Bmoov':'finProvBmoov' };
+  if (map[p]) document.getElementById(map[p]).classList.add('active');
+}
+
+function confirmFinalize() {
+  const r = reservations.find(x => x.id === currentFinalizeResId);
+  if (!r) return;
+
+  if (finPaymentMode === 'cash') {
+    const given = parseFloat(document.getElementById('finGiven').value) || 0;
+    if (given < r.restant) { showToast('Montant insuffisant !', 'error'); return; }
+    _doFinalize(r, 'cash', given, given - r.restant, null, null);
+  } else {
+    const ref = document.getElementById('finMobileRef').value.trim();
+    _doFinalize(r, 'mobile', r.restant, 0, finSelectedProvider, ref);
+  }
+}
+
+function _doFinalize(r, method, given, change, provider, ref) {
+  // Créer la vente complète
+  const sale = {
+    id:            nextSaleId++,
+    date:          new Date().toISOString(),
+    caissier:      currentUser?.label || 'Caissier',
+    clientName:    r.clientName,
+    clientContact: r.clientContact,
+    items:         r.items,
+    subtotal:      r.subtotal,
+    remise:        r.remise,
+    total:         r.total,
+    accompte:      r.accompte,
+    due:           0,
+    method, given, change,
+    provider: provider || '',
+    ref:      ref      || '',
+    fromReservation: r.id
+  };
+
+  sales.unshift(sale);
+
+  // Mettre à jour la réservation
+  r.status           = 'completed';
+  r.dateFinalisation = new Date().toISOString();
+  r.saleId           = sale.id;
+
+  saveData();
+  renderStats();
+  syncToAppsScript(sale);
+  syncReservationCompleteToSheets(r);
+  closeModal('finalizeModal');
+  printTicket(sale);
+  showToast(`✅ Vente #${sale.id} enregistrée — Réservation #${r.id} finalisée !`);
+  renderReservations();
+  updateResBadge();
+}
+
+// ============================================================
+// RÉSERVATIONS — ANNULER
+// ============================================================
+function cancelReservation(id) {
+  const r = reservations.find(x => x.id === id);
+  if (!r || r.status !== 'pending') return;
+  if (!confirm(`Annuler la réservation #${r.id} de ${r.clientName} ?\nLe stock sera restitué.`)) return;
+
+  // Restituer le stock
+  r.items.forEach(item => {
+    const p = products.find(pr => pr.name === item.name);
+    if (p) p.stock += item.qty;
+  });
+
+  r.status = 'cancelled';
+  saveData();
+  renderProducts();
+  renderStockTable();
+  renderReservations();
+  updateResBadge();
+  showToast(`Réservation #${r.id} annulée — stock restitué`, 'info');
+  syncReservationCompleteToSheets(r);
+}
+
+// ============================================================
+// TICKET RÉSERVATION
+// ============================================================
+function printReservationTicket(res) {
+  if (!res) return;
+  const dateStr = new Date(res.date).toLocaleString('fr-MG');
+  const w = window.open('', '_blank', 'width=420,height=620');
+  w.document.write(`<html><head><title>Réservation</title><style>
+    @page{size:10.5cm 15cm;margin:0.5cm}
+    *{box-sizing:border-box}
+    body{font-family:Arial,sans-serif;font-size:10pt;margin:0;padding:0;width:10.5cm;color:#000}
+    .shop-name{font-size:14pt;font-weight:bold;text-align:center;margin-bottom:2px}
+    .shop-info{font-size:9pt;text-align:center;color:#333;margin-bottom:2px}
+    .res-banner{background:#f0f8f0;border:2px solid #007a45;border-radius:4px;padding:5px;text-align:center;font-size:13pt;font-weight:bold;color:#007a45;margin:6px 0}
+    .row{display:flex;justify-content:space-between;align-items:baseline;padding:1px 0}
+    .row span:first-child{color:#555}
+    .row span:last-child{font-weight:500}
+    .row.bold{font-weight:bold;font-size:11pt}
+    .row.bold span:first-child{color:#000}
+    .items-section .row{border-bottom:1px dotted #ccc;padding:3px 0}
+    .items-section .row span:first-child{color:#000;flex:1;margin-right:8px}
+    .items-section .row span:last-child{white-space:nowrap;font-weight:600}
+    hr{border:none;border-top:1px dashed #999;margin:5px 0}
+    hr.solid{border-top:2px solid #000;margin:6px 0}
+    .footer{text-align:center;font-size:9pt;color:#555;margin-top:4px;font-style:italic}
+    .total-box{background:#f5f5f5;border:1px solid #ddd;border-radius:4px;padding:4px 6px;margin:4px 0}
+    .acc-box{background:#e8f7ee;border:1px solid #007a45;border-radius:4px;padding:5px 8px;margin:4px 0}
+    @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+  </style></head><body onload="window.print()">
+    <div class="shop-name">${shopConfig.name}</div>
+    ${shopConfig.address ? `<div class="shop-info">${shopConfig.address}</div>` : ''}
+    ${shopConfig.phone   ? `<div class="shop-info">Tél : ${shopConfig.phone}</div>` : ''}
+    <div class="res-banner">📋 BON DE RÉSERVATION</div>
+    <hr class="solid"/>
+    <div class="row"><span>Réservation N°</span><span><b>#${res.id}</b></span></div>
+    <div class="row"><span>Date</span><span>${dateStr}</span></div>
+    <div class="row"><span>Caissier</span><span>${res.caissier || ''}</span></div>
+    ${res.clientName    ? `<div class="row"><span>Client</span><span>${res.clientName}</span></div>` : ''}
+    ${res.clientContact ? `<div class="row"><span>Contact</span><span>${res.clientContact}</span></div>` : ''}
+    <hr/>
+    <div class="items-section">
+      ${res.items.map(i => `<div class="row"><span>${i.name} <em style="color:#777">×${i.qty}</em></span><span>${(i.price*i.qty).toLocaleString()} Ar</span></div>`).join('')}
+    </div>
+    <hr/>
+    <div class="row"><span>Sous-total</span><span>${fmt(res.subtotal)}</span></div>
+    ${res.remise > 0 ? `<div class="row"><span>Remise</span><span style="color:#c00">-${fmt(res.remise)}</span></div>` : ''}
+    <div class="total-box">
+      <div class="row bold"><span>TOTAL À PAYER</span><span>${fmt(res.total)}</span></div>
+    </div>
+    <div class="acc-box">
+      <div class="row bold" style="color:#007a45"><span>ACOMPTE VERSÉ</span><span>${fmt(res.accompte)}</span></div>
+      <div class="row bold" style="color:#c00"><span>RESTE DÛ</span><span>${fmt(res.restant)}</span></div>
+    </div>
+    <hr/>
+    ${res.depositMethod === 'cash'
+      ? `<div class="row"><span>Espèces reçus</span><span>${fmt(res.depositGiven)}</span></div>
+         <div class="row"><span>Monnaie rendue</span><span>${fmt(res.depositChange)}</span></div>`
+      : `<div class="row"><span>Paiement mobile (${res.depositProvider})</span><span>${res.depositRef || ''}</span></div>`}
+    <hr class="solid"/>
+    <div class="footer">À récupérer sur présentation de ce bon</div>
+    <div class="footer">${shopConfig.footer || 'Merci de votre confiance !'}</div>
+  </body></html>`);
+  w.document.close();
 }
 
 // ============================================================
@@ -1877,6 +2421,25 @@ function renderStats() {
   document.getElementById('statDue').textContent = fmt(totalDue);
   document.getElementById('statDueCount').textContent = duesSales.length+' créance'+(duesSales.length>1?'s':'');
 
+  // Bloc réservations en attente dans les stats
+  const pendingRes = reservations.filter(r => r.status === 'pending');
+  const resBlock   = document.getElementById('statsReservationsBlock');
+  const resList    = document.getElementById('statsResList');
+  if (resBlock && resList) {
+    resBlock.style.display = pendingRes.length > 0 ? 'block' : 'none';
+    resList.innerHTML = pendingRes.map(r => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:var(--surface);border-radius:10px;margin-bottom:6px;font-size:13px">
+        <div>
+          <span style="font-weight:700">👤 ${r.clientName}</span>
+          <span style="color:var(--muted);margin-left:8px">${r.items.map(i=>i.name+' ×'+i.qty).join(', ')}</span>
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:700;color:var(--accent)">${fmt(r.total)}</div>
+          <div style="font-size:11px;color:var(--green)">Acompte: ${fmt(r.accompte)}</div>
+        </div>
+      </div>`).join('');
+  }
+
   // Bar chart - last 7 days
   const chart = document.getElementById('barChart');
   const days = [];
@@ -2042,6 +2605,8 @@ function saveData() {
     localStorage.setItem('pos-sales', JSON.stringify(sales));
     localStorage.setItem('pos-nextId', String(nextId));
     localStorage.setItem('pos-nextSaleId', String(nextSaleId));
+    localStorage.setItem('pos-reservations', JSON.stringify(reservations));
+    localStorage.setItem('pos-nextResId', String(nextReservationId));
   } catch(e) { console.warn('localStorage full?', e); }
 }
 
@@ -2051,10 +2616,14 @@ function loadData() {
     const s = localStorage.getItem('pos-sales');
     const ni = localStorage.getItem('pos-nextId');
     const ns = localStorage.getItem('pos-nextSaleId');
+    const r  = localStorage.getItem('pos-reservations');
+    const nr = localStorage.getItem('pos-nextResId');
     if (p) products = JSON.parse(p);
     if (s) sales = JSON.parse(s);
     if (ni) nextId = parseInt(ni);
     if (ns) nextSaleId = parseInt(ns);
+    if (r)  reservations = JSON.parse(r);
+    if (nr) nextReservationId = parseInt(nr);
   } catch(e) { console.warn('loadData error:', e); }
 }
 
@@ -2375,6 +2944,22 @@ async function syncToAppsScript(sale) {
     updatePendingBadge();
     showToast('⚠️ Google Sheets inaccessible — vente mise en file. ' + errMsg, 'error');
   }
+}
+
+// ── Envoyer une réservation vers Sheet ───────────────────
+async function syncReservationToSheets(res) {
+  if (!APPS_SCRIPT_URL) return;
+  res.caissier = currentUser ? currentUser.username : 'caissier';
+  const r = await apiCall({ action: 'addReservation', reservation: res });
+  if (!r || !r.ok) {
+    console.warn('Sync réservation échouée:', r?.error || 'Connexion impossible');
+  }
+}
+
+// ── Mettre à jour le statut d'une réservation dans Sheet ─
+async function syncReservationCompleteToSheets(res) {
+  if (!APPS_SCRIPT_URL) return;
+  await apiCall({ action: 'updateReservation', id: res.id, status: res.status, dateFinalisation: res.dateFinalisation || '', saleId: res.saleId || '' });
 }
 
 // ── Mouvement de stock vers Sheet ────────────────────────

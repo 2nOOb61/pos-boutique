@@ -10,10 +10,11 @@
 const SHEET_ID = '1Lsf_OhhuKYlSE3S_OpJwzUEy78LBdFDj_1dmYuT70eo';
 
 // Noms des feuilles
-const SHEET_PRODUCTS  = 'Produits';
-const SHEET_SALES     = 'Ventes';
-const SHEET_STOCK_LOG = 'MouvementsStock';
-const SHEET_USERS     = 'Utilisateurs';
+const SHEET_PRODUCTS     = 'Produits';
+const SHEET_SALES        = 'Ventes';
+const SHEET_STOCK_LOG    = 'MouvementsStock';
+const SHEET_USERS        = 'Utilisateurs';
+const SHEET_RESERVATIONS = 'Réservations';
 
 // ============================================================
 // ROUTEUR PRINCIPAL — POST
@@ -28,12 +29,15 @@ function doPost(e) {
     else if (action === 'getProducts')   result = handleGetProducts();
     else if (action === 'saveProduct')   result = handleSaveProduct(data);
     else if (action === 'deleteProduct') result = handleDeleteProduct(data);
-    else if (action === 'addSale')       result = handleAddSale(data);
-    else if (action === 'stockMove')     result = handleStockMove(data);
-    else if (action === 'getSales')      result = handleGetSales(data);
-    else if (action === 'getUsers')      result = handleGetUsers();
-    else if (action === 'saveUser')      result = handleSaveUser(data);
-    else if (action === 'deleteUser')    result = handleDeleteUser(data);
+    else if (action === 'addSale')           result = handleAddSale(data);
+    else if (action === 'stockMove')         result = handleStockMove(data);
+    else if (action === 'getSales')          result = handleGetSales(data);
+    else if (action === 'getUsers')          result = handleGetUsers();
+    else if (action === 'saveUser')          result = handleSaveUser(data);
+    else if (action === 'deleteUser')        result = handleDeleteUser(data);
+    else if (action === 'addReservation')    result = handleAddReservation(data);
+    else if (action === 'updateReservation') result = handleUpdateReservation(data);
+    else if (action === 'getReservations')   result = handleGetReservations();
     else result = { ok: false, error: 'Action inconnue: ' + action };
 
     return jsonResponse(result);
@@ -52,12 +56,14 @@ function doGet(e) {
       const data = JSON.parse(e.parameter.payload);
       const action = data.action;
       let result;
-      if      (action === 'addSale')      result = handleAddSale(data);
-      else if (action === 'saveProduct')  result = handleSaveProduct(data);
-      else if (action === 'deleteProduct')result = handleDeleteProduct(data);
-      else if (action === 'stockMove')    result = handleStockMove(data);
-      else if (action === 'saveUser')     result = handleSaveUser(data);
-      else if (action === 'deleteUser')   result = handleDeleteUser(data);
+      if      (action === 'addSale')           result = handleAddSale(data);
+      else if (action === 'saveProduct')       result = handleSaveProduct(data);
+      else if (action === 'deleteProduct')     result = handleDeleteProduct(data);
+      else if (action === 'stockMove')         result = handleStockMove(data);
+      else if (action === 'saveUser')          result = handleSaveUser(data);
+      else if (action === 'deleteUser')        result = handleDeleteUser(data);
+      else if (action === 'addReservation')    result = handleAddReservation(data);
+      else if (action === 'updateReservation') result = handleUpdateReservation(data);
       else result = { ok: false, error: 'Action payload inconnue: ' + action };
       return jsonResponse(result);
     } catch(err) {
@@ -66,12 +72,13 @@ function doGet(e) {
   }
 
   const action = e.parameter.action || 'ping';
-  if (action === 'ping')        return jsonResponse({ ok: true, message: 'POS Backend actif ✅' });
-  if (action === 'login')       return jsonResponse(handleLogin({ username: e.parameter.username || '', password: e.parameter.password || '' }));
-  if (action === 'getProducts') return jsonResponse(handleGetProducts());
-  if (action === 'getSales')    return jsonResponse(handleGetSales(e.parameter));
-  if (action === 'getUsers')    return jsonResponse(handleGetUsers());
-  if (action === 'initSheets')  return jsonResponse(initSheets());
+  if (action === 'ping')             return jsonResponse({ ok: true, message: 'POS Backend actif ✅' });
+  if (action === 'login')            return jsonResponse(handleLogin({ username: e.parameter.username || '', password: e.parameter.password || '' }));
+  if (action === 'getProducts')      return jsonResponse(handleGetProducts());
+  if (action === 'getSales')         return jsonResponse(handleGetSales(e.parameter));
+  if (action === 'getUsers')         return jsonResponse(handleGetUsers());
+  if (action === 'getReservations')  return jsonResponse(handleGetReservations());
+  if (action === 'initSheets')       return jsonResponse(initSheets());
   return jsonResponse({ ok: false, error: 'Action GET inconnue: ' + action });
 }
 
@@ -143,6 +150,19 @@ function initSheets() {
     su.getRange(1,1,1,5).setBackground('#0a0e1a').setFontColor('#00e5a0').setFontWeight('bold');
     su.appendRow(['admin','1234','admin','Administrateur',true]);
     su.appendRow(['caissier','0000','caissier','Caissier',true]);
+  }
+
+  // ── Réservations ─────────────────────────────────────────────
+  const RES_HEADERS = [
+    'ID','Date','Heure','Client_Nom','Client_Contact','Article','Quantite','Prix_Unitaire',
+    'Sous_Total_Article','Sous_Total_Vente','Remise','Net_A_Payer','Accompte','Restant',
+    'Mode_Depot','Fournisseur_Mobile','Reference','Caissier','Statut','Date_Finalisation','Vente_ID'
+  ];
+  let sr = ss.getSheetByName(SHEET_RESERVATIONS);
+  if (!sr) {
+    sr = ss.insertSheet(SHEET_RESERVATIONS);
+    sr.appendRow(RES_HEADERS);
+    sr.getRange(1,1,1,RES_HEADERS.length).setBackground('#0a4d1a').setFontColor('#00e5a0').setFontWeight('bold');
   }
 
   return { ok: true, message: 'Feuilles initialisées / migrées ✅' };
@@ -457,6 +477,142 @@ function handleDeleteUser(data) {
     }
   }
   return { ok: false, error: 'Utilisateur introuvable' };
+}
+
+// ============================================================
+// RÉSERVATIONS
+// ID | Date | Heure | Client_Nom | Client_Contact | Article | Quantite | Prix_Unitaire |
+// Sous_Total_Article | Sous_Total_Vente | Remise | Net_A_Payer | Accompte | Restant |
+// Mode_Depot | Fournisseur_Mobile | Reference | Caissier | Statut | Date_Finalisation | Vente_ID
+// ============================================================
+function handleAddReservation(data) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_RESERVATIONS);
+  if (!sheet) return { ok: false, error: 'Feuille "Réservations" introuvable. Lancez initSheets().' };
+
+  const res = data.reservation;
+  const d = new Date(res.date);
+  const dateStr = Utilities.formatDate(d, Session.getScriptTimeZone(), 'dd/MM/yyyy');
+  const timeStr = Utilities.formatDate(d, Session.getScriptTimeZone(), 'HH:mm:ss');
+
+  const subtotal = Number(res.subtotal || res.total || 0);
+  const remise   = Number(res.remise   || 0);
+  const total    = Number(res.total    || 0);
+  const accompte = Number(res.accompte || 0);
+  const restant  = Number(res.restant  || 0);
+  const methode  = res.depositMethod === 'cash' ? 'Espèces' : 'Mobile Money';
+
+  res.items.forEach(item => {
+    sheet.appendRow([
+      res.id,
+      dateStr,
+      timeStr,
+      res.clientName    || '',
+      res.clientContact || '',
+      item.name,
+      item.qty,
+      item.price,
+      item.price * item.qty,
+      subtotal,
+      remise,
+      total,
+      accompte,
+      restant,
+      methode,
+      res.depositProvider || '',
+      res.depositRef      || '',
+      res.caissier        || '',
+      'En attente',
+      '',
+      ''
+    ]);
+  });
+
+  return { ok: true, reservationId: res.id };
+}
+
+function handleUpdateReservation(data) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_RESERVATIONS);
+  if (!sheet) return { ok: false, error: 'Feuille "Réservations" introuvable.' };
+
+  const rows = sheet.getDataRange().getValues();
+  const statusLabel = data.status === 'completed' ? 'Finalisée' : 'Annulée';
+  let updated = 0;
+
+  for (let i = 1; i < rows.length; i++) {
+    if (Number(rows[i][0]) === Number(data.id)) {
+      sheet.getRange(i + 1, 19).setValue(statusLabel);
+      if (data.dateFinalisation) {
+        try {
+          const df = new Date(data.dateFinalisation);
+          sheet.getRange(i + 1, 20).setValue(
+            Utilities.formatDate(df, Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm')
+          );
+        } catch(e) {}
+      }
+      if (data.saleId) sheet.getRange(i + 1, 21).setValue(data.saleId);
+      updated++;
+    }
+  }
+
+  return { ok: true, updated };
+}
+
+function handleGetReservations() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_RESERVATIONS);
+  if (!sheet) return { ok: true, reservations: [] };
+
+  const rows = sheet.getDataRange().getValues();
+  const resMap = {};
+
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    const id = r[0];
+    if (!id) continue;
+    if (!resMap[id]) {
+      let isoDate;
+      try {
+        const tz = Session.getScriptTimeZone();
+        const timeStr = r[2] instanceof Date
+          ? Utilities.formatDate(r[2], tz, 'HH:mm:ss') : (r[2] || '00:00:00').toString();
+        if (r[1] instanceof Date) {
+          isoDate = Utilities.formatDate(r[1], tz, 'yyyy-MM-dd') + 'T' + timeStr;
+        } else {
+          const parts = r[1].toString().split('/');
+          isoDate = parts[2] + '-' + parts[1].padStart(2,'0') + '-' + parts[0].padStart(2,'0') + 'T' + timeStr;
+        }
+      } catch(e) { isoDate = new Date().toISOString(); }
+
+      const statusRaw = (r[18] || '').toString();
+      const status = statusRaw === 'Finalisée' ? 'completed' : statusRaw === 'Annulée' ? 'cancelled' : 'pending';
+
+      resMap[id] = {
+        id: Number(id),
+        date: isoDate,
+        clientName:    r[3]  || '',
+        clientContact: r[4]  || '',
+        subtotal:      Number(r[9]  || 0),
+        remise:        Number(r[10] || 0),
+        total:         Number(r[11] || 0),
+        accompte:      Number(r[12] || 0),
+        restant:       Number(r[13] || 0),
+        depositMethod: r[14] === 'Espèces' ? 'cash' : 'mobile',
+        depositProvider: r[15] || '',
+        depositRef:    r[16] || '',
+        caissier:      r[17] || '',
+        status,
+        dateFinalisation: r[19] || null,
+        saleId:        r[20] || null,
+        items: []
+      };
+    }
+    resMap[id].items.push({ name: r[5], qty: Number(r[6]), price: Number(r[7]) });
+  }
+
+  const reservations = Object.values(resMap).reverse();
+  return { ok: true, reservations };
 }
 
 // ============================================================
