@@ -994,6 +994,14 @@
       <div class="big" id="payAmount">0 Ar</div>
       <div id="payAccompteInfo" style="display:none;font-size:12px;color:var(--blue);margin-top:4px"></div>
     </div>
+    <div class="form-group" style="margin-bottom:8px">
+      <label>Nom du client (optionnel)</label>
+      <input id="clientName" placeholder="Ex: Jean Dupont" autocomplete="off" />
+    </div>
+    <div class="form-group" style="margin-bottom:12px">
+      <label>Contact / Téléphone (optionnel)</label>
+      <input id="clientContact" placeholder="Ex: +261 34 XX XXX XX" autocomplete="off" />
+    </div>
     <div class="payment-tabs">
       <button class="payment-tab active" id="tabCash" onclick="switchPayTab('cash')">💵 Espèces</button>
       <button class="payment-tab payment-tab-mobile" id="tabMobile" onclick="switchPayTab('mobile')">📱 Mobile Money</button>
@@ -1054,6 +1062,8 @@
   <div class="ticket-divider"></div>
   <div class="ticket-row"><span>Date :</span><span id="tDate"></span></div>
   <div class="ticket-row"><span>Responsable :</span><span id="tResponsable"></span></div>
+  <div class="ticket-row" id="tClientRow" style="display:none"><span>Client :</span><span id="tClient"></span></div>
+  <div class="ticket-row" id="tContactRow" style="display:none"><span>Contact :</span><span id="tContact"></span></div>
   <div class="ticket-divider"></div>
   <div id="tItems"></div>
   <div class="ticket-divider"></div>
@@ -1372,6 +1382,8 @@ function openPayment(mode) {
   document.getElementById('changeVal').textContent='0 Ar';
   document.getElementById('changeVal').className='val';
   document.getElementById('mobileRef').value='';
+  document.getElementById('clientName').value='';
+  document.getElementById('clientContact').value='';
   switchPayTab(mode);
   openModal('paymentModal');
 }
@@ -1401,16 +1413,18 @@ function confirmPayment() {
   const rem = getRemise();
   const acc = getAccompte();
   const due = getDue();
+  const clientName    = document.getElementById('clientName').value.trim();
+  const clientContact = document.getElementById('clientContact').value.trim();
   if(paymentMode==='cash') {
     const given = parseFloat(document.getElementById('givenAmount').value)||0;
     if(given < due) { showToast('Montant insuffisant !','error'); return; }
-    recordSale(net, 'cash', given, given-due, null, null, rem, acc);
+    recordSale(net, 'cash', given, given-due, null, null, rem, acc, clientName, clientContact);
   } else {
     const ref = document.getElementById('mobileRef').value.trim();
-    recordSale(net, 'mobile', due, 0, selectedProvider, ref, rem, acc);
+    recordSale(net, 'mobile', due, 0, selectedProvider, ref, rem, acc, clientName, clientContact);
   }
 }
-function recordSale(total, method, given, change, provider, ref, remise=0, accompte=0) {
+function recordSale(total, method, given, change, provider, ref, remise=0, accompte=0, clientName='', clientContact='') {
   cart.forEach(item => {
     const p = products.find(pr=>pr.id===item.id);
     if(p) p.stock -= item.qty;
@@ -1420,6 +1434,7 @@ function recordSale(total, method, given, change, provider, ref, remise=0, accom
     id: nextSaleId++,
     date: new Date().toISOString(),
     caissier: currentUser?.label || 'Caissier',
+    clientName, clientContact,
     items: cart.map(i=>({name:i.name,qty:i.qty,price:i.price})),
     subtotal, remise, total, accompte,
     due: Math.max(0, total - accompte),
@@ -1447,6 +1462,16 @@ function printTicket(sale) {
   document.getElementById('tDate').textContent = dateStr;
   document.getElementById('tResponsable').textContent = sale.caissier || '';
   document.getElementById('tPhone').textContent = shopConfig.phone || '';
+  const clientRow = document.getElementById('tClientRow');
+  const contactRow = document.getElementById('tContactRow');
+  if (sale.clientName) {
+    clientRow.style.display = 'flex';
+    document.getElementById('tClient').textContent = sale.clientName;
+  } else { clientRow.style.display = 'none'; }
+  if (sale.clientContact) {
+    contactRow.style.display = 'flex';
+    document.getElementById('tContact').textContent = sale.clientContact;
+  } else { contactRow.style.display = 'none'; }
   document.getElementById('tSubtotal').textContent = fmt(sale.subtotal ?? sale.total);
   document.getElementById('tTotal').textContent = fmt(sale.total);
   document.getElementById('tItems').innerHTML = sale.items.map(i=>

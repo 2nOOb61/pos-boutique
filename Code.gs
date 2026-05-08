@@ -109,7 +109,8 @@ function initSheets() {
   const VENTES_HEADERS = [
     'ID','Date','Heure','Article','Quantite','Prix_Unitaire',
     'Sous_Total_Article','Sous_Total_Vente','Remise','Net_A_Payer',
-    'Accompte','Reste_Du','Mode_Paiement','Fournisseur_Mobile','Reference','Caissier'
+    'Accompte','Reste_Du','Mode_Paiement','Fournisseur_Mobile','Reference','Caissier',
+    'Nom_Client','Contact_Client'
   ];
   if (!sv) {
     sv = ss.insertSheet(SHEET_SALES);
@@ -246,10 +247,11 @@ function updateProductStock(ss, productName, delta) {
 }
 
 // ============================================================
-// VENTES  (16 colonnes)
+// VENTES  (18 colonnes)
 // ID | Date | Heure | Article | Quantite | Prix_Unitaire |
 // Sous_Total_Article | Sous_Total_Vente | Remise | Net_A_Payer |
-// Accompte | Reste_Du | Mode_Paiement | Fournisseur_Mobile | Reference | Caissier
+// Accompte | Reste_Du | Mode_Paiement | Fournisseur_Mobile | Reference | Caissier |
+// Nom_Client | Contact_Client
 // ============================================================
 function handleAddSale(data) {
   const ss = SpreadsheetApp.openById(SHEET_ID);
@@ -276,16 +278,18 @@ function handleAddSale(data) {
       item.name,
       item.qty,
       item.price,
-      item.price * item.qty,   // Sous_Total_Article
-      subtotal,                 // Sous_Total_Vente (avant remise)
-      remise,                   // Remise
-      netPayer,                 // Net_A_Payer (après remise)
-      accompte,                 // Accompte
-      resteDu,                  // Reste_Du
+      item.price * item.qty,       // Sous_Total_Article
+      subtotal,                     // Sous_Total_Vente (avant remise)
+      remise,                       // Remise
+      netPayer,                     // Net_A_Payer (après remise)
+      accompte,                     // Accompte
+      resteDu,                      // Reste_Du
       methode,
-      sale.provider || '',
-      sale.ref      || '',
-      sale.caissier || ''
+      sale.provider      || '',
+      sale.ref           || '',
+      sale.caissier      || '',
+      sale.clientName    || '',     // Nom_Client
+      sale.clientContact || ''      // Contact_Client
     ]);
     updateProductStock(ss, item.name, -item.qty);
     logStockMove(ss, item.name, 'Vente', -item.qty, 'Vente #' + sale.id, sale.caissier || '');
