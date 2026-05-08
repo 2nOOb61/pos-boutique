@@ -601,6 +601,38 @@
     #page-config { padding-top:24px; }
   }
 
+  /* ===== TICKET CONFIG ===== */
+  .ticket-cfg-layout { display:grid; grid-template-columns:1fr 1fr; gap:24px; }
+  @media(max-width:768px){ .ticket-cfg-layout { grid-template-columns:1fr; } }
+  .ticket-cfg-options { display:flex; flex-direction:column; gap:14px; }
+  .ticket-cfg-preview-wrap { position:sticky; top:80px; }
+  .ticket-cfg-preview-label { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:10px; font-weight:600; }
+  .ticket-preview-frame {
+    background:#fff; border:1px solid #ccc; border-radius:8px; padding:14px;
+    width:100%; max-width:300px; font-family:Arial,sans-serif; font-size:10pt;
+    box-shadow:0 4px 20px rgba(0,0,0,0.10); color:#000; margin:0 auto;
+  }
+  .ticket-preview-frame .p-shop-name { font-size:14pt; font-weight:bold; text-align:center; margin-bottom:2px; }
+  .ticket-preview-frame .p-shop-info { font-size:9pt; text-align:center; color:#555; margin-bottom:2px; }
+  .ticket-preview-frame .p-logo-wrap { text-align:center; margin-bottom:6px; }
+  .ticket-preview-frame .p-logo-wrap img { object-fit:contain; border-radius:4px; }
+  .ticket-preview-frame .p-row { display:flex; justify-content:space-between; padding:1px 0; font-size:9pt; }
+  .ticket-preview-frame .p-row span:first-child { color:#555; }
+  .ticket-preview-frame .p-item { display:flex; justify-content:space-between; font-size:9pt; padding:2px 0; border-bottom:1px dotted #ccc; }
+  .ticket-preview-frame .p-total { display:flex; justify-content:space-between; font-weight:bold; font-size:11pt; padding:4px 6px; margin:4px 0; border-radius:3px; }
+  .ticket-preview-frame .p-footer { text-align:center; font-size:9pt; color:#777; font-style:italic; margin-top:6px; }
+  .ticket-preview-frame hr { border:none; margin:5px 0; }
+  .cfg-toggle-row { display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:var(--surface2); border-radius:10px; font-size:14px; }
+  .logo-upload-box {
+    border:2px dashed var(--border); border-radius:12px; padding:16px; text-align:center;
+    cursor:pointer; transition:.2s; background:var(--surface2);
+  }
+  .logo-upload-box:hover { border-color:var(--accent); background:rgba(255,107,0,0.05); }
+  .logo-upload-box input[type=file] { display:none; }
+  .logo-preview-img { max-height:70px; max-width:100%; border-radius:6px; margin-top:8px; display:none; }
+  .cfg-color-row { display:flex; align-items:center; gap:12px; }
+  .cfg-color-row input[type=color] { width:40px; height:40px; border:none; border-radius:8px; cursor:pointer; padding:2px; background:var(--surface2); }
+
   /* ===== RÉSERVATIONS ===== */
   .res-toolbar { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px; margin-bottom:20px; }
   .res-summary { display:flex; gap:12px; flex-wrap:wrap; }
@@ -941,6 +973,118 @@
         <button class="btn-add-product" onclick="addCategory()">➕ Ajouter</button>
       </div>
       <div id="categoriesList" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+    </div>
+
+    <!-- Section Ticket -->
+    <div class="config-section">
+      <div class="config-section-title">🎨 Personnalisation du ticket de caisse</div>
+      <div class="ticket-cfg-layout">
+
+        <!-- Options -->
+        <div class="ticket-cfg-options">
+
+          <!-- Logo -->
+          <div>
+            <label style="font-size:13px;color:var(--muted);font-weight:600;display:block;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Logo de la boutique</label>
+            <div class="logo-upload-box" onclick="document.getElementById('logoFileInput').click()">
+              <input type="file" id="logoFileInput" accept="image/*" onchange="handleLogoUpload(this)" />
+              <div id="logoUploadHint" style="color:var(--muted);font-size:13px">
+                🖼️ Cliquez pour choisir une image<br>
+                <span style="font-size:11px">PNG, JPG, SVG — max 500 Ko</span>
+              </div>
+              <img id="logoPreviewImg" class="logo-preview-img" alt="Logo" />
+            </div>
+            <div id="logoClearRow" style="display:none;margin-top:8px;text-align:right">
+              <button onclick="removeLogo()" style="font-size:12px;color:var(--red);background:none;border:none;cursor:pointer;text-decoration:underline">🗑 Supprimer le logo</button>
+            </div>
+          </div>
+
+          <!-- Position & taille logo -->
+          <div id="logoOptionsRow" style="display:none">
+            <label style="font-size:13px;color:var(--muted);font-weight:600;display:block;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Position et taille du logo</label>
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+              <div style="flex:1;min-width:120px">
+                <select id="cfgLogoPos" onchange="saveTicketConfig()" style="width:100%;padding:8px 10px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px">
+                  <option value="center">Centré</option>
+                  <option value="left">À gauche</option>
+                  <option value="right">À droite</option>
+                </select>
+              </div>
+              <div style="flex:1;min-width:120px">
+                <select id="cfgLogoSize" onchange="saveTicketConfig()" style="width:100%;padding:8px 10px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px">
+                  <option value="small">Petit (40px)</option>
+                  <option value="medium">Moyen (70px)</option>
+                  <option value="large">Grand (100px)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Couleur accent -->
+          <div>
+            <label style="font-size:13px;color:var(--muted);font-weight:600;display:block;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Couleur du total</label>
+            <div class="cfg-color-row">
+              <input type="color" id="cfgTicketColor" value="#000000" oninput="saveTicketConfig()" />
+              <span style="font-size:13px;color:var(--muted)">Couleur de la zone NET À PAYER</span>
+            </div>
+          </div>
+
+          <!-- Police -->
+          <div>
+            <label style="font-size:13px;color:var(--muted);font-weight:600;display:block;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Police d'écriture</label>
+            <select id="cfgTicketFont" onchange="saveTicketConfig()" style="width:100%;padding:8px 10px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px">
+              <option value="Arial">Arial (standard)</option>
+              <option value="'Courier New',monospace">Courier (style caisse)</option>
+              <option value="'Times New Roman',serif">Times New Roman</option>
+              <option value="Verdana">Verdana</option>
+            </select>
+          </div>
+
+          <!-- Séparateur -->
+          <div>
+            <label style="font-size:13px;color:var(--muted);font-weight:600;display:block;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Style des séparateurs</label>
+            <select id="cfgSepStyle" onchange="saveTicketConfig()" style="width:100%;padding:8px 10px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px">
+              <option value="dashed">Tirets - - - -</option>
+              <option value="solid">Trait continu ────</option>
+              <option value="dotted">Pointillés · · · ·</option>
+              <option value="double">Double ════</option>
+            </select>
+          </div>
+
+          <!-- Afficher/Masquer éléments -->
+          <div>
+            <label style="font-size:13px;color:var(--muted);font-weight:600;display:block;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Éléments à afficher</label>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <div class="cfg-toggle-row">
+                <span>N° du ticket</span>
+                <label class="toggle"><input type="checkbox" id="cfgShowTicketNum" checked onchange="saveTicketConfig()"><span class="toggle-slider"></span></label>
+              </div>
+              <div class="cfg-toggle-row">
+                <span>Nom du caissier</span>
+                <label class="toggle"><input type="checkbox" id="cfgShowCaissier" checked onchange="saveTicketConfig()"><span class="toggle-slider"></span></label>
+              </div>
+              <div class="cfg-toggle-row">
+                <span>Sous-total (avant remise)</span>
+                <label class="toggle"><input type="checkbox" id="cfgShowSubtotal" checked onchange="saveTicketConfig()"><span class="toggle-slider"></span></label>
+              </div>
+              <div class="cfg-toggle-row">
+                <span>Détail du paiement (espèces/monnaie)</span>
+                <label class="toggle"><input type="checkbox" id="cfgShowPayDetail" checked onchange="saveTicketConfig()"><span class="toggle-slider"></span></label>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Prévisualisation live -->
+        <div class="ticket-cfg-preview-wrap">
+          <div class="ticket-cfg-preview-label">👁 Aperçu du ticket</div>
+          <div class="ticket-preview-frame" id="ticketPreviewFrame">
+            <!-- généré par renderTicketPreview() -->
+          </div>
+        </div>
+
+      </div>
     </div>
 
     <!-- Section Articles -->
@@ -1935,127 +2079,46 @@ function cancelReservation(id) {
 // ============================================================
 // TICKET RÉSERVATION
 // ============================================================
-function printReservationTicket(res) {
-  if (!res) return;
-  const dateStr = new Date(res.date).toLocaleString('fr-MG');
-  const w = window.open('', '_blank', 'width=420,height=620');
-  w.document.write(`<html><head><title>Réservation</title><style>
-    @page{size:10.5cm 15cm;margin:0.5cm}
-    *{box-sizing:border-box}
-    body{font-family:Arial,sans-serif;font-size:10pt;margin:0;padding:0;width:10.5cm;color:#000}
-    .shop-name{font-size:14pt;font-weight:bold;text-align:center;margin-bottom:2px}
-    .shop-info{font-size:9pt;text-align:center;color:#333;margin-bottom:2px}
-    .res-banner{background:#f0f8f0;border:2px solid #007a45;border-radius:4px;padding:5px;text-align:center;font-size:13pt;font-weight:bold;color:#007a45;margin:6px 0}
-    .row{display:flex;justify-content:space-between;align-items:baseline;padding:1px 0}
-    .row span:first-child{color:#555}
-    .row span:last-child{font-weight:500}
-    .row.bold{font-weight:bold;font-size:11pt}
-    .row.bold span:first-child{color:#000}
-    .items-section .row{border-bottom:1px dotted #ccc;padding:3px 0}
-    .items-section .row span:first-child{color:#000;flex:1;margin-right:8px}
-    .items-section .row span:last-child{white-space:nowrap;font-weight:600}
-    hr{border:none;border-top:1px dashed #999;margin:5px 0}
-    hr.solid{border-top:2px solid #000;margin:6px 0}
-    .footer{text-align:center;font-size:9pt;color:#555;margin-top:4px;font-style:italic}
-    .total-box{background:#f5f5f5;border:1px solid #ddd;border-radius:4px;padding:4px 6px;margin:4px 0}
-    .acc-box{background:#e8f7ee;border:1px solid #007a45;border-radius:4px;padding:5px 8px;margin:4px 0}
-    @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-  </style></head><body onload="window.print()">
-    <div class="shop-name">${shopConfig.name}</div>
-    ${shopConfig.address ? `<div class="shop-info">${shopConfig.address}</div>` : ''}
-    ${shopConfig.phone   ? `<div class="shop-info">Tél : ${shopConfig.phone}</div>` : ''}
-    <div class="res-banner">📋 BON DE RÉSERVATION</div>
-    <hr class="solid"/>
-    <div class="row"><span>Réservation N°</span><span><b>#${res.id}</b></span></div>
-    <div class="row"><span>Date</span><span>${dateStr}</span></div>
-    <div class="row"><span>Caissier</span><span>${res.caissier || ''}</span></div>
-    ${res.clientName    ? `<div class="row"><span>Client</span><span>${res.clientName}</span></div>` : ''}
-    ${res.clientContact ? `<div class="row"><span>Contact</span><span>${res.clientContact}</span></div>` : ''}
-    <hr/>
-    <div class="items-section">
-      ${res.items.map(i => `<div class="row"><span>${i.name} <em style="color:#777">×${i.qty}</em></span><span>${(i.price*i.qty).toLocaleString()} Ar</span></div>`).join('')}
-    </div>
-    <hr/>
-    <div class="row"><span>Sous-total</span><span>${fmt(res.subtotal)}</span></div>
-    ${res.remise > 0 ? `<div class="row"><span>Remise</span><span style="color:#c00">-${fmt(res.remise)}</span></div>` : ''}
-    <div class="total-box">
-      <div class="row bold"><span>TOTAL À PAYER</span><span>${fmt(res.total)}</span></div>
-    </div>
-    <div class="acc-box">
-      <div class="row bold" style="color:#007a45"><span>ACOMPTE VERSÉ</span><span>${fmt(res.accompte)}</span></div>
-      <div class="row bold" style="color:#c00"><span>RESTE DÛ</span><span>${fmt(res.restant)}</span></div>
-    </div>
-    <hr/>
-    ${res.depositMethod === 'cash'
-      ? `<div class="row"><span>Espèces reçus</span><span>${fmt(res.depositGiven)}</span></div>
-         <div class="row"><span>Monnaie rendue</span><span>${fmt(res.depositChange)}</span></div>`
-      : `<div class="row"><span>Paiement mobile (${res.depositProvider})</span><span>${res.depositRef || ''}</span></div>`}
-    <hr class="solid"/>
-    <div class="footer">À récupérer sur présentation de ce bon</div>
-    <div class="footer">${shopConfig.footer || 'Merci de votre confiance !'}</div>
-  </body></html>`);
-  w.document.close();
+// ============================================================
+// TICKET — FONCTIONS D'IMPRESSION (utilisent shopConfig)
+// ============================================================
+function _ticketStyles(tc) {
+  const font  = tc.ticketFont || 'Arial';
+  const color = tc.ticketColor || '#000000';
+  const sep   = tc.ticketSep  || 'dashed';
+  const sepSolid = sep === 'double'
+    ? 'border:none;border-top:3px double #000;margin:6px 0'
+    : `border:none;border-top:2px ${sep} #000;margin:6px 0`;
+  const sepLight = sep === 'double'
+    ? 'border:none;border-top:2px double #ccc;margin:5px 0'
+    : `border:none;border-top:1px ${sep} #ccc;margin:5px 0`;
+  return { font, color, sepSolid, sepLight };
 }
 
-// ============================================================
-// TICKET IMPRESSION
-// ============================================================
-function printTicket(sale) {
-  const dateStr = new Date(sale.date).toLocaleString('fr-MG');
-  // Update hidden ticket DOM
-  document.getElementById('tDate').textContent = dateStr;
-  document.getElementById('tResponsable').textContent = sale.caissier || '';
-  document.getElementById('tPhone').textContent = shopConfig.phone || '';
-  const clientRow = document.getElementById('tClientRow');
-  const contactRow = document.getElementById('tContactRow');
-  if (sale.clientName) {
-    clientRow.style.display = 'flex';
-    document.getElementById('tClient').textContent = sale.clientName;
-  } else { clientRow.style.display = 'none'; }
-  if (sale.clientContact) {
-    contactRow.style.display = 'flex';
-    document.getElementById('tContact').textContent = sale.clientContact;
-  } else { contactRow.style.display = 'none'; }
-  document.getElementById('tSubtotal').textContent = fmt(sale.subtotal ?? sale.total);
-  document.getElementById('tTotal').textContent = fmt(sale.total);
-  document.getElementById('tItems').innerHTML = sale.items.map(i=>
-    `<div style="display:flex;justify-content:space-between">
-       <span>${i.name} x${i.qty}</span>
-       <span>${(i.price*i.qty).toLocaleString()} Ar</span>
-     </div>`).join('');
-  const remiseRow = document.getElementById('tRemiseRow');
-  if (sale.remise > 0) {
-    remiseRow.style.display = 'flex';
-    document.getElementById('tRemise').textContent = '-' + fmt(sale.remise);
-  } else { remiseRow.style.display = 'none'; }
-  const accRow = document.getElementById('tAccompteRow');
-  const dueRow = document.getElementById('tDueRow');
-  if (sale.accompte > 0) {
-    accRow.style.display = 'flex';
-    document.getElementById('tAccompte').textContent = fmt(sale.accompte);
-    dueRow.style.display = 'flex';
-    document.getElementById('tDue').textContent = fmt(sale.due ?? 0);
-  } else { accRow.style.display = 'none'; dueRow.style.display = 'none'; }
-  if(sale.method==='cash') {
-    document.getElementById('tPayMethod').textContent = '💵 Espèces remis';
-    document.getElementById('tGiven').textContent = fmt(sale.given);
-    document.getElementById('tChangeRow').style.display='flex';
-    document.getElementById('tChange').textContent = fmt(sale.change);
-  } else {
-    document.getElementById('tPayMethod').textContent = `📱 ${sale.provider}`;
-    document.getElementById('tGiven').textContent = sale.ref || '';
-    document.getElementById('tChangeRow').style.display='none';
-  }
-  document.getElementById('tFooter').textContent = shopConfig.footer || 'Merci de votre visite !';
-  // Print window — format 10.5×15cm (imprimante de bureau)
-  setTimeout(()=>{
-    const w = window.open('','_blank','width=420,height=600');
-    w.document.write(`<html><head><title>Ticket</title><style>
+function _ticketLogoHtml(tc) {
+  if (!tc.ticketLogo) return '';
+  const h   = { small: 40, medium: 70, large: 100 }[tc.ticketLogoSize || 'medium'];
+  const align = { left:'left', right:'right', center:'center' }[tc.ticketLogoPos || 'center'];
+  return `<div style="text-align:${align};margin-bottom:5px"><img src="${tc.ticketLogo}" style="height:${h}px;max-width:100%;object-fit:contain" /></div>`;
+}
+
+function _ticketShopHeader(tc, st) {
+  return `
+    ${_ticketLogoHtml(tc)}
+    <div style="font-size:14pt;font-weight:bold;text-align:center;margin-bottom:2px;font-family:${st.font}">${tc.name}</div>
+    ${tc.address ? `<div style="font-size:9pt;text-align:center;color:#555;margin-bottom:2px">${tc.address}</div>` : ''}
+    ${tc.phone   ? `<div style="font-size:9pt;text-align:center;color:#555;margin-bottom:2px">Tél : ${tc.phone}</div>` : ''}`;
+}
+
+function _openTicketWindow(htmlBody, title='Ticket') {
+  setTimeout(() => {
+    const w = window.open('', '_blank', 'width=420,height=620');
+    const tc = shopConfig;
+    const font = tc.ticketFont || 'Arial';
+    w.document.write(`<html><head><title>${title}</title><style>
       @page{size:10.5cm 15cm;margin:0.5cm}
       *{box-sizing:border-box}
-      body{font-family:Arial,sans-serif;font-size:10pt;margin:0;padding:0;width:10.5cm;color:#000}
-      .shop-name{font-size:14pt;font-weight:bold;text-align:center;margin-bottom:2px}
-      .shop-info{font-size:9pt;text-align:center;color:#333;margin-bottom:2px}
+      body{font-family:${font},sans-serif;font-size:10pt;margin:0;padding:0;width:10.5cm;color:#000}
       .row{display:flex;justify-content:space-between;align-items:baseline;padding:1px 0}
       .row span:first-child{color:#555}
       .row span:last-child{font-weight:500}
@@ -2064,40 +2127,132 @@ function printTicket(sale) {
       .items-section .row{border-bottom:1px dotted #ccc;padding:3px 0}
       .items-section .row span:first-child{color:#000;flex:1;margin-right:8px}
       .items-section .row span:last-child{white-space:nowrap;font-weight:600}
-      hr{border:none;border-top:1px dashed #999;margin:5px 0}
-      hr.solid{border-top:2px solid #000;margin:6px 0}
       .footer{text-align:center;font-size:9pt;color:#555;margin-top:4px;font-style:italic}
-      .total-box{background:#f5f5f5;border:1px solid #ddd;border-radius:4px;padding:4px 6px;margin:4px 0}
       @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-    </style></head><body onload="window.print()">
-      <div class="shop-name">${shopConfig.name}</div>
-      ${shopConfig.address?`<div class="shop-info">${shopConfig.address}</div>`:''}
-      ${shopConfig.phone?`<div class="shop-info">Tél : ${shopConfig.phone}</div>`:''}
-      <hr class="solid"/>
-      <div class="row"><span>Date</span><span>${dateStr}</span></div>
-      <div class="row"><span>Caissier</span><span>${sale.caissier||''}</span></div>
-      <hr/>
-      <div class="items-section">
-        ${sale.items.map(i=>`<div class="row"><span>${i.name} <em style="color:#777">×${i.qty}</em></span><span>${(i.price*i.qty).toLocaleString()} Ar</span></div>`).join('')}
-      </div>
-      <hr/>
-      <div class="row"><span>Sous-total</span><span>${fmt(sale.subtotal??sale.total)}</span></div>
-      ${sale.remise>0?`<div class="row"><span>Remise</span><span style="color:#c00">-${fmt(sale.remise)}</span></div>`:''}
-      <div class="total-box">
-        <div class="row bold"><span>NET À PAYER</span><span>${fmt(sale.total)}</span></div>
-      </div>
-      ${sale.accompte>0?`<div class="row"><span>Acompte versé</span><span>${fmt(sale.accompte)}</span></div>
-      <div class="row bold" style="color:#c00"><span>RESTE DÛ</span><span>${fmt(sale.due??0)}</span></div>`:''}
-      <hr/>
-      ${sale.method==='cash'
-        ?`<div class="row"><span>Espèces reçus</span><span>${fmt(sale.given)}</span></div>
-          <div class="row"><span>Monnaie rendue</span><span>${fmt(sale.change)}</span></div>`
-        :`<div class="row"><span>Paiement mobile (${sale.provider})</span><span>${sale.ref||''}</span></div>`}
-      <hr class="solid"/>
-      <div class="footer">${shopConfig.footer||'Merci de votre visite !'}</div>
-    </body></html>`);
+    </style></head><body onload="window.print()">${htmlBody}</body></html>`);
     w.document.close();
   }, 200);
+}
+
+function printTicket(sale) {
+  const tc  = shopConfig;
+  const st  = _ticketStyles(tc);
+  const dateStr = new Date(sale.date).toLocaleString('fr-MG');
+
+  // Mise à jour du DOM ticket caché (pour compatibilité)
+  document.getElementById('tDate').textContent        = dateStr;
+  document.getElementById('tResponsable').textContent = sale.caissier || '';
+  document.getElementById('tPhone').textContent       = tc.phone || '';
+  const setRow = (rowId, valId, val) => {
+    const r = document.getElementById(rowId);
+    if (val) { r.style.display='flex'; document.getElementById(valId).textContent = val; }
+    else r.style.display = 'none';
+  };
+  setRow('tClientRow',  'tClient',  sale.clientName);
+  setRow('tContactRow', 'tContact', sale.clientContact);
+  document.getElementById('tSubtotal').textContent = fmt(sale.subtotal ?? sale.total);
+  document.getElementById('tTotal').textContent    = fmt(sale.total);
+  document.getElementById('tItems').innerHTML = sale.items.map(i =>
+    `<div style="display:flex;justify-content:space-between"><span>${i.name} x${i.qty}</span><span>${(i.price*i.qty).toLocaleString()} Ar</span></div>`).join('');
+  if (sale.remise > 0) {
+    document.getElementById('tRemiseRow').style.display = 'flex';
+    document.getElementById('tRemise').textContent = '-' + fmt(sale.remise);
+  } else document.getElementById('tRemiseRow').style.display = 'none';
+  if (sale.accompte > 0) {
+    document.getElementById('tAccompteRow').style.display = 'flex';
+    document.getElementById('tAccompte').textContent = fmt(sale.accompte);
+    document.getElementById('tDueRow').style.display = 'flex';
+    document.getElementById('tDue').textContent = fmt(sale.due ?? 0);
+  } else {
+    document.getElementById('tAccompteRow').style.display = 'none';
+    document.getElementById('tDueRow').style.display = 'none';
+  }
+  if (sale.method === 'cash') {
+    document.getElementById('tPayMethod').textContent    = '💵 Espèces remis';
+    document.getElementById('tGiven').textContent        = fmt(sale.given);
+    document.getElementById('tChangeRow').style.display = 'flex';
+    document.getElementById('tChange').textContent       = fmt(sale.change);
+  } else {
+    document.getElementById('tPayMethod').textContent    = `📱 ${sale.provider}`;
+    document.getElementById('tGiven').textContent        = sale.ref || '';
+    document.getElementById('tChangeRow').style.display = 'none';
+  }
+  document.getElementById('tFooter').textContent = tc.footer || 'Merci de votre visite !';
+
+  const html = `
+    ${_ticketShopHeader(tc, st)}
+    <hr style="${st.sepSolid}"/>
+    ${tc.ticketShowNum !== false ? `<div class="row"><span>Ticket N°</span><span>${sale.id}</span></div>` : ''}
+    <div class="row"><span>Date</span><span>${dateStr}</span></div>
+    ${tc.ticketShowCaissier !== false ? `<div class="row"><span>Caissier</span><span>${sale.caissier||''}</span></div>` : ''}
+    ${sale.clientName    ? `<div class="row"><span>Client</span><span>${sale.clientName}</span></div>` : ''}
+    ${sale.clientContact ? `<div class="row"><span>Contact</span><span>${sale.clientContact}</span></div>` : ''}
+    <hr style="${st.sepLight}"/>
+    <div class="items-section">
+      ${sale.items.map(i=>`<div class="row"><span>${i.name} <em style="color:#777">×${i.qty}</em></span><span>${(i.price*i.qty).toLocaleString()} Ar</span></div>`).join('')}
+    </div>
+    <hr style="${st.sepLight}"/>
+    ${tc.ticketShowSubtotal !== false ? `<div class="row"><span>Sous-total</span><span>${fmt(sale.subtotal??sale.total)}</span></div>` : ''}
+    ${sale.remise>0 ? `<div class="row"><span>Remise</span><span style="color:#c00">-${fmt(sale.remise)}</span></div>` : ''}
+    <div style="background:${st.color}18;border:1px solid ${st.color};border-radius:4px;padding:4px 6px;margin:4px 0">
+      <div class="row bold" style="color:${st.color}"><span>NET À PAYER</span><span>${fmt(sale.total)}</span></div>
+    </div>
+    ${sale.accompte>0 ? `<div class="row"><span>Acompte versé</span><span>${fmt(sale.accompte)}</span></div>
+    <div class="row bold" style="color:#c00"><span>RESTE DÛ</span><span>${fmt(sale.due??0)}</span></div>` : ''}
+    <hr style="${st.sepLight}"/>
+    ${tc.ticketShowPayDetail !== false
+      ? (sale.method==='cash'
+        ? `<div class="row"><span>Espèces reçus</span><span>${fmt(sale.given)}</span></div>
+           <div class="row"><span>Monnaie rendue</span><span>${fmt(sale.change)}</span></div>`
+        : `<div class="row"><span>Paiement mobile (${sale.provider})</span><span>${sale.ref||''}</span></div>`)
+      : ''}
+    <hr style="${st.sepSolid}"/>
+    <div class="footer">${tc.footer||'Merci de votre visite !'}</div>`;
+
+  _openTicketWindow(html, 'Ticket #' + sale.id);
+}
+
+function printReservationTicket(res) {
+  if (!res) return;
+  const tc  = shopConfig;
+  const st  = _ticketStyles(tc);
+  const dateStr = new Date(res.date).toLocaleString('fr-MG');
+
+  const html = `
+    ${_ticketShopHeader(tc, st)}
+    <div style="background:#e8f7ee;border:2px solid #007a45;border-radius:4px;padding:5px;text-align:center;font-size:13pt;font-weight:bold;color:#007a45;margin:6px 0;font-family:${st.font}">📋 BON DE RÉSERVATION</div>
+    <hr style="${st.sepSolid}"/>
+    <div class="row"><span>Réservation N°</span><span><b>#${res.id}</b></span></div>
+    <div class="row"><span>Date</span><span>${dateStr}</span></div>
+    ${tc.ticketShowCaissier !== false ? `<div class="row"><span>Caissier</span><span>${res.caissier||''}</span></div>` : ''}
+    ${res.clientName    ? `<div class="row"><span>Client</span><span>${res.clientName}</span></div>` : ''}
+    ${res.clientContact ? `<div class="row"><span>Contact</span><span>${res.clientContact}</span></div>` : ''}
+    <hr style="${st.sepLight}"/>
+    <div class="items-section">
+      ${res.items.map(i=>`<div class="row"><span>${i.name} <em style="color:#777">×${i.qty}</em></span><span>${(i.price*i.qty).toLocaleString()} Ar</span></div>`).join('')}
+    </div>
+    <hr style="${st.sepLight}"/>
+    ${tc.ticketShowSubtotal !== false ? `<div class="row"><span>Sous-total</span><span>${fmt(res.subtotal)}</span></div>` : ''}
+    ${res.remise>0 ? `<div class="row"><span>Remise</span><span style="color:#c00">-${fmt(res.remise)}</span></div>` : ''}
+    <div style="background:${st.color}18;border:1px solid ${st.color};border-radius:4px;padding:4px 6px;margin:4px 0">
+      <div class="row bold" style="color:${st.color}"><span>TOTAL À PAYER</span><span>${fmt(res.total)}</span></div>
+    </div>
+    <div style="background:#e8f7ee;border:1px solid #007a45;border-radius:4px;padding:5px 8px;margin:4px 0">
+      <div class="row bold" style="color:#007a45"><span>ACOMPTE VERSÉ</span><span>${fmt(res.accompte)}</span></div>
+      <div class="row bold" style="color:#c00"><span>RESTE DÛ</span><span>${fmt(res.restant)}</span></div>
+    </div>
+    <hr style="${st.sepLight}"/>
+    ${tc.ticketShowPayDetail !== false
+      ? (res.depositMethod === 'cash'
+        ? `<div class="row"><span>Espèces reçus</span><span>${fmt(res.depositGiven)}</span></div>
+           <div class="row"><span>Monnaie rendue</span><span>${fmt(res.depositChange)}</span></div>`
+        : `<div class="row"><span>Paiement mobile (${res.depositProvider})</span><span>${res.depositRef||''}</span></div>`)
+      : ''}
+    <hr style="${st.sepSolid}"/>
+    <div class="footer">À récupérer sur présentation de ce bon</div>
+    <div class="footer">${tc.footer||'Merci de votre confiance !'}</div>`;
+
+  _openTicketWindow(html, 'Réservation #' + res.id);
 }
 
 // ============================================================
@@ -3123,7 +3278,19 @@ async function initSheetsFromApp() {
 // ============================================================
 // CONFIGURATION — Boutique, Catégories, Articles
 // ============================================================
-let shopConfig = { name:'MA BOUTIQUE', address:'Antananarivo, Madagascar', phone:'', footer:'Merci de votre visite !' };
+let shopConfig = {
+  name:'MA BOUTIQUE', address:'Antananarivo, Madagascar', phone:'', footer:'Merci de votre visite !',
+  ticketLogo: null,
+  ticketLogoPos: 'center',
+  ticketLogoSize: 'medium',
+  ticketColor: '#000000',
+  ticketFont: 'Arial',
+  ticketSep: 'dashed',
+  ticketShowNum: true,
+  ticketShowCaissier: true,
+  ticketShowSubtotal: true,
+  ticketShowPayDetail: true
+};
 let categories = ['Alimentation','Boissons','Hygiène','Électronique','Vêtements','Autres'];
 
 function loadConfig() {
@@ -3140,22 +3307,166 @@ function saveConfig() {
   shopConfig.address = document.getElementById('cfgAddress').value  || 'Antananarivo, Madagascar';
   shopConfig.phone   = document.getElementById('cfgPhone').value    || '';
   shopConfig.footer  = document.getElementById('cfgFooter').value   || 'Merci de votre visite !';
-  localStorage.setItem('pos-config', JSON.stringify(shopConfig));
+  _persistConfig();
   showToast('✅ Boutique enregistrée', 'success');
 }
 
+function saveTicketConfig() {
+  shopConfig.ticketLogoPos       = document.getElementById('cfgLogoPos')?.value        || 'center';
+  shopConfig.ticketLogoSize      = document.getElementById('cfgLogoSize')?.value       || 'medium';
+  shopConfig.ticketColor         = document.getElementById('cfgTicketColor')?.value    || '#000000';
+  shopConfig.ticketFont          = document.getElementById('cfgTicketFont')?.value     || 'Arial';
+  shopConfig.ticketSep           = document.getElementById('cfgSepStyle')?.value       || 'dashed';
+  shopConfig.ticketShowNum       = document.getElementById('cfgShowTicketNum')?.checked  ?? true;
+  shopConfig.ticketShowCaissier  = document.getElementById('cfgShowCaissier')?.checked   ?? true;
+  shopConfig.ticketShowSubtotal  = document.getElementById('cfgShowSubtotal')?.checked   ?? true;
+  shopConfig.ticketShowPayDetail = document.getElementById('cfgShowPayDetail')?.checked  ?? true;
+  _persistConfig();
+  renderTicketPreview();
+}
+
+function _persistConfig() {
+  localStorage.setItem('pos-config', JSON.stringify(shopConfig));
+}
+
 function renderConfigPage() {
-  // Remplir champs boutique
+  // Boutique
   document.getElementById('cfgShopName').value = shopConfig.name;
   document.getElementById('cfgAddress').value  = shopConfig.address;
   document.getElementById('cfgPhone').value    = shopConfig.phone;
   document.getElementById('cfgFooter').value   = shopConfig.footer;
-  // Catégories
+  // Ticket
+  const lpos  = document.getElementById('cfgLogoPos');
+  const lsize = document.getElementById('cfgLogoSize');
+  const lcol  = document.getElementById('cfgTicketColor');
+  const lfont = document.getElementById('cfgTicketFont');
+  const lsep  = document.getElementById('cfgSepStyle');
+  if (lpos)  lpos.value  = shopConfig.ticketLogoPos  || 'center';
+  if (lsize) lsize.value = shopConfig.ticketLogoSize  || 'medium';
+  if (lcol)  lcol.value  = shopConfig.ticketColor     || '#000000';
+  if (lfont) lfont.value = shopConfig.ticketFont      || 'Arial';
+  if (lsep)  lsep.value  = shopConfig.ticketSep       || 'dashed';
+  const setChk = (id, val) => { const el = document.getElementById(id); if(el) el.checked = val !== false; };
+  setChk('cfgShowTicketNum',  shopConfig.ticketShowNum);
+  setChk('cfgShowCaissier',   shopConfig.ticketShowCaissier);
+  setChk('cfgShowSubtotal',   shopConfig.ticketShowSubtotal);
+  setChk('cfgShowPayDetail',  shopConfig.ticketShowPayDetail);
+  // Logo
+  _applyLogoPreview(shopConfig.ticketLogo);
+  // Catégories + articles
   renderCategories();
-  // Articles
   renderConfigArticles();
-  // Sync select catégorie du modal produit
   syncCategorySelect();
+  // Prévisualisation
+  renderTicketPreview();
+}
+
+// ============================================================
+// TICKET — PERSONNALISATION
+// ============================================================
+function handleLogoUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  if (file.size > 512000) { showToast('Image trop grande (max 500 Ko)', 'error'); return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    shopConfig.ticketLogo = e.target.result;
+    _persistConfig();
+    _applyLogoPreview(shopConfig.ticketLogo);
+    renderTicketPreview();
+  };
+  reader.readAsDataURL(file);
+}
+
+function _applyLogoPreview(src) {
+  const img  = document.getElementById('logoPreviewImg');
+  const hint = document.getElementById('logoUploadHint');
+  const row  = document.getElementById('logoClearRow');
+  const opts = document.getElementById('logoOptionsRow');
+  if (!img) return;
+  if (src) {
+    img.src = src;
+    img.style.display = 'block';
+    if (hint) hint.style.display = 'none';
+    if (row)  row.style.display  = 'block';
+    if (opts) opts.style.display = 'block';
+  } else {
+    img.src = '';
+    img.style.display = 'none';
+    if (hint) hint.style.display = 'block';
+    if (row)  row.style.display  = 'none';
+    if (opts) opts.style.display = 'none';
+  }
+}
+
+function removeLogo() {
+  shopConfig.ticketLogo = null;
+  _persistConfig();
+  _applyLogoPreview(null);
+  const input = document.getElementById('logoFileInput');
+  if (input) input.value = '';
+  renderTicketPreview();
+  showToast('Logo supprimé', 'info');
+}
+
+function _ticketSepCss(style) {
+  const map = { dashed:'dashed', solid:'solid', dotted:'dotted', double:'double' };
+  const s = map[style] || 'dashed';
+  return s === 'double'
+    ? 'border:none;border-top:3px double #999;margin:5px 0'
+    : `border:none;border-top:1px ${s} #999;margin:5px 0`;
+}
+
+function _logoSizePx(size) {
+  return { small: 40, medium: 70, large: 100 }[size] || 70;
+}
+
+function _ticketHeaderHtml(tc) {
+  const logoH = _logoSizePx(tc.ticketLogoSize || 'medium');
+  const logoAlign = { left:'left', right:'right', center:'center' }[tc.ticketLogoPos || 'center'];
+  const logoHtml = tc.ticketLogo
+    ? `<div style="text-align:${logoAlign};margin-bottom:4px"><img src="${tc.ticketLogo}" style="height:${logoH}px;max-width:100%;object-fit:contain;border-radius:3px" /></div>`
+    : '';
+  return `${logoHtml}
+    <div style="font-size:14pt;font-weight:bold;text-align:center;margin-bottom:2px;font-family:${tc.ticketFont||'Arial'}">${tc.name}</div>
+    ${tc.address ? `<div style="font-size:9pt;text-align:center;color:#555;margin-bottom:2px">${tc.address}</div>` : ''}
+    ${tc.phone   ? `<div style="font-size:9pt;text-align:center;color:#555;margin-bottom:2px">Tél : ${tc.phone}</div>` : ''}`;
+}
+
+function renderTicketPreview() {
+  const frame = document.getElementById('ticketPreviewFrame');
+  if (!frame) return;
+  const tc = shopConfig;
+  const sep = _ticketSepCss(tc.ticketSep);
+  const font = tc.ticketFont || 'Arial';
+  const color = tc.ticketColor || '#000000';
+  const logoH = _logoSizePx(tc.ticketLogoSize || 'medium');
+  const logoAlign = { left:'left', right:'right', center:'center' }[tc.ticketLogoPos || 'center'];
+
+  frame.style.fontFamily = font;
+  frame.innerHTML = `
+    ${tc.ticketLogo ? `<div style="text-align:${logoAlign};margin-bottom:6px"><img src="${tc.ticketLogo}" style="height:${logoH}px;max-width:100%;object-fit:contain;border-radius:3px" /></div>` : ''}
+    <div class="p-shop-name" style="font-family:${font}">${tc.name || 'MA BOUTIQUE'}</div>
+    ${tc.address ? `<div class="p-shop-info">${tc.address}</div>` : ''}
+    ${tc.phone   ? `<div class="p-shop-info">Tél : ${tc.phone}</div>` : ''}
+    <hr style="${sep}">
+    ${tc.ticketShowNum !== false      ? `<div class="p-row"><span>Ticket N°</span><span>0001</span></div>` : ''}
+    <div class="p-row"><span>Date</span><span>${new Date().toLocaleDateString('fr-FR')}</span></div>
+    ${tc.ticketShowCaissier !== false  ? `<div class="p-row"><span>Caissier</span><span>Admin</span></div>` : ''}
+    <hr style="${sep}">
+    <div class="p-item"><span>Article exemple ×2</span><span>5 000 Ar</span></div>
+    <div class="p-item"><span>Autre article ×1</span><span>2 500 Ar</span></div>
+    <hr style="${sep}">
+    ${tc.ticketShowSubtotal !== false  ? `<div class="p-row"><span>Sous-total</span><span>7 500 Ar</span></div>` : ''}
+    <div style="background:${color}1a;border:1px solid ${color};border-radius:3px;padding:4px 6px;margin:4px 0">
+      <div style="display:flex;justify-content:space-between;font-weight:bold;font-size:11pt;color:${color}"><span>NET À PAYER</span><span>7 500 Ar</span></div>
+    </div>
+    <hr style="${sep}">
+    ${tc.ticketShowPayDetail !== false ? `<div class="p-row"><span>Espèces reçus</span><span>10 000 Ar</span></div>
+    <div class="p-row"><span>Monnaie</span><span>2 500 Ar</span></div>` : ''}
+    <hr style="${sep}">
+    <div class="p-footer">${tc.footer || 'Merci de votre visite !'}</div>
+  `;
 }
 
 function renderCategories() {
