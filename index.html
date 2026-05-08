@@ -1478,37 +1478,54 @@ function printTicket(sale) {
     document.getElementById('tChangeRow').style.display='none';
   }
   document.getElementById('tFooter').textContent = shopConfig.footer || 'Merci de votre visite !';
-  // Print window
+  // Print window — format 10.5×15cm (imprimante de bureau)
   setTimeout(()=>{
-    const w = window.open('','_blank','width=340,height=700');
+    const w = window.open('','_blank','width=420,height=600');
     w.document.write(`<html><head><title>Ticket</title><style>
-      body{font-family:monospace;font-size:12px;padding:10px;max-width:300px;margin:0 auto}
-      .row{display:flex;justify-content:space-between}
-      .center{text-align:center}
-      .bold{font-weight:bold}
-      hr{border:none;border-top:1px dashed #000}
+      @page{size:10.5cm 15cm;margin:0.5cm}
+      *{box-sizing:border-box}
+      body{font-family:Arial,sans-serif;font-size:10pt;margin:0;padding:0;width:10.5cm;color:#000}
+      .shop-name{font-size:14pt;font-weight:bold;text-align:center;margin-bottom:2px}
+      .shop-info{font-size:9pt;text-align:center;color:#333;margin-bottom:2px}
+      .row{display:flex;justify-content:space-between;align-items:baseline;padding:1px 0}
+      .row span:first-child{color:#555}
+      .row span:last-child{font-weight:500}
+      .row.bold{font-weight:bold;font-size:11pt}
+      .row.bold span:first-child{color:#000}
+      .items-section .row{border-bottom:1px dotted #ccc;padding:3px 0}
+      .items-section .row span:first-child{color:#000;flex:1;margin-right:8px}
+      .items-section .row span:last-child{white-space:nowrap;font-weight:600}
+      hr{border:none;border-top:1px dashed #999;margin:5px 0}
+      hr.solid{border-top:2px solid #000;margin:6px 0}
+      .footer{text-align:center;font-size:9pt;color:#555;margin-top:4px;font-style:italic}
+      .total-box{background:#f5f5f5;border:1px solid #ddd;border-radius:4px;padding:4px 6px;margin:4px 0}
+      @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
     </style></head><body onload="window.print()">
-      <div class="center bold" style="font-size:15px">${shopConfig.name}</div>
-      <div class="center">${shopConfig.address}</div>
-      ${shopConfig.phone ? `<div class="center">${shopConfig.phone}</div>` : ''}
+      <div class="shop-name">${shopConfig.name}</div>
+      ${shopConfig.address?`<div class="shop-info">${shopConfig.address}</div>`:''}
+      ${shopConfig.phone?`<div class="shop-info">Tél : ${shopConfig.phone}</div>`:''}
+      <hr class="solid"/>
+      <div class="row"><span>Date</span><span>${dateStr}</span></div>
+      <div class="row"><span>Caissier</span><span>${sale.caissier||''}</span></div>
       <hr/>
-      <div class="row"><span>Date :</span><span>${dateStr}</span></div>
-      <div class="row"><span>Responsable :</span><span>${sale.caissier||''}</span></div>
-      <hr/>
-      ${sale.items.map(i=>`<div class="row"><span>${i.name} x${i.qty}</span><span>${(i.price*i.qty).toLocaleString()} Ar</span></div>`).join('')}
+      <div class="items-section">
+        ${sale.items.map(i=>`<div class="row"><span>${i.name} <em style="color:#777">×${i.qty}</em></span><span>${(i.price*i.qty).toLocaleString()} Ar</span></div>`).join('')}
+      </div>
       <hr/>
       <div class="row"><span>Sous-total</span><span>${fmt(sale.subtotal??sale.total)}</span></div>
-      ${sale.remise>0?`<div class="row"><span>Remise</span><span>-${fmt(sale.remise)}</span></div>`:''}
-      <div class="row bold"><span>NET À PAYER</span><span>${fmt(sale.total)}</span></div>
-      ${sale.accompte>0?`<div class="row"><span>Accompte</span><span>${fmt(sale.accompte)}</span></div>
-      <div class="row bold"><span>RESTE DÛ</span><span>${fmt(sale.due??0)}</span></div>`:''}
+      ${sale.remise>0?`<div class="row"><span>Remise</span><span style="color:#c00">-${fmt(sale.remise)}</span></div>`:''}
+      <div class="total-box">
+        <div class="row bold"><span>NET À PAYER</span><span>${fmt(sale.total)}</span></div>
+      </div>
+      ${sale.accompte>0?`<div class="row"><span>Acompte versé</span><span>${fmt(sale.accompte)}</span></div>
+      <div class="row bold" style="color:#c00"><span>RESTE DÛ</span><span>${fmt(sale.due??0)}</span></div>`:''}
       <hr/>
       ${sale.method==='cash'
-        ?`<div class="row"><span>Espèces</span><span>${fmt(sale.given)}</span></div>
-          <div class="row"><span>Monnaie</span><span>${fmt(sale.change)}</span></div>`
-        :`<div class="row"><span>📱 ${sale.provider}</span><span>${sale.ref||''}</span></div>`}
-      <hr/>
-      <div class="center">${shopConfig.footer||'Merci de votre visite !'}</div>
+        ?`<div class="row"><span>Espèces reçus</span><span>${fmt(sale.given)}</span></div>
+          <div class="row"><span>Monnaie rendue</span><span>${fmt(sale.change)}</span></div>`
+        :`<div class="row"><span>Paiement mobile (${sale.provider})</span><span>${sale.ref||''}</span></div>`}
+      <hr class="solid"/>
+      <div class="footer">${shopConfig.footer||'Merci de votre visite !'}</div>
     </body></html>`);
     w.document.close();
   }, 200);
