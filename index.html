@@ -251,7 +251,23 @@
   .stat-card {
     background:var(--surface); border:1px solid var(--border); border-radius:18px;
     padding:20px; position:relative; overflow:hidden; box-shadow:var(--shadow);
+    cursor:pointer; transition:transform .15s, box-shadow .15s, border-color .15s; user-select:none;
   }
+  .stat-card:hover { transform:translateY(-3px); box-shadow:0 10px 30px rgba(0,0,0,.22); }
+  .stat-card.active { border-color:var(--accent); box-shadow:0 0 0 3px rgba(0,229,160,.15), var(--shadow); }
+  .stat-detail-hint { font-size:10px; color:var(--muted); margin-top:8px; opacity:.6; }
+  #statDetailPanel {
+    display:none; background:var(--surface); border:1px solid var(--border);
+    border-radius:18px; padding:20px; margin-bottom:20px; box-shadow:var(--shadow);
+    animation:fadeSlideIn .22s ease;
+  }
+  @keyframes fadeSlideIn { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
+  .detail-kpi-row { display:flex; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
+  .detail-kpi { border-radius:12px; padding:10px 16px; border:1px solid; }
+  .detail-table-wrap { border-radius:12px; overflow:hidden; border:1px solid var(--border); overflow-x:auto; }
+  .detail-table-wrap table { width:100%; border-collapse:collapse; min-width:420px; }
+  .detail-table-wrap table th { background:var(--surface2); color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.5px; padding:9px 10px; text-align:left; font-weight:600; white-space:nowrap; }
+  .detail-table-wrap table td { padding:9px 10px; border-top:1px solid var(--border); font-size:13px; vertical-align:middle; }
   .stat-card::before { content:''; position:absolute; top:-20px; right:-20px; width:90px; height:90px; border-radius:50%; opacity:.10; }
   .stat-card.green::before { background:var(--green); }
   .stat-card.blue::before { background:var(--blue); }
@@ -269,6 +285,22 @@
   .bar { width:100%; border-radius:6px 6px 0 0; background:var(--accent); min-height:4px; transition:.6s; }
   .bar-label { font-size:10px; color:var(--muted); }
   .history-table-wrap { background:var(--surface); border:1px solid var(--border); border-radius:18px; overflow:hidden; box-shadow:var(--shadow); }
+
+  /* ===== MEILLEURES VENTES ===== */
+  .bs-period-bar { display:flex; background:var(--surface2); border-radius:12px; padding:4px; border:1px solid var(--border); margin-bottom:14px; }
+  .bs-tab { flex:1; padding:9px 6px; border:none; background:none; color:var(--muted); cursor:pointer; font-size:13px; font-weight:600; border-radius:9px; transition:.2s; }
+  .bs-tab.active { background:var(--surface); color:var(--accent); box-shadow:0 2px 8px rgba(0,0,0,.18); }
+  .bs-table-wrap { background:var(--surface); border:1px solid var(--border); border-radius:16px; overflow:hidden; box-shadow:var(--shadow); }
+  .bs-table-wrap table { width:100%; border-collapse:collapse; }
+  .bs-table-wrap table th { background:var(--surface2); color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.5px; padding:10px 12px; text-align:left; font-weight:600; }
+  .bs-table-wrap table td { padding:10px 12px; border-top:1px solid var(--border); font-size:13px; vertical-align:middle; }
+  .bs-rank { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:50%; font-size:11px; font-weight:800; }
+  .bs-rank-1 { background:rgba(255,200,0,.18); color:#f5c400; }
+  .bs-rank-2 { background:rgba(180,190,200,.14); color:#a0aab4; }
+  .bs-rank-3 { background:rgba(200,120,60,.14); color:#c07840; }
+  .bs-rank-n { background:var(--surface2); color:var(--muted); }
+  .bs-bar-bg { background:var(--surface2); border-radius:99px; height:5px; margin-top:4px; overflow:hidden; }
+  .bs-bar-fill { height:100%; border-radius:99px; background:var(--accent); transition:.5s; }
 
   /* ===== MODAL ===== */
   .modal-overlay {
@@ -862,30 +894,43 @@
   <!-- STATS -->
   <div class="page" id="page-stats">
     <div class="stats-grid">
-      <div class="stat-card green">
+      <div class="stat-card green" id="statCardDay" onclick="openStatDetail('day')">
         <div class="stat-icon">💰</div>
         <div class="stat-label">Ventes aujourd'hui</div>
         <div class="stat-value" id="statToday">0 Ar</div>
         <div class="stat-sub" id="statTodayCount">0 transactions</div>
+        <div class="stat-detail-hint">Cliquer pour voir le détail ›</div>
       </div>
-      <div class="stat-card blue">
+      <div class="stat-card blue" id="statCardMonth" onclick="openStatDetail('month')">
         <div class="stat-icon">📅</div>
         <div class="stat-label">Ventes ce mois</div>
         <div class="stat-value" id="statMonth">0 Ar</div>
         <div class="stat-sub" id="statMonthCount">0 transactions</div>
+        <div class="stat-detail-hint">Cliquer pour voir le détail ›</div>
       </div>
-      <div class="stat-card orange">
+      <div class="stat-card orange" id="statCardStock" onclick="openStatDetail('stock')">
         <div class="stat-icon">📦</div>
         <div class="stat-label">Articles en stock</div>
         <div class="stat-value" id="statItems">0</div>
         <div class="stat-sub" id="statLow">0 en alerte</div>
+        <div class="stat-detail-hint">Cliquer pour voir le détail ›</div>
       </div>
-      <div class="stat-card red">
+      <div class="stat-card red" id="statCardDue" onclick="openStatDetail('due')">
         <div class="stat-icon">⏳</div>
         <div class="stat-label">Reste à payer</div>
         <div class="stat-value" id="statDue">0 Ar</div>
         <div class="stat-sub" id="statDueCount">0 créances</div>
+        <div class="stat-detail-hint">Cliquer pour voir le détail ›</div>
       </div>
+    </div>
+
+    <!-- PANNEAU DÉTAIL — s'ouvre sous les cartes au clic -->
+    <div id="statDetailPanel">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:15px" id="statDetailTitle"></div>
+        <button onclick="closeStatDetail()" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:20px;padding:2px 8px;border-radius:8px;line-height:1" title="Fermer">✕</button>
+      </div>
+      <div id="statDetailBody" style="max-height:480px;overflow-y:auto;overflow-x:hidden"></div>
     </div>
     <div class="chart-placeholder">
       <div class="chart-title">📈 Ventes des 7 derniers jours</div>
@@ -897,6 +942,17 @@
       <div id="monthTable" style="margin-top:14px;display:flex;flex-direction:column;gap:6px"></div>
     </div>
 
+    <!-- MEILLEURES VENTES PAR PÉRIODE -->
+    <div style="margin-top:20px">
+      <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px;margin-bottom:12px">🏆 Meilleures ventes par article</div>
+      <div class="bs-period-bar">
+        <button id="bsTabDay"   class="bs-tab active" onclick="switchBestSalesPeriod('day')">📅 Aujourd'hui</button>
+        <button id="bsTabMonth" class="bs-tab"        onclick="switchBestSalesPeriod('month')">🗓️ Ce mois</button>
+        <button id="bsTabYear"  class="bs-tab"        onclick="switchBestSalesPeriod('year')">📆 Cette année</button>
+      </div>
+      <div id="bestSalesContent"></div>
+    </div>
+
     <div id="statsReservationsBlock" style="margin-top:20px;padding:16px;background:rgba(108,63,197,0.06);border:1px solid rgba(108,63,197,0.18);border-radius:16px;display:none">
       <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:15px;color:var(--accent3);margin-bottom:10px">📋 Réservations en attente</div>
       <div id="statsResList"></div>
@@ -904,11 +960,11 @@
 
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;margin-top:20px">
       <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px">📋 Historique des ventes</div>
-      <button onclick="loadSalesFromScript().then(renderStats)" style="padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--muted);cursor:pointer;font-size:13px">🔄 Actualiser depuis Sheets</button>
+      <button id="statsRefreshBtn" onclick="manualRefreshStats()" style="padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--muted);cursor:pointer;font-size:13px">🔄 Actualiser depuis Sheets</button>
     </div>
     <div class="history-table-wrap">
       <table>
-        <thead><tr><th>Date/Heure</th><th>Articles</th><th>Paiement</th><th>Total</th><th>Reste dû</th><th>Ticket</th></tr></thead>
+        <thead><tr><th>Date/Heure</th><th>Articles</th><th>Paiement</th><th>Total</th><th>Reste dû</th><th>Ticket</th><th>Actions</th></tr></thead>
         <tbody id="historyTbody"></tbody>
       </table>
     </div>
@@ -1392,6 +1448,92 @@
   </div>
 </div>
 
+<!-- MODIFIER UNE VENTE (local uniquement) -->
+<div class="modal-overlay" id="editSaleModal">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-title">
+      <span>✏️ Modifier la vente <span id="editSaleIdLabel"></span></span>
+      <button class="modal-close" onclick="closeModal('editSaleModal')">✕</button>
+    </div>
+    <div class="form-group">
+      <label>Nom client</label>
+      <input id="editClientName" placeholder="Nom du client" />
+    </div>
+    <div class="form-group">
+      <label>Contact client</label>
+      <input id="editClientContact" placeholder="Numéro de téléphone" />
+    </div>
+    <div class="form-group">
+      <label style="margin-bottom:6px;display:block">Articles <span style="font-size:11px;color:var(--muted)">(quantité · prix unitaire)</span></label>
+      <div id="editSaleItems"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-group" style="margin:0">
+        <label>Remise (Ar)</label>
+        <input id="editRemise" type="number" min="0" placeholder="0" oninput="recalcEditSale()" />
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Acompte (Ar)</label>
+        <input id="editAccompte" type="number" min="0" placeholder="0" oninput="recalcEditSale()" />
+      </div>
+    </div>
+    <div style="background:var(--surface2);border-radius:12px;padding:12px;margin:12px 0;font-size:13px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="color:var(--muted)">Sous-total</span><span id="editPreviewSubtotal" style="font-family:'DM Mono',monospace">0 Ar</span></div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="color:var(--muted)">Remise</span><span id="editPreviewRemise" style="font-family:'DM Mono',monospace;color:var(--red)">0 Ar</span></div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-weight:700">Net à payer</span><span id="editPreviewTotal" style="font-family:'DM Mono',monospace;font-weight:700;color:var(--accent)">0 Ar</span></div>
+      <div style="display:flex;justify-content:space-between"><span style="color:var(--muted)">Reste dû</span><span id="editPreviewDue" style="font-family:'DM Mono',monospace;color:var(--red)">0 Ar</span></div>
+    </div>
+    <div class="form-group">
+      <label>Mode de paiement</label>
+      <select id="editMethod" onchange="toggleEditPayFields()">
+        <option value="cash">💵 Espèces</option>
+        <option value="mobile">📱 Mobile Money</option>
+      </select>
+    </div>
+    <div id="editMobileFields" style="display:none">
+      <div class="form-group">
+        <label>Opérateur</label>
+        <select id="editProvider">
+          <option value="MVola">MVola</option>
+          <option value="Airtel Money">Airtel Money</option>
+          <option value="Orange Money">Orange Money</option>
+          <option value="Bmoov">Bmoov</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Référence transaction</label>
+        <input id="editRef" placeholder="Numéro de transaction" />
+      </div>
+    </div>
+    <div style="background:rgba(255,200,0,0.07);border:1px solid rgba(255,200,0,0.2);border-radius:10px;padding:10px;font-size:12px;color:var(--muted);margin-bottom:12px">
+      ⚠️ Modification locale uniquement — les données Google Sheets ne sont pas modifiées.
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal('editSaleModal')">Annuler</button>
+      <button class="btn-primary" onclick="saveEditSale()">✅ Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- CONFIRMER SUPPRESSION D'UNE VENTE -->
+<div class="modal-overlay" id="deleteSaleModal">
+  <div class="modal" style="max-width:400px;text-align:center">
+    <div class="modal-title" style="justify-content:center;border-bottom:none;padding-bottom:0">
+      <span style="font-size:18px">🗑️ Supprimer la vente</span>
+    </div>
+    <div style="color:var(--muted);font-size:14px;padding:16px 0">
+      Retirer la vente <strong id="deleteSaleIdLabel" style="color:var(--text)">#0</strong> de l'affichage local ?<br><br>
+      <span style="font-size:12px;background:rgba(255,60,60,0.08);border:1px solid rgba(255,60,60,0.2);border-radius:8px;padding:8px 12px;display:inline-block;color:var(--red)">
+        ⚠️ L'enregistrement dans Google Sheets n'est pas affecté.
+      </span>
+    </div>
+    <div class="modal-footer" style="justify-content:center">
+      <button class="btn-secondary" onclick="closeModal('deleteSaleModal')">Annuler</button>
+      <button class="btn-primary" style="background:var(--red);border-color:var(--red)" onclick="confirmDeleteSale()">🗑️ Supprimer localement</button>
+    </div>
+  </div>
+</div>
+
 <!-- TICKET D'IMPRESSION -->
 <div id="ticket-print">
   <div class="ticket-center ticket-bold" style="font-size:14px" id="tShopName">MA BOUTIQUE</div>
@@ -1581,7 +1723,7 @@ function showPage(id, btn, bnavBtn) {
   document.querySelectorAll('.nav-btn').forEach(b => {
     if (b.getAttribute('onclick') && b.getAttribute('onclick').includes("'"+id+"'")) b.classList.add('active');
   });
-  if (id==='stats')        renderStats();
+  if (id==='stats')        { renderStats(); _autoRefreshStats(); }
   if (id==='config')       renderConfigPage();
   if (id==='users')        renderUsersPage();
   if (id==='reservations') renderReservations();
@@ -2604,6 +2746,252 @@ function saleDateKey(str) {
 }
 
 // ============================================================
+// DÉTAIL DES CARTES STATISTIQUES
+// ============================================================
+let _openStatType = null;
+
+function openStatDetail(type) {
+  const panel = document.getElementById('statDetailPanel');
+  if (!panel) return;
+  // Même carte = fermer
+  if (_openStatType === type && panel.style.display !== 'none') {
+    closeStatDetail();
+    return;
+  }
+  _openStatType = type;
+  ['Day','Month','Stock','Due'].forEach(t => {
+    const c = document.getElementById('statCard' + t);
+    if (c) c.classList.toggle('active', t.toLowerCase() === type);
+  });
+  const titles = {
+    day:   '💰 Ventes du jour — ' + new Date().toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long', year:'numeric'}),
+    month: '📅 Ventes du mois — ' + new Date().toLocaleDateString('fr-FR', {month:'long', year:'numeric'}),
+    stock: '📦 Détail du stock',
+    due:   '⏳ Créances — reste à percevoir'
+  };
+  document.getElementById('statDetailTitle').textContent = titles[type];
+  document.getElementById('statDetailBody').innerHTML = _buildStatDetail(type);
+  panel.style.display = 'block';
+  // Relancer l'animation
+  panel.style.animation = 'none';
+  void panel.offsetHeight;
+  panel.style.animation = '';
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function closeStatDetail() {
+  const panel = document.getElementById('statDetailPanel');
+  if (panel) panel.style.display = 'none';
+  ['Day','Month','Stock','Due'].forEach(t => {
+    const c = document.getElementById('statCard' + t);
+    if (c) c.classList.remove('active');
+  });
+  _openStatType = null;
+}
+
+function _buildStatDetail(type) {
+  if (type === 'day')   return _detailDay();
+  if (type === 'month') return _detailMonth();
+  if (type === 'stock') return _detailStock();
+  if (type === 'due')   return _detailDue();
+  return '';
+}
+
+/* ── KPI badge helper ── */
+function _kpi(label, value, color, bg) {
+  return `<div class="detail-kpi" style="background:${bg};border-color:${color}">
+    <div style="font-size:11px;color:var(--muted);margin-bottom:2px">${label}</div>
+    <div style="font-family:'DM Mono',monospace;font-weight:800;font-size:18px;color:${color}">${value}</div>
+  </div>`;
+}
+
+/* ── Ligne de vente réutilisable ── */
+function _saleRow(s) {
+  const d = parseSaleDate(s.date);
+  const dateStr = d ? d.toLocaleString('fr-FR') : '—';
+  const items   = (s.items || []).map(i => `${i.name||'?'} ×${i.qty||1}`).join(', ');
+  const total   = Number(s.total)   || 0;
+  const due     = Number(s.due)     || 0;
+  const client  = s.clientName
+    ? `<div style="font-size:11px;color:var(--muted)">👤 ${s.clientName}${s.clientContact ? ' · ' + s.clientContact : ''}</div>`
+    : '';
+  return `<tr>
+    <td><div>${dateStr}</div>${client}</td>
+    <td style="font-size:12px;max-width:200px">${items}</td>
+    <td style="white-space:nowrap">${s.method==='cash'?'💵 Espèces':'📱 '+(s.provider||'Mobile')}</td>
+    <td class="td-mono" style="text-align:right;font-weight:700;color:var(--accent)">${fmt(total)}</td>
+    <td class="td-mono" style="text-align:right;font-weight:${due>0?700:400};color:${due>0?'var(--red)':'var(--muted)'}">${due>0?fmt(due):'—'}</td>
+  </tr>`;
+}
+
+function _salesTableWrap(salesArr) {
+  if (salesArr.length === 0)
+    return '<div style="text-align:center;color:var(--muted);padding:24px">Aucune vente sur cette période.</div>';
+  return `<div class="detail-table-wrap">
+    <table>
+      <thead><tr>
+        <th>Date / Client</th><th>Articles</th><th>Paiement</th>
+        <th style="text-align:right">Total</th><th style="text-align:right">Reste dû</th>
+      </tr></thead>
+      <tbody>${salesArr.map(_saleRow).join('')}</tbody>
+    </table></div>`;
+}
+
+/* ── Ventes du jour ── */
+function _detailDay() {
+  const today = new Date().toDateString();
+  const list  = sales.filter(s => { const d = parseSaleDate(s.date); return d && d.toDateString() === today; });
+  const ca    = list.reduce((s,v) => s + (Number(v.total)||0), 0);
+  const due   = list.reduce((s,v) => s + (Number(v.due)||0),   0);
+  const cash  = list.filter(s => s.method==='cash').reduce((s,v) => s + (Number(v.total)||0), 0);
+  const mob   = list.filter(s => s.method!=='cash').reduce((s,v) => s + (Number(v.total)||0), 0);
+  return `<div class="detail-kpi-row">
+    ${_kpi('CA du jour',     fmt(ca),          'var(--accent)', 'rgba(0,229,160,.07)')}
+    ${_kpi('Transactions',   list.length,       'var(--blue)',   'rgba(74,158,255,.07)')}
+    ${_kpi('💵 Espèces',     fmt(cash),         'var(--text)',   'var(--surface2)')}
+    ${_kpi('📱 Mobile',      fmt(mob),          'var(--text)',   'var(--surface2)')}
+    ${due > 0 ? _kpi('Reste à percevoir', fmt(due), 'var(--red)', 'rgba(255,71,87,.07)') : ''}
+  </div>${_salesTableWrap(list)}`;
+}
+
+/* ── Ventes du mois ── */
+function _detailMonth() {
+  const key  = new Date().toISOString().slice(0, 7);
+  const list = sales.filter(s => saleDateKey(s.date).startsWith(key));
+  const ca   = list.reduce((s,v) => s + (Number(v.total)||0), 0);
+  const due  = list.reduce((s,v) => s + (Number(v.due)||0),   0);
+  const cash = list.filter(s => s.method==='cash').reduce((s,v) => s + (Number(v.total)||0), 0);
+  const mob  = list.filter(s => s.method!=='cash').reduce((s,v) => s + (Number(v.total)||0), 0);
+  return `<div class="detail-kpi-row">
+    ${_kpi('CA du mois',     fmt(ca),           'var(--accent)', 'rgba(0,229,160,.07)')}
+    ${_kpi('Transactions',   list.length,        'var(--blue)',   'rgba(74,158,255,.07)')}
+    ${_kpi('💵 Espèces',     fmt(cash),          'var(--text)',   'var(--surface2)')}
+    ${_kpi('📱 Mobile',      fmt(mob),           'var(--text)',   'var(--surface2)')}
+    ${due > 0 ? _kpi('Reste à percevoir', fmt(due), 'var(--red)', 'rgba(255,71,87,.07)') : ''}
+  </div>${_salesTableWrap(list)}`;
+}
+
+/* ── Articles en stock ── */
+function _detailStock() {
+  if (products.length === 0)
+    return '<div style="text-align:center;color:var(--muted);padding:24px">Aucun article enregistré.</div>';
+  const low   = products.filter(p => p.stock > 0 && p.stock <= p.minStock).length;
+  const out   = products.filter(p => p.stock <= 0).length;
+  const valV  = products.reduce((s,p) => s + p.stock * (p.price||0), 0);
+  const valA  = products.reduce((s,p) => s + p.stock * (p.cost||0),  0);
+  const sorted = [...products].sort((a,b) => {
+    const sa = a.stock<=0?0:a.stock<=a.minStock?1:2;
+    const sb = b.stock<=0?0:b.stock<=b.minStock?1:2;
+    return sa - sb;
+  });
+  const rows = sorted.map(p => {
+    const badge = p.stock <= 0
+      ? `<span class="badge badge-out">⛔ Épuisé</span>`
+      : p.stock <= p.minStock
+        ? `<span class="badge badge-low">⚠️ Faible</span>`
+        : `<span class="badge badge-ok">✅ OK</span>`;
+    const stockColor = p.stock<=0?'var(--red)':p.stock<=p.minStock?'var(--yellow)':'var(--green)';
+    return `<tr>
+      <td><div style="font-weight:600">${p.emoji||'📦'} ${p.name}</div><div style="font-size:11px;color:var(--muted)">${p.cat||''} · ${p.code||''}</div></td>
+      <td class="td-mono" style="text-align:right">${fmt(p.price||0)}</td>
+      <td class="td-mono" style="text-align:right;color:var(--muted)">${fmt(p.cost||0)}</td>
+      <td style="text-align:right">
+        <span style="font-family:'DM Mono',monospace;font-weight:700;color:${stockColor}">${p.stock}</span>
+        <span style="font-size:11px;color:var(--muted)"> / min ${p.minStock}</span>
+      </td>
+      <td>${badge}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="detail-kpi-row">
+    ${_kpi('Total articles',  products.length,  'var(--accent)', 'rgba(0,229,160,.07)')}
+    ${low>0 ? _kpi('Stock faible', low,         'var(--yellow)', 'rgba(255,184,48,.07)') : ''}
+    ${out>0 ? _kpi('Épuisés',      out,         'var(--red)',    'rgba(255,71,87,.07)')  : ''}
+    ${_kpi('Valeur (vente)',  fmt(valV),         'var(--blue)',   'rgba(74,158,255,.07)')}
+    ${_kpi('Valeur (achat)',  fmt(valA),         'var(--muted)',  'var(--surface2)')}
+  </div>
+  <div class="detail-table-wrap">
+    <table>
+      <thead><tr>
+        <th>Article</th>
+        <th style="text-align:right">Prix vente</th>
+        <th style="text-align:right">Prix achat</th>
+        <th style="text-align:right">Stock</th>
+        <th>Statut</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+/* ── Créances (reste à payer) ── */
+function _detailDue() {
+  const list  = sales.filter(s => (Number(s.due)||0) > 0);
+  if (list.length === 0)
+    return '<div style="text-align:center;color:var(--green);padding:24px;font-weight:600">✅ Aucune créance en cours.</div>';
+  const total = list.reduce((s,v) => s + (Number(v.due)||0), 0);
+  const rows  = list.map(s => {
+    const d      = parseSaleDate(s.date);
+    const dateStr = d ? d.toLocaleString('fr-FR') : '—';
+    const items  = (s.items||[]).map(i => `${i.name||'?'} ×${i.qty||1}`).join(', ');
+    const client = s.clientName
+      ? `<div style="font-size:11px;color:var(--muted)">👤 ${s.clientName}${s.clientContact?' · '+s.clientContact:''}</div>` : '';
+    return `<tr>
+      <td><div>${dateStr}</div>${client}</td>
+      <td style="font-size:12px;max-width:180px">${items}</td>
+      <td class="td-mono" style="text-align:right">${fmt(Number(s.total)||0)}</td>
+      <td class="td-mono" style="text-align:right;color:var(--muted)">${fmt(Number(s.accompte)||0)}</td>
+      <td class="td-mono" style="text-align:right;font-weight:800;color:var(--red)">${fmt(Number(s.due)||0)}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="detail-kpi-row">
+    ${_kpi('Total à percevoir', fmt(total), 'var(--red)',    'rgba(255,71,87,.07)')}
+    ${_kpi('Créances',          list.length, 'var(--yellow)', 'rgba(255,184,48,.07)')}
+  </div>
+  <div class="detail-table-wrap">
+    <table>
+      <thead><tr>
+        <th>Date / Client</th><th>Articles</th>
+        <th style="text-align:right">Total</th>
+        <th style="text-align:right">Acompte</th>
+        <th style="text-align:right">Reste dû</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+// ============================================================
+// AUTO-REFRESH STATS (avec cooldown 45 s pour ne pas spammer Sheets)
+// ============================================================
+let _lastStatsRefresh = 0;
+
+async function _autoRefreshStats() {
+  if (!APPS_SCRIPT_URL) return;
+  const now = Date.now();
+  if (now - _lastStatsRefresh < 45000) return;   // cooldown 45 s
+  _lastStatsRefresh = now;
+
+  const btn = document.getElementById('statsRefreshBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Actualisation...'; }
+
+  await loadSalesFromScript();
+
+  if (btn) { btn.disabled = false; btn.textContent = '🔄 Actualiser depuis Sheets'; }
+  renderStats();
+}
+
+// Bouton manuel — ignore le cooldown
+async function manualRefreshStats() {
+  if (!APPS_SCRIPT_URL) {
+    showToast('⚠️ URL Apps Script non configurée', 'error');
+    return;
+  }
+  _lastStatsRefresh = 0;   // réinitialise le cooldown
+  await _autoRefreshStats();
+  showToast('✅ Données actualisées');
+}
+
+// ============================================================
 // STATS
 // ============================================================
 function renderStats() {
@@ -2696,9 +3084,19 @@ function renderStats() {
   const tbody = document.getElementById('historyTbody');
   if (!tbody) return;
   if (sales.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">Aucune vente enregistrée</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:24px">Aucune vente enregistrée</td></tr>';
     return;
   }
+  // Meilleures ventes — rafraîchir selon la période active
+  renderBestSales(_bsPeriod);
+
+  // Panneau détail ouvert — rafraîchir son contenu
+  if (_openStatType) {
+    const body = document.getElementById('statDetailBody');
+    if (body) body.innerHTML = _buildStatDetail(_openStatType);
+  }
+
+  const isAdmin = currentUser && currentUser.role === 'admin';
   tbody.innerHTML = sales.slice(0,20).map(s => {
     const due = Number(s.due) || 0;
     const total = Number(s.total) || 0;
@@ -2708,6 +3106,10 @@ function renderStats() {
     const dueCell = due > 0
       ? `<td class="td-mono" style="font-weight:700;color:var(--red)">${fmt(due)}</td>`
       : `<td class="td-mono" style="color:var(--muted)">—</td>`;
+    const adminActions = isAdmin
+      ? `<button class="btn-icon" onclick="openEditSaleModal(${s.id})" title="Modifier" style="margin-left:4px">✏️</button>
+         <button class="btn-icon" onclick="openDeleteSaleModal(${s.id})" title="Supprimer" style="margin-left:2px;color:var(--red)">🗑️</button>`
+      : '';
     return `<tr>
       <td>${dateStr}</td>
       <td>${items.map(i=>`${i.name||'?'} x${i.qty||1}`).join(', ')}</td>
@@ -2715,6 +3117,7 @@ function renderStats() {
       <td class="td-mono" style="font-weight:600;color:var(--accent)">${fmt(total)}</td>
       ${dueCell}
       <td><button class="btn-icon" onclick="reprintTicket(${s.id})" title="Réimprimer">🖨️</button></td>
+      <td style="white-space:nowrap">${adminActions}</td>
     </tr>`;
   }).join('');
 }
@@ -2723,6 +3126,243 @@ function reprintTicket(id) {
   if(s) printTicket(s);
 }
 
+// ============================================================
+// MEILLEURES VENTES PAR ARTICLE (local uniquement)
+// ============================================================
+let _bsPeriod = 'day';
+
+function switchBestSalesPeriod(period) {
+  _bsPeriod = period;
+  ['day','month','year'].forEach(p => {
+    const btn = document.getElementById('bsTab' + p.charAt(0).toUpperCase() + p.slice(1));
+    if (btn) btn.classList.toggle('active', p === period);
+  });
+  renderBestSales(period);
+}
+
+function _filterSalesByPeriod(period) {
+  const today      = new Date().toDateString();
+  const thisMonth  = new Date().toISOString().slice(0, 7);
+  const thisYear   = new Date().getFullYear().toString();
+  return sales.filter(s => {
+    const d = parseSaleDate(s.date);
+    if (!d) return false;
+    if (period === 'day')   return d.toDateString() === today;
+    if (period === 'month') return saleDateKey(s.date).startsWith(thisMonth);
+    return saleDateKey(s.date).startsWith(thisYear);
+  });
+}
+
+function _aggregateArticles(filtered) {
+  const map = {};
+  filtered.forEach(sale => {
+    (sale.items || []).forEach(item => {
+      const name = (item.name || '?').trim();
+      if (!map[name]) map[name] = { name, qty: 0, price: 0, total: 0, txCount: 0 };
+      const q = Number(item.qty)   || 1;
+      const p = Number(item.price) || 0;
+      map[name].qty     += q;
+      map[name].total   += q * p;
+      map[name].price    = p;     // prix le plus récent
+      map[name].txCount += 1;
+    });
+  });
+  return Object.values(map).sort((a, b) => b.total - a.total);
+}
+
+function renderBestSales(period) {
+  const container = document.getElementById('bestSalesContent');
+  if (!container) return;
+
+  const filtered  = _filterSalesByPeriod(period);
+  const articles  = _aggregateArticles(filtered);
+
+  const periodLabel = { day: "aujourd'hui", month: 'ce mois', year: 'cette année' }[period];
+
+  if (articles.length === 0) {
+    container.innerHTML = `<div style="text-align:center;color:var(--muted);font-size:13px;padding:24px 0">Aucune vente ${periodLabel}.</div>`;
+    return;
+  }
+
+  const maxTotal   = articles[0].total || 1;
+  const grandTotal = articles.reduce((s, a) => s + a.total, 0);
+  const grandQty   = articles.reduce((s, a) => s + a.qty,   0);
+
+  const rankClass = i => i === 0 ? 'bs-rank-1' : i === 1 ? 'bs-rank-2' : i === 2 ? 'bs-rank-3' : 'bs-rank-n';
+  const rankEmoji = i => i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i + 1);
+
+  const rows = articles.map((a, i) => {
+    const pct = Math.round(a.total / maxTotal * 100);
+    const share = grandTotal > 0 ? Math.round(a.total / grandTotal * 100) : 0;
+    return `<tr>
+      <td><span class="bs-rank ${rankClass(i)}">${rankEmoji(i)}</span></td>
+      <td>
+        <div style="font-weight:600;color:var(--text)">${a.name}</div>
+        <div class="bs-bar-bg"><div class="bs-bar-fill" style="width:${pct}%"></div></div>
+      </td>
+      <td style="text-align:right;font-family:'DM Mono',monospace;white-space:nowrap">
+        <div style="font-weight:700">${a.qty}</div>
+        <div style="font-size:11px;color:var(--muted)">unité${a.qty>1?'s':''}</div>
+      </td>
+      <td style="text-align:right;font-family:'DM Mono',monospace;white-space:nowrap">
+        <div>${fmt(a.price)}</div>
+        <div style="font-size:11px;color:var(--muted)">/ unité</div>
+      </td>
+      <td style="text-align:right;font-family:'DM Mono',monospace;white-space:nowrap">
+        <div style="font-weight:700;color:var(--accent)">${fmt(a.total)}</div>
+        <div style="font-size:11px;color:var(--muted)">${share}% du CA</div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  const totalRow = `<tr style="background:var(--surface2)">
+    <td colspan="2" style="font-weight:700;font-size:13px;padding:10px 12px">
+      Total — ${articles.length} article${articles.length>1?'s':''} · ${filtered.length} vente${filtered.length>1?'s':''}
+    </td>
+    <td style="text-align:right;font-family:'DM Mono',monospace;font-weight:700;padding:10px 12px">${grandQty}</td>
+    <td></td>
+    <td style="text-align:right;font-family:'DM Mono',monospace;font-weight:800;color:var(--accent);padding:10px 12px">${fmt(grandTotal)}</td>
+  </tr>`;
+
+  container.innerHTML = `
+    <div class="bs-table-wrap">
+      <table>
+        <thead><tr>
+          <th style="width:36px">#</th>
+          <th>Article</th>
+          <th style="text-align:right">Qté</th>
+          <th style="text-align:right">Prix unit.</th>
+          <th style="text-align:right">Montant</th>
+        </tr></thead>
+        <tbody>${rows}${totalRow}</tbody>
+      </table>
+    </div>`;
+}
+
+// ============================================================
+// MODIFIER / SUPPRIMER UNE VENTE — local uniquement (Sheets inchangé)
+// ============================================================
+let _editingSaleId = null;
+let _deletingSaleId = null;
+
+function openEditSaleModal(id) {
+  if (!currentUser || currentUser.role !== 'admin') {
+    showToast('⛔ Réservé aux administrateurs');
+    return;
+  }
+  const s = sales.find(s => s.id === id);
+  if (!s) return;
+  _editingSaleId = id;
+
+  document.getElementById('editSaleIdLabel').textContent = '#' + id;
+  document.getElementById('editClientName').value    = s.clientName    || '';
+  document.getElementById('editClientContact').value = s.clientContact || '';
+  document.getElementById('editRemise').value         = s.remise    || 0;
+  document.getElementById('editAccompte').value       = s.accompte  || 0;
+  document.getElementById('editMethod').value         = s.method    || 'cash';
+
+  // Items — chaque article affiche qty + prix éditables
+  document.getElementById('editSaleItems').innerHTML =
+    (s.items || []).map((item, idx) => `
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+        <span style="flex:1;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${item.name || '?'}</span>
+        <input type="number" min="1" value="${Number(item.qty)||1}"
+          style="width:60px;padding:6px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);text-align:center"
+          oninput="updateEditItem(${idx},'qty',this.value)" title="Quantité" />
+        <input type="number" min="0" value="${Number(item.price)||0}"
+          style="width:90px;padding:6px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);text-align:right"
+          oninput="updateEditItem(${idx},'price',this.value)" title="Prix unitaire (Ar)" />
+        <span style="color:var(--muted);font-size:11px">Ar</span>
+      </div>`).join('');
+
+  toggleEditPayFields();
+  if (s.method === 'mobile') {
+    document.getElementById('editProvider').value = s.provider || 'MVola';
+    document.getElementById('editRef').value      = s.ref      || '';
+  }
+
+  recalcEditSale();
+  openModal('editSaleModal');
+}
+
+function updateEditItem(idx, field, value) {
+  const s = sales.find(s => s.id === _editingSaleId);
+  if (!s || !s.items[idx]) return;
+  s.items[idx][field] = Math.max(field === 'qty' ? 1 : 0, Number(value) || 0);
+  recalcEditSale();
+}
+
+function recalcEditSale() {
+  const s = sales.find(s => s.id === _editingSaleId);
+  if (!s) return;
+  const subtotal = (s.items || []).reduce((t, i) => t + (Number(i.qty)||1) * (Number(i.price)||0), 0);
+  const remise   = Math.max(0, Math.min(subtotal, Number(document.getElementById('editRemise').value)   || 0));
+  const total    = Math.max(0, subtotal - remise);
+  const accompte = Math.max(0, Math.min(total,    Number(document.getElementById('editAccompte').value) || 0));
+  const due      = Math.max(0, total - accompte);
+
+  document.getElementById('editPreviewSubtotal').textContent = fmt(subtotal);
+  document.getElementById('editPreviewRemise').textContent   = fmt(remise);
+  document.getElementById('editPreviewTotal').textContent    = fmt(total);
+  document.getElementById('editPreviewDue').textContent      = fmt(due);
+}
+
+function toggleEditPayFields() {
+  const isMobile = document.getElementById('editMethod').value === 'mobile';
+  document.getElementById('editMobileFields').style.display = isMobile ? '' : 'none';
+}
+
+function saveEditSale() {
+  const s = sales.find(s => s.id === _editingSaleId);
+  if (!s) return;
+
+  const subtotal = (s.items || []).reduce((t, i) => t + (Number(i.qty)||1) * (Number(i.price)||0), 0);
+  const remise   = Math.max(0, Math.min(subtotal, Number(document.getElementById('editRemise').value)   || 0));
+  const total    = Math.max(0, subtotal - remise);
+  const accompte = Math.max(0, Math.min(total,    Number(document.getElementById('editAccompte').value) || 0));
+  const due      = Math.max(0, total - accompte);
+  const method   = document.getElementById('editMethod').value;
+
+  s.clientName    = document.getElementById('editClientName').value.trim();
+  s.clientContact = document.getElementById('editClientContact').value.trim();
+  s.subtotal  = subtotal;
+  s.remise    = remise;
+  s.total     = total;
+  s.accompte  = accompte;
+  s.due       = due;
+  s.method    = method;
+  if (method === 'mobile') {
+    s.provider = document.getElementById('editProvider').value;
+    s.ref      = document.getElementById('editRef').value.trim();
+  }
+
+  saveData();
+  closeModal('editSaleModal');
+  renderStats();
+  showToast('✅ Vente #' + _editingSaleId + ' modifiée localement');
+  _editingSaleId = null;
+}
+
+function openDeleteSaleModal(id) {
+  if (!currentUser || currentUser.role !== 'admin') {
+    showToast('⛔ Réservé aux administrateurs');
+    return;
+  }
+  _deletingSaleId = id;
+  document.getElementById('deleteSaleIdLabel').textContent = '#' + id;
+  openModal('deleteSaleModal');
+}
+
+function confirmDeleteSale() {
+  if (!_deletingSaleId) return;
+  sales = sales.filter(s => s.id !== _deletingSaleId);
+  const deletedId = _deletingSaleId;
+  _deletingSaleId = null;
+  saveData();
+  closeModal('deleteSaleModal');
+  renderStats();
+  showToast('🗑️ Vente #' + deletedId + ' supprimée localement');
+}
 
 // ============================================================
 // PWA — Service Worker + Install + Offline
@@ -3189,6 +3829,14 @@ async function loadSalesFromScript() {
     const sheetIds = new Set(r.sales.map(s => String(s.id)));
     const localOnly = sales.filter(s => !sheetIds.has(String(s.id)));
     sales = [...r.sales, ...localOnly];
+    // Retrier par date décroissante après fusion
+    sales.sort((a, b) => {
+      const da = parseSaleDate(a.date), db = parseSaleDate(b.date);
+      if (!da && !db) return 0;
+      if (!da) return 1;
+      if (!db) return -1;
+      return db - da;
+    });
     saveData();
   }
 }
