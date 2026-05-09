@@ -999,6 +999,7 @@
           <option value="cancelled">Annulées</option>
           <option value="all">Toutes</option>
         </select>
+        <button id="resRefreshBtn" onclick="manualRefreshReservations()" style="padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--muted);cursor:pointer;font-size:13px">🔄 Actualiser</button>
       </div>
     </div>
     <div id="reservationsList"></div>
@@ -1682,6 +1683,7 @@ async function doLogin() {
       await loadProductsFromScript();
       await loadSalesFromScript();
       await loadUsersFromScript();
+      await loadReservationsFromScript();
       await syncPendingOfflineSales();
     }
     applyRolePermissions(currentUser.role);
@@ -1726,7 +1728,7 @@ function showPage(id, btn, bnavBtn) {
   if (id==='stats')        { renderStats(); _autoRefreshStats(); }
   if (id==='config')       renderConfigPage();
   if (id==='users')        renderUsersPage();
-  if (id==='reservations') renderReservations();
+  if (id==='reservations') { renderReservations(); _autoRefreshReservations(); }
   // Garde : caissier ne peut accéder qu'à caisse + réservations
   if (currentUser && currentUser.role !== 'admin' && id !== 'caisse' && id !== 'reservations') {
     showPage('caisse', null, null);
@@ -2058,6 +2060,29 @@ function saveReservation(accompte, depositMethod, given, change, provider, ref, 
 // ============================================================
 // RÉSERVATIONS — AFFICHER
 // ============================================================
+// ── Auto-refresh réservations (cooldown 45 s) ─────────────
+let _lastResRefresh = 0;
+
+async function _autoRefreshReservations() {
+  if (!APPS_SCRIPT_URL) return;
+  const now = Date.now();
+  if (now - _lastResRefresh < 45000) return;
+  _lastResRefresh = now;
+  const btn = document.getElementById('resRefreshBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Actualisation...'; }
+  await loadReservationsFromScript();
+  if (btn) { btn.disabled = false; btn.textContent = '🔄 Actualiser'; }
+  renderReservations();
+  updateResBadge();
+}
+
+async function manualRefreshReservations() {
+  if (!APPS_SCRIPT_URL) { showToast('⚠️ URL Apps Script non configurée', 'error'); return; }
+  _lastResRefresh = 0;
+  await _autoRefreshReservations();
+  showToast('✅ Réservations actualisées');
+}
+
 function renderReservations() {
   const filter = document.getElementById('resFilter')?.value || 'pending';
   let list = reservations.filter(r => filter === 'all' ? true : r.status === filter);
@@ -3852,6 +3877,32 @@ async function loadUsersFromScript() {
     localUsers = [...r.users, ...localOnly];
     saveUsers();
   }
+}
+
+// ── Charger les réservations depuis Sheet ────────────────
+async function loadReservationsFromScript() {
+  if (!APPS_SCRIPT_URL) return;
+  showLoader('Chargement des réservations...');
+  const r = await apiCall({ action: 'getReservations' });
+  hideLoader();
+  if (!r || !r.ok || !Array.isArray(r.reservations)) return;
+
+  // Merger : Sheets fait autorité — conserver les réservations locales absentes du Sheet
+  const sheetIds = new Set(r.reservations.map(res => String(res.id)));
+  const localOnly = reservations.filter(res => !sheetIds.has(String(res.id)));
+  reservations = [...r.reservations, ...localOnly];
+
+  // Trier par date décroissante
+  reservations.sort((a, b) => {
+    const da = new Date(a.date), db = new Date(b.date);
+    return db - da;
+  });
+
+  // Recalibrer nextReservationId pour éviter les collisions avec d'autres postes
+  const maxId = reservations.reduce((m, res) => Math.max(m, Number(res.id) || 0), 0);
+  if (maxId >= nextReservationId) nextReservationId = maxId + 1;
+
+  saveData();
 }
 
 // ── Sauvegarder un utilisateur vers Sheet ────────────────
