@@ -1612,7 +1612,7 @@ let currentFinalizeResId = null;
 // ============================================================
 // UTILS
 // ============================================================
-function fmt(n) { return n.toLocaleString('fr-MG') + ' Ar'; }
+function fmt(n) { const v = Number(n); return (isNaN(v) ? 0 : v).toLocaleString('fr-MG') + ' Ar'; }
 function now() { return new Date().toLocaleString('fr-MG'); }
 function showToast(msg, type='success') {
   const t = document.getElementById('toast-container');
@@ -2109,10 +2109,11 @@ function renderReservations() {
   }
 
   container.innerHTML = list.map(r => {
-    const d = new Date(r.date).toLocaleString('fr-FR');
-    const statusLabel = { pending: 'En attente', completed: 'Finalisée', cancelled: 'Annulée' }[r.status];
-    const statusClass = { pending: 'res-status-pending', completed: 'res-status-completed', cancelled: 'res-status-cancelled' }[r.status];
-    const itemsStr = r.items.map(i => `${i.name} ×${i.qty}`).join(', ');
+    const d = parseSaleDate(r.date);
+    const dateStr = d ? d.toLocaleString('fr-FR') : '—';
+    const statusLabel = { pending: 'En attente', completed: 'Finalisée', cancelled: 'Annulée' }[r.status] || r.status;
+    const statusClass = { pending: 'res-status-pending', completed: 'res-status-completed', cancelled: 'res-status-cancelled' }[r.status] || '';
+    const itemsStr = (r.items || []).map(i => `${i.name||'?'} ×${Number(i.qty)||1} — ${fmt(Number(i.price)||0)}`).join('<br>') || '—';
     const actions = r.status === 'pending' ? `
       <button class="btn-finalize" onclick="openFinalizeModal(${r.id})">✅ Finaliser</button>
       <button class="btn-cancel-res" onclick="cancelReservation(${r.id})">❌ Annuler</button>
@@ -2128,10 +2129,10 @@ function renderReservations() {
         </div>
         <div style="text-align:right">
           <span class="res-status ${statusClass}">${statusLabel}</span>
-          <div class="res-card-date">${d}</div>
+          <div class="res-card-date">${dateStr}</div>
         </div>
       </div>
-      <div class="res-items">📦 ${itemsStr}</div>
+      <div class="res-items" style="line-height:1.8">📦 ${itemsStr}</div>
       <div class="res-amounts">
         <div class="res-amount-item"><span class="lbl">Total</span><span class="val">${fmt(r.total)}</span></div>
         <div class="res-amount-item"><span class="lbl">Acompte versé</span><span class="val" style="color:var(--green)">${fmt(r.accompte)}</span></div>
@@ -3152,14 +3153,14 @@ function renderStats() {
     }
   }
 
-  // Meilleures ventes et panneau détail — après le tableau, erreurs non bloquantes
-  try { renderBestSales(_bsPeriod); } catch(e) { console.warn('renderBestSales error:', e); }
-  try {
-    if (_openStatType) {
+  // Meilleures ventes et panneau détail — après le tableau
+  renderBestSales(_bsPeriod);
+  if (_openStatType) {
+    try {
       const body = document.getElementById('statDetailBody');
       if (body) body.innerHTML = _buildStatDetail(_openStatType);
-    }
-  } catch(e) { console.warn('statDetail error:', e); }
+    } catch(e) { console.warn('statDetail error:', e); }
+  }
 }
 function reprintTicket(id) {
   const s = sales.find(s=>s.id===id);
@@ -3214,42 +3215,46 @@ function renderBestSales(period) {
   const container = document.getElementById('bestSalesContent');
   if (!container) return;
 
+  try {
   const filtered  = _filterSalesByPeriod(period);
   const articles  = _aggregateArticles(filtered);
 
-  const periodLabel = { day: "aujourd'hui", month: 'ce mois', year: 'cette année' }[period];
+  const periodLabel = { day: "aujourd'hui", month: 'ce mois', year: 'cette année' }[period] || period;
 
   if (articles.length === 0) {
     container.innerHTML = `<div style="text-align:center;color:var(--muted);font-size:13px;padding:24px 0">Aucune vente ${periodLabel}.</div>`;
     return;
   }
 
-  const maxTotal   = articles[0].total || 1;
-  const grandTotal = articles.reduce((s, a) => s + a.total, 0);
-  const grandQty   = articles.reduce((s, a) => s + a.qty,   0);
+  const maxTotal   = Math.max(articles[0].total || 0, 1);
+  const grandTotal = articles.reduce((s, a) => s + (Number(a.total) || 0), 0);
+  const grandQty   = articles.reduce((s, a) => s + (Number(a.qty)   || 0), 0);
 
   const rankClass = i => i === 0 ? 'bs-rank-1' : i === 1 ? 'bs-rank-2' : i === 2 ? 'bs-rank-3' : 'bs-rank-n';
-  const rankEmoji = i => i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i + 1);
+  const rankEmoji = i => i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : String(i + 1);
 
   const rows = articles.map((a, i) => {
-    const pct = Math.round(a.total / maxTotal * 100);
-    const share = grandTotal > 0 ? Math.round(a.total / grandTotal * 100) : 0;
+    const qty   = Number(a.qty)   || 0;
+    const price = Number(a.price) || 0;
+    const total = Number(a.total) || 0;
+    const pct   = Math.round(total / maxTotal * 100);
+    const share = grandTotal > 0 ? Math.round(total / grandTotal * 100) : 0;
     return `<tr>
       <td><span class="bs-rank ${rankClass(i)}">${rankEmoji(i)}</span></td>
       <td>
-        <div style="font-weight:600;color:var(--text)">${a.name}</div>
+        <div style="font-weight:600;color:var(--text)">${a.name || '?'}</div>
         <div class="bs-bar-bg"><div class="bs-bar-fill" style="width:${pct}%"></div></div>
       </td>
       <td style="text-align:right;font-family:'DM Mono',monospace;white-space:nowrap">
-        <div style="font-weight:700">${a.qty}</div>
-        <div style="font-size:11px;color:var(--muted)">unité${a.qty>1?'s':''}</div>
+        <div style="font-weight:700">${qty}</div>
+        <div style="font-size:11px;color:var(--muted)">unité${qty>1?'s':''}</div>
       </td>
       <td style="text-align:right;font-family:'DM Mono',monospace;white-space:nowrap">
-        <div>${fmt(a.price)}</div>
+        <div>${fmt(price)}</div>
         <div style="font-size:11px;color:var(--muted)">/ unité</div>
       </td>
       <td style="text-align:right;font-family:'DM Mono',monospace;white-space:nowrap">
-        <div style="font-weight:700;color:var(--accent)">${fmt(a.total)}</div>
+        <div style="font-weight:700;color:var(--accent)">${fmt(total)}</div>
         <div style="font-size:11px;color:var(--muted)">${share}% du CA</div>
       </td>
     </tr>`;
@@ -3277,6 +3282,10 @@ function renderBestSales(period) {
         <tbody>${rows}${totalRow}</tbody>
       </table>
     </div>`;
+  } catch(e) {
+    container.innerHTML = `<div style="color:var(--muted);font-size:13px;padding:16px;text-align:center">⚠️ Erreur affichage meilleures ventes</div>`;
+    console.error('renderBestSales:', e);
+  }
 }
 
 // ============================================================
