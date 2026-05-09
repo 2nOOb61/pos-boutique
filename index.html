@@ -2109,11 +2109,12 @@ function renderReservations() {
   }
 
   container.innerHTML = list.map(r => {
+    try {
     const d = parseSaleDate(r.date);
     const dateStr = d ? d.toLocaleString('fr-FR') : '—';
     const statusLabel = { pending: 'En attente', completed: 'Finalisée', cancelled: 'Annulée' }[r.status] || r.status;
     const statusClass = { pending: 'res-status-pending', completed: 'res-status-completed', cancelled: 'res-status-cancelled' }[r.status] || '';
-    const itemsStr = (r.items || []).map(i => `${i.name||'?'} ×${Number(i.qty)||1} — ${fmt(Number(i.price)||0)}`).join('<br>') || '—';
+    const itemsStr = (Array.isArray(r.items) ? r.items : []).map(i => `${String(i.name||'?')} ×${Number(i.qty)||1} — ${fmt(Number(i.price)||0)}`).join('<br>') || '—';
     const actions = r.status === 'pending' ? `
       <button class="btn-finalize" onclick="openFinalizeModal(${r.id})">✅ Finaliser</button>
       <button class="btn-cancel-res" onclick="cancelReservation(${r.id})">❌ Annuler</button>
@@ -2140,6 +2141,10 @@ function renderReservations() {
       </div>
       <div class="res-actions">${actions}</div>
     </div>`;
+    } catch(e) {
+      console.error('renderReservations card #' + r.id + ':', e);
+      return `<div class="res-card" style="color:var(--muted);font-size:13px;padding:12px">⚠️ Réservation #${r.id} — erreur affichage: ${e.message}</div>`;
+    }
   }).join('');
 }
 
@@ -2773,7 +2778,7 @@ function parseSaleDate(str) {
 // Retourne la portion YYYY-MM-DD pour les comparaisons startsWith
 function saleDateKey(str) {
   if (!str) return '';
-  const m = str.match(/^(\d{4}-\d{2}-\d{2})/);
+  const m = String(str).match(/^(\d{4}-\d{2}-\d{2})/);
   return m ? m[1] : '';
 }
 
@@ -3197,8 +3202,9 @@ function _filterSalesByPeriod(period) {
 function _aggregateArticles(filtered) {
   const map = {};
   filtered.forEach(sale => {
-    (sale.items || []).forEach(item => {
-      const name = (item.name || '?').trim();
+    (Array.isArray(sale.items) ? sale.items : []).forEach(item => {
+      if (!item) return;
+      const name = String(item.name ?? '?').trim() || '?';
       if (!map[name]) map[name] = { name, qty: 0, price: 0, total: 0, txCount: 0 };
       const q = Number(item.qty)   || 1;
       const p = Number(item.price) || 0;
@@ -3283,7 +3289,7 @@ function renderBestSales(period) {
       </table>
     </div>`;
   } catch(e) {
-    container.innerHTML = `<div style="color:var(--muted);font-size:13px;padding:16px;text-align:center">⚠️ Erreur affichage meilleures ventes</div>`;
+    container.innerHTML = `<div style="color:var(--muted);font-size:13px;padding:16px;text-align:center">⚠️ Erreur: ${e.message}</div>`;
     console.error('renderBestSales:', e);
   }
 }
@@ -3911,10 +3917,22 @@ async function loadReservationsFromScript() {
   hideLoader();
   if (!r || !r.ok || !Array.isArray(r.reservations) || r.reservations.length === 0) return;
 
+  // Dédupliquer les articles par nom au sein de chaque réservation (doublon possible dans le Sheet)
+  const deduped = r.reservations.map(res => {
+    const seen = new Set();
+    const items = (Array.isArray(res.items) ? res.items : []).filter(i => {
+      const key = String(i.name ?? '').trim().toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    return { ...res, items };
+  });
+
   // Merger : Sheets fait autorité — conserver les réservations locales absentes du Sheet
-  const sheetIds = new Set(r.reservations.map(res => String(res.id)));
+  const sheetIds = new Set(deduped.map(res => String(res.id)));
   const localOnly = reservations.filter(res => !sheetIds.has(String(res.id)));
-  reservations = [...r.reservations, ...localOnly];
+  reservations = [...deduped, ...localOnly];
 
   // Trier par date décroissante
   reservations.sort((a, b) => {
