@@ -2064,16 +2064,22 @@ function saveReservation(accompte, depositMethod, given, change, provider, ref, 
 let _lastResRefresh = 0;
 
 async function _autoRefreshReservations() {
-  if (!APPS_SCRIPT_URL) return;
+  if (!APPS_SCRIPT_URL) { renderReservations(); return; }
   const now = Date.now();
   if (now - _lastResRefresh < 45000) return;
   _lastResRefresh = now;
   const btn = document.getElementById('resRefreshBtn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Actualisation...'; }
-  await loadReservationsFromScript();
-  if (btn) { btn.disabled = false; btn.textContent = '🔄 Actualiser'; }
-  renderReservations();
-  updateResBadge();
+  try {
+    await loadReservationsFromScript();
+  } catch(e) {
+    console.warn('loadReservationsFromScript error:', e);
+    showToast('⚠️ Erreur chargement réservations — données locales affichées', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 Actualiser'; }
+    renderReservations();
+    updateResBadge();
+  }
 }
 
 async function manualRefreshReservations() {
@@ -2991,7 +2997,7 @@ function _detailDue() {
 let _lastStatsRefresh = 0;
 
 async function _autoRefreshStats() {
-  if (!APPS_SCRIPT_URL) return;
+  if (!APPS_SCRIPT_URL) { renderStats(); return; }
   const now = Date.now();
   if (now - _lastStatsRefresh < 45000) return;   // cooldown 45 s
   _lastStatsRefresh = now;
@@ -2999,10 +3005,15 @@ async function _autoRefreshStats() {
   const btn = document.getElementById('statsRefreshBtn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Actualisation...'; }
 
-  await loadSalesFromScript();
-
-  if (btn) { btn.disabled = false; btn.textContent = '🔄 Actualiser depuis Sheets'; }
-  renderStats();
+  try {
+    await loadSalesFromScript();
+  } catch(e) {
+    console.warn('loadSalesFromScript error:', e);
+    showToast('⚠️ Erreur de chargement — données locales affichées', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 Actualiser depuis Sheets'; }
+    renderStats();   // toujours afficher, même en cas d'erreur réseau
+  }
 }
 
 // Bouton manuel — ignore le cooldown
@@ -3011,9 +3022,9 @@ async function manualRefreshStats() {
     showToast('⚠️ URL Apps Script non configurée', 'error');
     return;
   }
-  _lastStatsRefresh = 0;   // réinitialise le cooldown
+  _lastStatsRefresh = 0;
   await _autoRefreshStats();
-  showToast('✅ Données actualisées');
+  if (sales.length > 0) showToast(`✅ ${sales.length} vente(s) chargée(s)`);
 }
 
 // ============================================================
@@ -3105,46 +3116,50 @@ function renderStats() {
       </div>`).join('') || '<div style="color:var(--muted);font-size:13px;text-align:center;padding:12px">Aucune vente sur cette période</div>';
   }
 
-  // History
+  // History — remplir le tableau EN PREMIER avant tout autre appel
   const tbody = document.getElementById('historyTbody');
-  if (!tbody) return;
-  if (sales.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:24px">Aucune vente enregistrée</td></tr>';
-    return;
+  if (tbody) {
+    if (sales.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:28px">
+        <div style="margin-bottom:10px">Aucune vente enregistrée</div>
+        <button onclick="manualRefreshStats()" style="padding:8px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--muted);cursor:pointer;font-size:13px">🔄 Recharger depuis Sheets</button>
+      </td></tr>`;
+    } else {
+      const isAdmin = currentUser && currentUser.role === 'admin';
+      tbody.innerHTML = sales.slice(0, 50).map(s => {
+        const due   = Number(s.due)   || 0;
+        const total = Number(s.total) || 0;
+        const items = Array.isArray(s.items) ? s.items : [];
+        const d = parseSaleDate(s.date);
+        const dateStr = d ? d.toLocaleString('fr-FR') : '—';
+        const dueCell = due > 0
+          ? `<td class="td-mono" style="font-weight:700;color:var(--red)">${fmt(due)}</td>`
+          : `<td class="td-mono" style="color:var(--muted)">—</td>`;
+        const adminActions = isAdmin
+          ? `<button class="btn-icon" onclick="openEditSaleModal(${s.id})" title="Modifier" style="margin-left:4px">✏️</button>
+             <button class="btn-icon" onclick="openDeleteSaleModal(${s.id})" title="Supprimer" style="margin-left:2px;color:var(--red)">🗑️</button>`
+          : '';
+        return `<tr>
+          <td>${dateStr}</td>
+          <td>${items.map(i=>`${i.name||'?'} x${i.qty||1}`).join(', ')}</td>
+          <td>${s.method==='cash'?'💵 Espèces':`📱 ${s.provider||'Mobile'}`}</td>
+          <td class="td-mono" style="font-weight:600;color:var(--accent)">${fmt(total)}</td>
+          ${dueCell}
+          <td><button class="btn-icon" onclick="reprintTicket(${s.id})" title="Réimprimer">🖨️</button></td>
+          <td style="white-space:nowrap">${adminActions}</td>
+        </tr>`;
+      }).join('');
+    }
   }
-  // Meilleures ventes — rafraîchir selon la période active
-  renderBestSales(_bsPeriod);
 
-  // Panneau détail ouvert — rafraîchir son contenu
-  if (_openStatType) {
-    const body = document.getElementById('statDetailBody');
-    if (body) body.innerHTML = _buildStatDetail(_openStatType);
-  }
-
-  const isAdmin = currentUser && currentUser.role === 'admin';
-  tbody.innerHTML = sales.slice(0,20).map(s => {
-    const due = Number(s.due) || 0;
-    const total = Number(s.total) || 0;
-    const items = Array.isArray(s.items) ? s.items : [];
-    const d = parseSaleDate(s.date);
-    const dateStr = d ? d.toLocaleString('fr-FR') : '—';
-    const dueCell = due > 0
-      ? `<td class="td-mono" style="font-weight:700;color:var(--red)">${fmt(due)}</td>`
-      : `<td class="td-mono" style="color:var(--muted)">—</td>`;
-    const adminActions = isAdmin
-      ? `<button class="btn-icon" onclick="openEditSaleModal(${s.id})" title="Modifier" style="margin-left:4px">✏️</button>
-         <button class="btn-icon" onclick="openDeleteSaleModal(${s.id})" title="Supprimer" style="margin-left:2px;color:var(--red)">🗑️</button>`
-      : '';
-    return `<tr>
-      <td>${dateStr}</td>
-      <td>${items.map(i=>`${i.name||'?'} x${i.qty||1}`).join(', ')}</td>
-      <td>${s.method==='cash'?'💵 Espèces':`📱 ${s.provider||'Mobile'}`}</td>
-      <td class="td-mono" style="font-weight:600;color:var(--accent)">${fmt(total)}</td>
-      ${dueCell}
-      <td><button class="btn-icon" onclick="reprintTicket(${s.id})" title="Réimprimer">🖨️</button></td>
-      <td style="white-space:nowrap">${adminActions}</td>
-    </tr>`;
-  }).join('');
+  // Meilleures ventes et panneau détail — après le tableau, erreurs non bloquantes
+  try { renderBestSales(_bsPeriod); } catch(e) { console.warn('renderBestSales error:', e); }
+  try {
+    if (_openStatType) {
+      const body = document.getElementById('statDetailBody');
+      if (body) body.innerHTML = _buildStatDetail(_openStatType);
+    }
+  } catch(e) { console.warn('statDetail error:', e); }
 }
 function reprintTicket(id) {
   const s = sales.find(s=>s.id===id);
