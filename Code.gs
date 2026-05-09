@@ -71,15 +71,19 @@ function doGet(e) {
     }
   }
 
-  const action = e.parameter.action || 'ping';
-  if (action === 'ping')             return jsonResponse({ ok: true, message: 'POS Backend actif ✅' });
-  if (action === 'login')            return jsonResponse(handleLogin({ username: e.parameter.username || '', password: e.parameter.password || '' }));
-  if (action === 'getProducts')      return jsonResponse(handleGetProducts());
-  if (action === 'getSales')         return jsonResponse(handleGetSales(e.parameter));
-  if (action === 'getUsers')         return jsonResponse(handleGetUsers());
-  if (action === 'getReservations')  return jsonResponse(handleGetReservations());
-  if (action === 'initSheets')       return jsonResponse(initSheets());
-  return jsonResponse({ ok: false, error: 'Action GET inconnue: ' + action });
+  try {
+    const action = e.parameter.action || 'ping';
+    if (action === 'ping')             return jsonResponse({ ok: true, message: 'POS Backend actif ✅' });
+    if (action === 'login')            return jsonResponse(handleLogin({ username: e.parameter.username || '', password: e.parameter.password || '' }));
+    if (action === 'getProducts')      return jsonResponse(handleGetProducts());
+    if (action === 'getSales')         return jsonResponse(handleGetSales(e.parameter));
+    if (action === 'getUsers')         return jsonResponse(handleGetUsers());
+    if (action === 'getReservations')  return jsonResponse(handleGetReservations());
+    if (action === 'initSheets')       return jsonResponse(initSheets());
+    return jsonResponse({ ok: false, error: 'Action GET inconnue: ' + action });
+  } catch(err) {
+    return jsonResponse({ ok: false, error: 'GET error: ' + err.message });
+  }
 }
 
 function jsonResponse(data) {
