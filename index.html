@@ -2096,9 +2096,9 @@ function renderReservations() {
   // Summary (pending only)
   const pending = reservations.filter(r => r.status === 'pending');
   document.getElementById('resSumCount').textContent   = pending.length;
-  document.getElementById('resSumTotal').textContent   = fmt(pending.reduce((s, r) => s + r.total, 0));
-  document.getElementById('resSumAcc').textContent     = fmt(pending.reduce((s, r) => s + r.accompte, 0));
-  document.getElementById('resSumRestant').textContent = fmt(pending.reduce((s, r) => s + r.restant, 0));
+  document.getElementById('resSumTotal').textContent   = fmt(pending.reduce((s, r) => s + (Number(r.total)   || 0), 0));
+  document.getElementById('resSumAcc').textContent     = fmt(pending.reduce((s, r) => s + (Number(r.accompte) || 0), 0));
+  document.getElementById('resSumRestant').textContent = fmt(pending.reduce((s, r) => s + (Number(r.restant)  || 0), 0));
 
   const container = document.getElementById('reservationsList');
   if (!container) return;
@@ -2260,9 +2260,9 @@ function cancelReservation(id) {
   if (!confirm(`Annuler la réservation #${r.id} de ${r.clientName} ?\nLe stock sera restitué.`)) return;
 
   // Restituer le stock
-  r.items.forEach(item => {
+  (Array.isArray(r.items) ? r.items : []).forEach(item => {
     const p = products.find(pr => pr.name === item.name);
-    if (p) p.stock += item.qty;
+    if (p) p.stock += Number(item.qty) || 0;
   });
 
   r.status = 'cancelled';
@@ -2351,8 +2351,8 @@ function printTicket(sale) {
   setRow('tContactRow', 'tContact', sale.clientContact);
   document.getElementById('tSubtotal').textContent = fmt(sale.subtotal ?? sale.total);
   document.getElementById('tTotal').textContent    = fmt(sale.total);
-  document.getElementById('tItems').innerHTML = sale.items.map(i =>
-    `<div style="display:flex;justify-content:space-between"><span>${i.name} x${i.qty}</span><span>${(i.price*i.qty).toLocaleString()} Ar</span></div>`).join('');
+  document.getElementById('tItems').innerHTML = (Array.isArray(sale.items) ? sale.items : []).map(i =>
+    `<div style="display:flex;justify-content:space-between"><span>${i.name||'?'} x${Number(i.qty)||1}</span><span>${((Number(i.price)||0)*(Number(i.qty)||1)).toLocaleString()} Ar</span></div>`).join('');
   if (sale.remise > 0) {
     document.getElementById('tRemiseRow').style.display = 'flex';
     document.getElementById('tRemise').textContent = '-' + fmt(sale.remise);
@@ -2388,7 +2388,7 @@ function printTicket(sale) {
     ${sale.clientContact ? `<div class="row"><span>Contact</span><span>${sale.clientContact}</span></div>` : ''}
     <hr style="${st.sepLight}"/>
     <div class="items-section">
-      ${sale.items.map(i=>`<div class="row"><span>${i.name} <em style="color:#777">×${i.qty}</em></span><span>${(i.price*i.qty).toLocaleString()} Ar</span></div>`).join('')}
+      ${(Array.isArray(sale.items)?sale.items:[]).map(i=>`<div class="row"><span>${i.name||'?'} <em style="color:#777">×${Number(i.qty)||1}</em></span><span>${((Number(i.price)||0)*(Number(i.qty)||1)).toLocaleString()} Ar</span></div>`).join('')}
     </div>
     <hr style="${st.sepLight}"/>
     ${tc.ticketShowSubtotal !== false ? `<div class="row"><span>Sous-total</span><span>${fmt(sale.subtotal??sale.total)}</span></div>` : ''}
@@ -2428,7 +2428,7 @@ function printReservationTicket(res) {
     ${res.clientContact ? `<div class="row"><span>Contact</span><span>${res.clientContact}</span></div>` : ''}
     <hr style="${st.sepLight}"/>
     <div class="items-section">
-      ${res.items.map(i=>`<div class="row"><span>${i.name} <em style="color:#777">×${i.qty}</em></span><span>${(i.price*i.qty).toLocaleString()} Ar</span></div>`).join('')}
+      ${(Array.isArray(res.items)?res.items:[]).map(i=>`<div class="row"><span>${i.name||'?'} <em style="color:#777">×${Number(i.qty)||1}</em></span><span>${((Number(i.price)||0)*(Number(i.qty)||1)).toLocaleString()} Ar</span></div>`).join('')}
     </div>
     <hr style="${st.sepLight}"/>
     ${tc.ticketShowSubtotal !== false ? `<div class="row"><span>Sous-total</span><span>${fmt(res.subtotal)}</span></div>` : ''}
@@ -3345,7 +3345,7 @@ function openEditSaleModal(id) {
 
 function updateEditItem(idx, field, value) {
   const s = sales.find(s => s.id === _editingSaleId);
-  if (!s || !s.items[idx]) return;
+  if (!s || !Array.isArray(s.items) || !s.items[idx]) return;
   s.items[idx][field] = Math.max(field === 'qty' ? 1 : 0, Number(value) || 0);
   recalcEditSale();
 }
