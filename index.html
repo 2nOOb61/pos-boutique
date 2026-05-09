@@ -3847,9 +3847,9 @@ async function syncStockMove(productName, type, qty, reason) {
 async function loadSalesFromScript() {
   if (!APPS_SCRIPT_URL) return;
   showLoader('Chargement des ventes...');
-  const r = await apiCall({ action: 'getSales', limit: 200 });
+  const r = await apiCall({ action: 'getSales', limit: 1000 });
   hideLoader();
-  if (r && r.ok) {
+  if (r && r.ok && Array.isArray(r.sales)) {
     // Merger: garder les ventes locales non encore dans le Sheet
     const sheetIds = new Set(r.sales.map(s => String(s.id)));
     const localOnly = sales.filter(s => !sheetIds.has(String(s.id)));
@@ -3885,7 +3885,7 @@ async function loadReservationsFromScript() {
   showLoader('Chargement des réservations...');
   const r = await apiCall({ action: 'getReservations' });
   hideLoader();
-  if (!r || !r.ok || !Array.isArray(r.reservations)) return;
+  if (!r || !r.ok || !Array.isArray(r.reservations) || r.reservations.length === 0) return;
 
   // Merger : Sheets fait autorité — conserver les réservations locales absentes du Sheet
   const sheetIds = new Set(r.reservations.map(res => String(res.id)));
