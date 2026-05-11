@@ -958,7 +958,14 @@
       <div id="statsResList"></div>
     </div>
 
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;margin-top:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;margin-top:20px;gap:8px;flex-wrap:wrap">
+      <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px">🖨️ Imprimer rapport</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button onclick="printReportDay()" style="padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text);cursor:pointer;font-size:13px;font-weight:600">📅 Rapport du jour</button>
+        <button onclick="printReportMonth()" style="padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text);cursor:pointer;font-size:13px;font-weight:600">🗓️ Rapport du mois</button>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;margin-top:10px">
       <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px">📋 Historique des ventes</div>
       <button id="statsRefreshBtn" onclick="manualRefreshStats()" style="padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--muted);cursor:pointer;font-size:13px">🔄 Actualiser depuis Sheets</button>
     </div>
@@ -3173,6 +3180,208 @@ function _renderStatsInner() {
 function reprintTicket(id) {
   const s = sales.find(s=>s.id===id);
   if(s) printTicket(s);
+}
+
+// ============================================================
+// RAPPORT DE VENTES — IMPRESSION (jour / mois)
+// ============================================================
+
+function _openReportWindow(htmlBody, title) {
+  setTimeout(() => {
+    const w = window.open('', '_blank', 'width=940,height=720');
+    w.document.write(`<html><head><title>${title}</title><style>
+      @page{size:A4;margin:1.5cm 2cm}
+      *{box-sizing:border-box}
+      body{font-family:Arial,sans-serif;font-size:10pt;margin:0;padding:0;color:#000}
+      table{width:100%;border-collapse:collapse;margin-bottom:16px}
+      th{background:#f0f0f0;font-weight:700;padding:6px 8px;text-align:left;border:1px solid #ddd;font-size:9pt}
+      td{padding:5px 8px;border:1px solid #eee;font-size:9pt;vertical-align:top}
+      tr:nth-child(even) td{background:#fafafa}
+      .mono{font-family:'Courier New',monospace;font-weight:700}
+      .right{text-align:right}
+      .center{text-align:center}
+      .section-title{font-size:12pt;font-weight:800;margin:18px 0 8px;padding-bottom:4px;border-bottom:2px solid #000}
+      .kpi-row{display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+      .kpi{flex:1;min-width:120px;border:1px solid #ddd;border-radius:6px;padding:8px 12px}
+      .kpi-label{font-size:8pt;color:#666;margin-bottom:3px}
+      .kpi-val{font-size:14pt;font-weight:800}
+      @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+    </style></head><body onload="window.print()">${htmlBody}</body></html>`);
+    w.document.close();
+  }, 200);
+}
+
+function _buildReportHtml(period) {
+  const tc  = shopConfig;
+  const now = new Date();
+  const isDay = period === 'day';
+  const periodLabel = isDay
+    ? now.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long', year:'numeric'})
+    : now.toLocaleDateString('fr-FR', {month:'long', year:'numeric'});
+  const reportTitle = isDay ? 'RAPPORT DE VENTES DU JOUR' : 'RAPPORT DE VENTES DU MOIS';
+
+  const list = _filterSalesByPeriod(period);
+  const ca   = list.reduce((s,v) => s + (Number(v.total)||0), 0);
+  const due  = list.reduce((s,v) => s + (Number(v.due)||0),   0);
+  const cash = list.filter(s => s.method==='cash').reduce((s,v) => s + (Number(v.total)||0), 0);
+  const mob  = list.filter(s => s.method!=='cash').reduce((s,v) => s + (Number(v.total)||0), 0);
+
+  const articles   = _aggregateArticles(list);
+  const grandTotal = articles.reduce((s,a) => s + (Number(a.total)||0), 0);
+  const grandQty   = articles.reduce((s,a) => s + (Number(a.qty)||0),   0);
+
+  const pendingRes = reservations.filter(r => r.status === 'pending');
+
+  // --- EN-TÊTE ---
+  let html = `<div style="text-align:center;margin-bottom:12px">
+    ${tc.ticketLogo ? `<img src="${tc.ticketLogo}" style="height:60px;max-width:100%;object-fit:contain;margin-bottom:6px"><br>` : ''}
+    <div style="font-size:18pt;font-weight:800">${tc.name || 'Ma Boutique'}</div>
+    ${tc.address ? `<div style="font-size:9pt;color:#555">${tc.address}</div>` : ''}
+    ${tc.phone   ? `<div style="font-size:9pt;color:#555">Tél : ${tc.phone}</div>` : ''}
+    <div style="font-size:13pt;font-weight:800;margin-top:8px;text-transform:uppercase;border:2px solid #000;padding:5px 18px;display:inline-block;border-radius:4px">${reportTitle}</div>
+    <div style="font-size:10pt;color:#333;margin-top:4px">${periodLabel}</div>
+    <div style="font-size:8pt;color:#888">Édité le ${now.toLocaleString('fr-FR')}</div>
+  </div>
+  <hr style="border:none;border-top:2px solid #000;margin:10px 0"/>`;
+
+  // --- RÉSUMÉ KPI ---
+  html += `<div class="section-title">📊 Résumé</div>
+  <div class="kpi-row">
+    <div class="kpi"><div class="kpi-label">Chiffre d'affaires</div><div class="kpi-val" style="color:#007a45">${fmt(ca)}</div></div>
+    <div class="kpi"><div class="kpi-label">Transactions</div><div class="kpi-val" style="color:#1a6ec7">${list.length}</div></div>
+    <div class="kpi"><div class="kpi-label">💵 Espèces</div><div class="kpi-val">${fmt(cash)}</div></div>
+    <div class="kpi"><div class="kpi-label">📱 Mobile Money</div><div class="kpi-val">${fmt(mob)}</div></div>
+    ${due > 0 ? `<div class="kpi"><div class="kpi-label">Reste à percevoir</div><div class="kpi-val" style="color:#c00">${fmt(due)}</div></div>` : ''}
+  </div>`;
+
+  // --- ARTICLES ---
+  if (articles.length > 0) {
+    html += `<div class="section-title">📦 Détail par article</div>
+    <table>
+      <thead><tr>
+        <th class="center">#</th><th>Article</th>
+        <th class="right">Qté</th><th class="right">Prix unit.</th>
+        <th class="right">Total</th><th class="right">% CA</th>
+      </tr></thead><tbody>`;
+    articles.forEach((a, i) => {
+      const pct = grandTotal > 0 ? ((a.total / grandTotal) * 100).toFixed(1) : '0.0';
+      html += `<tr>
+        <td class="center">${i+1}</td>
+        <td><strong>${a.name}</strong></td>
+        <td class="right mono">${a.qty}</td>
+        <td class="right mono">${fmt(a.price)}</td>
+        <td class="right mono">${fmt(a.total)}</td>
+        <td class="right" style="color:#888">${pct}%</td>
+      </tr>`;
+    });
+    html += `<tr style="background:#e8f4ec;font-weight:800">
+      <td colspan="2"><strong>TOTAL</strong></td>
+      <td class="right mono">${grandQty}</td><td></td>
+      <td class="right mono" style="color:#007a45">${fmt(grandTotal)}</td>
+      <td class="right">100%</td>
+    </tr></tbody></table>`;
+  }
+
+  // --- DÉTAIL DES VENTES ---
+  if (list.length > 0) {
+    html += `<div class="section-title">🧾 Détail des ventes (${list.length})</div>
+    <table>
+      <thead><tr>
+        <th>Date / Heure</th><th>Client</th><th>Articles</th>
+        <th>Moyen de paiement</th>
+        <th class="right">Total</th><th class="right">Acompte</th><th class="right">Reste dû</th>
+      </tr></thead><tbody>`;
+    list.forEach(s => {
+      const d       = parseSaleDate(s.date);
+      const dateStr = d ? d.toLocaleString('fr-FR') : '—';
+      const items   = (Array.isArray(s.items)?s.items:[])
+        .map(i => `${i.name||'?'} ×${Number(i.qty)||1} <em style="color:#666">(${fmt((Number(i.price)||0)*(Number(i.qty)||1))})</em>`)
+        .join('<br>');
+      const payDetail = s.method === 'cash'
+        ? `💵 Espèces${s.given>0 ? `<br><small>Reçu: ${fmt(s.given)} · Rendu: ${fmt(s.change)}</small>` : ''}`
+        : `📱 ${s.provider||'Mobile'}${s.ref ? `<br><small>Réf: ${s.ref}</small>` : ''}`;
+      const dueVal = Number(s.due)||0;
+      const accVal = Number(s.accompte)||0;
+      html += `<tr>
+        <td style="white-space:nowrap;font-size:8.5pt">${dateStr}</td>
+        <td>${s.clientName
+          ? `<strong>${s.clientName}</strong>${s.clientContact?`<br><small>${s.clientContact}</small>`:''}`
+          : '—'}</td>
+        <td style="font-size:8pt">${items}</td>
+        <td style="white-space:nowrap;font-size:8.5pt">${payDetail}</td>
+        <td class="right mono" style="color:#007a45;font-weight:700">${fmt(Number(s.total)||0)}</td>
+        <td class="right mono">${accVal>0 ? fmt(accVal) : '—'}</td>
+        <td class="right mono" style="${dueVal>0?'color:#c00;font-weight:700':'color:#888'}">${dueVal>0?fmt(dueVal):'—'}</td>
+      </tr>`;
+    });
+    const totalAcc = list.reduce((s,v)=>s+(Number(v.accompte)||0),0);
+    html += `<tr style="background:#e8f4ec;font-weight:800">
+      <td colspan="4"><strong>TOTAL</strong></td>
+      <td class="right mono" style="color:#007a45">${fmt(ca)}</td>
+      <td class="right mono">${totalAcc>0?fmt(totalAcc):'—'}</td>
+      <td class="right mono" style="${due>0?'color:#c00':''}">${due>0?fmt(due):'—'}</td>
+    </tr></tbody></table>`;
+  } else {
+    html += `<div class="section-title">🧾 Détail des ventes</div><p style="color:#888;text-align:center">Aucune vente sur cette période.</p>`;
+  }
+
+  // --- RÉSERVATIONS EN ATTENTE ---
+  if (pendingRes.length > 0) {
+    html += `<div class="section-title">📋 Réservations en attente (${pendingRes.length})</div>
+    <table>
+      <thead><tr>
+        <th>N°</th><th>Date</th><th>Client</th><th>Articles</th>
+        <th>Acompte versé</th>
+        <th class="right">Total</th><th class="right">Acompte</th><th class="right">Restant dû</th>
+      </tr></thead><tbody>`;
+    pendingRes.forEach(r => {
+      const d       = parseSaleDate(r.date);
+      const dateStr = d ? d.toLocaleDateString('fr-FR') : '—';
+      const items   = (Array.isArray(r.items)?r.items:[]).map(i=>`${i.name||'?'} ×${Number(i.qty)||1}`).join('<br>');
+      const payAcc  = r.depositMethod==='cash'
+        ? '💵 Espèces'
+        : `📱 ${r.depositProvider||'Mobile'}${r.depositRef?`<br><small>Réf: ${r.depositRef}</small>`:''}`;
+      html += `<tr>
+        <td class="center">#${r.id}</td>
+        <td style="white-space:nowrap">${dateStr}</td>
+        <td>${r.clientName||'—'}${r.clientContact?`<br><small>${r.clientContact}</small>`:''}</td>
+        <td style="font-size:8pt">${items}</td>
+        <td style="font-size:8.5pt">${payAcc}</td>
+        <td class="right mono;font-weight:700">${fmt(Number(r.total)||0)}</td>
+        <td class="right mono" style="color:#007a45">${fmt(Number(r.accompte)||0)}</td>
+        <td class="right mono" style="color:#c00;font-weight:700">${fmt(Number(r.restant)||0)}</td>
+      </tr>`;
+    });
+    const resTotal   = pendingRes.reduce((s,r)=>s+(Number(r.total)||0),0);
+    const resAcc     = pendingRes.reduce((s,r)=>s+(Number(r.accompte)||0),0);
+    const resRestant = pendingRes.reduce((s,r)=>s+(Number(r.restant)||0),0);
+    html += `<tr style="background:#f7eeee;font-weight:800">
+      <td colspan="5"><strong>TOTAL</strong></td>
+      <td class="right mono">${fmt(resTotal)}</td>
+      <td class="right mono" style="color:#007a45">${fmt(resAcc)}</td>
+      <td class="right mono" style="color:#c00">${fmt(resRestant)}</td>
+    </tr></tbody></table>`;
+  }
+
+  // --- PIED DE PAGE ---
+  html += `<hr style="border:none;border-top:1px solid #ccc;margin:20px 0 8px"/>
+  <div style="text-align:center;font-size:8.5pt;color:#666">${tc.footer||'Merci de votre visite !'}</div>`;
+
+  return html;
+}
+
+function printReportDay() {
+  _openReportWindow(
+    _buildReportHtml('day'),
+    'Rapport du jour — ' + new Date().toLocaleDateString('fr-FR')
+  );
+}
+
+function printReportMonth() {
+  _openReportWindow(
+    _buildReportHtml('month'),
+    'Rapport du mois — ' + new Date().toLocaleDateString('fr-FR', {month:'long', year:'numeric'})
+  );
 }
 
 // ============================================================
