@@ -958,11 +958,27 @@
       <div id="statsResList"></div>
     </div>
 
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;margin-top:20px;gap:8px;flex-wrap:wrap">
-      <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px">🖨️ Imprimer rapport</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button onclick="printReportDay()" style="padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text);cursor:pointer;font-size:13px;font-weight:600">📅 Rapport du jour</button>
-        <button onclick="printReportMonth()" style="padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text);cursor:pointer;font-size:13px;font-weight:600">🗓️ Rapport du mois</button>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px;margin-top:20px;margin-bottom:8px">
+      <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px;margin-bottom:12px">🖨️ Imprimer rapport</div>
+      <!-- Raccourcis rapides -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+        <button onclick="printReportDay()" style="padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text);cursor:pointer;font-size:13px;font-weight:600">📅 Aujourd'hui</button>
+        <button onclick="printReportMonth()" style="padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text);cursor:pointer;font-size:13px;font-weight:600">🗓️ Ce mois</button>
+      </div>
+      <!-- Période personnalisée -->
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding-top:12px;border-top:1px solid var(--border)">
+        <span style="font-size:13px;color:var(--muted);white-space:nowrap">Période personnalisée :</span>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;flex:1">
+          <div style="display:flex;align-items:center;gap:6px">
+            <label style="font-size:12px;color:var(--muted)">Du</label>
+            <input type="date" id="reportDateFrom" style="padding:7px 10px;border:1px solid var(--border);border-radius:10px;background:var(--surface2);color:var(--text);font-size:13px;cursor:pointer">
+          </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <label style="font-size:12px;color:var(--muted)">Au</label>
+            <input type="date" id="reportDateTo" style="padding:7px 10px;border:1px solid var(--border);border-radius:10px;background:var(--surface2);color:var(--text);font-size:13px;cursor:pointer">
+          </div>
+          <button onclick="printReportCustom()" style="padding:8px 16px;background:var(--accent);border:none;border-radius:10px;color:#000;cursor:pointer;font-size:13px;font-weight:700">🖨️ Imprimer</button>
+        </div>
       </div>
     </div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;margin-top:10px">
@@ -3211,16 +3227,30 @@ function _openReportWindow(htmlBody, title) {
   }, 200);
 }
 
-function _buildReportHtml(period) {
+function _buildReportHtml(period, customRange) {
   const tc  = shopConfig;
   const now = new Date();
-  const isDay = period === 'day';
-  const periodLabel = isDay
-    ? now.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long', year:'numeric'})
-    : now.toLocaleDateString('fr-FR', {month:'long', year:'numeric'});
-  const reportTitle = isDay ? 'RAPPORT DE VENTES DU JOUR' : 'RAPPORT DE VENTES DU MOIS';
+  let periodLabel, reportTitle, list;
 
-  const list = _filterSalesByPeriod(period);
+  if (customRange) {
+    const { from, to } = customRange;
+    const fromDate = new Date(from + 'T00:00:00');
+    const toDate   = new Date(to   + 'T23:59:59');
+    const fmtDate  = d => d.toLocaleDateString('fr-FR', {day:'numeric', month:'long', year:'numeric'});
+    periodLabel  = `Du ${fmtDate(fromDate)} au ${fmtDate(toDate)}`;
+    reportTitle  = 'RAPPORT DE VENTES — PÉRIODE PERSONNALISÉE';
+    list = sales.filter(s => {
+      const d = parseSaleDate(s.date);
+      return d && d >= fromDate && d <= toDate;
+    });
+  } else {
+    const isDay = period === 'day';
+    periodLabel = isDay
+      ? now.toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long', year:'numeric'})
+      : now.toLocaleDateString('fr-FR', {month:'long', year:'numeric'});
+    reportTitle = isDay ? 'RAPPORT DE VENTES DU JOUR' : 'RAPPORT DE VENTES DU MOIS';
+    list = _filterSalesByPeriod(period);
+  }
   const ca   = list.reduce((s,v) => s + (Number(v.total)||0), 0);
   const due  = list.reduce((s,v) => s + (Number(v.due)||0),   0);
   const cash = list.filter(s => s.method==='cash').reduce((s,v) => s + (Number(v.total)||0), 0);
@@ -3382,6 +3412,15 @@ function printReportMonth() {
     _buildReportHtml('month'),
     'Rapport du mois — ' + new Date().toLocaleDateString('fr-FR', {month:'long', year:'numeric'})
   );
+}
+
+function printReportCustom() {
+  const from = document.getElementById('reportDateFrom').value;
+  const to   = document.getElementById('reportDateTo').value;
+  if (!from || !to) { showToast('⚠️ Veuillez sélectionner une date de début et de fin.', 'error'); return; }
+  if (from > to)    { showToast('⚠️ La date de début doit être avant la date de fin.', 'error'); return; }
+  const label = new Date(from+'T00:00:00').toLocaleDateString('fr-FR') + ' → ' + new Date(to+'T00:00:00').toLocaleDateString('fr-FR');
+  _openReportWindow(_buildReportHtml(null, {from, to}), 'Rapport — ' + label);
 }
 
 // ============================================================
