@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\Gino Ramiada\\\\Desktop\\\\appscit\\\\Nouveau dossier \\(2\\)\\\\pos-boutique\" -Force)",
+      "Bash(Select-Object Name, FullName)",
+      "Bash(Format-List)"
+    ]
+  }
+}

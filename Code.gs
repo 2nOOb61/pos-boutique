@@ -38,6 +38,7 @@ function doPost(e) {
     else if (action === 'addReservation')    result = handleAddReservation(data);
     else if (action === 'updateReservation') result = handleUpdateReservation(data);
     else if (action === 'getReservations')   result = handleGetReservations();
+    else if (action === 'getCSV')            result = handleGetCSV(data);
     else result = { ok: false, error: 'Action inconnue: ' + action };
 
     return jsonResponse(result);
@@ -80,6 +81,7 @@ function doGet(e) {
     if (action === 'getUsers')         return jsonResponse(handleGetUsers());
     if (action === 'getReservations')  return jsonResponse(handleGetReservations());
     if (action === 'initSheets')       return jsonResponse(initSheets());
+    if (action === 'getCSV')           return handleGetCSVResponse(e.parameter);
     return jsonResponse({ ok: false, error: 'Action GET inconnue: ' + action });
   } catch(err) {
     return jsonResponse({ ok: false, error: 'GET error: ' + err.message });
@@ -152,8 +154,17 @@ function initSheets() {
     su = ss.insertSheet(SHEET_USERS);
     su.appendRow(['Username','MotDePasse','Role','Nom','Actif']);
     su.getRange(1,1,1,5).setBackground('#0a0e1a').setFontColor('#00e5a0').setFontWeight('bold');
-    su.appendRow(['admin','1234','admin','Administrateur',true]);
-    su.appendRow(['caissier','0000','caissier','Caissier',true]);
+    su.appendRow(['admin', sha256('1234'), 'admin','Administrateur',true]);
+    su.appendRow(['caissier', sha256('0000'), 'caissier','Caissier',true]);
+  } else {
+    // Migration : hacher les mots de passe en clair (longueur != 64 => pas encore hashé)
+    const uRows = su.getDataRange().getValues();
+    for (let i = 1; i < uRows.length; i++) {
+      const pwd = String(uRows[i][1]);
+      if (pwd.length !== 64) {
+        su.getRange(i + 1, 2).setValue(sha256(pwd));
+      }
+    }
   }
 
   // ── Réservations ─────────────────────────────────────────────
@@ -181,13 +192,21 @@ function handleLogin(data) {
   if (!sheet) return { ok: false, error: 'Feuille Utilisateurs introuvable. Lancez initSheets() d\'abord.' };
 
   const rows = sheet.getDataRange().getValues();
+  const hashedInput = sha256(data.password);
   for (let i = 1; i < rows.length; i++) {
     const [username, pass, role, label, actif] = rows[i];
+    const storedPass = pass.toString();
+    // Accepte le hash SHA-256 (64 hex) OU le mot de passe en clair (migration)
+    const isMatch = storedPass === hashedInput || storedPass === data.password;
     if (
       username.toString().toLowerCase() === data.username.toLowerCase() &&
-      pass.toString() === data.password &&
+      isMatch &&
       actif !== false
     ) {
+      // Migration à la volée : si le mot de passe était encore en clair, le hacher maintenant
+      if (storedPass === data.password && storedPass.length !== 64) {
+        sheet.getRange(i + 1, 2).setValue(hashedInput);
+      }
       return { ok: true, user: { username, role, label } };
     }
   }
@@ -384,9 +403,12 @@ function handleGetSales(params) {
     salesMap[id].items.push({ name: article, qty: Number(qty), price: Number(prixUnit) });
   }
 
-  const limit = Number(params.limit) || 100;
-  const sales = Object.values(salesMap).reverse().slice(0, limit);
-  return { ok: true, sales };
+  const limit  = Number(params.limit)  || 200;
+  const offset = Number(params.offset) || 0;
+  const allSales = Object.values(salesMap).reverse();
+  const total  = allSales.length;
+  const sales  = allSales.slice(offset, offset + limit);
+  return { ok: true, sales, total, offset, limit };
 }
 
 // ============================================================
@@ -452,8 +474,8 @@ function handleSaveUser(data) {
   // Chercher si l'utilisateur existe déjà
   for (let i = 1; i < rows.length; i++) {
     if (rows[i][0].toString().toLowerCase() === u.username.toLowerCase()) {
-      // Mise à jour — mot de passe inchangé si non fourni
-      const newPass = u.pass || rows[i][1];
+      // Mise à jour — hasher le nouveau mot de passe s'il est fourni
+      const newPass = u.pass ? sha256(u.pass) : rows[i][1];
       sheet.getRange(i+1, 1, 1, 5).setValues([[
         u.username, newPass, u.role, u.label,
         u.actif !== false
@@ -464,7 +486,7 @@ function handleSaveUser(data) {
 
   // Nouvel utilisateur
   if (!u.pass) return { ok: false, error: 'Mot de passe obligatoire pour un nouvel utilisateur' };
-  sheet.appendRow([u.username, u.pass, u.role, u.label, u.actif !== false]);
+  sheet.appendRow([u.username, sha256(u.pass), u.role, u.label, u.actif !== false]);
   return { ok: true, action: 'created' };
 }
 
@@ -617,6 +639,54 @@ function handleGetReservations() {
 
   const reservations = Object.values(resMap).reverse();
   return { ok: true, reservations };
+}
+
+// ============================================================
+// SHA-256 (natif Apps Script via Utilities)
+// ============================================================
+function sha256(text) {
+  const raw = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    text,
+    Utilities.Charset.UTF_8
+  );
+  return raw.map(b => ('0' + (b & 0xff).toString(16)).slice(-2)).join('');
+}
+
+// ============================================================
+// EXPORT CSV DES VENTES
+// ============================================================
+function handleGetCSV(params) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_SALES);
+  if (!sheet) return { ok: false, error: 'Feuille Ventes introuvable' };
+
+  const rows  = sheet.getDataRange().getValues();
+  const from  = params.from || '';
+  const to    = params.to   || '';
+
+  const csvLines = [rows[0].join(';')]; // en-tête
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r[0]) continue;
+    if (from || to) {
+      const cellDate = r[1] instanceof Date ? r[1] : new Date(r[1]);
+      if (isNaN(cellDate)) { csvLines.push(r.join(';')); continue; }
+      const d = cellDate.toISOString().slice(0, 10);
+      if (from && d < from) continue;
+      if (to   && d > to)   continue;
+    }
+    csvLines.push(r.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(';'));
+  }
+  return { ok: true, csv: csvLines.join('\n'), rows: csvLines.length - 1 };
+}
+
+function handleGetCSVResponse(params) {
+  const result = handleGetCSV(params);
+  if (!result.ok) return jsonResponse(result);
+  return ContentService
+    .createTextOutput(result.csv)
+    .setMimeType(ContentService.MimeType.CSV);
 }
 
 // ============================================================
