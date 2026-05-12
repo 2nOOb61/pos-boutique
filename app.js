@@ -82,12 +82,13 @@ async function doLogin() {
   let loginOk = false;
   let userInfo = null;
 
-  // Hasher le mot de passe avant envoi (SHA-256)
+  // Hasher le mot de passe pour la comparaison locale uniquement
   const pHashed = await sha256(p);
 
   // Essayer Apps Script en premier si URL configurée
+  // ⚠️ Envoyer le mot de passe en CLAIR au backend (le serveur se charge du hashage)
   if (APPS_SCRIPT_URL) {
-    const r = await loginViaScript(u, pHashed);
+    const r = await loginViaScript(u, p);
     if (r && r.ok) {
       loginOk = true; userInfo = r.user;
     } else if (r && !r.ok) {
