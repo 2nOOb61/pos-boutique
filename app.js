@@ -178,8 +178,9 @@ function showPage(id, btn, bnavBtn) {
   if (id==='config')       renderConfigPage();
   if (id==='users')        renderUsersPage();
   if (id==='reservations') { renderReservations(); _autoRefreshReservations(); }
-  // Garde : caissier ne peut accéder qu'à caisse + réservations
-  if (currentUser && currentUser.role !== 'admin' && id !== 'caisse' && id !== 'reservations') {
+  if (id==='commandes')    { renderCommandes(); _autoRefreshCommandes(); }
+  // Garde : caissier ne peut accéder qu'à caisse + réservations + commandes
+  if (currentUser && currentUser.role !== 'admin' && id !== 'caisse' && id !== 'reservations' && id !== 'commandes') {
     showPage('caisse', null, null);
     showToast('⛔ Accès réservé aux administrateurs', 'error');
   }
@@ -2185,6 +2186,17 @@ function saveData() {
     localStorage.setItem('pos-nextSaleId', String(nextSaleId));
     localStorage.setItem('pos-reservations', JSON.stringify(reservations));
     localStorage.setItem('pos-nextResId', String(nextReservationId));
+    // Photos séparées pour éviter de dépasser la limite localStorage
+    const cmdWithoutPhotos = commandes.map(c => ({ ...c, photos: [] }));
+    localStorage.setItem('pos-commandes', JSON.stringify(cmdWithoutPhotos));
+    localStorage.setItem('pos-nextCmdId', String(nextCommandeId));
+    // Photos stockées séparément par commande ID
+    commandes.forEach(c => {
+      if (c.photos && c.photos.length > 0) {
+        try { localStorage.setItem(`pos-cmd-photos-${c.id}`, JSON.stringify(c.photos)); }
+        catch(e) { /* photos trop lourdes, on ignore */ }
+      }
+    });
   } catch(e) { console.warn('localStorage full?', e); }
 }
 
@@ -2202,6 +2214,20 @@ function loadData() {
     if (ns) nextSaleId = parseInt(ns);
     if (r)  reservations = JSON.parse(r);
     if (nr) nextReservationId = parseInt(nr);
+    const cmds  = localStorage.getItem('pos-commandes');
+    const ncid  = localStorage.getItem('pos-nextCmdId');
+    if (cmds) {
+      commandes = JSON.parse(cmds);
+      // Réattacher les photos
+      commandes.forEach(c => {
+        try {
+          const photos = localStorage.getItem(`pos-cmd-photos-${c.id}`);
+          if (photos) c.photos = JSON.parse(photos);
+          else c.photos = c.photos || [];
+        } catch(e) { c.photos = []; }
+      });
+    }
+    if (ncid) nextCommandeId = parseInt(ncid);
   } catch(e) { console.warn('loadData error:', e); }
 }
 
@@ -2435,7 +2461,7 @@ async function apiCall(payload) {
   if (!APPS_SCRIPT_URL) return null;
 
   // ── LECTURES & LOGIN : requête GET avec params individuels ─
-  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations'];
+  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes'];
   if (getActions.includes(payload.action)) {
     try {
       let url = APPS_SCRIPT_URL + '?action=' + payload.action;
@@ -3045,6 +3071,525 @@ function saveArticleConfig(id) {
   renderStockTable();
   saveProductToScript(p);
   showToast(`✅ ${p.name} mis à jour`);
+}
+
+// ============================================================
+// COMMANDES — ÉTAT
+// ============================================================
+let commandes = [];
+let nextCommandeId = 1;
+let cmdModalItems = [];
+let cmdModalPhotos = [];
+let cmdPayMode = 'cash';
+let cmdProvider = 'MVola';
+let currentCmdFinalizeId = null;
+let cmdFinalPayMode = 'cash';
+let cmdFinalProvider = 'MVola';
+let _lastCmdRefresh = 0;
+
+// Ferme le dropdown stock si clic en dehors
+document.addEventListener('click', e => {
+  const dd = document.getElementById('cmdStockDropdown');
+  const input = document.getElementById('cmdStockSearch');
+  if (dd && input && !dd.contains(e.target) && e.target !== input) dd.style.display = 'none';
+});
+
+// ============================================================
+// COMMANDES — MODAL CRÉATION
+// ============================================================
+function openCommandeModal(fromCart) {
+  cmdModalItems = [];
+  cmdModalPhotos = [];
+  cmdPayMode = 'cash';
+  cmdProvider = 'MVola';
+
+  document.getElementById('cmdClientName').value = '';
+  document.getElementById('cmdClientContact').value = '';
+  document.getElementById('cmdAdresse').value = '';
+  document.getElementById('cmdDateLivraison').value = '';
+  document.getElementById('cmdNotes').value = '';
+  document.getElementById('cmdRemise').value = '';
+  document.getElementById('cmdAccompte').value = '';
+  document.getElementById('cmdGiven').value = '';
+  document.getElementById('cmdMobileRef').value = '';
+  document.getElementById('cmdChangeVal').textContent = '0 Ar';
+  document.getElementById('cmdPhotosPreviews').innerHTML = '';
+  document.getElementById('cmdPhotosInput').value = '';
+  document.getElementById('cmdStockSearch').value = '';
+  document.getElementById('cmdStockDropdown').style.display = 'none';
+
+  if (fromCart && cart.length > 0) {
+    cart.forEach(item => cmdModalItems.push({ name: item.name, qty: item.qty, price: item.price, custom: false }));
+  }
+
+  renderCmdItemsTable();
+  updateCmdTotals();
+  switchCmdPayTab('cash');
+  openModal('commandeModal');
+}
+
+function renderCmdItemsTable() {
+  const container = document.getElementById('cmdItemsList');
+  if (!container) return;
+  if (cmdModalItems.length === 0) {
+    container.innerHTML = '<div style="text-align:center;color:var(--muted);padding:14px;font-size:13px">Aucun article — utilisez la recherche ou "Article libre"</div>';
+    return;
+  }
+  container.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:var(--surface2)">
+        <th style="text-align:left;padding:7px 6px">Article</th>
+        <th style="text-align:center;padding:7px 6px;width:65px">Qté</th>
+        <th style="text-align:right;padding:7px 6px;width:110px">Prix unit. (Ar)</th>
+        <th style="text-align:right;padding:7px 6px;width:90px">S-total</th>
+        <th style="width:28px"></th>
+      </tr></thead>
+      <tbody>${cmdModalItems.map((item, i) => `
+        <tr style="border-bottom:1px solid var(--border)">
+          <td style="padding:7px 6px">
+            ${item.custom
+              ? `<input value="${item.name.replace(/"/g,'&quot;')}" oninput="cmdModalItems[${i}].name=this.value" style="width:100%;padding:4px 8px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:13px" placeholder="Nom de l'article" />`
+              : `<span>${item.name}</span>`}
+            ${item.custom ? '<span style="font-size:10px;color:var(--accent2);margin-left:3px">libre</span>' : ''}
+          </td>
+          <td style="padding:7px 6px;text-align:center">
+            <input type="number" value="${item.qty}" min="1"
+              oninput="cmdModalItems[${i}].qty=Math.max(1,parseInt(this.value)||1);updateCmdTotals()"
+              style="width:55px;padding:4px 6px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:13px;text-align:center" />
+          </td>
+          <td style="padding:7px 6px">
+            <input type="number" value="${item.price}" min="0"
+              oninput="cmdModalItems[${i}].price=Math.max(0,parseFloat(this.value)||0);updateCmdTotals()"
+              style="width:100px;padding:4px 8px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:13px;text-align:right" />
+          </td>
+          <td style="padding:7px 6px;text-align:right;font-family:'DM Mono',monospace;white-space:nowrap">${fmt(item.qty * item.price)}</td>
+          <td style="padding:7px 4px;text-align:center">
+            <button onclick="removeCmdItem(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:17px;padding:2px 4px;line-height:1" title="Supprimer">×</button>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+function removeCmdItem(index) {
+  cmdModalItems.splice(index, 1);
+  renderCmdItemsTable();
+  updateCmdTotals();
+}
+
+function addCmdCustomItem() {
+  cmdModalItems.push({ name: '', qty: 1, price: 0, custom: true });
+  renderCmdItemsTable();
+  updateCmdTotals();
+}
+
+function filterCmdStock() {
+  const q = (document.getElementById('cmdStockSearch')?.value || '').toLowerCase();
+  const dd = document.getElementById('cmdStockDropdown');
+  if (!dd) return;
+  const filtered = products.filter(p => !q || p.name.toLowerCase().includes(q) || (p.code || '').includes(q));
+  if (filtered.length === 0) { dd.style.display = 'none'; return; }
+  dd.style.display = 'block';
+  dd.innerHTML = filtered.slice(0, 8).map(p => `
+    <div class="cmd-stock-item" onclick="addCmdItemFromStock(${p.id})">
+      <span>${p.emoji || '📦'} ${p.name}</span>
+      <span style="font-family:'DM Mono',monospace;color:var(--muted);font-size:12px">${fmt(p.price)}</span>
+    </div>`).join('');
+}
+
+function addCmdItemFromStock(id) {
+  const p = products.find(pr => pr.id === id);
+  if (!p) return;
+  const existing = cmdModalItems.find(i => i.name === p.name && !i.custom);
+  if (existing) { existing.qty++; }
+  else { cmdModalItems.push({ name: p.name, qty: 1, price: p.price, custom: false }); }
+  document.getElementById('cmdStockSearch').value = '';
+  document.getElementById('cmdStockDropdown').style.display = 'none';
+  renderCmdItemsTable();
+  updateCmdTotals();
+}
+
+function updateCmdTotals() {
+  const subtotal = cmdModalItems.reduce((s, i) => s + ((i.qty || 1) * (i.price || 0)), 0);
+  const remise   = Math.max(0, Math.min(subtotal, parseFloat(document.getElementById('cmdRemise')?.value) || 0));
+  const total    = Math.max(0, subtotal - remise);
+  const accompte = Math.max(0, Math.min(total, parseFloat(document.getElementById('cmdAccompte')?.value) || 0));
+  const restant  = Math.max(0, total - accompte);
+  if (document.getElementById('cmdSubtotalVal')) document.getElementById('cmdSubtotalVal').textContent = fmt(subtotal);
+  if (document.getElementById('cmdTotalVal'))    document.getElementById('cmdTotalVal').textContent    = fmt(total);
+  if (document.getElementById('cmdRestantVal'))  document.getElementById('cmdRestantVal').textContent  = fmt(restant);
+  calcCmdChange();
+}
+
+function switchCmdPayTab(mode) {
+  cmdPayMode = mode;
+  document.getElementById('cmdCashSection').style.display   = mode === 'cash'   ? 'block' : 'none';
+  document.getElementById('cmdMobileSection').style.display = mode === 'mobile' ? 'block' : 'none';
+  document.getElementById('tabCmdCash').classList.toggle('active', mode === 'cash');
+  document.getElementById('tabCmdMobile').classList.toggle('active', mode === 'mobile');
+}
+
+function calcCmdChange() {
+  const given    = parseFloat(document.getElementById('cmdGiven')?.value) || 0;
+  const accompte = Math.max(0, parseFloat(document.getElementById('cmdAccompte')?.value) || 0);
+  const change   = given - accompte;
+  const el = document.getElementById('cmdChangeVal');
+  if (el) { el.textContent = fmt(Math.abs(change)); el.className = 'val ' + (change >= 0 ? 'positive' : 'negative'); }
+}
+
+function selectCmdProvider(p) {
+  cmdProvider = p;
+  document.querySelectorAll('#commandeModal .provider-btn').forEach(b => b.classList.remove('active'));
+  const map = { 'MVola':'cmdProvMvola','Airtel Money':'cmdProvAirtel','Orange Money':'cmdProvOrange','Bmoov':'cmdProvBmoov' };
+  if (map[p]) document.getElementById(map[p]).classList.add('active');
+}
+
+async function addCmdPhotos(files) {
+  if (!files || files.length === 0) return;
+  const remaining = 5 - cmdModalPhotos.length;
+  if (remaining <= 0) { showToast('Maximum 5 photos par commande', 'error'); return; }
+  for (const file of Array.from(files).slice(0, remaining)) {
+    if (!file.type.startsWith('image/')) continue;
+    try {
+      const dataUrl = await _resizeImage(file, 600, 600);
+      cmdModalPhotos.push(dataUrl);
+    } catch(e) { showToast('Erreur lecture: ' + file.name, 'error'); }
+  }
+  renderCmdPhotos();
+  document.getElementById('cmdPhotosInput').value = '';
+}
+
+function _resizeImage(file, maxW, maxH) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        let w = img.width, h = img.height;
+        if (w > maxW || h > maxH) { const r = Math.min(maxW/w, maxH/h); w = Math.round(w*r); h = Math.round(h*r); }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', 0.75));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderCmdPhotos() {
+  const container = document.getElementById('cmdPhotosPreviews');
+  if (!container) return;
+  container.innerHTML = cmdModalPhotos.map((src, i) => `
+    <div style="position:relative;display:inline-block">
+      <img src="${src}" style="width:80px;height:80px;object-fit:cover;border-radius:10px;border:2px solid var(--border)" />
+      <button onclick="removeCmdPhoto(${i})" style="position:absolute;top:-6px;right:-6px;background:var(--red);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;line-height:1">×</button>
+    </div>`).join('');
+}
+
+function removeCmdPhoto(index) {
+  cmdModalPhotos.splice(index, 1);
+  renderCmdPhotos();
+}
+
+function saveCommande() {
+  const clientName    = document.getElementById('cmdClientName').value.trim();
+  const clientContact = document.getElementById('cmdClientContact').value.trim();
+  const adresse       = document.getElementById('cmdAdresse').value.trim();
+  const dateLiv       = document.getElementById('cmdDateLivraison').value;
+  const notes         = document.getElementById('cmdNotes').value.trim();
+  const remise        = Math.max(0, parseFloat(document.getElementById('cmdRemise').value) || 0);
+  const accompte      = Math.max(0, parseFloat(document.getElementById('cmdAccompte').value) || 0);
+
+  if (!clientName) { showToast('Le nom du client est obligatoire !', 'error'); return; }
+  if (cmdModalItems.length === 0) { showToast('Ajoutez au moins un article !', 'error'); return; }
+  for (const item of cmdModalItems) {
+    if (!item.name.trim()) { showToast('Tous les articles doivent avoir un nom', 'error'); return; }
+  }
+
+  const subtotal = cmdModalItems.reduce((s, i) => s + ((i.qty||1) * (i.price||0)), 0);
+  const total    = Math.max(0, subtotal - remise);
+  const restant  = Math.max(0, total - accompte);
+
+  if (accompte > total) { showToast("L'acompte ne peut pas dépasser le total !", 'error'); return; }
+
+  let depositProvider = '', depositRef = '';
+  if (accompte > 0) {
+    if (cmdPayMode === 'cash') {
+      const given = parseFloat(document.getElementById('cmdGiven').value) || 0;
+      if (given < accompte) { showToast('Montant remis insuffisant !', 'error'); return; }
+    } else {
+      depositProvider = cmdProvider;
+      depositRef = document.getElementById('cmdMobileRef').value.trim();
+    }
+  }
+
+  const commande = {
+    id:               nextCommandeId++,
+    date:             new Date().toISOString(),
+    caissier:         currentUser?.username || 'caissier',
+    clientName, clientContact,
+    adresseLivraison: adresse,
+    dateLivraison:    dateLiv,
+    items:            cmdModalItems.map(i => ({ name: i.name.trim(), qty: i.qty, price: i.price, custom: !!i.custom })),
+    notes,
+    photos:           [...cmdModalPhotos],
+    subtotal, remise, total, accompte, restant,
+    depositMethod:    cmdPayMode,
+    depositProvider, depositRef,
+    status:           'pending',
+    dateFinalisation: null,
+    saleId:           null
+  };
+
+  commandes.unshift(commande);
+  saveData();
+  syncCommandeToSheets(commande);
+  closeModal('commandeModal');
+  showToast(`🧾 Commande #${commande.id} créée — ${clientName}`);
+  updateCmdBadge();
+
+  if (cart.length > 0 && commande.items.some(ci => cart.find(c2 => c2.name === ci.name))) {
+    if (confirm('Vider le panier maintenant ?')) clearCart();
+  }
+}
+
+// ============================================================
+// COMMANDES — PAGE / AFFICHAGE
+// ============================================================
+async function _autoRefreshCommandes() {
+  if (!APPS_SCRIPT_URL) { renderCommandes(); return; }
+  const now = Date.now();
+  if (now - _lastCmdRefresh < 45000) return;
+  _lastCmdRefresh = now;
+  const btn = document.getElementById('cmdRefreshBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Actualisation...'; }
+  try { await loadCommandesFromScript(); }
+  catch(e) { showToast('⚠️ Erreur chargement commandes', 'error'); }
+  finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 Actualiser'; }
+    renderCommandes();
+    updateCmdBadge();
+  }
+}
+
+async function manualRefreshCommandes() {
+  if (!APPS_SCRIPT_URL) { showToast('⚠️ URL Apps Script non configurée', 'error'); return; }
+  _lastCmdRefresh = 0;
+  await _autoRefreshCommandes();
+  showToast('✅ Commandes actualisées');
+}
+
+function renderCommandes() {
+  const filter = document.getElementById('cmdFilter')?.value || 'pending';
+  const list = commandes.filter(c => filter === 'all' ? true : c.status === filter);
+
+  const pending = commandes.filter(c => c.status === 'pending');
+  if (document.getElementById('cmdSumCount'))   document.getElementById('cmdSumCount').textContent   = pending.length;
+  if (document.getElementById('cmdSumTotal'))   document.getElementById('cmdSumTotal').textContent   = fmt(pending.reduce((s,c)=>s+(Number(c.total)||0),0));
+  if (document.getElementById('cmdSumAcc'))     document.getElementById('cmdSumAcc').textContent     = fmt(pending.reduce((s,c)=>s+(Number(c.accompte)||0),0));
+  if (document.getElementById('cmdSumRestant')) document.getElementById('cmdSumRestant').textContent = fmt(pending.reduce((s,c)=>s+(Number(c.restant)||0),0));
+
+  const container = document.getElementById('commandesList');
+  if (!container) return;
+  if (list.length === 0) {
+    container.innerHTML = `<div style="text-align:center;color:var(--muted);padding:48px 20px;font-size:15px">🧾 Aucune commande ${filter==='pending'?'en cours':''}</div>`;
+    return;
+  }
+
+  container.innerHTML = list.map(c => {
+    try {
+      const d = parseSaleDate(c.date);
+      const dateStr = d ? d.toLocaleString('fr-FR') : '—';
+      const statusLabel = { pending:'En cours', completed:'Livrée', cancelled:'Annulée' }[c.status] || c.status;
+      const statusClass = { pending:'cmd-status-pending', completed:'cmd-status-completed', cancelled:'cmd-status-cancelled' }[c.status] || '';
+      const itemsStr = (c.items||[]).map(i=>`${i.name} ×${i.qty} — ${fmt(i.price)}`).join('<br>')||'—';
+
+      const deliveryHtml = (c.adresseLivraison || c.dateLivraison) ? `
+        <div class="cmd-card-delivery">
+          ${c.adresseLivraison ? `📍 ${c.adresseLivraison}` : ''}
+          ${c.dateLivraison ? ` &nbsp;🗓️ Livraison : <strong>${new Date(c.dateLivraison+'T00:00:00').toLocaleDateString('fr-FR')}</strong>` : ''}
+        </div>` : '';
+
+      const notesHtml = c.notes ? `<div class="cmd-notes">📝 ${c.notes}</div>` : '';
+
+      const photosHtml = (c.photos||[]).length > 0
+        ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${(c.photos||[]).map(src=>`<img src="${src}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:pointer" onclick="window.open(this.src,'_blank')" />`).join('')}</div>` : '';
+
+      const actions = c.status === 'pending'
+        ? `<button class="btn-finalize" onclick="openCmdFinalizeModal(${c.id})">✅ Finaliser</button>
+           <button class="btn-cancel-res" onclick="cancelCommande(${c.id})">❌ Annuler</button>`
+        : '';
+
+      return `
+      <div class="cmd-card">
+        <div class="cmd-card-header">
+          <div>
+            <div class="cmd-card-client">👤 ${c.clientName} <span style="font-size:12px;color:var(--muted);font-weight:400">#${c.id}</span></div>
+            ${c.clientContact ? `<div style="font-size:13px;color:var(--muted)">📞 ${c.clientContact}</div>` : ''}
+          </div>
+          <div style="text-align:right">
+            <span class="cmd-status ${statusClass}">${statusLabel}</span>
+            <div class="cmd-card-date">${dateStr}</div>
+          </div>
+        </div>
+        ${deliveryHtml}
+        <div class="cmd-items">📦 ${itemsStr}</div>
+        ${notesHtml}
+        ${photosHtml}
+        <div class="res-amounts" style="margin-top:12px">
+          <div class="res-amount-item"><span class="lbl">Total</span><span class="val">${fmt(c.total)}</span></div>
+          <div class="res-amount-item"><span class="lbl">Acompte versé</span><span class="val" style="color:var(--green)">${fmt(c.accompte)}</span></div>
+          <div class="res-amount-item"><span class="lbl">Restant dû</span><span class="val" style="color:${c.status==='pending'?'var(--accent2)':'var(--muted)'}">${fmt(c.restant)}</span></div>
+        </div>
+        ${actions ? `<div class="res-actions">${actions}</div>` : ''}
+      </div>`;
+    } catch(e) {
+      return `<div class="cmd-card" style="color:var(--muted);font-size:13px;padding:12px">⚠️ Commande #${c.id} — erreur: ${e.message}</div>`;
+    }
+  }).join('');
+}
+
+function updateCmdBadge() {
+  const n = commandes.filter(c => c.status === 'pending').length;
+  const badge = document.getElementById('navCmdBadge');
+  if (badge) { badge.textContent = n; badge.style.display = n > 0 ? 'inline' : 'none'; }
+}
+
+// ============================================================
+// COMMANDES — FINALISER
+// ============================================================
+function openCmdFinalizeModal(id) {
+  const c = commandes.find(x => x.id === id);
+  if (!c) return;
+  currentCmdFinalizeId = id;
+  document.getElementById('cmdFinalClientInfo').textContent = `👤 ${c.clientName}${c.clientContact?' — '+c.clientContact:''}`;
+  document.getElementById('cmdFinalTotal').textContent   = fmt(c.total);
+  document.getElementById('cmdFinalAcc').textContent     = fmt(c.accompte);
+  document.getElementById('cmdFinalRestant').textContent = fmt(c.restant);
+  document.getElementById('cmdFinGiven').value = '';
+  document.getElementById('cmdFinChangeVal').textContent = '0 Ar';
+  document.getElementById('cmdFinMobileRef').value = '';
+  cmdFinalPayMode = 'cash';
+  cmdFinalProvider = 'MVola';
+  switchCmdFinPayTab('cash');
+  openModal('cmdFinalizeModal');
+}
+
+function switchCmdFinPayTab(mode) {
+  cmdFinalPayMode = mode;
+  document.getElementById('cmdFinCashSection').style.display  = mode==='cash'   ? 'block' : 'none';
+  document.getElementById('cmdFinMobileSection').style.display = mode==='mobile' ? 'block' : 'none';
+  document.getElementById('tabCmdFinCash').classList.toggle('active', mode==='cash');
+  document.getElementById('tabCmdFinMobile').classList.toggle('active', mode==='mobile');
+}
+
+function calcCmdFinChange() {
+  const c = commandes.find(x => x.id === currentCmdFinalizeId);
+  if (!c) return;
+  const given  = parseFloat(document.getElementById('cmdFinGiven').value) || 0;
+  const change = given - c.restant;
+  const el = document.getElementById('cmdFinChangeVal');
+  el.textContent = fmt(Math.abs(change));
+  el.className = 'val ' + (change >= 0 ? 'positive' : 'negative');
+}
+
+function selectCmdFinProvider(p) {
+  cmdFinalProvider = p;
+  document.querySelectorAll('#cmdFinalizeModal .provider-btn').forEach(b => b.classList.remove('active'));
+  const map = { 'MVola':'cmdFinProvMvola','Airtel Money':'cmdFinProvAirtel','Orange Money':'cmdFinProvOrange','Bmoov':'cmdFinProvBmoov' };
+  if (map[p]) document.getElementById(map[p]).classList.add('active');
+}
+
+function confirmCmdFinalize() {
+  const c = commandes.find(x => x.id === currentCmdFinalizeId);
+  if (!c) return;
+  if (cmdFinalPayMode === 'cash') {
+    const given = parseFloat(document.getElementById('cmdFinGiven').value) || 0;
+    if (given < c.restant) { showToast('Montant insuffisant !', 'error'); return; }
+    _doCmdFinalize(c, 'cash', given, given - c.restant, null, null);
+  } else {
+    const ref = document.getElementById('cmdFinMobileRef').value.trim();
+    _doCmdFinalize(c, 'mobile', c.restant, 0, cmdFinalProvider, ref);
+  }
+}
+
+function _doCmdFinalize(c, method, given, change, provider, ref) {
+  const sale = {
+    id:            nextSaleId++,
+    date:          new Date().toISOString(),
+    caissier:      currentUser?.label || 'Caissier',
+    clientName:    c.clientName,
+    clientContact: c.clientContact,
+    items:         c.items.map(i => ({ name: i.name, qty: i.qty, price: i.price })),
+    subtotal:      c.subtotal,
+    remise:        c.remise,
+    total:         c.total,
+    accompte:      c.accompte,
+    due:           0,
+    method, given, change,
+    provider: provider || '',
+    ref:      ref      || '',
+    fromCommande: c.id
+  };
+  sales.unshift(sale);
+  c.status           = 'completed';
+  c.dateFinalisation = new Date().toISOString();
+  c.saleId           = sale.id;
+  saveData();
+  renderStats();
+  syncToAppsScript(sale);
+  syncCmdUpdateToSheets(c);
+  closeModal('cmdFinalizeModal');
+  printTicket(sale);
+  showToast(`✅ Vente #${sale.id} enregistrée — Commande #${c.id} livrée !`);
+  renderCommandes();
+  updateCmdBadge();
+}
+
+// ============================================================
+// COMMANDES — ANNULER
+// ============================================================
+function cancelCommande(id) {
+  const c = commandes.find(x => x.id === id);
+  if (!c || c.status !== 'pending') return;
+  if (!confirm(`Annuler la commande #${c.id} de ${c.clientName} ?`)) return;
+  c.status = 'cancelled';
+  saveData();
+  renderCommandes();
+  updateCmdBadge();
+  syncCmdUpdateToSheets(c);
+  showToast(`Commande #${c.id} annulée`, 'info');
+}
+
+// ============================================================
+// COMMANDES — SYNC GOOGLE SHEETS
+// ============================================================
+async function syncCommandeToSheets(cmd) {
+  if (!APPS_SCRIPT_URL) return;
+  const r = await apiCall({ action: 'addCommande', commande: cmd });
+  if (!r || !r.ok) console.warn('Sync commande échouée:', r?.error || 'Connexion impossible');
+}
+
+async function syncCmdUpdateToSheets(cmd) {
+  if (!APPS_SCRIPT_URL) return;
+  await apiCall({ action: 'updateCommande', id: cmd.id, status: cmd.status, dateFinalisation: cmd.dateFinalisation || '', saleId: cmd.saleId || '' });
+}
+
+async function loadCommandesFromScript() {
+  if (!APPS_SCRIPT_URL) return;
+  const r = await apiCall({ action: 'getCommandes' });
+  if (r && r.ok && Array.isArray(r.commandes) && r.commandes.length > 0) {
+    const sheetIds = new Set(r.commandes.map(c => String(c.id)));
+    const localOnly = commandes.filter(c => !sheetIds.has(String(c.id)));
+    commandes = [...r.commandes, ...localOnly];
+    commandes.sort((a, b) => (parseSaleDate(b.date)||0) - (parseSaleDate(a.date)||0));
+    if (commandes.length > 0) nextCommandeId = Math.max(...commandes.map(c => Number(c.id))) + 1;
+    saveData();
+  }
 }
 
 // ============================================================

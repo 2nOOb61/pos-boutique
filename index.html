@@ -70,6 +70,9 @@
     <button class="bnav-btn admin-only" id="bnav-users" onclick="showPage('users',null,this)">
       <span class="bnav-icon">👥</span>Comptes
     </button>
+    <button class="bnav-btn" id="bnav-commandes" onclick="showPage('commandes',null,this)">
+      <span class="bnav-icon">🧾</span>Commandes
+    </button>
   </div>
 </nav>
 
@@ -101,6 +104,7 @@
     <nav class="topbar-nav">
       <button class="nav-btn active" onclick="showPage('caisse',this)">🛒 Caisse</button>
       <button class="nav-btn" onclick="showPage('reservations',this)">📋 Réservations <span id="navResBadge" style="display:none;background:var(--accent3);color:#fff;border-radius:20px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:2px">0</span></button>
+      <button class="nav-btn" onclick="showPage('commandes',this)">🧾 Commandes <span id="navCmdBadge" style="display:none;background:var(--accent2);color:#fff;border-radius:20px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:2px">0</span></button>
       <button class="nav-btn admin-only" onclick="showPage('stock',this)">📦 Stock</button>
       <button class="nav-btn admin-only" onclick="showPage('stats',this)">📊 Statistiques</button>
       <button class="nav-btn admin-only" onclick="showPage('config',this)">⚙️ Configuration</button>
@@ -169,6 +173,7 @@
             <button class="btn-pay btn-cash" onclick="openPayment('cash')">💵 Espèces</button>
             <button class="btn-pay btn-mobile" onclick="openPayment('mobile')">📱 Mobile</button>
             <button class="btn-pay btn-reserve" onclick="openReservation()">📋 Réserver</button>
+            <button class="btn-pay btn-commande" onclick="openCommandeModal(true)">🧾 Commander</button>
           </div>
           <button class="btn-clear" onclick="clearCart()">🗑 Vider le panier</button>
         </div>
@@ -307,7 +312,6 @@
         <tbody id="historyTbody"></tbody>
       </table>
     </div>
-  </div>
 </div>
 
   <!-- RÉSERVATIONS -->
@@ -342,6 +346,41 @@
       </div>
     </div>
     <div id="reservationsList"></div>
+  </div>
+
+  <!-- COMMANDES -->
+  <div class="page" id="page-commandes">
+    <div class="cmd-toolbar">
+      <div class="cmd-summary">
+        <div class="cmd-sum-item">
+          <span class="cmd-sum-val" id="cmdSumCount">0</span>
+          <span class="cmd-sum-label">En cours</span>
+        </div>
+        <div class="cmd-sum-item">
+          <span class="cmd-sum-val" id="cmdSumTotal">0 Ar</span>
+          <span class="cmd-sum-label">Total engagé</span>
+        </div>
+        <div class="cmd-sum-item">
+          <span class="cmd-sum-val" id="cmdSumAcc">0 Ar</span>
+          <span class="cmd-sum-label">Acomptes reçus</span>
+        </div>
+        <div class="cmd-sum-item">
+          <span class="cmd-sum-val" id="cmdSumRestant">0 Ar</span>
+          <span class="cmd-sum-label">Restant à percevoir</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <select id="cmdFilter" onchange="renderCommandes()" style="padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px">
+          <option value="pending">En cours</option>
+          <option value="completed">Livrées</option>
+          <option value="cancelled">Annulées</option>
+          <option value="all">Toutes</option>
+        </select>
+        <button id="cmdRefreshBtn" onclick="manualRefreshCommandes()" style="padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--muted);cursor:pointer;font-size:13px">🔄 Actualiser</button>
+        <button class="btn-add-product" style="background:var(--accent2)" onclick="openCommandeModal(false)">➕ Nouvelle commande</button>
+      </div>
+    </div>
+    <div id="commandesList"></div>
   </div>
 
   <!-- UTILISATEURS -->
@@ -501,6 +540,173 @@
       <div id="configArticlesGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-top:16px"></div>
     </div>
 
+  </div>
+</div>
+
+<!-- MODAL COMMANDE — CRÉATION -->
+<div class="modal-overlay" id="commandeModal">
+  <div class="modal cmd-modal">
+    <div class="modal-title">
+      <span>🧾 Nouvelle commande</span>
+      <button class="modal-close" onclick="closeModal('commandeModal')">✕</button>
+    </div>
+
+    <!-- Client -->
+    <div class="cmd-section">
+      <div class="cmd-section-title">👤 Informations client</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="form-group" style="margin:0">
+          <label>Nom du client <span style="color:var(--red)">*</span></label>
+          <input id="cmdClientName" placeholder="Ex: Jean Dupont" autocomplete="off" />
+        </div>
+        <div class="form-group" style="margin:0">
+          <label>Contact / Téléphone</label>
+          <input id="cmdClientContact" placeholder="+261 34 XX XXX XX" />
+        </div>
+      </div>
+      <div class="form-group" style="margin-top:12px;margin-bottom:0">
+        <label>Adresse de livraison</label>
+        <input id="cmdAdresse" placeholder="Ex: Lot II A 30, Antananarivo" />
+      </div>
+      <div class="form-group" style="margin-top:12px;margin-bottom:0">
+        <label>Date de livraison prévue</label>
+        <input type="date" id="cmdDateLivraison" />
+      </div>
+    </div>
+
+    <!-- Articles -->
+    <div class="cmd-section">
+      <div class="cmd-section-title">🛍️ Articles commandés</div>
+      <div id="cmdItemsList"></div>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:flex-start">
+        <div style="position:relative;flex:1;min-width:180px">
+          <input id="cmdStockSearch" class="filter-input" placeholder="🔍 Ajouter depuis le stock..."
+                 oninput="filterCmdStock()" onfocus="filterCmdStock()"
+                 style="width:100%" />
+          <div id="cmdStockDropdown" class="cmd-stock-dropdown" style="display:none"></div>
+        </div>
+        <button class="btn-add-product" onclick="addCmdCustomItem()" style="white-space:nowrap;font-size:13px">✏️ Article libre</button>
+      </div>
+    </div>
+
+    <!-- Notes -->
+    <div class="cmd-section">
+      <div class="cmd-section-title">📝 Notes de personnalisation</div>
+      <textarea id="cmdNotes" placeholder="Ex: Broderie initiales JD, couleur bleu marine, taille M..."
+                style="width:100%;min-height:80px;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface2);color:var(--text);font-family:inherit;font-size:14px;resize:vertical;outline:none;transition:.2s"></textarea>
+    </div>
+
+    <!-- Photos -->
+    <div class="cmd-section">
+      <div class="cmd-section-title">📷 Photos / Pièces jointes <span style="font-size:11px;color:var(--muted);font-weight:400">(max 5, stockées localement)</span></div>
+      <div class="cmd-photos-zone" onclick="document.getElementById('cmdPhotosInput').click()">
+        <input type="file" id="cmdPhotosInput" accept="image/*" multiple onchange="addCmdPhotos(this.files)" style="display:none" />
+        <span style="font-size:22px">🖼️</span>
+        <div style="font-size:13px;color:var(--muted);margin-top:4px">Cliquer pour ajouter des photos</div>
+        <div style="font-size:11px;color:var(--muted)">JPEG, PNG — Plusieurs fichiers acceptés</div>
+      </div>
+      <div id="cmdPhotosPreviews" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"></div>
+    </div>
+
+    <!-- Montants -->
+    <div class="cmd-section">
+      <div class="cmd-section-title">💰 Montants</div>
+      <div style="background:var(--surface2);border-radius:12px;padding:14px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+          <span style="color:var(--muted)">Sous-total</span>
+          <span id="cmdSubtotalVal" style="font-family:'DM Mono',monospace">0 Ar</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <label style="color:var(--muted)">🏷️ Remise (Ar)</label>
+          <input type="number" id="cmdRemise" style="width:120px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px;text-align:right" placeholder="0" min="0" oninput="updateCmdTotals()" />
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px;font-weight:700;font-size:15px;border-top:1px solid var(--border);padding-top:8px">
+          <span>NET À PAYER</span>
+          <span id="cmdTotalVal" style="font-family:'DM Mono',monospace;color:var(--accent)">0 Ar</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <label style="color:var(--muted)">💳 Acompte (Ar)</label>
+          <input type="number" id="cmdAccompte" style="width:120px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px;text-align:right" placeholder="0" min="0" oninput="updateCmdTotals()" />
+        </div>
+        <div style="display:flex;justify-content:space-between;font-weight:700">
+          <span>RESTANT DÛ</span>
+          <span id="cmdRestantVal" style="font-family:'DM Mono',monospace;color:var(--red)">0 Ar</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Paiement accompte -->
+    <div class="cmd-section">
+      <div class="cmd-section-title">💳 Paiement de l'acompte</div>
+      <div class="payment-tabs" style="margin-bottom:12px">
+        <button class="payment-tab active" id="tabCmdCash" onclick="switchCmdPayTab('cash')">💵 Espèces</button>
+        <button class="payment-tab payment-tab-mobile" id="tabCmdMobile" onclick="switchCmdPayTab('mobile')">📱 Mobile Money</button>
+      </div>
+      <div id="cmdCashSection">
+        <div class="form-group" style="margin-bottom:8px">
+          <label>Montant remis par le client (Ar)</label>
+          <input type="number" id="cmdGiven" placeholder="0" oninput="calcCmdChange()" />
+        </div>
+        <div class="change-display">
+          <span class="label">Monnaie à rendre</span>
+          <span class="val" id="cmdChangeVal">0 Ar</span>
+        </div>
+      </div>
+      <div id="cmdMobileSection" style="display:none">
+        <div class="mobile-providers">
+          <button class="provider-btn active" id="cmdProvMvola" onclick="selectCmdProvider('MVola')">📱 MVola</button>
+          <button class="provider-btn" id="cmdProvAirtel" onclick="selectCmdProvider('Airtel Money')">🔴 Airtel Money</button>
+          <button class="provider-btn" id="cmdProvOrange" onclick="selectCmdProvider('Orange Money')">🟠 Orange Money</button>
+          <button class="provider-btn" id="cmdProvBmoov" onclick="selectCmdProvider('Bmoov')">🔵 Bmoov</button>
+        </div>
+        <div class="form-group"><label>Référence transaction</label><input id="cmdMobileRef" placeholder="Ex: TX12345678" /></div>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal('commandeModal')">Annuler</button>
+      <button class="btn-primary" style="background:var(--accent2)" onclick="saveCommande()">🧾 Enregistrer la commande</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL FINALISATION COMMANDE -->
+<div class="modal-overlay" id="cmdFinalizeModal">
+  <div class="modal">
+    <div class="modal-title">
+      <span>✅ Finaliser la commande</span>
+      <button class="modal-close" onclick="closeModal('cmdFinalizeModal')">✕</button>
+    </div>
+    <div id="cmdFinalClientInfo" style="background:rgba(237,111,44,0.10);border-radius:12px;padding:10px 14px;margin-bottom:14px;font-size:14px;color:var(--accent2);font-weight:600"></div>
+    <div class="final-amounts">
+      <div class="row"><span>Total</span><span id="cmdFinalTotal">0 Ar</span></div>
+      <div class="row"><span style="color:var(--green)">Acompte déjà versé</span><span id="cmdFinalAcc" style="color:var(--green)">0 Ar</span></div>
+      <div class="row total"><span>Reste à payer</span><span id="cmdFinalRestant" style="color:var(--accent2)">0 Ar</span></div>
+    </div>
+    <div class="payment-tabs" style="margin-bottom:12px">
+      <button class="payment-tab active" id="tabCmdFinCash" onclick="switchCmdFinPayTab('cash')">💵 Espèces</button>
+      <button class="payment-tab payment-tab-mobile" id="tabCmdFinMobile" onclick="switchCmdFinPayTab('mobile')">📱 Mobile Money</button>
+    </div>
+    <div id="cmdFinCashSection">
+      <div class="form-group"><label>Montant remis par le client (Ar)</label><input id="cmdFinGiven" type="number" placeholder="0" oninput="calcCmdFinChange()" /></div>
+      <div class="change-display">
+        <span class="label">Monnaie à rendre</span>
+        <span class="val" id="cmdFinChangeVal">0 Ar</span>
+      </div>
+    </div>
+    <div id="cmdFinMobileSection" style="display:none">
+      <div class="mobile-providers">
+        <button class="provider-btn active" id="cmdFinProvMvola" onclick="selectCmdFinProvider('MVola')">📱 MVola</button>
+        <button class="provider-btn" id="cmdFinProvAirtel" onclick="selectCmdFinProvider('Airtel Money')">🔴 Airtel Money</button>
+        <button class="provider-btn" id="cmdFinProvOrange" onclick="selectCmdFinProvider('Orange Money')">🟠 Orange Money</button>
+        <button class="provider-btn" id="cmdFinProvBmoov" onclick="selectCmdFinProvider('Bmoov')">🔵 Bmoov</button>
+      </div>
+      <div class="form-group"><label>Référence transaction</label><input id="cmdFinMobileRef" placeholder="Ex: TX12345678" /></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal('cmdFinalizeModal')">Annuler</button>
+      <button class="btn-primary" onclick="confirmCmdFinalize()">✅ Valider et encaisser</button>
+    </div>
   </div>
 </div>
 

@@ -15,6 +15,7 @@ const SHEET_SALES        = 'Ventes';
 const SHEET_STOCK_LOG    = 'MouvementsStock';
 const SHEET_USERS        = 'Utilisateurs';
 const SHEET_RESERVATIONS = 'Réservations';
+const SHEET_COMMANDES    = 'Commandes';
 
 // ============================================================
 // ROUTEUR PRINCIPAL — POST
@@ -38,6 +39,9 @@ function doPost(e) {
     else if (action === 'addReservation')    result = handleAddReservation(data);
     else if (action === 'updateReservation') result = handleUpdateReservation(data);
     else if (action === 'getReservations')   result = handleGetReservations();
+    else if (action === 'addCommande')       result = handleAddCommande(data);
+    else if (action === 'updateCommande')    result = handleUpdateCommande(data);
+    else if (action === 'getCommandes')      result = handleGetCommandes();
     else if (action === 'getCSV')            result = handleGetCSV(data);
     else result = { ok: false, error: 'Action inconnue: ' + action };
 
@@ -65,6 +69,8 @@ function doGet(e) {
       else if (action === 'deleteUser')        result = handleDeleteUser(data);
       else if (action === 'addReservation')    result = handleAddReservation(data);
       else if (action === 'updateReservation') result = handleUpdateReservation(data);
+      else if (action === 'addCommande')       result = handleAddCommande(data);
+      else if (action === 'updateCommande')    result = handleUpdateCommande(data);
       else result = { ok: false, error: 'Action payload inconnue: ' + action };
       return jsonResponse(result);
     } catch(err) {
@@ -80,6 +86,7 @@ function doGet(e) {
     if (action === 'getSales')         return jsonResponse(handleGetSales(e.parameter));
     if (action === 'getUsers')         return jsonResponse(handleGetUsers());
     if (action === 'getReservations')  return jsonResponse(handleGetReservations());
+    if (action === 'getCommandes')     return jsonResponse(handleGetCommandes());
     if (action === 'initSheets')       return jsonResponse(initSheets());
     if (action === 'getCSV')           return handleGetCSVResponse(e.parameter);
     return jsonResponse({ ok: false, error: 'Action GET inconnue: ' + action });
@@ -178,6 +185,21 @@ function initSheets() {
     sr = ss.insertSheet(SHEET_RESERVATIONS);
     sr.appendRow(RES_HEADERS);
     sr.getRange(1,1,1,RES_HEADERS.length).setBackground('#0a4d1a').setFontColor('#00e5a0').setFontWeight('bold');
+  }
+
+  // ── Commandes ─────────────────────────────────────────────
+  const CMD_HEADERS = [
+    'ID','Date','Heure','Client_Nom','Client_Contact','Adresse_Livraison','Date_Livraison',
+    'Article','Quantite','Prix_Unitaire','Est_Personnalise','Sous_Total_Article',
+    'Sous_Total_Commande','Remise','Net_A_Payer','Accompte','Restant',
+    'Mode_Depot','Fournisseur_Mobile','Reference','Caissier',
+    'Notes','Statut','Date_Finalisation','Vente_ID'
+  ];
+  let sc = ss.getSheetByName(SHEET_COMMANDES);
+  if (!sc) {
+    sc = ss.insertSheet(SHEET_COMMANDES);
+    sc.appendRow(CMD_HEADERS);
+    sc.getRange(1,1,1,CMD_HEADERS.length).setBackground('#1e1b4b').setFontColor('#c7d2fe').setFontWeight('bold');
   }
 
   return { ok: true, message: 'Feuilles initialisées / migrées ✅' };
@@ -651,6 +673,167 @@ function sha256(text) {
     Utilities.Charset.UTF_8
   );
   return raw.map(b => ('0' + (b & 0xff).toString(16)).slice(-2)).join('');
+}
+
+// ============================================================
+// COMMANDES
+// ID | Date | Heure | Client_Nom | Client_Contact | Adresse_Livraison | Date_Livraison |
+// Article | Quantite | Prix_Unitaire | Est_Personnalise | Sous_Total_Article |
+// Sous_Total_Commande | Remise | Net_A_Payer | Accompte | Restant |
+// Mode_Depot | Fournisseur_Mobile | Reference | Caissier |
+// Notes | Statut | Date_Finalisation | Vente_ID
+// ============================================================
+function handleAddCommande(data) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_COMMANDES);
+  if (!sheet) return { ok: false, error: 'Feuille "Commandes" introuvable. Lancez initSheets().' };
+
+  const cmd = data.commande;
+  const d = new Date(cmd.date);
+  const tz = Session.getScriptTimeZone();
+  const dateStr = Utilities.formatDate(d, tz, 'dd/MM/yyyy');
+  const timeStr = Utilities.formatDate(d, tz, 'HH:mm:ss');
+
+  const subtotal = Number(cmd.subtotal || 0);
+  const remise   = Number(cmd.remise   || 0);
+  const total    = Number(cmd.total    || 0);
+  const accompte = Number(cmd.accompte || 0);
+  const restant  = Number(cmd.restant  || 0);
+  const methode  = cmd.depositMethod === 'cash' ? 'Espèces' : 'Mobile Money';
+
+  (cmd.items || []).forEach(item => {
+    sheet.appendRow([
+      cmd.id,
+      dateStr,
+      timeStr,
+      cmd.clientName         || '',
+      cmd.clientContact      || '',
+      cmd.adresseLivraison   || '',
+      cmd.dateLivraison      || '',
+      item.name,
+      item.qty,
+      item.price,
+      item.custom ? 'Oui' : 'Non',
+      item.price * item.qty,
+      subtotal,
+      remise,
+      total,
+      accompte,
+      restant,
+      methode,
+      cmd.depositProvider    || '',
+      cmd.depositRef         || '',
+      cmd.caissier           || '',
+      cmd.notes              || '',
+      'En cours',
+      '',
+      ''
+    ]);
+  });
+
+  return { ok: true, commandeId: cmd.id };
+}
+
+function handleUpdateCommande(data) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_COMMANDES);
+  if (!sheet) return { ok: false, error: 'Feuille "Commandes" introuvable.' };
+
+  const rows = sheet.getDataRange().getValues();
+  const statusLabel = data.status === 'completed' ? 'Livrée' : 'Annulée';
+  let updated = 0;
+
+  for (let i = 1; i < rows.length; i++) {
+    if (Number(rows[i][0]) === Number(data.id)) {
+      sheet.getRange(i + 1, 23).setValue(statusLabel);
+      if (data.dateFinalisation) {
+        try {
+          const df = new Date(data.dateFinalisation);
+          sheet.getRange(i + 1, 24).setValue(
+            Utilities.formatDate(df, Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm')
+          );
+        } catch(e) {}
+      }
+      if (data.saleId) sheet.getRange(i + 1, 25).setValue(data.saleId);
+      updated++;
+    }
+  }
+  return { ok: true, updated };
+}
+
+function handleGetCommandes() {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(SHEET_COMMANDES);
+  if (!sheet) return { ok: true, commandes: [] };
+
+  const rows = sheet.getDataRange().getValues();
+  const cmdMap = {};
+
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    const id = r[0];
+    if (!id) continue;
+
+    if (!cmdMap[id]) {
+      let isoDate;
+      try {
+        const tz = Session.getScriptTimeZone();
+        const timeStr = r[2] instanceof Date
+          ? Utilities.formatDate(r[2], tz, 'HH:mm:ss') : (r[2] || '00:00:00').toString();
+        if (r[1] instanceof Date) {
+          isoDate = Utilities.formatDate(r[1], tz, 'yyyy-MM-dd') + 'T' + timeStr;
+        } else {
+          const parts = r[1].toString().split('/');
+          isoDate = parts[2] + '-' + parts[1].padStart(2,'0') + '-' + parts[0].padStart(2,'0') + 'T' + timeStr;
+        }
+      } catch(e) { isoDate = new Date().toISOString(); }
+
+      const statusRaw = (r[22] || '').toString();
+      const status = statusRaw === 'Livrée' ? 'completed' : statusRaw === 'Annulée' ? 'cancelled' : 'pending';
+
+      // Date livraison: colonne 7 (index 6)
+      const dateLivRaw = r[6];
+      let dateLivraison = '';
+      if (dateLivRaw instanceof Date) {
+        dateLivraison = Utilities.formatDate(dateLivRaw, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      } else if (dateLivRaw) {
+        dateLivraison = dateLivRaw.toString();
+      }
+
+      cmdMap[id] = {
+        id:               Number(id),
+        date:             isoDate,
+        clientName:       r[3]  || '',
+        clientContact:    r[4]  || '',
+        adresseLivraison: r[5]  || '',
+        dateLivraison,
+        subtotal:         Number(r[12] || 0),
+        remise:           Number(r[13] || 0),
+        total:            Number(r[14] || 0),
+        accompte:         Number(r[15] || 0),
+        restant:          Number(r[16] || 0),
+        depositMethod:    r[17] === 'Espèces' ? 'cash' : 'mobile',
+        depositProvider:  r[18] || '',
+        depositRef:       r[19] || '',
+        caissier:         r[20] || '',
+        notes:            r[21] || '',
+        status,
+        dateFinalisation: r[23] || null,
+        saleId:           r[24] || null,
+        photos:           [],
+        items:            []
+      };
+    }
+    cmdMap[id].items.push({
+      name:   r[7]  || '',
+      qty:    Number(r[8]  || 0),
+      price:  Number(r[9]  || 0),
+      custom: r[10] === 'Oui'
+    });
+  }
+
+  const commandes = Object.values(cmdMap).reverse();
+  return { ok: true, commandes };
 }
 
 // ============================================================
