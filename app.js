@@ -1157,6 +1157,7 @@ function editProduct(id) { openProductModal(id); }
 function deleteProduct(id) {
   if(!confirm('Supprimer cet article ?')) return;
   products = products.filter(p=>p.id!==id);
+  localStorage.removeItem(`pos-prod-img-${id}`);
   saveData();
   renderStockTable(); renderProducts();
   deleteProductFromScript(id);
@@ -2220,7 +2221,15 @@ function applyUpdate() {
 // ============================================================
 function saveData() {
   try {
-    localStorage.setItem('pos-products', JSON.stringify(products));
+    // Images stockées séparément (trop lourdes pour pos-products, effacées par le sync Sheet)
+    const productsWithoutImages = products.map(({ image, ...rest }) => rest);
+    localStorage.setItem('pos-products', JSON.stringify(productsWithoutImages));
+    products.forEach(p => {
+      if (p.image) {
+        try { localStorage.setItem(`pos-prod-img-${p.id}`, p.image); }
+        catch(e) { console.warn('Image produit trop lourde:', p.name); }
+      }
+    });
     localStorage.setItem('pos-sales', JSON.stringify(sales));
     localStorage.setItem('pos-nextId', String(nextId));
     localStorage.setItem('pos-nextSaleId', String(nextSaleId));
@@ -2248,7 +2257,14 @@ function loadData() {
     const ns = localStorage.getItem('pos-nextSaleId');
     const r  = localStorage.getItem('pos-reservations');
     const nr = localStorage.getItem('pos-nextResId');
-    if (p) products = JSON.parse(p);
+    if (p) {
+      products = JSON.parse(p);
+      // Réattacher les images stockées séparément
+      products.forEach(prod => {
+        const img = localStorage.getItem(`pos-prod-img-${prod.id}`);
+        if (img) prod.image = img;
+      });
+    }
     if (s) sales = JSON.parse(s);
     if (ni) nextId = parseInt(ni);
     if (ns) nextSaleId = parseInt(ns);
@@ -2552,7 +2568,11 @@ async function loadProductsFromScript() {
   const r = await apiCall({ action: 'getProducts' });
   hideLoader();
   if (r && r.ok && r.products.length > 0) {
-    products = r.products;
+    // Restaurer les images locales que le Sheet ne stocke pas
+    products = r.products.map(p => {
+      const img = localStorage.getItem(`pos-prod-img-${p.id}`);
+      return img ? { ...p, image: img } : p;
+    });
     nextId = Math.max(...products.map(p => p.id)) + 1;
     saveData();
     showToast('✅ ' + products.length + ' articles chargés depuis Google Sheets');
