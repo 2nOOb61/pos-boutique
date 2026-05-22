@@ -1166,9 +1166,27 @@ function previewProductImage(input) {
 
 async function uploadImageToDrive(file) {
   try {
-    // 150x150 : assez petit pour passer en GET ?payload= sans problème de redirect POST
-    const resized = await _resizeImage(file, 150, 150);
-    const [header, data] = resized.split(',');
+    // Compression agressive 80x80 / qualité 0.4 pour tenir dans l'URL GET d'Apps Script
+    const compressed = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = ev => {
+        const img = new Image();
+        img.onload = () => {
+          const max = 80;
+          let w = img.width, h = img.height;
+          if (w > max || h > max) { const r = Math.min(max/w, max/h); w = Math.round(w*r); h = Math.round(h*r); }
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL('image/jpeg', 0.4));
+        };
+        img.onerror = reject;
+        img.src = ev.target.result;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    const [header, data] = compressed.split(',');
     const mimeType = header.match(/:(.*?);/)[1];
     showLoader('Upload vers Google Drive...');
     const r = await apiCall({ action: 'saveImage', imageData: data, mimeType, filename: file.name });
