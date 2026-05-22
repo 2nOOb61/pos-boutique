@@ -1123,9 +1123,14 @@ tr:hover td {
   margin-top: 0 !important;
 }
 
-.caisse-layout {
-  height: auto !important;
-  min-height: calc(100vh - 120px);
+/* Caisse: le panier occupe tout l'espace jusqu'en bas */
+@media (min-width: 769px) {
+  #page-caisse {
+    padding-bottom: 0 !important;
+  }
+  .caisse-layout {
+    height: calc(100vh - 88px) !important; /* 64px topbar + 24px padding-top */
+  }
 }
 
 /* ===== COMMANDES ===== */
