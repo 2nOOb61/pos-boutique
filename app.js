@@ -2624,9 +2624,12 @@ async function loadProductsFromScript() {
 // ── Sauvegarder un produit vers Sheet ───────────────────
 async function saveProductToScript(product) {
   if (!APPS_SCRIPT_URL) return;
-  const r = await apiCall({ action: 'saveProduct', product });
+  // Ne jamais envoyer le base64 via GET (URL trop longue → Failed to fetch)
+  // Seules les URLs Drive (https://...) sont synchronisées dans le Sheet
+  const payload = { ...product };
+  if (payload.image && payload.image.startsWith('data:')) payload.image = '';
+  const r = await apiCall({ action: 'saveProduct', product: payload });
   if (r && r.ok && r.id && !product.id) {
-    // Mettre à jour l'ID généré par le Sheet
     const p = products.find(pr => pr.name === product.name && !pr.syncedId);
     if (p) { p.id = r.id; p.syncedId = true; saveData(); }
   }
