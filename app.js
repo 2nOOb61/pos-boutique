@@ -1166,21 +1166,15 @@ function previewProductImage(input) {
 
 async function uploadImageToDrive(file) {
   try {
-    const resized = await _resizeImage(file, 400, 400);
+    // 150x150 : assez petit pour passer en GET ?payload= sans problème de redirect POST
+    const resized = await _resizeImage(file, 150, 150);
     const [header, data] = resized.split(',');
     const mimeType = header.match(/:(.*?);/)[1];
     showLoader('Upload vers Google Drive...');
-    // POST direct avec Content-Type text/plain pour éviter le preflight CORS
-    // (le base64 est trop grand pour passer via ?payload= en GET)
-    const res = await fetch(APPS_SCRIPT_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ action: 'saveImage', imageData: data, mimeType, filename: file.name })
-    });
-    const r = await res.json();
+    const r = await apiCall({ action: 'saveImage', imageData: data, mimeType, filename: file.name });
     hideLoader();
     if (r && r.ok && r.url) return r.url;
-    console.warn('saveImage response:', r);
+    console.warn('saveImage échec:', JSON.stringify(r));
   } catch (e) {
     console.warn('uploadImageToDrive:', e);
     hideLoader();
