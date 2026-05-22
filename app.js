@@ -1139,15 +1139,45 @@ function _resetImagePreview() {
 }
 function previewProductImage(input) {
   const file = input.files[0];
-  if(!file) return;
+  if (!file) return;
+  // Prévisualisation locale immédiate
   const reader = new FileReader();
-  reader.onload = e => {
-    editingProductImage = e.target.result;
+  reader.onload = async e => {
     const prev = document.getElementById('pImagePreview');
-    prev.src = editingProductImage; prev.style.display='block';
-    document.getElementById('pImageClear').style.display='block';
+    prev.src = e.target.result; prev.style.display = 'block';
+    document.getElementById('pImageClear').style.display = 'block';
+    if (APPS_SCRIPT_URL) {
+      // Upload vers Google Drive → URL accessible sur tous les postes
+      const driveUrl = await uploadImageToDrive(file);
+      if (driveUrl) {
+        editingProductImage = driveUrl;
+        prev.src = driveUrl;
+        showToast('✅ Image sauvegardée sur Google Drive');
+      } else {
+        editingProductImage = e.target.result; // fallback base64 local
+        showToast('⚠️ Upload Drive échoué — image visible sur ce poste uniquement', 'error');
+      }
+    } else {
+      editingProductImage = e.target.result;
+    }
   };
   reader.readAsDataURL(file);
+}
+
+async function uploadImageToDrive(file) {
+  try {
+    const resized = await _resizeImage(file, 400, 400);
+    const [header, data] = resized.split(',');
+    const mimeType = header.match(/:(.*?);/)[1];
+    showLoader('Upload vers Google Drive...');
+    const r = await apiCall({ action: 'saveImage', imageData: data, mimeType, filename: file.name });
+    hideLoader();
+    if (r && r.ok && r.url) return r.url;
+  } catch (e) {
+    console.warn('uploadImageToDrive:', e);
+    hideLoader();
+  }
+  return null;
 }
 function clearProductImage() {
   editingProductImage = null;
@@ -2568,8 +2598,10 @@ async function loadProductsFromScript() {
   const r = await apiCall({ action: 'getProducts' });
   hideLoader();
   if (r && r.ok && r.products.length > 0) {
-    // Restaurer les images locales que le Sheet ne stocke pas
+    // Restaurer les images : priorité à l'URL Drive (stockée dans le Sheet),
+    // sinon fallback sur l'image locale (base64 localStorage)
     products = r.products.map(p => {
+      if (p.image) return p; // URL Drive déjà dans le Sheet
       const img = localStorage.getItem(`pos-prod-img-${p.id}`);
       return img ? { ...p, image: img } : p;
     });
