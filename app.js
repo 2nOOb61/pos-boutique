@@ -13,9 +13,34 @@ async function sha256(str) {
 // ============================================================
 // Utilisateurs locaux (persistés dans localStorage)
 let localUsers = [
-  { username:'admin',    pass:'1234', role:'admin',    label:'Administrateur', actif:true },
-  { username:'caissier', pass:'0000', role:'caissier', label:'Caissier',       actif:true }
+  { username:'admin',        pass:'1234', role:'admin',        label:'Administrateur',    actif:true },
+  { username:'caissier',     pass:'0000', role:'caissier',     label:'Caissier',          actif:true },
+  { username:'utilisateur',  pass:'1111', role:'utilisateur',  label:'Utilisateur',       actif:true },
+  { username:'gestionnaire', pass:'2222', role:'gestionnaire', label:'Gestionnaire Stock', actif:true },
+  { username:'comptable',    pass:'3333', role:'comptable',    label:'Comptable',         actif:true }
 ];
+
+const ROLE_LABELS = {
+  admin:        'Administrateur',
+  caissier:     'Caissier',
+  utilisateur:  'Utilisateur',
+  gestionnaire: 'Gestionnaire Stock',
+  comptable:    'Comptable'
+};
+
+const ROLE_ICONS = {
+  admin: '👑', caissier: '🛒', utilisateur: '👤', gestionnaire: '📦', comptable: '📊'
+};
+
+const PAGE_ACCESS = {
+  caisse:       ['admin','caissier','utilisateur','gestionnaire'],
+  reservations: ['admin','caissier','utilisateur','gestionnaire','comptable'],
+  commandes:    ['admin','caissier','gestionnaire','comptable'],
+  stock:        ['admin','gestionnaire'],
+  stats:        ['admin','comptable'],
+  config:       ['admin'],
+  users:        ['admin']
+};
 let editingUserId = null; // index dans localUsers
 
 let currentUser = null;
@@ -141,6 +166,9 @@ async function doLogin() {
     renderProducts();
     renderStockTable();
     renderStats();
+    // Rediriger vers la première page accessible selon le rôle
+    const startPage = Object.keys(PAGE_ACCESS).find(p => PAGE_ACCESS[p].includes(currentUser.role)) || 'caisse';
+    showPage(startPage, null, null);
     if (window.innerWidth <= 768) switchCaisseTab('products');
   } else {
     err.textContent = '❌ Identifiant ou mot de passe incorrect';
@@ -184,10 +212,15 @@ function showPage(id, btn, bnavBtn) {
   if (id==='users')        renderUsersPage();
   if (id==='reservations') { renderReservations(); _autoRefreshReservations(); }
   if (id==='commandes')    { renderCommandes(); _autoRefreshCommandes(); }
-  // Garde : caissier ne peut accéder qu'à caisse + réservations + commandes
-  if (currentUser && currentUser.role !== 'admin' && id !== 'caisse' && id !== 'reservations' && id !== 'commandes') {
-    showPage('caisse', null, null);
-    showToast('⛔ Accès réservé aux administrateurs', 'error');
+  // Garde d'accès par rôle
+  if (currentUser) {
+    const allowed = PAGE_ACCESS[id];
+    if (allowed && !allowed.includes(currentUser.role)) {
+      const fallback = Object.keys(PAGE_ACCESS).find(p => PAGE_ACCESS[p].includes(currentUser.role)) || 'caisse';
+      showPage(fallback, null, null);
+      showToast('⛔ Accès non autorisé pour votre rôle', 'error');
+      return;
+    }
   }
 }
 
@@ -2253,10 +2286,15 @@ function loadUsers() {
 // PERMISSIONS PAR RÔLE
 // ============================================================
 function applyRolePermissions(role) {
+  // Système data-roles : affiche/masque selon le rôle
+  document.querySelectorAll('[data-roles]').forEach(el => {
+    const allowed = el.dataset.roles.split(',');
+    el.style.display = allowed.includes(role) ? '' : 'none';
+  });
+  // Compatibilité legacy admin-only
   const isAdmin = role === 'admin';
-  // Top nav & bottom nav: montrer/cacher les éléments admin-only
   document.querySelectorAll('.admin-only').forEach(el => {
-    el.style.display = isAdmin ? '' : 'none';
+    if (!el.hasAttribute('data-roles')) el.style.display = isAdmin ? '' : 'none';
   });
   // Bouton Google Sheets (admin only)
   const sheetsBtn = document.querySelector('[onclick="openScriptSettings()"]');
@@ -2272,13 +2310,14 @@ function renderUsersPage() {
   if (!grid) return;
   count.textContent = `${localUsers.length} compte(s)`;
   grid.innerHTML = localUsers.map((u, idx) => {
-    const roleLabel = u.role === 'admin' ? 'Administrateur' : 'Caissier';
+    const roleLabel = ROLE_LABELS[u.role] || u.role;
+    const roleIcon  = ROLE_ICONS[u.role]  || '👤';
     const isMe = currentUser && u.username === currentUser.username;
     const isLastAdmin = u.role === 'admin' && localUsers.filter(x => x.role === 'admin' && x.actif !== false).length === 1;
     return `
     <div class="user-card">
       <div class="user-card-top">
-        <div class="user-avatar role-${u.role}">${u.role === 'admin' ? '👑' : '🛒'}</div>
+        <div class="user-avatar role-${u.role}">${roleIcon}</div>
         <div class="user-card-info">
           <div class="user-card-name">${u.label}${isMe ? ' <span style="font-size:11px;color:var(--accent)">(vous)</span>' : ''}</div>
           <div class="user-card-username">@${u.username}</div>

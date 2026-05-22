@@ -55,26 +55,26 @@
 <!-- BOTTOM NAV (mobile) -->
 <nav id="bottomNav">
   <div class="bottom-nav-inner">
-    <button class="bnav-btn active" id="bnav-caisse" onclick="showPage('caisse',null,this)">
+    <button class="bnav-btn active" id="bnav-caisse" data-roles="admin,caissier,utilisateur,gestionnaire" onclick="showPage('caisse',null,this)">
       <span class="bnav-icon">🛒</span>Caisse
     </button>
-    <button class="bnav-btn" id="bnav-reservations" onclick="showPage('reservations',null,this)">
+    <button class="bnav-btn" id="bnav-reservations" data-roles="admin,caissier,utilisateur,gestionnaire,comptable" onclick="showPage('reservations',null,this)">
       <span class="bnav-icon">📋</span>Réservations
     </button>
-    <button class="bnav-btn admin-only" id="bnav-stock" onclick="showPage('stock',null,this)">
+    <button class="bnav-btn" id="bnav-commandes" data-roles="admin,caissier,gestionnaire,comptable" onclick="showPage('commandes',null,this)">
+      <span class="bnav-icon">🧾</span>Commandes
+    </button>
+    <button class="bnav-btn" id="bnav-stock" data-roles="admin,gestionnaire" onclick="showPage('stock',null,this)">
       <span class="bnav-icon">📦</span>Stock
     </button>
-    <button class="bnav-btn admin-only" id="bnav-stats" onclick="showPage('stats',null,this)">
+    <button class="bnav-btn" id="bnav-stats" data-roles="admin,comptable" onclick="showPage('stats',null,this)">
       <span class="bnav-icon">📊</span>Stats
     </button>
-    <button class="bnav-btn admin-only" id="bnav-config" onclick="showPage('config',null,this)">
+    <button class="bnav-btn" id="bnav-config" data-roles="admin" onclick="showPage('config',null,this)">
       <span class="bnav-icon">⚙️</span>Config
     </button>
-    <button class="bnav-btn admin-only" id="bnav-users" onclick="showPage('users',null,this)">
+    <button class="bnav-btn" id="bnav-users" data-roles="admin" onclick="showPage('users',null,this)">
       <span class="bnav-icon">👥</span>Comptes
-    </button>
-    <button class="bnav-btn" id="bnav-commandes" onclick="showPage('commandes',null,this)">
-      <span class="bnav-icon">🧾</span>Commandes
     </button>
   </div>
 </nav>
@@ -119,31 +119,31 @@
     <!-- SIDEBAR -->
     <aside class="sidebar" id="sidebar" role="navigation" aria-label="Navigation principale">
       <nav class="sidebar-nav">
-        <button class="nav-btn sidebar-btn active" onclick="showPage('caisse',this)" aria-label="Caisse">
+        <button class="nav-btn sidebar-btn active" data-roles="admin,caissier,utilisateur,gestionnaire" onclick="showPage('caisse',this)" aria-label="Caisse">
           <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg></span>
           <span class="sidebar-label">Caisse</span>
         </button>
-        <button class="nav-btn sidebar-btn" onclick="showPage('reservations',this)" aria-label="Réservations">
+        <button class="nav-btn sidebar-btn" data-roles="admin,caissier,utilisateur,gestionnaire,comptable" onclick="showPage('reservations',this)" aria-label="Réservations">
           <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>
           <span class="sidebar-label">Réservations <span id="navResBadge" style="display:none;background:#ED6F2C;color:#fff;border-radius:20px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:2px" aria-live="polite">0</span></span>
         </button>
-        <button class="nav-btn sidebar-btn" onclick="showPage('commandes',this)" aria-label="Commandes">
+        <button class="nav-btn sidebar-btn" data-roles="admin,caissier,gestionnaire,comptable" onclick="showPage('commandes',this)" aria-label="Commandes">
           <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></span>
           <span class="sidebar-label">Commandes <span id="navCmdBadge" style="display:none;background:#ED6F2C;color:#fff;border-radius:20px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:2px" aria-live="polite">0</span></span>
         </button>
-        <button class="nav-btn sidebar-btn admin-only" onclick="showPage('stock',this)" aria-label="Stock">
+        <button class="nav-btn sidebar-btn" data-roles="admin,gestionnaire" onclick="showPage('stock',this)" aria-label="Stock">
           <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg></span>
           <span class="sidebar-label">Stock</span>
         </button>
-        <button class="nav-btn sidebar-btn admin-only" onclick="showPage('stats',this)" aria-label="Statistiques">
+        <button class="nav-btn sidebar-btn" data-roles="admin,comptable" onclick="showPage('stats',this)" aria-label="Statistiques">
           <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span>
           <span class="sidebar-label">Statistiques</span>
         </button>
-        <button class="nav-btn sidebar-btn admin-only" onclick="showPage('config',this)" aria-label="Configuration">
+        <button class="nav-btn sidebar-btn" data-roles="admin" onclick="showPage('config',this)" aria-label="Configuration">
           <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
           <span class="sidebar-label">Configuration</span>
         </button>
-        <button class="nav-btn sidebar-btn admin-only" onclick="showPage('users',this)" aria-label="Utilisateurs">
+        <button class="nav-btn sidebar-btn" data-roles="admin" onclick="showPage('users',this)" aria-label="Utilisateurs">
           <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
           <span class="sidebar-label">Utilisateurs</span>
         </button>
@@ -785,7 +785,10 @@
       <label>Rôle</label>
       <select id="uRole">
         <option value="admin">👑 Administrateur — accès complet</option>
-        <option value="caissier">🛒 Caissier — caisse uniquement</option>
+        <option value="caissier">🛒 Caissier — caisse + réservations + commandes</option>
+        <option value="utilisateur">👤 Utilisateur — caisse + réservations</option>
+        <option value="gestionnaire">📦 Gestionnaire Stock — caisse + stock + commandes</option>
+        <option value="comptable">📊 Comptable — statistiques + commandes + réservations</option>
       </select>
     </div>
     <div class="form-group" style="display:flex;align-items:center;gap:12px">
