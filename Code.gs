@@ -43,6 +43,7 @@ function doPost(e) {
     else if (action === 'updateCommande')    result = handleUpdateCommande(data);
     else if (action === 'getCommandes')      result = handleGetCommandes();
     else if (action === 'getCSV')            result = handleGetCSV(data);
+    else if (action === 'saveImage')         result = handleSaveImage(data);
     else result = { ok: false, error: 'Action inconnue: ' + action };
 
     return jsonResponse(result);
@@ -834,6 +835,51 @@ function handleGetCommandes() {
 
   const commandes = Object.values(cmdMap).reverse();
   return { ok: true, commandes };
+}
+
+// ============================================================
+// IMAGES — Sauvegarde dans Google Drive
+// ============================================================
+function handleSaveImage(data) {
+  try {
+    if (!data.imageData) return { ok: false, error: 'Aucune donnée image reçue' };
+
+    // Décoder le base64 (avec ou sans header data:image/...)
+    let base64Data = data.imageData;
+    let mimeType   = data.mimeType || 'image/jpeg';
+    if (base64Data.includes(',')) {
+      const parts = base64Data.split(',');
+      const header = parts[0];
+      base64Data   = parts[1];
+      const mimeMatch = header.match(/:(.*?);/);
+      if (mimeMatch) mimeType = mimeMatch[1];
+    }
+
+    const bytes    = Utilities.base64Decode(base64Data);
+    const ext      = mimeType.split('/')[1] || 'jpg';
+    const filename = data.filename || ('img_' + Date.now() + '.' + ext);
+    const blob     = Utilities.newBlob(bytes, mimeType, filename);
+
+    // Dossier dédié dans Drive
+    const folder = _getOrCreateFolder('POS_Boutique_Images');
+    const file   = folder.createFile(blob);
+
+    // Rendre accessible publiquement (lecture seule)
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+    const fileId  = file.getId();
+    const viewUrl = 'https://drive.google.com/uc?export=view&id=' + fileId;
+
+    return { ok: true, url: viewUrl, id: fileId };
+  } catch (e) {
+    return { ok: false, error: 'saveImage: ' + e.message };
+  }
+}
+
+function _getOrCreateFolder(name) {
+  const existing = DriveApp.getFoldersByName(name);
+  if (existing.hasNext()) return existing.next();
+  return DriveApp.createFolder(name);
 }
 
 // ============================================================
