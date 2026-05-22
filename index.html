@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="BoutiquePOS">
-<meta name="theme-color" content="#FF6B00">
+<meta name="theme-color" content="#073D37">
 <meta name="description" content="Système de caisse professionnel - Stock, ventes, Mobile Money">
 <title>FOREVER MG POS</title>
 <!-- PWA Manifest -->
@@ -20,10 +20,13 @@
 <link rel="icon" type="image/png" sizes="32x32" href="./icons/icon-96.png">
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
-<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Inter:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&family=Syne:wght@700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="./style.css">
 </head>
 <body>
+
+<!-- Skip link accessibilité clavier -->
+<a href="#app" class="skip-link">Aller au contenu principal</a>
 
 <!-- LOGIN -->
 
@@ -98,23 +101,23 @@
 </div>
 
 <!-- APP -->
-<div id="app">
+<div id="app" role="main">
   <div class="topbar">
     🏪 FOREVER MG
-    <nav class="topbar-nav">
-      <button class="nav-btn active" onclick="showPage('caisse',this)">🛒 Caisse</button>
-      <button class="nav-btn" onclick="showPage('reservations',this)">📋 Réservations <span id="navResBadge" style="display:none;background:var(--accent3);color:#fff;border-radius:20px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:2px">0</span></button>
-      <button class="nav-btn" onclick="showPage('commandes',this)">🧾 Commandes <span id="navCmdBadge" style="display:none;background:var(--accent2);color:#fff;border-radius:20px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:2px">0</span></button>
-      <button class="nav-btn admin-only" onclick="showPage('stock',this)">📦 Stock</button>
-      <button class="nav-btn admin-only" onclick="showPage('stats',this)">📊 Statistiques</button>
-      <button class="nav-btn admin-only" onclick="showPage('config',this)">⚙️ Configuration</button>
-      <button class="nav-btn admin-only" onclick="showPage('users',this)">👥 Utilisateurs</button>
+    <nav class="topbar-nav" role="navigation" aria-label="Navigation principale">
+      <button class="nav-btn active" onclick="showPage('caisse',this)" aria-label="Caisse">🛒 Caisse</button>
+      <button class="nav-btn" onclick="showPage('reservations',this)" aria-label="Réservations">📋 Réservations <span id="navResBadge" style="display:none;background:var(--accent3);color:#fff;border-radius:20px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:2px" aria-live="polite">0</span></button>
+      <button class="nav-btn" onclick="showPage('commandes',this)" aria-label="Commandes">🧾 Commandes <span id="navCmdBadge" style="display:none;background:var(--accent2);color:#fff;border-radius:20px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:2px" aria-live="polite">0</span></button>
+      <button class="nav-btn admin-only" onclick="showPage('stock',this)" aria-label="Stock">📦 Stock</button>
+      <button class="nav-btn admin-only" onclick="showPage('stats',this)" aria-label="Statistiques">📊 Statistiques</button>
+      <button class="nav-btn admin-only" onclick="showPage('config',this)" aria-label="Configuration">⚙️ Configuration</button>
+      <button class="nav-btn admin-only" onclick="showPage('users',this)" aria-label="Utilisateurs">👥 Utilisateurs</button>
     </nav>
     <div class="topbar-right">
       <div class="user-badge"><div class="user-dot"></div><span id="currentUserLabel">Admin</span></div>
-      <button class="btn-logout" onclick="openScriptSettings()" title="Configurer Apps Script" style="border-color:rgba(0,229,160,0.3);color:var(--accent)">⚙️ Google Sheets</button>
-      <span id="pendingBadge" title="Ventes en attente de sync" style="display:none;background:var(--red);color:#fff;border-radius:20px;padding:3px 10px;font-size:12px;font-weight:700;cursor:pointer" onclick="syncPendingOfflineSales()">⏳ <span id="pendingCount">0</span> en attente</span>
-      <button class="btn-logout" onclick="doLogout()">Déconnexion</button>
+      <button class="btn-logout" onclick="openScriptSettings()" title="Configurer Apps Script" aria-label="Configurer Google Sheets" style="border-color:rgba(7,61,55,0.3);color:var(--accent)">⚙️ Google Sheets</button>
+      <span id="pendingBadge" title="Ventes en attente de sync" role="button" tabindex="0" aria-live="polite" style="display:none;background:var(--red);color:#fff;border-radius:20px;padding:3px 10px;font-size:12px;font-weight:700;cursor:pointer" onclick="syncPendingOfflineSales()" onkeydown="if(event.key==='Enter')syncPendingOfflineSales()">⏳ <span id="pendingCount">0</span> en attente</span>
+      <button class="btn-logout" onclick="doLogout()" aria-label="Se déconnecter">Déconnexion</button>
     </div>
   </div>
 
@@ -129,9 +132,9 @@
         <div class="search-bar">
           <div class="search-wrap">
             <span class="search-icon">🔍</span>
-            <input class="search-input" id="searchInput" placeholder="Rechercher un article..." oninput="filterProducts()" />
+            <input class="search-input" id="searchInput" placeholder="Rechercher un article..." oninput="filterProducts()" aria-label="Rechercher un article" autocomplete="off" role="searchbox" />
           </div>
-          <button class="btn-scan" id="btnScan" onclick="openScanner()" title="Scanner un code-barres">📷</button>
+          <button class="btn-scan" id="btnScan" onclick="openScanner()" title="Scanner un code-barres" aria-label="Scanner un code-barres">📷</button>
         </div>
         <div class="products-grid" id="productsGrid"></div>
       </div>
@@ -140,7 +143,7 @@
         <div class="cart-header">
           <span class="cart-title">🛒 Panier</span>
           <div style="display:flex;align-items:center;gap:8px">
-            <button class="btn-quick-add" onclick="openQuickAddModal()" title="Créer un nouvel article et l'ajouter au panier">➕</button>
+            <button class="btn-quick-add" onclick="openQuickAddModal()" aria-label="Ajouter un article rapide" title="Créer un nouvel article et l'ajouter au panier">➕</button>
             <span class="cart-count" id="cartCount">0</span>
           </div>
         </div>
@@ -150,7 +153,7 @@
         <div class="cart-footer">
           <div class="cart-subtotal"><span>Sous-total</span><span id="subtotalVal">0 Ar</span></div>
           <div class="cart-extra-row">
-            <label class="cart-extra-label">🏷️ Remise</label>
+            <label class="cart-extra-label" for="cartRemise">Remise</label>
             <div class="cart-extra-input-wrap">
               <input type="number" id="cartRemise" class="cart-extra-input" placeholder="0" min="0" oninput="updateCartTotals()" />
               <span class="cart-extra-unit">Ar</span>
@@ -159,7 +162,7 @@
           </div>
           <div class="cart-total"><span>NET À PAYER</span><span id="totalVal">0 Ar</span></div>
           <div class="cart-extra-row">
-            <label class="cart-extra-label">💳 Accompte</label>
+            <label class="cart-extra-label" for="cartAccompte">Accompte</label>
             <div class="cart-extra-input-wrap">
               <input type="number" id="cartAccompte" class="cart-extra-input" placeholder="0" min="0" oninput="updateCartTotals()" />
               <span class="cart-extra-unit">Ar</span>
@@ -175,7 +178,7 @@
             <button class="btn-pay btn-reserve" onclick="openReservation()">📋 Réserver</button>
             <button class="btn-pay btn-commande" onclick="openCommandeModal(true)">🧾 Commander</button>
           </div>
-          <button class="btn-clear" onclick="clearCart()">🗑 Vider le panier</button>
+          <button class="btn-clear" onclick="clearCart()" aria-label="Vider le panier">🗑 Vider le panier</button>
         </div>
       </div>
     </div>

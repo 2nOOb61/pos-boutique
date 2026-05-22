@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // SHA-256 (WebCrypto API — natif dans tous les navigateurs modernes)
 // ============================================================
 async function sha256(str) {
@@ -1057,7 +1057,7 @@ function renderStockTable() {
         <div class="stock-card-field"><span class="stock-card-field-label">Min</span><span class="stock-card-field-val">${p.minStock}</span></div>
       </div>
       <div class="stock-card-actions">
-        <button style="background:rgba(74,158,255,0.15);color:var(--blue)" onclick="editProduct(${p.id})">✏️ Modifier</button>
+        <button style="background:rgba(7,61,55,0.10);color:var(--accent)" onclick="editProduct(${p.id})">✏️ Modifier</button>
         <button style="background:rgba(255,71,87,0.12);color:var(--red)" onclick="deleteProduct(${p.id})">🗑 Supprimer</button>
       </div>
     </div>`).join('');
@@ -1335,8 +1335,8 @@ function _detailDay() {
   const cash  = list.filter(s => s.method==='cash').reduce((s,v) => s + (Number(v.total)||0), 0);
   const mob   = list.filter(s => s.method!=='cash').reduce((s,v) => s + (Number(v.total)||0), 0);
   return `<div class="detail-kpi-row">
-    ${_kpi('CA du jour',     fmt(ca),          'var(--accent)', 'rgba(0,229,160,.07)')}
-    ${_kpi('Transactions',   list.length,       'var(--blue)',   'rgba(74,158,255,.07)')}
+    ${_kpi('CA du jour',     fmt(ca),          'var(--accent)', 'rgba(7,61,55,0.07)')}
+    ${_kpi('Transactions',   list.length,       'var(--blue)',   'rgba(237,111,44,0.07)')}
     ${_kpi('💵 Espèces',     fmt(cash),         'var(--text)',   'var(--surface2)')}
     ${_kpi('📱 Mobile',      fmt(mob),          'var(--text)',   'var(--surface2)')}
     ${due > 0 ? _kpi('Reste à percevoir', fmt(due), 'var(--red)', 'rgba(255,71,87,.07)') : ''}
@@ -1352,8 +1352,8 @@ function _detailMonth() {
   const cash = list.filter(s => s.method==='cash').reduce((s,v) => s + (Number(v.total)||0), 0);
   const mob  = list.filter(s => s.method!=='cash').reduce((s,v) => s + (Number(v.total)||0), 0);
   return `<div class="detail-kpi-row">
-    ${_kpi('CA du mois',     fmt(ca),           'var(--accent)', 'rgba(0,229,160,.07)')}
-    ${_kpi('Transactions',   list.length,        'var(--blue)',   'rgba(74,158,255,.07)')}
+    ${_kpi('CA du mois',     fmt(ca),           'var(--accent)', 'rgba(7,61,55,0.07)')}
+    ${_kpi('Transactions',   list.length,        'var(--blue)',   'rgba(237,111,44,0.07)')}
     ${_kpi('💵 Espèces',     fmt(cash),          'var(--text)',   'var(--surface2)')}
     ${_kpi('📱 Mobile',      fmt(mob),           'var(--text)',   'var(--surface2)')}
     ${due > 0 ? _kpi('Reste à percevoir', fmt(due), 'var(--red)', 'rgba(255,71,87,.07)') : ''}
@@ -1392,10 +1392,10 @@ function _detailStock() {
     </tr>`;
   }).join('');
   return `<div class="detail-kpi-row">
-    ${_kpi('Total articles',  products.length,  'var(--accent)', 'rgba(0,229,160,.07)')}
+    ${_kpi('Total articles',  products.length,  'var(--accent)', 'rgba(7,61,55,0.07)')}
     ${low>0 ? _kpi('Stock faible', low,         'var(--yellow)', 'rgba(255,184,48,.07)') : ''}
     ${out>0 ? _kpi('Épuisés',      out,         'var(--red)',    'rgba(255,71,87,.07)')  : ''}
-    ${_kpi('Valeur (vente)',  fmt(valV),         'var(--blue)',   'rgba(74,158,255,.07)')}
+    ${_kpi('Valeur (vente)',  fmt(valV),         'var(--blue)',   'rgba(237,111,44,0.07)')}
     ${_kpi('Valeur (achat)',  fmt(valA),         'var(--muted)',  'var(--surface2)')}
   </div>
   <div class="detail-table-wrap">
@@ -2682,7 +2682,7 @@ function showLoader(msg) {
   if (!el) {
     el = document.createElement('div');
     el.id = 'syncLoader';
-    el.style.cssText = 'position:fixed;top:70px;left:50%;transform:translateX(-50%);background:#111827;border:1px solid rgba(0,229,160,0.3);color:#00e5a0;padding:10px 20px;border-radius:20px;font-size:13px;z-index:1600;display:flex;gap:8px;align-items:center;';
+    el.style.cssText = 'position:fixed;top:70px;left:50%;transform:translateX(-50%);background:#073D37;border:1px solid rgba(255,255,255,0.20);color:#FFFFFF;padding:10px 20px;border-radius:20px;font-size:13px;z-index:1600;display:flex;gap:8px;align-items:center;';
     el.innerHTML = '<span style="animation:spin 1s linear infinite;display:inline-block">⚙️</span><span id="syncLoaderMsg"></span>';
     document.body.appendChild(el);
     const style = document.createElement('style');
