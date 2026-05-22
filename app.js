@@ -160,6 +160,11 @@ function doLogout() {
 // ============================================================
 // NAVIGATION
 // ============================================================
+function toggleSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  if (sidebar) sidebar.classList.toggle('collapsed');
+}
+
 function showPage(id, btn, bnavBtn) {
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
