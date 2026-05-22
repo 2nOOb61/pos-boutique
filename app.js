@@ -926,7 +926,9 @@ async function startCamera() {
   if (scannerRunning) return;
   try {
     if (!html5QrCode) {
-      html5QrCode = new Html5Qrcode('qr-reader');
+      html5QrCode = new Html5Qrcode('qr-reader', {
+        formatsToSupport: [Html5QrcodeSupportedFormats.CODE_128]
+      });
     }
     const cameras = await Html5Qrcode.getCameras();
     if (!cameras || cameras.length === 0) {
