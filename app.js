@@ -45,6 +45,7 @@ let editingUserId = null; // index dans localUsers
 
 let currentUser = null;
 let cart = [];
+let heldCarts = [];
 let paymentMode = 'cash';
 let selectedProvider = 'MVola';
 let editingProductId = null;
@@ -304,6 +305,73 @@ function clearCart() {
   const ri = document.getElementById('cartRemise'); if(ri) ri.value='';
   const ai = document.getElementById('cartAccompte'); if(ai) ai.value='';
   renderCart();
+  renderHeldCarts();
+}
+
+function holdCurrentCart() {
+  if (cart.length === 0) { showToast('Le panier est vide', 'error'); return; }
+  const remise   = parseFloat(document.getElementById('cartRemise')?.value)   || 0;
+  const accompte = parseFloat(document.getElementById('cartAccompte')?.value) || 0;
+  heldCarts.push({
+    id:        Date.now(),
+    items:     cart.map(i => ({ ...i })),
+    remise,
+    accompte,
+    createdAt: new Date().toISOString()
+  });
+  clearCart();
+  showToast(`Panier #${heldCarts.length} mis en attente`);
+}
+
+function recallHeldCart(index) {
+  const held = heldCarts[index];
+  if (!held) return;
+  if (cart.length > 0) {
+    const remise   = parseFloat(document.getElementById('cartRemise')?.value)   || 0;
+    const accompte = parseFloat(document.getElementById('cartAccompte')?.value) || 0;
+    heldCarts.push({ id: Date.now(), items: cart.map(i => ({ ...i })), remise, accompte, createdAt: new Date().toISOString() });
+  }
+  cart = held.items.map(i => ({ ...i }));
+  heldCarts.splice(index, 1);
+  const ri = document.getElementById('cartRemise');   if (ri) ri.value = held.remise   || '';
+  const ai = document.getElementById('cartAccompte'); if (ai) ai.value = held.accompte || '';
+  renderCart();
+  renderHeldCarts();
+  showToast('Panier rappelé');
+}
+
+function deleteHeldCart(index) {
+  heldCarts.splice(index, 1);
+  renderHeldCarts();
+}
+
+function renderHeldCarts() {
+  const bar = document.getElementById('heldCartsBar');
+  if (!bar) return;
+  if (heldCarts.length === 0) { bar.style.display = 'none'; return; }
+  bar.style.display = 'block';
+  bar.innerHTML = `
+    <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px">
+      En attente
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      ${heldCarts.map((hc, i) => {
+        const total = hc.items.reduce((s, it) => s + it.price * it.qty, 0);
+        const qty   = hc.items.reduce((s, it) => s + it.qty, 0);
+        return `<div
+          onclick="recallHeldCart(${i})"
+          onmouseover="this.style.background='rgba(232,131,74,0.22)'"
+          onmouseout="this.style.background='rgba(232,131,74,0.10)'"
+          style="cursor:pointer;display:flex;align-items:center;gap:6px;background:rgba(232,131,74,0.10);border:1.5px solid var(--accent2);border-radius:10px;padding:5px 10px;transition:.15s;user-select:none">
+          <span style="font-size:12px;font-weight:700;color:var(--accent2)">#${i + 1}</span>
+          <span style="font-size:11px;color:var(--text);white-space:nowrap">${qty} art. — ${fmt(total)}</span>
+          <button onclick="event.stopPropagation();deleteHeldCart(${i})"
+            style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:15px;padding:0 0 0 3px;line-height:1;transition:.15s"
+            onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--muted)'"
+            title="Supprimer ce panier">×</button>
+        </div>`;
+      }).join('')}
+    </div>`;
 }
 function getSubtotal() { return cart.reduce((s,i)=>s+i.price*i.qty,0); }
 function getRemise()   { return Math.min(parseFloat(document.getElementById('cartRemise')?.value)||0, getSubtotal()); }
@@ -2297,6 +2365,20 @@ function saveData() {
         catch(e) { console.warn('Image produit trop lourde:', p.name); }
       }
     });
+    // Recalibration anti-collision (multi-onglets ou rechargement rapide)
+    if (sales.length > 0) {
+      const maxSaleId = Math.max(...sales.map(s => Number(s.id) || 0));
+      if (maxSaleId >= nextSaleId) nextSaleId = maxSaleId + 1;
+    }
+    if (commandes.length > 0) {
+      const maxCmdId = Math.max(...commandes.map(c => Number(c.id) || 0));
+      if (maxCmdId >= nextCommandeId) nextCommandeId = maxCmdId + 1;
+    }
+    if (reservations.length > 0) {
+      const maxResId = Math.max(...reservations.map(r => Number(r.id) || 0));
+      if (maxResId >= nextReservationId) nextReservationId = maxResId + 1;
+    }
+    localStorage.setItem('pos-heldCarts', JSON.stringify(heldCarts));
     localStorage.setItem('pos-sales', JSON.stringify(sales));
     localStorage.setItem('pos-nextId', String(nextId));
     localStorage.setItem('pos-nextSaleId', String(nextSaleId));
@@ -2332,6 +2414,8 @@ function loadData() {
         if (img) prod.image = img;
       });
     }
+    const hc = localStorage.getItem('pos-heldCarts');
+    if (hc) heldCarts = JSON.parse(hc);
     if (s) sales = JSON.parse(s);
     if (ni) nextId = parseInt(ni);
     if (ns) nextSaleId = parseInt(ns);
@@ -2351,6 +2435,20 @@ function loadData() {
       });
     }
     if (ncid) nextCommandeId = parseInt(ncid);
+
+    // Recalibration depuis les données réelles pour éviter les doublons
+    if (sales.length > 0) {
+      const maxSaleId = Math.max(...sales.map(s => Number(s.id) || 0));
+      if (maxSaleId >= nextSaleId) nextSaleId = maxSaleId + 1;
+    }
+    if (commandes.length > 0) {
+      const maxCmdId = Math.max(...commandes.map(c => Number(c.id) || 0));
+      if (maxCmdId >= nextCommandeId) nextCommandeId = maxCmdId + 1;
+    }
+    if (reservations.length > 0) {
+      const maxResId = Math.max(...reservations.map(r => Number(r.id) || 0));
+      if (maxResId >= nextReservationId) nextReservationId = maxResId + 1;
+    }
   } catch(e) { console.warn('loadData error:', e); }
 }
 
@@ -3300,7 +3398,7 @@ function renderCmdItemsTable() {
               oninput="cmdModalItems[${i}].price=Math.max(0,parseFloat(this.value)||0);updateCmdTotals()"
               style="width:100px;padding:4px 8px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:13px;text-align:right" />
           </td>
-          <td style="padding:7px 6px;text-align:right;font-family:'DM Mono',monospace;white-space:nowrap">${fmt(item.qty * item.price)}</td>
+          <td id="cmdRowTotal_${i}" style="padding:7px 6px;text-align:right;font-family:'DM Mono',monospace;white-space:nowrap">${fmt(item.qty * item.price)}</td>
           <td style="padding:7px 4px;text-align:center">
             <button onclick="removeCmdItem(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:17px;padding:2px 4px;line-height:1" title="Supprimer">×</button>
           </td>
@@ -3348,6 +3446,10 @@ function addCmdItemFromStock(id) {
 }
 
 function updateCmdTotals() {
+  cmdModalItems.forEach((item, idx) => {
+    const cell = document.getElementById(`cmdRowTotal_${idx}`);
+    if (cell) cell.textContent = fmt((item.qty || 1) * (item.price || 0));
+  });
   const subtotal = cmdModalItems.reduce((s, i) => s + ((i.qty || 1) * (i.price || 0)), 0);
   const remise   = Math.max(0, Math.min(subtotal, parseFloat(document.getElementById('cmdRemise')?.value) || 0));
   const total    = Math.max(0, subtotal - remise);
@@ -3673,11 +3775,19 @@ function _doCmdFinalize(c, method, given, change, provider, ref) {
     ref:      ref      || '',
     fromCommande: c.id
   };
+  c.items.forEach(item => {
+    if (!item.custom) {
+      const p = products.find(pr => pr.name === item.name);
+      if (p) p.stock = Math.max(0, p.stock - item.qty);
+    }
+  });
   sales.unshift(sale);
   c.status           = 'completed';
   c.dateFinalisation = new Date().toISOString();
   c.saleId           = sale.id;
   saveData();
+  renderProducts();
+  renderStockTable();
   renderStats();
   syncToAppsScript(sale);
   syncCmdUpdateToSheets(c);
@@ -3791,3 +3901,4 @@ loadData();
 loadUsers();
 initPWA();
 renderCart();
+renderHeldCarts();
