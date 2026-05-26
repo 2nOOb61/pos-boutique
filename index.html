@@ -20,7 +20,7 @@
 <link rel="icon" type="image/png" sizes="32x32" href="./icons/icon-96.png">
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
-<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="./style.css">
 </head>
 <body>
@@ -56,25 +56,25 @@
 <nav id="bottomNav">
   <div class="bottom-nav-inner">
     <button class="bnav-btn active" id="bnav-caisse" data-roles="admin,caissier,utilisateur,gestionnaire" onclick="showPage('caisse',null,this)">
-      <span class="bnav-icon">🛒</span>Caisse
+      <span class="bnav-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg></span>Caisse
     </button>
     <button class="bnav-btn" id="bnav-reservations" data-roles="admin,caissier,utilisateur,gestionnaire,comptable" onclick="showPage('reservations',null,this)">
-      <span class="bnav-icon">📋</span>Réservations
+      <span class="bnav-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span>Réservations
     </button>
     <button class="bnav-btn" id="bnav-commandes" data-roles="admin,caissier,gestionnaire,comptable" onclick="showPage('commandes',null,this)">
-      <span class="bnav-icon">🧾</span>Commandes
+      <span class="bnav-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="15" y2="16"/></svg></span>Commandes
     </button>
     <button class="bnav-btn" id="bnav-stock" data-roles="admin,gestionnaire" onclick="showPage('stock',null,this)">
-      <span class="bnav-icon">📦</span>Stock
+      <span class="bnav-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg></span>Stock
     </button>
     <button class="bnav-btn" id="bnav-stats" data-roles="admin,comptable" onclick="showPage('stats',null,this)">
-      <span class="bnav-icon">📊</span>Stats
+      <span class="bnav-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span>Stats
     </button>
     <button class="bnav-btn" id="bnav-config" data-roles="admin" onclick="showPage('config',null,this)">
-      <span class="bnav-icon">⚙️</span>Config
+      <span class="bnav-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>Config
     </button>
     <button class="bnav-btn" id="bnav-users" data-roles="admin" onclick="showPage('users',null,this)">
-      <span class="bnav-icon">👥</span>Comptes
+      <span class="bnav-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>Comptes
     </button>
   </div>
 </nav>
@@ -82,7 +82,7 @@
 <div id="loginScreen">
   <div class="login-box">
     <div class="login-logo">
-      <span class="icon">🏪</span>
+      <div class="icon"><svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg></div>
       <h1>FOREVER MG <span>POS</span></h1>
       <p>Système de caisse professionnel</p>
     </div>
@@ -95,7 +95,7 @@
       <input type="password" id="loginPass" placeholder="••••••" autocomplete="current-password" />
     </div>
     <button class="btn-login" onclick="doLogin()">Se connecter</button>
-    <div class="login-error" id="loginError">❌ Identifiant ou mot de passe incorrect</div>
+    <div class="login-error" id="loginError">Identifiant ou mot de passe incorrect</div>
     <div class="login-hint">Demo: admin / 1234 &nbsp;|&nbsp; caissier / 0000</div>
   </div>
 </div>
@@ -107,11 +107,11 @@
     <button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()" aria-label="Ouvrir/fermer la navigation" title="Réduire/Agrandir la navigation">
       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
-    <span class="topbar-brand">🏪 FOREVER MG</span>
+    <span class="topbar-brand">FOREVER MG</span>
     <div class="topbar-right">
       <div class="user-badge"><div class="user-dot"></div><span id="currentUserLabel">Admin</span></div>
-      <button class="btn-logout" onclick="openScriptSettings()" title="Configurer Apps Script" aria-label="Configurer Google Sheets" style="border-color:rgba(7,61,55,0.3);color:var(--accent)">⚙️ Google Sheets</button>
-      <span id="pendingBadge" title="Ventes en attente de sync" role="button" tabindex="0" aria-live="polite" style="display:none;background:var(--red);color:#fff;border-radius:20px;padding:3px 10px;font-size:12px;font-weight:700;cursor:pointer" onclick="syncPendingOfflineSales()" onkeydown="if(event.key==='Enter')syncPendingOfflineSales()">⏳ <span id="pendingCount">0</span> en attente</span>
+      <button class="btn-logout" onclick="openScriptSettings()" title="Configurer Apps Script" aria-label="Configurer Google Sheets" style="border-color:rgba(26,74,58,0.3);color:var(--accent)">Google Sheets</button>
+      <span id="pendingBadge" title="Ventes en attente de sync" role="button" tabindex="0" aria-live="polite" style="display:none;background:var(--red);color:#fff;border-radius:20px;padding:3px 10px;font-size:12px;font-weight:700;cursor:pointer" onclick="syncPendingOfflineSales()" onkeydown="if(event.key==='Enter')syncPendingOfflineSales()"><span id="pendingCount">0</span> en attente</span>
       <button class="btn-logout" onclick="doLogout()" aria-label="Se déconnecter">Déconnexion</button>
     </div>
   </div>
@@ -156,31 +156,31 @@
   <!-- CAISSE -->
   <div class="page active" id="page-caisse">
     <div class="caisse-mobile-tabs">
-      <button class="caisse-tab-btn active" id="tabProducts" onclick="switchCaisseTab('products')">🛒 Articles</button>
-      <button class="caisse-tab-btn" id="tabCart" onclick="switchCaisseTab('cart')">🛍️ Panier <span id="caisseTabCartCount" style="background:var(--accent);color:#0a0e1a;border-radius:20px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:2px">0</span></button>
+      <button class="caisse-tab-btn active" id="tabProducts" onclick="switchCaisseTab('products')">Articles</button>
+      <button class="caisse-tab-btn" id="tabCart" onclick="switchCaisseTab('cart')">Panier <span id="caisseTabCartCount" style="background:var(--accent);color:#fff;border-radius:20px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:2px">0</span></button>
     </div>
     <div class="caisse-layout">
       <div class="products-panel">
         <div class="search-bar">
           <div class="search-wrap">
-            <span class="search-icon">🔍</span>
+            <span class="search-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
             <input class="search-input" id="searchInput" placeholder="Rechercher un article..." oninput="filterProducts()" aria-label="Rechercher un article" autocomplete="off" role="searchbox" />
           </div>
-          <button class="btn-scan" id="btnScan" onclick="openScanner()" title="Scanner un code-barres" aria-label="Scanner un code-barres">📷</button>
+          <button class="btn-scan" id="btnScan" onclick="openScanner()" title="Scanner un code-barres" aria-label="Scanner un code-barres"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></button>
         </div>
         <div class="products-grid" id="productsGrid"></div>
       </div>
 
       <div class="cart-panel">
         <div class="cart-header">
-          <span class="cart-title">🛒 Panier</span>
+          <span class="cart-title">Panier</span>
           <div style="display:flex;align-items:center;gap:8px">
-            <button class="btn-quick-add" onclick="openQuickAddModal()" aria-label="Ajouter un article rapide" title="Créer un nouvel article et l'ajouter au panier">➕</button>
+            <button class="btn-quick-add" onclick="openQuickAddModal()" aria-label="Ajouter un article rapide" title="Créer un nouvel article et l'ajouter au panier"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
             <span class="cart-count" id="cartCount">0</span>
           </div>
         </div>
         <div class="cart-items" id="cartItems">
-          <div class="cart-empty"><span class="icon">🛍️</span>Le panier est vide</div>
+          <div class="cart-empty"><span class="icon"><svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg></span>Le panier est vide</div>
         </div>
         <div class="cart-footer">
           <div class="cart-subtotal"><span>Sous-total</span><span id="subtotalVal">0 Ar</span></div>
@@ -205,12 +205,12 @@
             <span>RESTE DÛ</span><span id="dueVal" style="color:var(--red)">0 Ar</span>
           </div>
           <div class="payment-btns">
-            <button class="btn-pay btn-cash" onclick="openPayment('cash')">💵 Espèces</button>
-            <button class="btn-pay btn-mobile" onclick="openPayment('mobile')">📱 Mobile</button>
-            <button class="btn-pay btn-reserve" onclick="openReservation()">📋 Réserver</button>
-            <button class="btn-pay btn-commande" onclick="openCommandeModal(true)">🧾 Commander</button>
+            <button class="btn-pay btn-cash" onclick="openPayment('cash')">Espèces</button>
+            <button class="btn-pay btn-mobile" onclick="openPayment('mobile')">Mobile Money</button>
+            <button class="btn-pay btn-reserve" onclick="openReservation()">Réserver</button>
+            <button class="btn-pay btn-commande" onclick="openCommandeModal(true)">Commander</button>
           </div>
-          <button class="btn-clear" onclick="clearCart()" aria-label="Vider le panier">🗑 Vider le panier</button>
+          <button class="btn-clear" onclick="clearCart()" aria-label="Vider le panier">Vider le panier</button>
         </div>
       </div>
     </div>
@@ -219,12 +219,12 @@
   <!-- STOCK -->
   <div class="page" id="page-stock">
     <div class="stock-toolbar">
-      <button class="btn-add-product" onclick="openProductModal()">➕ Nouvel article</button>
-      <button class="btn-add-product" style="background:var(--accent2)" onclick="openScanner('stock')">📷 Scanner un article</button>
+      <button class="btn-add-product" onclick="openProductModal()">+ Nouvel article</button>
+      <button class="btn-add-product" style="background:var(--accent2)" onclick="openScanner('stock')">Scanner un article</button>
       <div style="position:relative;flex:1;max-width:300px">
-        <input class="filter-input" id="stockFilter" placeholder="🔍 Filtrer le stock..." oninput="renderStockTable()" />
+        <input class="filter-input" id="stockFilter" placeholder="Filtrer le stock..." oninput="renderStockTable()" />
       </div>
-      <button class="btn-add-product" style="background:var(--accent3)" onclick="openMouvement()">📥 Entrée/Sortie stock</button>
+      <button class="btn-add-product" style="background:var(--accent3)" onclick="openMouvement()">Entrée / Sortie stock</button>
     </div>
     <div class="stock-table-wrap">
       <table>
@@ -250,28 +250,28 @@
   <div class="page" id="page-stats">
     <div class="stats-grid">
       <div class="stat-card green" id="statCardDay" onclick="openStatDetail('day')">
-        <div class="stat-icon">💰</div>
+        <div class="stat-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
         <div class="stat-label">Ventes aujourd'hui</div>
         <div class="stat-value" id="statToday">0 Ar</div>
         <div class="stat-sub" id="statTodayCount">0 transactions</div>
         <div class="stat-detail-hint">Cliquer pour voir le détail ›</div>
       </div>
       <div class="stat-card blue" id="statCardMonth" onclick="openStatDetail('month')">
-        <div class="stat-icon">📅</div>
+        <div class="stat-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
         <div class="stat-label">Ventes ce mois</div>
         <div class="stat-value" id="statMonth">0 Ar</div>
         <div class="stat-sub" id="statMonthCount">0 transactions</div>
         <div class="stat-detail-hint">Cliquer pour voir le détail ›</div>
       </div>
       <div class="stat-card orange" id="statCardStock" onclick="openStatDetail('stock')">
-        <div class="stat-icon">📦</div>
+        <div class="stat-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg></div>
         <div class="stat-label">Articles en stock</div>
         <div class="stat-value" id="statItems">0</div>
         <div class="stat-sub" id="statLow">0 en alerte</div>
         <div class="stat-detail-hint">Cliquer pour voir le détail ›</div>
       </div>
       <div class="stat-card red" id="statCardDue" onclick="openStatDetail('due')">
-        <div class="stat-icon">⏳</div>
+        <div class="stat-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
         <div class="stat-label">Reste à payer</div>
         <div class="stat-value" id="statDue">0 Ar</div>
         <div class="stat-sub" id="statDueCount">0 créances</div>
@@ -282,43 +282,43 @@
     <!-- PANNEAU DÉTAIL — s'ouvre sous les cartes au clic -->
     <div id="statDetailPanel">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:15px" id="statDetailTitle"></div>
+        <div style="font-family:'DM Sans',sans-serif;font-weight:700;font-size:15px" id="statDetailTitle"></div>
         <button onclick="closeStatDetail()" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:20px;padding:2px 8px;border-radius:8px;line-height:1" title="Fermer">✕</button>
       </div>
       <div id="statDetailBody" style="max-height:480px;overflow-y:auto;overflow-x:hidden"></div>
     </div>
     <div class="chart-placeholder">
-      <div class="chart-title">📈 Ventes des 7 derniers jours</div>
+      <div class="chart-title">Ventes des 7 derniers jours</div>
       <div class="bar-chart" id="barChart"></div>
     </div>
     <div class="chart-placeholder" style="margin-top:20px">
-      <div class="chart-title">📅 Ventes par mois</div>
+      <div class="chart-title">Ventes par mois</div>
       <div class="bar-chart" id="monthChart"></div>
       <div id="monthTable" style="margin-top:14px;display:flex;flex-direction:column;gap:6px"></div>
     </div>
 
     <!-- MEILLEURES VENTES PAR PÉRIODE -->
     <div style="margin-top:20px">
-      <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px;margin-bottom:12px">🏆 Meilleures ventes par article</div>
+      <div style="font-family:'DM Sans',sans-serif;font-weight:700;font-size:16px;margin-bottom:12px">Meilleures ventes par article</div>
       <div class="bs-period-bar">
-        <button id="bsTabDay"   class="bs-tab active" onclick="switchBestSalesPeriod('day')">📅 Aujourd'hui</button>
-        <button id="bsTabMonth" class="bs-tab"        onclick="switchBestSalesPeriod('month')">🗓️ Ce mois</button>
-        <button id="bsTabYear"  class="bs-tab"        onclick="switchBestSalesPeriod('year')">📆 Cette année</button>
+        <button id="bsTabDay"   class="bs-tab active" onclick="switchBestSalesPeriod('day')">Aujourd'hui</button>
+        <button id="bsTabMonth" class="bs-tab"        onclick="switchBestSalesPeriod('month')">Ce mois</button>
+        <button id="bsTabYear"  class="bs-tab"        onclick="switchBestSalesPeriod('year')">Cette année</button>
       </div>
       <div id="bestSalesContent"></div>
     </div>
 
     <div id="statsReservationsBlock" style="margin-top:20px;padding:16px;background:rgba(108,63,197,0.06);border:1px solid rgba(108,63,197,0.18);border-radius:16px;display:none">
-      <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:15px;color:var(--accent3);margin-bottom:10px">📋 Réservations en attente</div>
+      <div style="font-family:'DM Sans',sans-serif;font-weight:700;font-size:15px;color:var(--accent3);margin-bottom:10px">Réservations en attente</div>
       <div id="statsResList"></div>
     </div>
 
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px;margin-top:20px;margin-bottom:8px">
-      <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px;margin-bottom:12px">🖨️ Imprimer rapport</div>
+      <div style="font-family:'DM Sans',sans-serif;font-weight:700;font-size:16px;margin-bottom:12px">Imprimer rapport</div>
       <!-- Raccourcis rapides -->
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-        <button onclick="printReportDay()" style="padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text);cursor:pointer;font-size:13px;font-weight:600">📅 Aujourd'hui</button>
-        <button onclick="printReportMonth()" style="padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text);cursor:pointer;font-size:13px;font-weight:600">🗓️ Ce mois</button>
+        <button onclick="printReportDay()" style="padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text);cursor:pointer;font-size:13px;font-weight:600">Aujourd'hui</button>
+        <button onclick="printReportMonth()" style="padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text);cursor:pointer;font-size:13px;font-weight:600">Ce mois</button>
       </div>
       <!-- Période personnalisée -->
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding-top:12px;border-top:1px solid var(--border)">
@@ -332,14 +332,14 @@
             <label style="font-size:12px;color:var(--muted)">Au</label>
             <input type="date" id="reportDateTo" style="padding:7px 10px;border:1px solid var(--border);border-radius:10px;background:var(--surface2);color:var(--text);font-size:13px;cursor:pointer">
           </div>
-          <button onclick="printReportCustom()" style="padding:8px 16px;background:var(--accent);border:none;border-radius:10px;color:#000;cursor:pointer;font-size:13px;font-weight:700">🖨️ Imprimer</button>
-          <button onclick="exportSalesCSV()" style="padding:8px 16px;background:var(--green);border:none;border-radius:10px;color:#fff;cursor:pointer;font-size:13px;font-weight:700" title="Exporter les ventes en CSV (filtre période appliqué)">📥 Export CSV</button>
+          <button onclick="printReportCustom()" style="padding:8px 16px;background:var(--accent);border:none;border-radius:10px;color:#fff;cursor:pointer;font-size:13px;font-weight:700">Imprimer</button>
+          <button onclick="exportSalesCSV()" style="padding:8px 16px;background:var(--green);border:none;border-radius:10px;color:#fff;cursor:pointer;font-size:13px;font-weight:700" title="Exporter les ventes en CSV (filtre période appliqué)">Export CSV</button>
         </div>
       </div>
     </div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;margin-top:10px">
-      <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px">📋 Historique des ventes</div>
-      <button id="statsRefreshBtn" onclick="manualRefreshStats()" style="padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--muted);cursor:pointer;font-size:13px">🔄 Actualiser depuis Sheets</button>
+      <div style="font-family:'DM Sans',sans-serif;font-weight:700;font-size:16px">Historique des ventes</div>
+      <button id="statsRefreshBtn" onclick="manualRefreshStats()" style="padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--muted);cursor:pointer;font-size:13px">Actualiser depuis Sheets</button>
     </div>
     <div class="history-table-wrap">
       <table>
@@ -377,7 +377,7 @@
           <option value="cancelled">Annulées</option>
           <option value="all">Toutes</option>
         </select>
-        <button id="resRefreshBtn" onclick="manualRefreshReservations()" style="padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--muted);cursor:pointer;font-size:13px">🔄 Actualiser</button>
+        <button id="resRefreshBtn" onclick="manualRefreshReservations()" style="padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--muted);cursor:pointer;font-size:13px">Actualiser</button>
       </div>
     </div>
     <div id="reservationsList"></div>
@@ -411,8 +411,8 @@
           <option value="cancelled">Annulées</option>
           <option value="all">Toutes</option>
         </select>
-        <button id="cmdRefreshBtn" onclick="manualRefreshCommandes()" style="padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--muted);cursor:pointer;font-size:13px">🔄 Actualiser</button>
-        <button class="btn-add-product" style="background:var(--accent2)" onclick="openCommandeModal(false)">➕ Nouvelle commande</button>
+        <button id="cmdRefreshBtn" onclick="manualRefreshCommandes()" style="padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--muted);cursor:pointer;font-size:13px">Actualiser</button>
+        <button class="btn-add-product" style="background:var(--accent2)" onclick="openCommandeModal(false)">+ Nouvelle commande</button>
       </div>
     </div>
     <div id="commandesList"></div>
@@ -421,7 +421,7 @@
   <!-- UTILISATEURS -->
   <div class="page" id="page-users">
     <div class="users-toolbar">
-      <button class="btn-add-product" onclick="openUserModal()">➕ Nouvel utilisateur</button>
+      <button class="btn-add-product" onclick="openUserModal()">+ Nouvel utilisateur</button>
       <span style="color:var(--muted);font-size:13px" id="usersCount"></span>
     </div>
     <div class="users-grid" id="usersGrid"></div>
@@ -432,7 +432,7 @@
 
     <!-- Section Boutique -->
     <div class="config-section">
-      <div class="config-section-title">🏪 Informations de la boutique</div>
+      <div class="config-section-title">Informations de la boutique</div>
       <div class="config-grid">
         <div class="form-group"><label>Nom de la boutique</label><input id="cfgShopName" placeholder="MA BOUTIQUE" oninput="saveConfig()" /></div>
         <div class="form-group"><label>Adresse / Ville</label><input id="cfgAddress" placeholder="Antananarivo, Madagascar" oninput="saveConfig()" /></div>
@@ -443,17 +443,17 @@
 
     <!-- Section Catégories -->
     <div class="config-section">
-      <div class="config-section-title">🏷️ Catégories d'articles</div>
+      <div class="config-section-title">Catégories d'articles</div>
       <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
         <input id="newCatInput" class="filter-input" placeholder="Nouvelle catégorie..." style="max-width:240px" onkeydown="if(event.key==='Enter')addCategory()" />
-        <button class="btn-add-product" onclick="addCategory()">➕ Ajouter</button>
+        <button class="btn-add-product" onclick="addCategory()">+ Ajouter</button>
       </div>
       <div id="categoriesList" style="display:flex;gap:8px;flex-wrap:wrap"></div>
     </div>
 
     <!-- Section Ticket -->
     <div class="config-section">
-      <div class="config-section-title">🎨 Personnalisation du ticket de caisse</div>
+      <div class="config-section-title">Personnalisation du ticket de caisse</div>
       <div class="ticket-cfg-layout">
 
         <!-- Options -->
@@ -465,13 +465,13 @@
             <div class="logo-upload-box" onclick="document.getElementById('logoFileInput').click()">
               <input type="file" id="logoFileInput" accept="image/*" onchange="handleLogoUpload(this)" />
               <div id="logoUploadHint" style="color:var(--muted);font-size:13px">
-                🖼️ Cliquez pour choisir une image<br>
+                Cliquez pour choisir une image<br>
                 <span style="font-size:11px">PNG, JPG, SVG — max 500 Ko</span>
               </div>
               <img id="logoPreviewImg" class="logo-preview-img" alt="Logo" />
             </div>
             <div id="logoClearRow" style="display:none;margin-top:8px;text-align:right">
-              <button onclick="removeLogo()" style="font-size:12px;color:var(--red);background:none;border:none;cursor:pointer;text-decoration:underline">🗑 Supprimer le logo</button>
+              <button onclick="removeLogo()" style="font-size:12px;color:var(--red);background:none;border:none;cursor:pointer;text-decoration:underline">Supprimer le logo</button>
             </div>
           </div>
 
@@ -566,10 +566,10 @@
     <!-- Section Articles -->
     <div class="config-section">
       <div class="config-section-title" style="display:flex;align-items:center;justify-content:space-between">
-        <span>📦 Gestion des articles</span>
+        <span>Gestion des articles</span>
         <div style="display:flex;gap:8px">
-          <input class="filter-input" id="configSearch" placeholder="🔍 Rechercher..." oninput="renderConfigArticles()" style="max-width:200px;padding:8px 12px" />
-          <button class="btn-add-product" onclick="openProductModal()">➕ Nouvel article</button>
+          <input class="filter-input" id="configSearch" placeholder="Rechercher..." oninput="renderConfigArticles()" style="max-width:200px;padding:8px 12px" />
+          <button class="btn-add-product" onclick="openProductModal()">+ Nouvel article</button>
         </div>
       </div>
       <div id="configArticlesGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-top:16px"></div>
@@ -584,13 +584,13 @@
 <div class="modal-overlay" id="commandeModal">
   <div class="modal cmd-modal">
     <div class="modal-title">
-      <span>🧾 Nouvelle commande</span>
+      <span>Nouvelle commande</span>
       <button class="modal-close" onclick="closeModal('commandeModal')">✕</button>
     </div>
 
     <!-- Client -->
     <div class="cmd-section">
-      <div class="cmd-section-title">👤 Informations client</div>
+      <div class="cmd-section-title">Informations client</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
         <div class="form-group" style="margin:0">
           <label>Nom du client <span style="color:var(--red)">*</span></label>
@@ -613,32 +613,32 @@
 
     <!-- Articles -->
     <div class="cmd-section">
-      <div class="cmd-section-title">🛍️ Articles commandés</div>
+      <div class="cmd-section-title">Articles commandés</div>
       <div id="cmdItemsList"></div>
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:flex-start">
         <div style="position:relative;flex:1;min-width:180px">
-          <input id="cmdStockSearch" class="filter-input" placeholder="🔍 Ajouter depuis le stock..."
+          <input id="cmdStockSearch" class="filter-input" placeholder="Ajouter depuis le stock..."
                  oninput="filterCmdStock()" onfocus="filterCmdStock()"
                  style="width:100%" />
           <div id="cmdStockDropdown" class="cmd-stock-dropdown" style="display:none"></div>
         </div>
-        <button class="btn-add-product" onclick="addCmdCustomItem()" style="white-space:nowrap;font-size:13px">✏️ Article libre</button>
+        <button class="btn-add-product" onclick="addCmdCustomItem()" style="white-space:nowrap;font-size:13px">Article libre</button>
       </div>
     </div>
 
     <!-- Notes -->
     <div class="cmd-section">
-      <div class="cmd-section-title">📝 Notes de personnalisation</div>
+      <div class="cmd-section-title">Notes de personnalisation</div>
       <textarea id="cmdNotes" placeholder="Ex: Broderie initiales JD, couleur bleu marine, taille M..."
                 style="width:100%;min-height:80px;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface2);color:var(--text);font-family:inherit;font-size:14px;resize:vertical;outline:none;transition:.2s"></textarea>
     </div>
 
     <!-- Photos -->
     <div class="cmd-section">
-      <div class="cmd-section-title">📷 Photos / Pièces jointes <span style="font-size:11px;color:var(--muted);font-weight:400">(max 5, stockées localement)</span></div>
+      <div class="cmd-section-title">Photos / Pièces jointes <span style="font-size:11px;color:var(--muted);font-weight:400">(max 5, stockées localement)</span></div>
       <div class="cmd-photos-zone" onclick="document.getElementById('cmdPhotosInput').click()">
         <input type="file" id="cmdPhotosInput" accept="image/*" multiple onchange="addCmdPhotos(this.files)" style="display:none" />
-        <span style="font-size:22px">🖼️</span>
+        <span style="font-size:22px"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></span>
         <div style="font-size:13px;color:var(--muted);margin-top:4px">Cliquer pour ajouter des photos</div>
         <div style="font-size:11px;color:var(--muted)">JPEG, PNG — Plusieurs fichiers acceptés</div>
       </div>
@@ -647,14 +647,14 @@
 
     <!-- Montants -->
     <div class="cmd-section">
-      <div class="cmd-section-title">💰 Montants</div>
+      <div class="cmd-section-title">Montants</div>
       <div style="background:var(--surface2);border-radius:12px;padding:14px">
         <div style="display:flex;justify-content:space-between;margin-bottom:8px">
           <span style="color:var(--muted)">Sous-total</span>
           <span id="cmdSubtotalVal" style="font-family:'DM Mono',monospace">0 Ar</span>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <label style="color:var(--muted)">🏷️ Remise (Ar)</label>
+          <label style="color:var(--muted)">Remise (Ar)</label>
           <input type="number" id="cmdRemise" style="width:120px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px;text-align:right" placeholder="0" min="0" oninput="updateCmdTotals()" />
         </div>
         <div style="display:flex;justify-content:space-between;margin-bottom:8px;font-weight:700;font-size:15px;border-top:1px solid var(--border);padding-top:8px">
@@ -662,7 +662,7 @@
           <span id="cmdTotalVal" style="font-family:'DM Mono',monospace;color:var(--accent)">0 Ar</span>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-          <label style="color:var(--muted)">💳 Acompte (Ar)</label>
+          <label style="color:var(--muted)">Acompte (Ar)</label>
           <input type="number" id="cmdAccompte" style="width:120px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px;text-align:right" placeholder="0" min="0" oninput="updateCmdTotals()" />
         </div>
         <div style="display:flex;justify-content:space-between;font-weight:700">
@@ -674,10 +674,10 @@
 
     <!-- Paiement accompte -->
     <div class="cmd-section">
-      <div class="cmd-section-title">💳 Paiement de l'acompte</div>
+      <div class="cmd-section-title">Paiement de l'acompte</div>
       <div class="payment-tabs" style="margin-bottom:12px">
-        <button class="payment-tab active" id="tabCmdCash" onclick="switchCmdPayTab('cash')">💵 Espèces</button>
-        <button class="payment-tab payment-tab-mobile" id="tabCmdMobile" onclick="switchCmdPayTab('mobile')">📱 Mobile Money</button>
+        <button class="payment-tab active" id="tabCmdCash" onclick="switchCmdPayTab('cash')">Espèces</button>
+        <button class="payment-tab payment-tab-mobile" id="tabCmdMobile" onclick="switchCmdPayTab('mobile')">Mobile Money</button>
       </div>
       <div id="cmdCashSection">
         <div class="form-group" style="margin-bottom:8px">
@@ -691,10 +691,10 @@
       </div>
       <div id="cmdMobileSection" style="display:none">
         <div class="mobile-providers">
-          <button class="provider-btn active" id="cmdProvMvola" onclick="selectCmdProvider('MVola')">📱 MVola</button>
-          <button class="provider-btn" id="cmdProvAirtel" onclick="selectCmdProvider('Airtel Money')">🔴 Airtel Money</button>
-          <button class="provider-btn" id="cmdProvOrange" onclick="selectCmdProvider('Orange Money')">🟠 Orange Money</button>
-          <button class="provider-btn" id="cmdProvBmoov" onclick="selectCmdProvider('Bmoov')">🔵 Bmoov</button>
+          <button class="provider-btn active" id="cmdProvMvola" onclick="selectCmdProvider('MVola')">MVola</button>
+          <button class="provider-btn" id="cmdProvAirtel" onclick="selectCmdProvider('Airtel Money')">Airtel Money</button>
+          <button class="provider-btn" id="cmdProvOrange" onclick="selectCmdProvider('Orange Money')">Orange Money</button>
+          <button class="provider-btn" id="cmdProvBmoov" onclick="selectCmdProvider('Bmoov')">Bmoov</button>
         </div>
         <div class="form-group"><label>Référence transaction</label><input id="cmdMobileRef" placeholder="Ex: TX12345678" /></div>
       </div>
@@ -702,7 +702,7 @@
 
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeModal('commandeModal')">Annuler</button>
-      <button class="btn-primary" style="background:var(--accent2)" onclick="saveCommande()">🧾 Enregistrer la commande</button>
+      <button class="btn-primary" style="background:var(--accent2)" onclick="saveCommande()">Enregistrer la commande</button>
     </div>
   </div>
 </div>
@@ -711,7 +711,7 @@
 <div class="modal-overlay" id="cmdFinalizeModal">
   <div class="modal">
     <div class="modal-title">
-      <span>✅ Finaliser la commande</span>
+      <span>Finaliser la commande</span>
       <button class="modal-close" onclick="closeModal('cmdFinalizeModal')">✕</button>
     </div>
     <div id="cmdFinalClientInfo" style="background:rgba(237,111,44,0.10);border-radius:12px;padding:10px 14px;margin-bottom:14px;font-size:14px;color:var(--accent2);font-weight:600"></div>
@@ -721,8 +721,8 @@
       <div class="row total"><span>Reste à payer</span><span id="cmdFinalRestant" style="color:var(--accent2)">0 Ar</span></div>
     </div>
     <div class="payment-tabs" style="margin-bottom:12px">
-      <button class="payment-tab active" id="tabCmdFinCash" onclick="switchCmdFinPayTab('cash')">💵 Espèces</button>
-      <button class="payment-tab payment-tab-mobile" id="tabCmdFinMobile" onclick="switchCmdFinPayTab('mobile')">📱 Mobile Money</button>
+      <button class="payment-tab active" id="tabCmdFinCash" onclick="switchCmdFinPayTab('cash')">Espèces</button>
+      <button class="payment-tab payment-tab-mobile" id="tabCmdFinMobile" onclick="switchCmdFinPayTab('mobile')">Mobile Money</button>
     </div>
     <div id="cmdFinCashSection">
       <div class="form-group"><label>Montant remis par le client (Ar)</label><input id="cmdFinGiven" type="number" placeholder="0" oninput="calcCmdFinChange()" /></div>
@@ -733,23 +733,23 @@
     </div>
     <div id="cmdFinMobileSection" style="display:none">
       <div class="mobile-providers">
-        <button class="provider-btn active" id="cmdFinProvMvola" onclick="selectCmdFinProvider('MVola')">📱 MVola</button>
-        <button class="provider-btn" id="cmdFinProvAirtel" onclick="selectCmdFinProvider('Airtel Money')">🔴 Airtel Money</button>
-        <button class="provider-btn" id="cmdFinProvOrange" onclick="selectCmdFinProvider('Orange Money')">🟠 Orange Money</button>
-        <button class="provider-btn" id="cmdFinProvBmoov" onclick="selectCmdFinProvider('Bmoov')">🔵 Bmoov</button>
+        <button class="provider-btn active" id="cmdFinProvMvola" onclick="selectCmdFinProvider('MVola')">MVola</button>
+        <button class="provider-btn" id="cmdFinProvAirtel" onclick="selectCmdFinProvider('Airtel Money')">Airtel Money</button>
+        <button class="provider-btn" id="cmdFinProvOrange" onclick="selectCmdFinProvider('Orange Money')">Orange Money</button>
+        <button class="provider-btn" id="cmdFinProvBmoov" onclick="selectCmdFinProvider('Bmoov')">Bmoov</button>
       </div>
       <div class="form-group"><label>Référence transaction</label><input id="cmdFinMobileRef" placeholder="Ex: TX12345678" /></div>
     </div>
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeModal('cmdFinalizeModal')">Annuler</button>
-      <button class="btn-primary" onclick="confirmCmdFinalize()">✅ Valider et encaisser</button>
+      <button class="btn-primary" onclick="confirmCmdFinalize()">Valider et encaisser</button>
     </div>
   </div>
 </div>
 
 <!-- SCANNER OVERLAY -->
 <div id="scannerOverlay">
-  <div class="scanner-top-label" id="scannerLabel">📷 Scanner un code-barres</div>
+  <div class="scanner-top-label" id="scannerLabel">Scanner un code-barres</div>
   <div id="qr-reader"></div>
   <div class="scanner-result-box" id="scannerResult">En attente...</div>
   <button id="scanActionBtn" style="display:none;margin-top:10px;padding:12px 24px;background:var(--accent);color:#0a0e1a;border:none;border-radius:12px;font-weight:700;font-size:14px;cursor:pointer;width:100%;max-width:340px"></button>
@@ -764,7 +764,7 @@
 <div class="modal-overlay" id="userModal">
   <div class="modal">
     <div class="modal-title">
-      <span id="userModalTitle">➕ Nouvel utilisateur</span>
+      <span id="userModalTitle">Nouvel utilisateur</span>
       <button class="modal-close" onclick="closeModal('userModal')">✕</button>
     </div>
     <div class="form-group">
@@ -779,17 +779,17 @@
       <label id="uPassLabel">Mot de passe</label>
       <div style="position:relative">
         <input id="uPass" type="password" placeholder="••••••" autocomplete="new-password" style="width:100%;padding-right:44px" />
-        <button type="button" onclick="togglePassVis()" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px" id="passVisBtn">👁</button>
+        <button type="button" onclick="togglePassVis()" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--muted);cursor:pointer;" id="passVisBtn"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
       </div>
     </div>
     <div class="form-group">
       <label>Rôle</label>
       <select id="uRole">
-        <option value="admin">👑 Administrateur — accès complet</option>
-        <option value="caissier">🛒 Caissier — caisse + réservations + commandes</option>
-        <option value="utilisateur">👤 Utilisateur — caisse + réservations</option>
-        <option value="gestionnaire">📦 Gestionnaire Stock — caisse + stock + commandes</option>
-        <option value="comptable">📊 Comptable — statistiques + commandes + réservations</option>
+        <option value="admin">Administrateur — accès complet</option>
+        <option value="caissier">Caissier — caisse + réservations + commandes</option>
+        <option value="utilisateur">Utilisateur — caisse + réservations</option>
+        <option value="gestionnaire">Gestionnaire Stock — caisse + stock + commandes</option>
+        <option value="comptable">Comptable — statistiques + commandes + réservations</option>
       </select>
     </div>
     <div class="form-group" style="display:flex;align-items:center;gap:12px">
@@ -810,7 +810,7 @@
 <div class="modal-overlay" id="productModal">
   <div class="modal">
     <div class="modal-title">
-      <span id="productModalTitle">➕ Nouvel article</span>
+      <span id="productModalTitle">Nouvel article</span>
       <button class="modal-close" onclick="closeModal('productModal')">✕</button>
     </div>
     <div class="form-group"><label>Nom de l'article</label><input id="pName" placeholder="Ex: Riz 1kg" /></div>
@@ -827,12 +827,12 @@
       <label>Photo du produit <span style="font-weight:400;color:var(--muted)">(optionnel)</span></label>
       <div class="img-upload-zone" onclick="document.getElementById('pImage').click()">
         <input type="file" id="pImage" accept="image/*" onchange="previewProductImage(this)" />
-        <span style="font-size:22px">🖼️</span>
+        <span style="font-size:22px"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></span>
         <div style="font-size:12px;color:var(--muted);margin-top:4px">Cliquer pour choisir une image</div>
         <div style="font-size:11px;color:var(--muted);margin-top:2px">Taille recommandée : <strong>400 × 400 px</strong> (carré)</div>
       </div>
       <img id="pImagePreview" class="img-modal-preview" />
-      <button type="button" class="img-clear-btn" id="pImageClear" onclick="clearProductImage()">✕ Supprimer la photo</button>
+      <button type="button" class="img-clear-btn" id="pImageClear" onclick="clearProductImage()">Supprimer la photo</button>
     </div>
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeModal('productModal')">Annuler</button>
@@ -845,7 +845,7 @@
 <div class="modal-overlay" id="quickAddModal">
   <div class="modal">
     <div class="modal-title">
-      <span>🛒 Nouvel article → Panier</span>
+      <span>Nouvel article → Panier</span>
       <button class="modal-close" onclick="closeModal('quickAddModal')">✕</button>
     </div>
     <div class="form-group"><label>Nom de l'article</label><input id="qaName" placeholder="Ex: Sucre 1kg" /></div>
@@ -857,11 +857,11 @@
       <div class="form-group" style="margin-bottom:0"><label>Stock initial</label><input id="qaStock" type="number" placeholder="1" min="1" value="1" /></div>
     </div>
     <div style="background:rgba(255,107,0,0.08);border-radius:10px;padding:10px 14px;font-size:13px;color:var(--accent);margin-top:16px;margin-bottom:4px">
-      💡 L'article sera créé dans le stock ET ajouté directement au panier
+      L'article sera créé dans le stock ET ajouté directement au panier
     </div>
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeModal('quickAddModal')">Annuler</button>
-      <button class="btn-primary" onclick="saveQuickAdd()">🛒 Ajouter au panier</button>
+      <button class="btn-primary" onclick="saveQuickAdd()">Ajouter au panier</button>
     </div>
   </div>
 </div>
@@ -870,7 +870,7 @@
 <div class="modal-overlay" id="paymentModal">
   <div class="modal">
     <div class="modal-title">
-      <span>💳 Paiement</span>
+      <span>Paiement</span>
       <button class="modal-close" onclick="closeModal('paymentModal')">✕</button>
     </div>
     <div class="payment-amount">
@@ -887,8 +887,8 @@
       <input id="clientContact" placeholder="Ex: +261 34 XX XXX XX" autocomplete="off" />
     </div>
     <div class="payment-tabs">
-      <button class="payment-tab active" id="tabCash" onclick="switchPayTab('cash')">💵 Espèces</button>
-      <button class="payment-tab payment-tab-mobile" id="tabMobile" onclick="switchPayTab('mobile')">📱 Mobile Money</button>
+      <button class="payment-tab active" id="tabCash" onclick="switchPayTab('cash')">Espèces</button>
+      <button class="payment-tab payment-tab-mobile" id="tabMobile" onclick="switchPayTab('mobile')">Mobile Money</button>
     </div>
     <div id="cashSection">
       <div class="form-group"><label>Montant remis par le client (Ar)</label><input class="given-input" id="givenAmount" type="number" placeholder="0" oninput="calcChange()" /></div>
@@ -899,16 +899,16 @@
     </div>
     <div id="mobileSection" style="display:none">
       <div class="mobile-providers">
-        <button class="provider-btn active" id="provMvola" onclick="selectProvider('MVola')">📱 MVola</button>
-        <button class="provider-btn" id="provAirtel" onclick="selectProvider('Airtel Money')">🔴 Airtel Money</button>
-        <button class="provider-btn" id="provOrange" onclick="selectProvider('Orange Money')">🟠 Orange Money</button>
-        <button class="provider-btn" id="provBmoov" onclick="selectProvider('Bmoov')">🔵 Bmoov</button>
+        <button class="provider-btn active" id="provMvola" onclick="selectProvider('MVola')">MVola</button>
+        <button class="provider-btn" id="provAirtel" onclick="selectProvider('Airtel Money')">Airtel Money</button>
+        <button class="provider-btn" id="provOrange" onclick="selectProvider('Orange Money')">Orange Money</button>
+        <button class="provider-btn" id="provBmoov" onclick="selectProvider('Bmoov')">Bmoov</button>
       </div>
       <div class="form-group"><label>Référence transaction</label><input id="mobileRef" placeholder="Ex: TX12345678" /></div>
     </div>
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeModal('paymentModal')">Annuler</button>
-      <button class="btn-primary" onclick="confirmPayment()">✅ Valider le paiement</button>
+      <button class="btn-primary" onclick="confirmPayment()">Valider le paiement</button>
     </div>
   </div>
 </div>
@@ -917,7 +917,7 @@
 <div class="modal-overlay" id="reservationModal">
   <div class="modal">
     <div class="modal-title">
-      <span>📋 Nouvelle réservation</span>
+      <span>Nouvelle réservation</span>
       <button class="modal-close" onclick="closeModal('reservationModal')">✕</button>
     </div>
     <div class="payment-amount">
@@ -943,8 +943,8 @@
       <label>Mode de paiement de l'acompte</label>
     </div>
     <div class="payment-tabs" style="margin-bottom:12px">
-      <button class="payment-tab active" id="tabResCash" onclick="switchResPayTab('cash')">💵 Espèces</button>
-      <button class="payment-tab payment-tab-mobile" id="tabResMobile" onclick="switchResPayTab('mobile')">📱 Mobile Money</button>
+      <button class="payment-tab active" id="tabResCash" onclick="switchResPayTab('cash')">Espèces</button>
+      <button class="payment-tab payment-tab-mobile" id="tabResMobile" onclick="switchResPayTab('mobile')">Mobile Money</button>
     </div>
     <div id="resCashSection">
       <div class="form-group"><label>Montant remis (Ar)</label><input id="resGiven" type="number" placeholder="0" oninput="calcResChange()" /></div>
@@ -955,16 +955,16 @@
     </div>
     <div id="resMobileSection" style="display:none">
       <div class="mobile-providers">
-        <button class="provider-btn active" id="resProvMvola" onclick="selectResProvider('MVola')">📱 MVola</button>
-        <button class="provider-btn" id="resProvAirtel" onclick="selectResProvider('Airtel Money')">🔴 Airtel Money</button>
-        <button class="provider-btn" id="resProvOrange" onclick="selectResProvider('Orange Money')">🟠 Orange Money</button>
-        <button class="provider-btn" id="resProvBmoov" onclick="selectResProvider('Bmoov')">🔵 Bmoov</button>
+        <button class="provider-btn active" id="resProvMvola" onclick="selectResProvider('MVola')">MVola</button>
+        <button class="provider-btn" id="resProvAirtel" onclick="selectResProvider('Airtel Money')">Airtel Money</button>
+        <button class="provider-btn" id="resProvOrange" onclick="selectResProvider('Orange Money')">Orange Money</button>
+        <button class="provider-btn" id="resProvBmoov" onclick="selectResProvider('Bmoov')">Bmoov</button>
       </div>
       <div class="form-group"><label>Référence transaction</label><input id="resMobileRef" placeholder="Ex: TX12345678" /></div>
     </div>
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeModal('reservationModal')">Annuler</button>
-      <button class="btn-primary" style="background:var(--green)" onclick="confirmReservation()">📋 Confirmer la réservation</button>
+      <button class="btn-primary" style="background:var(--green)" onclick="confirmReservation()">Confirmer la réservation</button>
     </div>
   </div>
 </div>
@@ -973,7 +973,7 @@
 <div class="modal-overlay" id="finalizeModal">
   <div class="modal">
     <div class="modal-title">
-      <span>✅ Finaliser la réservation</span>
+      <span>Finaliser la réservation</span>
       <button class="modal-close" onclick="closeModal('finalizeModal')">✕</button>
     </div>
     <div id="finalizeClientInfo" style="background:rgba(108,63,197,0.08);border-radius:12px;padding:10px 14px;margin-bottom:14px;font-size:14px;color:var(--accent3);font-weight:600"></div>
@@ -983,8 +983,8 @@
       <div class="row total"><span>Reste à payer</span><span id="finalRestant" style="color:var(--accent)">0 Ar</span></div>
     </div>
     <div class="payment-tabs" style="margin-bottom:12px">
-      <button class="payment-tab active" id="tabFinCash" onclick="switchFinPayTab('cash')">💵 Espèces</button>
-      <button class="payment-tab payment-tab-mobile" id="tabFinMobile" onclick="switchFinPayTab('mobile')">📱 Mobile Money</button>
+      <button class="payment-tab active" id="tabFinCash" onclick="switchFinPayTab('cash')">Espèces</button>
+      <button class="payment-tab payment-tab-mobile" id="tabFinMobile" onclick="switchFinPayTab('mobile')">Mobile Money</button>
     </div>
     <div id="finCashSection">
       <div class="form-group"><label>Montant remis par le client (Ar)</label><input id="finGiven" type="number" placeholder="0" oninput="calcFinChange()" /></div>
@@ -995,16 +995,16 @@
     </div>
     <div id="finMobileSection" style="display:none">
       <div class="mobile-providers">
-        <button class="provider-btn active" id="finProvMvola" onclick="selectFinProvider('MVola')">📱 MVola</button>
-        <button class="provider-btn" id="finProvAirtel" onclick="selectFinProvider('Airtel Money')">🔴 Airtel Money</button>
-        <button class="provider-btn" id="finProvOrange" onclick="selectFinProvider('Orange Money')">🟠 Orange Money</button>
-        <button class="provider-btn" id="finProvBmoov" onclick="selectFinProvider('Bmoov')">🔵 Bmoov</button>
+        <button class="provider-btn active" id="finProvMvola" onclick="selectFinProvider('MVola')">MVola</button>
+        <button class="provider-btn" id="finProvAirtel" onclick="selectFinProvider('Airtel Money')">Airtel Money</button>
+        <button class="provider-btn" id="finProvOrange" onclick="selectFinProvider('Orange Money')">Orange Money</button>
+        <button class="provider-btn" id="finProvBmoov" onclick="selectFinProvider('Bmoov')">Bmoov</button>
       </div>
       <div class="form-group"><label>Référence transaction</label><input id="finMobileRef" placeholder="Ex: TX12345678" /></div>
     </div>
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeModal('finalizeModal')">Annuler</button>
-      <button class="btn-primary" onclick="confirmFinalize()">✅ Valider et encaisser</button>
+      <button class="btn-primary" onclick="confirmFinalize()">Valider et encaisser</button>
     </div>
   </div>
 </div>
@@ -1013,7 +1013,7 @@
 <div class="modal-overlay" id="mouvModal">
   <div class="modal">
     <div class="modal-title">
-      <span>📥 Mouvement de stock</span>
+      <span>Mouvement de stock</span>
       <button class="modal-close" onclick="closeModal('mouvModal')">✕</button>
     </div>
     <div class="form-group"><label>Article</label>
@@ -1021,15 +1021,15 @@
     </div>
     <div class="form-group"><label>Type</label>
       <select id="mouvType">
-        <option value="in">📥 Entrée (réapprovisionnement)</option>
-        <option value="out">📤 Sortie (correction/perte)</option>
+        <option value="in">Entrée (réapprovisionnement)</option>
+        <option value="out">Sortie (correction/perte)</option>
       </select>
     </div>
     <div class="form-group"><label>Quantité</label><input id="mouvQty" type="number" placeholder="0" /></div>
     <div class="form-group"><label>Motif</label><input id="mouvReason" placeholder="Ex: Livraison fournisseur" /></div>
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeModal('mouvModal')">Annuler</button>
-      <button class="btn-primary" onclick="saveMouvement()">✅ Confirmer</button>
+      <button class="btn-primary" onclick="saveMouvement()">Confirmer</button>
     </div>
   </div>
 </div>
@@ -1038,7 +1038,7 @@
 <div class="modal-overlay" id="editSaleModal">
   <div class="modal" style="max-width:520px">
     <div class="modal-title">
-      <span>✏️ Modifier la vente <span id="editSaleIdLabel"></span></span>
+      <span>Modifier la vente <span id="editSaleIdLabel"></span></span>
       <button class="modal-close" onclick="closeModal('editSaleModal')">✕</button>
     </div>
     <div class="form-group">
@@ -1072,8 +1072,8 @@
     <div class="form-group">
       <label>Mode de paiement</label>
       <select id="editMethod" onchange="toggleEditPayFields()">
-        <option value="cash">💵 Espèces</option>
-        <option value="mobile">📱 Mobile Money</option>
+        <option value="cash">Espèces</option>
+        <option value="mobile">Mobile Money</option>
       </select>
     </div>
     <div id="editMobileFields" style="display:none">
@@ -1092,11 +1092,11 @@
       </div>
     </div>
     <div style="background:rgba(255,200,0,0.07);border:1px solid rgba(255,200,0,0.2);border-radius:10px;padding:10px;font-size:12px;color:var(--muted);margin-bottom:12px">
-      ⚠️ Modification locale uniquement — les données Google Sheets ne sont pas modifiées.
+      Modification locale uniquement — les données Google Sheets ne sont pas modifiées.
     </div>
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeModal('editSaleModal')">Annuler</button>
-      <button class="btn-primary" onclick="saveEditSale()">✅ Enregistrer</button>
+      <button class="btn-primary" onclick="saveEditSale()">Enregistrer</button>
     </div>
   </div>
 </div>
@@ -1105,17 +1105,17 @@
 <div class="modal-overlay" id="deleteSaleModal">
   <div class="modal" style="max-width:400px;text-align:center">
     <div class="modal-title" style="justify-content:center;border-bottom:none;padding-bottom:0">
-      <span style="font-size:18px">🗑️ Supprimer la vente</span>
+      <span style="font-size:18px">Supprimer la vente</span>
     </div>
     <div style="color:var(--muted);font-size:14px;padding:16px 0">
       Retirer la vente <strong id="deleteSaleIdLabel" style="color:var(--text)">#0</strong> de l'affichage local ?<br><br>
       <span style="font-size:12px;background:rgba(255,60,60,0.08);border:1px solid rgba(255,60,60,0.2);border-radius:8px;padding:8px 12px;display:inline-block;color:var(--red)">
-        ⚠️ L'enregistrement dans Google Sheets n'est pas affecté.
+        L'enregistrement dans Google Sheets n'est pas affecté.
       </span>
     </div>
     <div class="modal-footer" style="justify-content:center">
       <button class="btn-secondary" onclick="closeModal('deleteSaleModal')">Annuler</button>
-      <button class="btn-primary" style="background:var(--red);border-color:var(--red)" onclick="confirmDeleteSale()">🗑️ Supprimer localement</button>
+      <button class="btn-primary" style="background:var(--red);border-color:var(--red)" onclick="confirmDeleteSale()">Supprimer localement</button>
     </div>
   </div>
 </div>
