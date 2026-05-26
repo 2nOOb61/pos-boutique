@@ -2279,6 +2279,24 @@ function confirmDeleteSale() {
 let deferredPrompt = null;
 let swRegistration = null;
 
+function showUpdateBanner() {
+  let banner = document.getElementById('swUpdateBanner');
+  if (banner) return;
+  banner = document.createElement('div');
+  banner.id = 'swUpdateBanner';
+  banner.innerHTML = `
+    <span style="flex:1;font-size:13px;font-weight:500">🔄 Mise à jour disponible</span>
+    <button onclick="window.location.reload()" style="background:#fff;color:#1a4a3a;border:none;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0">Recharger</button>
+    <button onclick="this.parentElement.remove()" style="background:none;border:none;color:rgba(255,255,255,0.7);font-size:18px;cursor:pointer;padding:0 4px;flex-shrink:0">×</button>`;
+  Object.assign(banner.style, {
+    position:'fixed', bottom:'80px', left:'50%', transform:'translateX(-50%)',
+    background:'#1a4a3a', color:'#fff', borderRadius:'14px', padding:'10px 14px',
+    display:'flex', alignItems:'center', gap:'10px', zIndex:'9999',
+    boxShadow:'0 4px 20px rgba(0,0,0,0.25)', maxWidth:'360px', width:'calc(100% - 32px)'
+  });
+  document.body.appendChild(banner);
+}
+
 function initPWA() {
   // Register Service Worker
   if ('serviceWorker' in navigator) {
@@ -2290,13 +2308,27 @@ function initPWA() {
       reg.addEventListener('updatefound', () => {
         const newWorker = reg.installing;
         newWorker.addEventListener('statechange', () => {
-          // Nouveau SW prêt : l'activer immédiatement sans bannière
-          if (newWorker.state === 'installed') {
+          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            // Nouveau SW prêt et un ancien SW existait : activer immédiatement
+            newWorker.postMessage({ type: 'SKIP_WAITING' });
+          } else if (newWorker.state === 'installed') {
+            // Premier install, pas besoin de bannière
             newWorker.postMessage({ type: 'SKIP_WAITING' });
           }
         });
       });
     }).catch(err => console.log('[PWA] SW error:', err));
+
+    // Quand le nouveau SW prend le contrôle → afficher la bannière
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      showUpdateBanner();
+    });
+
+    // Message du SW (SW_UPDATED envoyé depuis activate)
+    navigator.serviceWorker.addEventListener('message', event => {
+      if (event.data?.type === 'SW_UPDATED') showUpdateBanner();
+      if (event.data?.type === 'SYNC_REQUIRED') syncPendingSales?.();
+    });
   }
 
   // Install prompt

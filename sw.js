@@ -1,9 +1,10 @@
 // ============================================================
 // SERVICE WORKER — Boutique POS
-// Stratégie : Network First pour HTML (toujours à jour sur refresh)
-//             Cache First pour assets statiques (icons, fonts)
+// Stratégie : Network First pour tous les fichiers locaux
+//             (HTML, JS, CSS) — toujours à jour quand connecté
+//             Cache First uniquement pour icônes/manifest
 // ============================================================
-const CACHE_NAME = 'boutique-pos-v5';
+const CACHE_NAME = 'boutique-pos-v7';
 const OFFLINE_URL = './index.html';
 
 const STATIC_ASSETS = [
@@ -26,7 +27,13 @@ self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys()
       .then(keys => Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))))
-      .then(() => self.clients.claim())
+      .then(() => {
+        self.clients.claim();
+        // Notifier tous les onglets qu'une mise à jour est active
+        self.clients.matchAll({ type: 'window' }).then(clients =>
+          clients.forEach(c => c.postMessage({ type: 'SW_UPDATED' }))
+        );
+      })
   );
 });
 
@@ -37,39 +44,48 @@ self.addEventListener('fetch', event => {
   if (event.request.url.includes('fonts.googleapis.com') || event.request.url.includes('fonts.gstatic.com')) return;
   if (event.request.url.includes('cdnjs.cloudflare.com')) return;
 
-  const isHTML = event.request.destination === 'document' ||
-                 event.request.url.endsWith('.html') ||
-                 event.request.url.endsWith('/');
+  const url = event.request.url;
+  const isSameOrigin = url.startsWith(self.location.origin);
+  const isAppFile = isSameOrigin && (
+    url.endsWith('.html') || url.endsWith('/') ||
+    url.endsWith('.js')   ||
+    url.endsWith('.css')
+  );
+  const isStaticAsset = url.endsWith('.png') || url.endsWith('.ico') || url.endsWith('manifest.json');
 
-  if (isHTML) {
-    // Network First : toujours chercher la version fraîche du réseau
-    // En cas d'échec réseau (hors ligne), retourner le cache
-    event.respondWith(
-      fetch(event.request, { cache: 'no-store' })
-        .then(response => {
-          // Mettre en cache la version fraîche
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
-          return response;
-        })
-        .catch(() => caches.match(OFFLINE_URL))
-    );
-  } else {
-    // Cache First pour les assets statiques (icons, etc.)
+  if (isStaticAsset) {
+    // Cache First pour icônes/manifest : ne changent pas souvent
     event.respondWith(
       caches.match(event.request).then(cached => {
         if (cached) return cached;
         return fetch(event.request).then(response => {
           if (response && response.status === 200) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+            caches.open(CACHE_NAME).then(cache => cache.put(event.request, response.clone()));
           }
           return response;
-        }).catch(() => {
-          if (event.request.destination === 'document') return caches.match(OFFLINE_URL);
-        });
+        }).catch(() => caches.match(OFFLINE_URL));
       })
     );
+  } else if (isAppFile) {
+    // Network First pour HTML/JS/CSS : toujours la version fraîche
+    event.respondWith(
+      fetch(event.request, { cache: 'no-store' })
+        .then(response => {
+          if (response && response.status === 200) {
+            caches.open(CACHE_NAME).then(cache => cache.put(event.request, response.clone()));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request).then(cached => cached || caches.match(OFFLINE_URL)))
+    );
+  }
+});
+
+// ── MESSAGE ────────────────────────────────────────────────
+self.addEventListener('message', event => {
+  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
+  if (event.data?.type === 'CACHE_VERSION') {
+    event.source.postMessage({ type: 'CACHE_INFO', version: CACHE_NAME });
   }
 });
 
@@ -81,13 +97,5 @@ self.addEventListener('sync', event => {
         clients.forEach(c => c.postMessage({ type: 'SYNC_REQUIRED' }))
       )
     );
-  }
-});
-
-// ── MESSAGE ────────────────────────────────────────────────
-self.addEventListener('message', event => {
-  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
-  if (event.data?.type === 'CACHE_VERSION') {
-    event.source.postMessage({ type: 'CACHE_INFO', version: CACHE_NAME });
   }
 });
