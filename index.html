@@ -22,6 +22,58 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="./style.css">
+
+<style>
+/* ══ FOREVER MG — Modules Attribution & Production ══ */
+.attr-layout { display:grid; grid-template-columns:1fr 340px; gap:20px; align-items:start; }
+@media(max-width:900px) { .attr-layout { grid-template-columns:1fr; } .attr-right { position:static; } }
+.attr-left { display:flex; flex-direction:column; gap:10px; }
+.attr-right { position:sticky; top:80px; }
+.attr-panel { background:var(--color-surface); border:1px solid var(--color-border); border-radius:14px; overflow:hidden; min-height:200px; }
+.dossier-list-wrap { display:flex; flex-direction:column; gap:10px; }
+.dossier-card { background:var(--color-surface); border:1.5px solid var(--color-border); border-radius:12px; padding:14px 16px; cursor:pointer; transition:border-color .15s, box-shadow .15s; }
+.dossier-card:hover { border-color:var(--color-primary); box-shadow:0 2px 8px rgba(26,74,58,.08); }
+.dossier-card--selected { border-color:var(--color-primary); background:var(--color-primary-light); }
+.etape-row-attr { display:flex; align-items:center; gap:10px; padding:10px 16px; border-bottom:1px solid var(--color-border); }
+.etape-row-attr:last-child { border-bottom:none; }
+.btn-attr-assign { padding:5px 12px; border-radius:7px; background:var(--color-primary-light); color:var(--color-primary); border:1px solid rgba(26,74,58,.2); cursor:pointer; font-size:12px; font-weight:600; transition:.15s; white-space:nowrap; }
+.btn-attr-assign:hover { background:rgba(26,74,58,.15); }
+.tache-row { display:flex; align-items:center; gap:14px; padding:14px 16px; background:var(--color-surface); border:1.5px solid var(--color-border); border-radius:12px; margin-bottom:8px; transition:border-color .15s; }
+.tache-row--encours { border-color:var(--color-warning); background:var(--color-warning-bg); }
+.tache-row--done { opacity:.55; }
+.btn-prod-start { padding:7px 14px; border-radius:8px; background:var(--color-primary-light); color:var(--color-primary); border:1px solid rgba(26,74,58,.2); cursor:pointer; font-size:12px; font-weight:600; transition:.15s; white-space:nowrap; }
+.btn-prod-start:hover { background:rgba(26,74,58,.15); }
+.btn-prod-done { padding:7px 14px; border-radius:8px; background:var(--color-success-bg); color:var(--color-success); border:1px solid rgba(22,163,74,.2); cursor:pointer; font-size:12px; font-weight:600; transition:.15s; white-space:nowrap; }
+.btn-prod-done:hover { background:rgba(22,163,74,.15); }
+.prod-filter-btn { padding:7px 14px; border-radius:8px; border:1.5px solid var(--color-border); background:var(--color-surface); color:var(--color-text-secondary); cursor:pointer; font-size:13px; font-weight:500; transition:.15s; }
+.prod-filter-btn:hover { border-color:var(--color-primary); color:var(--color-primary); }
+.prod-filter-btn--active { background:var(--color-primary-light); border-color:rgba(26,74,58,.3); color:var(--color-primary); font-weight:600; }
+.prod-badge { display:inline-block; padding:2px 9px; border-radius:20px; font-size:11px; font-weight:600; }
+.select-input { padding:8px 12px; border-radius:8px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text-primary); font-size:13px; font-family:'DM Sans',sans-serif; cursor:pointer; outline:none; }
+.select-input:focus { border-color:var(--color-primary); }
+.page-topbar { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:20px; flex-wrap:wrap; }
+.page-title { font-size:20px; font-weight:700; color:var(--color-text-primary); }
+.page-subtitle { font-size:13px; color:var(--color-text-secondary); margin-top:2px; }
+.btn-secondary-action { display:flex; align-items:center; gap:6px; padding:8px 14px; border-radius:8px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text-primary); font-size:13px; font-weight:500; cursor:pointer; transition:.15s; }
+.btn-secondary-action:hover { border-color:var(--color-primary); color:var(--color-primary); }
+.kpi-grid-mini { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; }
+.kpi-card-mini { background:var(--color-surface); border:1px solid var(--color-border); border-radius:10px; padding:12px 14px; }
+.kpi-mini-label { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; color:var(--color-text-muted); margin-bottom:4px; }
+.kpi-mini-val { font-size:22px; font-weight:700; color:var(--color-text-primary); }
+.spinner { width:20px; height:20px; border:2px solid var(--color-border); border-top-color:var(--color-primary); border-radius:50%; animation:_spin .6s linear infinite; }
+@keyframes _spin { to { transform:rotate(360deg); } }
+.modal-header { display:flex; align-items:center; justify-content:space-between; padding:20px 24px 16px; border-bottom:1px solid var(--color-border); }
+.modal-body { padding:20px 24px; }
+.modal-footer { display:flex; gap:8px; justify-content:flex-end; padding:16px 24px 20px; border-top:1px solid var(--color-border); }
+.modal-close { background:none; border:none; cursor:pointer; padding:4px; color:var(--color-text-muted); border-radius:6px; transition:.15s; }
+.modal-close:hover { background:var(--color-border); }
+.btn-modal-cancel { padding:9px 18px; border-radius:8px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text-secondary); cursor:pointer; font-size:13px; font-weight:500; }
+.btn-modal-primary { display:flex; align-items:center; padding:9px 18px; border-radius:8px; border:none; background:var(--color-primary); color:#fff; cursor:pointer; font-size:13px; font-weight:600; transition:.15s; }
+.btn-modal-primary:hover { background:var(--color-primary-hover); }
+.form-label { display:block; font-size:13px; font-weight:500; color:var(--color-text-primary); margin-bottom:6px; }
+.form-input { width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--color-border); background:var(--color-bg); color:var(--color-text-primary); font-size:14px; font-family:'DM Sans',sans-serif; outline:none; transition:border-color .15s; }
+.form-input:focus { border-color:var(--color-primary); }
+</style>
 </head>
 <body>
 
@@ -75,6 +127,12 @@
     </button>
     <button class="bnav-btn" id="bnav-users" data-roles="admin" onclick="showPage('users',null,this)">
       <span class="bnav-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>Comptes
+    </button>
+    <button class="bnav-btn" id="bnav-attribution" data-roles="admin,chef_atelier" onclick="showPage('attribution',null,this)">
+      <span class="bnav-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>Attribution
+    </button>
+    <button class="bnav-btn" id="bnav-production" data-roles="admin,chef_atelier,operateur_prod" onclick="showPage('production',null,this)">
+      <span class="bnav-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg></span>Production
     </button>
   </div>
 </nav>
@@ -148,6 +206,14 @@
         <button class="nav-btn sidebar-btn" data-roles="admin" onclick="showPage('users',this)" aria-label="Utilisateurs">
           <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
           <span class="sidebar-label">Utilisateurs</span>
+        </button>
+        <button class="nav-btn sidebar-btn" data-roles="admin,chef_atelier" onclick="showPage('attribution',this)" aria-label="Attribution">
+          <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg></span>
+          <span class="sidebar-label">Attribution</span>
+        </button>
+        <button class="nav-btn sidebar-btn" data-roles="admin,chef_atelier,operateur_prod" onclick="showPage('production',this)" aria-label="Production">
+          <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg></span>
+          <span class="sidebar-label">Production</span>
         </button>
       </nav>
     </aside>
@@ -355,6 +421,9 @@
 </div>
 
   <!-- RÉSERVATIONS -->
+  <!-- KPI Production dans Stats -->
+  <div id="prodStatsBlock"></div>
+
   <div class="page" id="page-reservations">
     <div class="res-toolbar">
       <div class="res-summary">
@@ -1177,10 +1246,155 @@
   <div class="ticket-center" style="font-size:10px;margin-top:4px">Revenez bientôt 😊</div>
 </div>
 
+
+  <!-- ═══════════════════════════════════════════
+       PAGE ATTRIBUTION
+       ═══════════════════════════════════════════ -->
+  <div class="page" id="page-attribution" data-roles="admin,chef_atelier">
+    <div class="page-topbar">
+      <div>
+        <h1 class="page-title">Attribution des tâches</h1>
+        <p class="page-subtitle">Assignez chaque étape de production à un opérateur</p>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <select id="dossierFilterSel" class="select-input" onchange="loadDossiers()" style="min-width:160px">
+          <option value="TOUS">Tous les dossiers</option>
+          <option value="CREE">Créés</option>
+          <option value="PAO">PAO</option>
+          <option value="BAT">BAT</option>
+          <option value="ACHAT">Achat</option>
+          <option value="PRODUCTION">Production</option>
+          <option value="FINITION">Finition</option>
+        </select>
+        <button class="btn-secondary-action" onclick="openOperateurModal()">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+          Gérer opérateurs
+        </button>
+      </div>
+    </div>
+    <div class="attr-layout">
+      <div class="attr-left">
+        <div id="dossierListContainer" class="dossier-list-wrap"></div>
+      </div>
+      <div class="attr-right">
+        <div id="attrPanel" class="attr-panel">
+          <div style="text-align:center;color:var(--color-text-muted);padding:60px 24px">
+            <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin:0 auto 12px;display:block;opacity:.4"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            <p style="font-size:14px">Sélectionnez un dossier<br>pour assigner les étapes</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════
+       PAGE PRODUCTION
+       ═══════════════════════════════════════════ -->
+  <div class="page" id="page-production">
+    <div class="page-topbar">
+      <div>
+        <h1 class="page-title">Suivi de production</h1>
+        <p class="page-subtitle">Pointez vos tâches en temps réel</p>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap;align-items:center">
+      <button class="prod-filter-btn prod-filter-btn--active" onclick="setProdFilter('TOUS',this)">Toutes</button>
+      <button class="prod-filter-btn" onclick="setProdFilter('A_FAIRE',this)">À faire</button>
+      <button class="prod-filter-btn" onclick="setProdFilter('EN_COURS',this)">En cours</button>
+      <button class="prod-filter-btn" onclick="setProdFilter('TERMINE',this)">Terminées</button>
+      <select id="opFilterSel" class="select-input" onchange="loadTaches()" style="min-width:160px;margin-left:auto">
+        <option value="TOUS">Tous les opérateurs</option>
+      </select>
+    </div>
+    <div id="tachesContainer"></div>
+  </div>
+
 <div id="toast-container"></div>
 
 <script src="./app.js"></script>
 
 <!-- Apps Script code: voir Code.gs -->
+
+  <!-- MODAL ATTRIBUTION -->
+  <div class="modal" id="attribModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title">Attribuer une tâche</h3>
+        <button class="modal-close" onclick="closeModal('attribModal')">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div style="padding:10px 12px;background:var(--color-primary-light);border-radius:8px;margin-bottom:16px;font-size:13px;color:var(--color-primary);font-weight:500" id="attribContextText"></div>
+        <label class="form-label">Opérateur</label>
+        <select id="attribOpSel" class="form-input" style="margin-bottom:14px"></select>
+        <label class="form-label">Commentaire <span style="color:var(--color-text-muted);font-weight:400">(optionnel)</span></label>
+        <input type="text" id="attribComment" class="form-input" placeholder="Instructions, précisions...">
+      </div>
+      <div class="modal-footer">
+        <button class="btn-modal-cancel" onclick="closeModal('attribModal')">Annuler</button>
+        <button class="btn-modal-primary" onclick="confirmAttribution()">Attribuer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL OPÉRATEURS -->
+  <div class="modal" id="operateurModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title">Gestion des opérateurs</h3>
+        <button class="modal-close" onclick="closeModal('operateurModal')">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div id="opListEl" style="margin-bottom:16px"></div>
+        <hr style="border:none;border-top:1px solid var(--color-border);margin:16px 0">
+        <p style="font-size:13px;font-weight:600;color:var(--color-text-primary);margin-bottom:12px">Ajouter / modifier</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <label class="form-label">Nom</label>
+            <input type="text" id="opNomInput" class="form-input" placeholder="Prénom ou nom">
+          </div>
+          <div>
+            <label class="form-label">Rôle</label>
+            <select id="opRoleInput" class="form-input">
+              <option value="operateur">Opérateur</option>
+              <option value="chef_atelier">Chef atelier</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-modal-cancel" onclick="closeModal('operateurModal')">Fermer</button>
+        <button class="btn-modal-primary" onclick="saveOperateur()">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL POINTAGE -->
+  <div class="modal" id="pointageModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title">Terminer la tâche</h3>
+        <button class="modal-close" onclick="closeModal('pointageModal')">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div style="padding:10px 12px;background:var(--color-primary-light);border-radius:8px;margin-bottom:16px;font-size:13px;color:var(--color-primary);font-weight:500" id="pointageContextText"></div>
+        <label class="form-label">Commentaire <span style="color:var(--color-text-muted);font-weight:400">(optionnel)</span></label>
+        <textarea id="pointageCommentInput" class="form-input" placeholder="Observations, remarques..." rows="3" style="resize:none"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-modal-cancel" onclick="closeModal('pointageModal')">Annuler</button>
+        <button class="btn-modal-primary" style="background:var(--color-success)" onclick="confirmPointage()">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right:4px"><polyline points="20 6 9 17 4 12"/></svg>
+          Marquer terminé
+        </button>
+      </div>
+    </div>
+  </div>
+
 </body>
 </html>

@@ -39,7 +39,9 @@ const PAGE_ACCESS = {
   stock:        ['admin','gestionnaire'],
   stats:        ['admin','comptable'],
   config:       ['admin'],
-  users:        ['admin']
+  users:        ['admin'],
+  attribution:  ['admin','chef_atelier'],
+  production:   ['admin','chef_atelier','operateur_prod'],
 };
 let editingUserId = null; // index dans localUsers
 
@@ -229,6 +231,8 @@ function showPage(id, btn, bnavBtn) {
   if (id==='config')       renderConfigPage();
   if (id==='users')        renderUsersPage();
   if (id==='reservations') { renderReservations(); _autoRefreshReservations(); }
+  if (id==='attribution')  { loadDossiers(); initModulesProduction(); }
+  if (id==='production')   { loadTaches();   initModulesProduction(); }
   if (id==='commandes')    { renderCommandes(); _autoRefreshCommandes(); }
   // Garde d'accès par rôle
   if (currentUser) {
@@ -2866,7 +2870,7 @@ async function apiCall(payload) {
   if (!APPS_SCRIPT_URL) return null;
 
   // ── LECTURES & LOGIN : requête GET avec params individuels ─
-  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes'];
+  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getDossiers', 'getOperateurs', 'getTaches', 'getDashboard'];
   if (getActions.includes(payload.action)) {
     try {
       let url = APPS_SCRIPT_URL + '?action=' + payload.action;
@@ -4087,3 +4091,406 @@ renderCart();
 renderHeldCarts();
 
 _updateAirtableBtn();
+
+// ============================================================
+// MODULE ATTRIBUTION & PRODUCTION — FOREVER MG
+// Ajout au système POS existant
+// ============================================================
+
+// --- ÉTAT ---
+let dossiers = [];
+let operateurs = [];
+let taches = [];
+let selectedDossier = null;
+let pendingAttrib = null;
+let pendingPointage = null;
+let prodFilter = 'TOUS';
+let opFilterVal = 'TOUS';
+
+const ETAPES_CONFIG = [
+  { code:'PAO',        label:'PAO / Conception',  color:'#6c63ff', icon:'M' },
+  { code:'BAT',        label:'BAT validé',         color:'#2563eb', icon:'B' },
+  { code:'ACHAT',      label:'Achat matières',     color:'#d97706', icon:'A' },
+  { code:'PRODUCTION', label:'Production atelier', color:'#e8834a', icon:'P' },
+  { code:'FINITION',   label:'Finition',           color:'#1a4a3a', icon:'F' },
+  { code:'LIVRE',      label:'Livré',              color:'#78716c', icon:'L' },
+];
+
+// --- INIT ---
+async function initModulesProduction() {
+  const r = await apiCall({ action:'getOperateurs' });
+  if (r && r.ok) {
+    operateurs = r.operateurs;
+    const sel = document.getElementById('opFilterSel');
+    if (sel) {
+      sel.innerHTML = '<option value="TOUS">Tous les opérateurs</option>';
+      operateurs.forEach(o => {
+        const opt = document.createElement('option');
+        opt.value = o.nom; opt.textContent = o.nom;
+        sel.appendChild(opt);
+      });
+    }
+  }
+}
+
+// ============================================================
+// PAGE ATTRIBUTION
+// ============================================================
+async function loadDossiers() {
+  const filter = document.getElementById('dossierFilterSel')?.value || 'TOUS';
+  if (APPS_SCRIPT_URL) {
+    showLoader('Chargement des dossiers...');
+    const r = await apiCall({ action:'getDossiers', statut:filter });
+    hideLoader();
+    if (r && r.ok) dossiers = r.dossiers;
+    else dossiers = demoDossiers();
+  } else {
+    dossiers = demoDossiers();
+  }
+  renderDossiers();
+}
+
+function renderDossiers() {
+  const container = document.getElementById('dossierListContainer');
+  if (!container) return;
+  if (!dossiers.length) {
+    container.innerHTML = `<div style="text-align:center;color:var(--muted);padding:60px 0;font-size:14px">
+      <div style="font-size:40px;margin-bottom:12px">📋</div>
+      Aucun dossier — les dossiers sont créés automatiquement lors des ventes
+    </div>`;
+    return;
+  }
+  container.innerHTML = dossiers.map(d => {
+    const etape = ETAPES_CONFIG.find(e => e.code === d.statut);
+    const pct   = d.progression || 0;
+    const prioColor = d.priorite==='Urgente'?'var(--red)':d.priorite==='Haute'?'var(--yellow)':'var(--color-text-secondary)';
+    const isSelected = selectedDossier?.id === d.id;
+    return `<div class="dossier-card ${isSelected?'dossier-card--selected':''}" onclick="selectDossier('${d.id}')">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--color-text-muted)">${d.numeroDossier}</span>
+        ${etape?`<span class="prod-badge" style="background:${etape.color}18;color:${etape.color}">${etape.label}</span>`:`<span class="prod-badge" style="background:var(--color-primary-light);color:var(--color-primary)">Créé</span>`}
+      </div>
+      <div style="font-weight:600;font-size:14px;color:var(--color-text-primary);margin-bottom:2px">${d.client}</div>
+      <div style="font-size:13px;color:var(--color-text-secondary)">${d.produit} × ${d.quantite}</div>
+      <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:12px">
+        <span style="color:var(--color-text-muted)">📅 ${d.dateCreation}</span>
+        <span style="color:${prioColor};font-weight:500">${d.priorite}</span>
+      </div>
+      <div style="margin-top:10px;height:3px;background:var(--color-border);border-radius:2px;overflow:hidden">
+        <div style="height:100%;width:${pct}%;background:var(--color-primary);border-radius:2px;transition:.4s"></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function selectDossier(id) {
+  selectedDossier = dossiers.find(d => d.id === id);
+  renderDossiers();
+  const panel = document.getElementById('attrPanel');
+  if (!panel) return;
+  panel.innerHTML = `<div style="text-align:center;padding:40px 0;color:var(--color-text-muted)">
+    <div class="spinner" style="margin:0 auto 12px"></div>Chargement des tâches...
+  </div>`;
+  let tachesD = [];
+  if (APPS_SCRIPT_URL) {
+    const r = await apiCall({ action:'getTaches', dossierId:id });
+    if (r && r.ok) tachesD = r.taches;
+  } else {
+    tachesD = demoTaches({ dossierId:id });
+  }
+  renderAttrPanel(tachesD);
+}
+
+function renderAttrPanel(tachesD) {
+  const panel = document.getElementById('attrPanel');
+  if (!panel || !selectedDossier) return;
+  const d = selectedDossier;
+  panel.innerHTML = `
+    <div style="border-bottom:1px solid var(--color-border);padding-bottom:14px;margin-bottom:16px">
+      <div style="font-size:12px;font-family:'DM Mono',monospace;color:var(--color-text-muted);margin-bottom:4px">${d.numeroDossier}</div>
+      <div style="font-weight:700;font-size:16px;color:var(--color-primary)">${d.produit}</div>
+      <div style="font-size:13px;color:var(--color-text-secondary);margin-top:2px">Client: ${d.client} · Qté: ${d.quantite}</div>
+    </div>
+    ${ETAPES_CONFIG.map(e => {
+      const tache = tachesD.find(t => t.etapeCode === e.code);
+      const statusEl = tache
+        ? tache.statut==='TERMINE'  ? `<span class="prod-badge" style="background:var(--color-success-bg);color:var(--color-success)">Terminé</span>`
+        : tache.statut==='EN_COURS' ? `<span class="prod-badge" style="background:var(--color-warning-bg);color:var(--color-warning)">En cours</span>`
+        :                             `<span class="prod-badge" style="background:var(--color-info-bg);color:var(--color-info)">Assigné</span>`
+        : '';
+      const currentUser_role = currentUser?.role||'';
+      const canAssign = ['admin','chef_atelier'].includes(currentUser_role);
+      return `<div class="etape-row-attr">
+        <div style="width:28px;height:28px;border-radius:50%;background:${e.color}18;border:1.5px solid ${e.color};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;font-weight:700;color:${e.color}">${e.icon}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;color:var(--color-text-primary)">${e.label}</div>
+          <div style="font-size:12px;color:var(--color-text-secondary);margin-top:1px">
+            ${tache ? `${tache.operateur} ${statusEl}` : '<em style="color:var(--color-text-muted)">Non assigné</em>'}
+          </div>
+        </div>
+        ${canAssign ? `<button class="btn-attr-assign" onclick="openAttrib('${e.code}','${e.label}')">Assigner</button>` : ''}
+      </div>`;
+    }).join('')}
+  `;
+}
+
+function openAttrib(etapeCode, etapeLabel) {
+  if (!selectedDossier) return;
+  pendingAttrib = { etapeCode, etapeLabel };
+  document.getElementById('attribContextText').textContent = `${selectedDossier.numeroDossier} — ${etapeLabel}`;
+  const sel = document.getElementById('attribOpSel');
+  sel.innerHTML = operateurs.map(o => `<option value="${o.nom}">${o.nom} (${o.role})</option>`).join('');
+  document.getElementById('attribComment').value = '';
+  openModal('attribModal');
+}
+
+async function confirmAttribution() {
+  if (!selectedDossier || !pendingAttrib) return;
+  const payload = {
+    action: 'attribuerTache',
+    dossierId: selectedDossier.id,
+    numeroDossier: selectedDossier.numeroDossier,
+    etapeCode: pendingAttrib.etapeCode,
+    operateur: document.getElementById('attribOpSel').value,
+    commentaire: document.getElementById('attribComment').value,
+    assignePar: currentUser?.username || 'Admin'
+  };
+  let r;
+  if (APPS_SCRIPT_URL) { r = await apiCall(payload); }
+  else { r = { ok:true }; }
+  if (r && r.ok) {
+    showToast('Tâche attribuée avec succès');
+    closeModal('attribModal');
+    selectDossier(selectedDossier.id);
+  } else {
+    showToast(r?.error || 'Erreur attribution', 'error');
+  }
+}
+
+async function openOperateurModal() {
+  if (APPS_SCRIPT_URL) {
+    const r = await apiCall({ action:'getOperateurs' });
+    if (r && r.ok) operateurs = r.operateurs;
+  }
+  document.getElementById('opListEl').innerHTML = operateurs.map(o =>
+    `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--surface2);border-radius:8px;margin-bottom:6px">
+      <span style="flex:1;font-size:13px;font-weight:500">${o.nom}</span>
+      <span class="prod-badge" style="background:var(--color-primary-light);color:var(--color-primary)">${o.role}</span>
+    </div>`
+  ).join('') || '<div style="color:var(--color-text-muted);font-size:13px;text-align:center;padding:16px">Aucun opérateur</div>';
+  document.getElementById('opNomInput').value = '';
+  document.getElementById('opRoleInput').value = 'operateur';
+  openModal('operateurModal');
+}
+
+async function saveOperateur() {
+  const nom  = document.getElementById('opNomInput').value.trim();
+  const role = document.getElementById('opRoleInput').value;
+  if (!nom) { showToast('Nom obligatoire', 'error'); return; }
+  let r;
+  if (APPS_SCRIPT_URL) { r = await apiCall({ action:'saveOperateur', nom, role }); }
+  else { r = { ok:true }; operateurs.push({ nom, role }); }
+  if (r && r.ok) {
+    showToast(r.message || 'Opérateur enregistré');
+    if (!operateurs.find(o => o.nom === nom)) operateurs.push({ nom, role });
+    openOperateurModal();
+    // Refresh filtre
+    const sel = document.getElementById('opFilterSel');
+    if (sel) {
+      sel.innerHTML = '<option value="TOUS">Tous les opérateurs</option>';
+      operateurs.forEach(o => {
+        const opt = document.createElement('option');
+        opt.value = o.nom; opt.textContent = o.nom;
+        sel.appendChild(opt);
+      });
+    }
+  }
+}
+
+// ============================================================
+// PAGE PRODUCTION
+// ============================================================
+async function loadTaches() {
+  opFilterVal = document.getElementById('opFilterSel')?.value || 'TOUS';
+  if (APPS_SCRIPT_URL) {
+    showLoader('Chargement...');
+    const r = await apiCall({ action:'getTaches', operateur:opFilterVal });
+    hideLoader();
+    if (r && r.ok) taches = r.taches;
+    else taches = demoTaches({});
+  } else {
+    taches = demoTaches({});
+  }
+  renderTaches();
+}
+
+function setProdFilter(f, btn) {
+  prodFilter = f;
+  document.querySelectorAll('.prod-filter-btn').forEach(b => b.classList.remove('prod-filter-btn--active'));
+  btn.classList.add('prod-filter-btn--active');
+  renderTaches();
+}
+
+function renderTaches() {
+  const container = document.getElementById('tachesContainer');
+  if (!container) return;
+  let list = taches;
+  if (prodFilter !== 'TOUS') list = list.filter(t => t.statut === prodFilter);
+  if (!list.length) {
+    container.innerHTML = `<div style="text-align:center;color:var(--color-text-muted);padding:80px 0;font-size:14px">
+      <div style="font-size:40px;margin-bottom:12px">✅</div>
+      Aucune tâche ${prodFilter !== 'TOUS' ? 'dans ce filtre' : ''}
+    </div>`;
+    return;
+  }
+  container.innerHTML = list.map(t => {
+    const etape   = ETAPES_CONFIG.find(e => e.code === t.etapeCode) || { color:'#888', icon:'?', label:t.etapeLabel };
+    const isEC    = t.statut === 'EN_COURS';
+    const isDone  = t.statut === 'TERMINE';
+    const actions = isDone
+      ? `<span class="prod-badge" style="background:var(--color-success-bg);color:var(--color-success);padding:6px 12px">Terminé</span>`
+      : isEC
+        ? `<button class="btn-prod-done" onclick="openPointage('${t.id}','${t.etapeCode}','${t.numeroDossier}')">Terminer</button>`
+        : `<button class="btn-prod-start" onclick="pointerStart('${t.id}')">Démarrer</button>`;
+    return `<div class="tache-row ${isEC?'tache-row--encours':''} ${isDone?'tache-row--done':''}">
+      <div style="width:32px;height:32px;border-radius:50%;background:${etape.color}15;border:1.5px solid ${etape.color};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;font-weight:700;color:${etape.color}">${etape.icon}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--color-text-muted)">${t.numeroDossier}</div>
+        <div style="font-weight:600;font-size:14px;color:${etape.color};margin:1px 0">${t.etapeLabel}</div>
+        <div style="font-size:12px;color:var(--color-text-secondary)">
+          👤 ${t.operateur} · ${isEC ? '⏳ Démarré '+t.dateDebut : isDone ? '✅ Terminé '+t.dateFin : '📋 Assigné '+t.dateAssignation}
+        </div>
+      </div>
+      <div style="flex-shrink:0">${actions}</div>
+    </div>`;
+  }).join('');
+}
+
+async function pointerStart(tacheId) {
+  let r;
+  if (APPS_SCRIPT_URL) { r = await apiCall({ action:'pointerAction', tacheId, action_:'START' }); }
+  else { r = { ok:true }; }
+  if (r && r.ok) {
+    const t = taches.find(x => x.id === tacheId);
+    if (t) { t.statut = 'EN_COURS'; t.dateDebut = new Date().toLocaleDateString('fr-FR'); }
+    renderTaches();
+    showToast('Tâche démarrée');
+  }
+}
+
+function openPointage(tacheId, etapeCode, numeroDossier) {
+  pendingPointage = { tacheId, etapeCode, numeroDossier };
+  document.getElementById('pointageContextText').textContent =
+    `${numeroDossier} — ${ETAPES_CONFIG.find(e=>e.code===etapeCode)?.label || etapeCode}`;
+  document.getElementById('pointageCommentInput').value = '';
+  openModal('pointageModal');
+}
+
+async function confirmPointage() {
+  if (!pendingPointage) return;
+  const { tacheId, etapeCode } = pendingPointage;
+  const comment = document.getElementById('pointageCommentInput').value;
+  let r;
+  if (APPS_SCRIPT_URL) { r = await apiCall({ action:'pointerAction', tacheId, action_:'END', etapeCode, commentaire:comment }); }
+  else { r = { ok:true }; }
+  if (r && r.ok) {
+    const t = taches.find(x => x.id === tacheId);
+    if (t) { t.statut = 'TERMINE'; t.dateFin = new Date().toLocaleDateString('fr-FR'); t.commentaire = comment; }
+    renderTaches();
+    closeModal('pointageModal');
+    showToast('Tâche terminée ✅');
+  }
+}
+
+// ============================================================
+// STATS — PATCH pour ajouter les KPI production
+// ============================================================
+const _origRenderStats = typeof renderStats === 'function' ? renderStats : null;
+async function renderStats() {
+  if (_origRenderStats) _origRenderStats();
+  // Ajouter les KPI production après le rendu original
+  if (APPS_SCRIPT_URL) {
+    const r = await apiCall({ action:'getDashboard' });
+    if (r && r.ok) renderProdKpis(r);
+  } else {
+    renderProdKpis({ ventes:{total:485000,nb:12}, dossiers:{total:8,cree:3,enCours:4,livre:1}, operateurs:[{nom:'Marie',aFaire:2,enCours:1,termine:5},{nom:'Jean',aFaire:1,enCours:2,termine:3}] });
+  }
+}
+
+function renderProdKpis(data) {
+  const block = document.getElementById('prodStatsBlock');
+  if (!block) return;
+  const { dossiers:d, operateurs:ops } = data;
+  block.innerHTML = `
+    <div style="margin-top:24px;padding-top:24px;border-top:1px solid var(--color-border)">
+      <h2 style="font-size:15px;font-weight:700;color:var(--color-text-primary);margin-bottom:14px">Production</h2>
+      <div class="kpi-grid-mini">
+        <div class="kpi-card-mini"><div class="kpi-mini-label">Total dossiers</div><div class="kpi-mini-val">${d?.total||0}</div></div>
+        <div class="kpi-card-mini"><div class="kpi-mini-label">Créés</div><div class="kpi-mini-val" style="color:var(--color-info)">${d?.cree||0}</div></div>
+        <div class="kpi-card-mini"><div class="kpi-mini-label">En cours</div><div class="kpi-mini-val" style="color:var(--color-warning)">${d?.enCours||0}</div></div>
+        <div class="kpi-card-mini"><div class="kpi-mini-label">Livrés</div><div class="kpi-mini-val" style="color:var(--color-success)">${d?.livre||0}</div></div>
+      </div>
+      ${ops?.length ? `
+      <div style="margin-top:14px">
+        <div style="font-size:13px;font-weight:600;color:var(--color-text-primary);margin-bottom:8px">Charge opérateurs</div>
+        <div style="background:var(--color-surface);border:1px solid var(--color-border);border-radius:10px;overflow:hidden">
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr style="border-bottom:1px solid var(--color-border)">
+              <th style="text-align:left;padding:8px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-muted)">Opérateur</th>
+              <th style="text-align:center;padding:8px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-muted)">À faire</th>
+              <th style="text-align:center;padding:8px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-muted)">En cours</th>
+              <th style="text-align:center;padding:8px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-muted)">Terminé</th>
+            </tr></thead>
+            <tbody>
+              ${ops.map(o=>`<tr style="border-bottom:1px solid var(--color-border)">
+                <td style="padding:8px 12px;font-size:13px;font-weight:600;color:var(--color-text-primary)">${o.nom}</td>
+                <td style="padding:8px 12px;text-align:center"><span class="prod-badge" style="background:var(--color-info-bg);color:var(--color-info)">${o.aFaire}</span></td>
+                <td style="padding:8px 12px;text-align:center"><span class="prod-badge" style="background:var(--color-warning-bg);color:var(--color-warning)">${o.enCours}</span></td>
+                <td style="padding:8px 12px;text-align:center"><span class="prod-badge" style="background:var(--color-success-bg);color:var(--color-success)">${o.termine}</span></td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>` : ''}
+    </div>`;
+}
+
+// ============================================================
+// DONNÉES DÉMO (sans backend)
+// ============================================================
+function demoDossiers() {
+  return [
+    {id:'D0001',numeroDossier:'POS-101-1',client:'Marie R.',produit:'Riz 1kg',quantite:10,statut:'PAO',progression:20,dateCreation:'14/05/2026',priorite:'Normale',sourceVente:'Vente #101'},
+    {id:'D0002',numeroDossier:'POS-102-1',client:'Jean M.',produit:'Huile 1L',quantite:5,statut:'ACHAT',progression:55,dateCreation:'15/05/2026',priorite:'Haute',sourceVente:'Vente #102'},
+    {id:'D0003',numeroDossier:'POS-103-1',client:'Paul K.',produit:'Sucre 1kg',quantite:20,statut:'CREE',progression:0,dateCreation:'16/05/2026',priorite:'Normale',sourceVente:'Vente #103'},
+    {id:'D0004',numeroDossier:'POS-104-1',client:'Admin',produit:'Savon Protex',quantite:50,statut:'PRODUCTION',progression:75,dateCreation:'16/05/2026',priorite:'Urgente',sourceVente:'Vente #104'},
+  ];
+}
+
+function demoTaches(filters) {
+  const all = [
+    {id:'T0001',dossierId:'D0001',numeroDossier:'POS-101-1',etapeCode:'PAO',etapeLabel:'PAO / Conception',operateur:'Marie',statut:'EN_COURS',dateAssignation:'14/05/2026 09:00',dateDebut:'14/05/2026 10:00',dateFin:'',commentaire:''},
+    {id:'T0002',dossierId:'D0001',numeroDossier:'POS-101-1',etapeCode:'ACHAT',etapeLabel:'Achat matières',operateur:'Jean',statut:'A_FAIRE',dateAssignation:'14/05/2026 09:00',dateDebut:'',dateFin:'',commentaire:''},
+    {id:'T0003',dossierId:'D0002',numeroDossier:'POS-102-1',etapeCode:'ACHAT',etapeLabel:'Achat matières',operateur:'Jean',statut:'EN_COURS',dateAssignation:'15/05/2026 08:00',dateDebut:'15/05/2026 09:00',dateFin:'',commentaire:''},
+    {id:'T0004',dossierId:'D0003',numeroDossier:'POS-103-1',etapeCode:'PAO',etapeLabel:'PAO / Conception',operateur:'Marie',statut:'A_FAIRE',dateAssignation:'16/05/2026 08:00',dateDebut:'',dateFin:'',commentaire:''},
+    {id:'T0005',dossierId:'D0004',numeroDossier:'POS-104-1',etapeCode:'PRODUCTION',etapeLabel:'Production atelier',operateur:'Paul',statut:'EN_COURS',dateAssignation:'16/05/2026 10:00',dateDebut:'16/05/2026 11:00',dateFin:'',commentaire:''},
+    {id:'T0006',dossierId:'D0001',numeroDossier:'POS-101-1',etapeCode:'PAO',etapeLabel:'PAO / Conception',operateur:'Marie',statut:'TERMINE',dateAssignation:'10/05/2026 09:00',dateDebut:'10/05/2026 10:00',dateFin:'10/05/2026 16:00',commentaire:'RAS'},
+  ];
+  let res = all;
+  if (filters?.operateur && filters.operateur !== 'TOUS') res = res.filter(t => t.operateur === filters.operateur);
+  if (filters?.dossierId) res = res.filter(t => t.dossierId === filters.dossierId);
+  return res;
+}
+
+// Appel init au démarrage
+(function() {
+  const origInit = typeof initApp === 'function' ? initApp : null;
+  if (origInit) {
+    // Hook: après initApp, lancer initModulesProduction
+    const _o = window.initApp;
+    window.initApp = async function() {
+      await _o();
+      await initModulesProduction();
+    };
+  }
+})();
