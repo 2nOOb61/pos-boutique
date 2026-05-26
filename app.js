@@ -4231,20 +4231,25 @@ function renderAttrPanel(tachesD) {
       <div style="font-size:13px;color:var(--color-text-secondary);margin-top:2px">Client: ${d.client} · Qté: ${d.quantite}</div>
     </div>
     ${ETAPES_CONFIG.map(e => {
-      const tache = tachesD.find(t => t.etapeCode === e.code);
-      const statusEl = tache
-        ? tache.statut==='TERMINE'  ? `<span class="prod-badge" style="background:var(--color-success-bg);color:var(--color-success)">Terminé</span>`
-        : tache.statut==='EN_COURS' ? `<span class="prod-badge" style="background:var(--color-warning-bg);color:var(--color-warning)">En cours</span>`
-        :                             `<span class="prod-badge" style="background:var(--color-info-bg);color:var(--color-info)">Assigné</span>`
-        : '';
+      const tachesEtape = tachesD.filter(t => t.etapeCode === e.code);
       const currentUser_role = currentUser?.role||'';
       const canAssign = ['admin','chef_atelier'].includes(currentUser_role);
+      const operateursHtml = tachesEtape.length
+        ? tachesEtape.map(t => {
+            const badge = t.statut==='TERMINE'
+              ? `<span class="prod-badge" style="background:var(--color-success-bg);color:var(--color-success)">Terminé</span>`
+              : t.statut==='EN_COURS'
+              ? `<span class="prod-badge" style="background:var(--color-warning-bg);color:var(--color-warning)">En cours</span>`
+              : `<span class="prod-badge" style="background:var(--color-info-bg);color:var(--color-info)">Assigné</span>`;
+            return `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:6px;margin-bottom:2px">${t.operateur} ${badge}</span>`;
+          }).join('')
+        : '<em style="color:var(--color-text-muted)">Non assigné</em>';
       return `<div class="etape-row-attr">
         <div style="width:28px;height:28px;border-radius:50%;background:${e.color}18;border:1.5px solid ${e.color};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;font-weight:700;color:${e.color}">${e.icon}</div>
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:600;color:var(--color-text-primary)">${e.label}</div>
-          <div style="font-size:12px;color:var(--color-text-secondary);margin-top:1px">
-            ${tache ? `${tache.operateur} ${statusEl}` : '<em style="color:var(--color-text-muted)">Non assigné</em>'}
+          <div style="font-size:12px;color:var(--color-text-secondary);margin-top:3px;display:flex;flex-wrap:wrap;gap:2px">
+            ${operateursHtml}
           </div>
         </div>
         ${canAssign ? `<button class="btn-attr-assign" onclick="openAttrib('${e.code}','${e.label}')">Assigner</button>` : ''}
@@ -4257,33 +4262,41 @@ function openAttrib(etapeCode, etapeLabel) {
   if (!selectedDossier) return;
   pendingAttrib = { etapeCode, etapeLabel };
   document.getElementById('attribContextText').textContent = `${selectedDossier.numeroDossier} — ${etapeLabel}`;
-  const sel = document.getElementById('attribOpSel');
-  sel.innerHTML = operateurs.map(o => `<option value="${o.nom}">${o.nom} (${o.role})</option>`).join('');
+  const list = document.getElementById('attribOpList');
+  list.innerHTML = operateurs.map(o => `
+    <label style="display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;font-size:13px;color:var(--color-text-primary);transition:background .12s" onmouseover="this.style.background='var(--color-primary-light)'" onmouseout="this.style.background=''">
+      <input type="checkbox" value="${o.nom}" style="accent-color:var(--color-primary);width:15px;height:15px;flex-shrink:0;cursor:pointer">
+      <span>${o.nom} <span style="color:var(--color-text-muted);font-size:11px">(${o.role})</span></span>
+    </label>`).join('');
   document.getElementById('attribComment').value = '';
   openModal('attribModal');
 }
 
 async function confirmAttribution() {
   if (!selectedDossier || !pendingAttrib) return;
-  const payload = {
-    action: 'attribuerTache',
-    dossierId: selectedDossier.id,
-    numeroDossier: selectedDossier.numeroDossier,
-    etapeCode: pendingAttrib.etapeCode,
-    operateur: document.getElementById('attribOpSel').value,
-    commentaire: document.getElementById('attribComment').value,
-    assignePar: currentUser?.username || 'Admin'
-  };
-  let r;
-  if (APPS_SCRIPT_URL) { r = await apiCall(payload); }
-  else { r = { ok:true }; }
-  if (r && r.ok) {
-    showToast('Tâche attribuée avec succès');
-    closeModal('attribModal');
-    selectDossier(selectedDossier.id);
-  } else {
-    showToast(r?.error || 'Erreur attribution', 'error');
+  const checked = [...document.querySelectorAll('#attribOpList input[type=checkbox]:checked')];
+  if (!checked.length) { showToast('Sélectionnez au moins un opérateur', 'error'); return; }
+  const commentaire = document.getElementById('attribComment').value;
+  const assignePar  = currentUser?.username || 'Admin';
+  let allOk = true;
+  for (const cb of checked) {
+    const payload = {
+      action: 'attribuerTache',
+      dossierId: selectedDossier.id,
+      numeroDossier: selectedDossier.numeroDossier,
+      etapeCode: pendingAttrib.etapeCode,
+      operateur: cb.value,
+      commentaire,
+      assignePar
+    };
+    let r;
+    if (APPS_SCRIPT_URL) { r = await apiCall(payload); }
+    else { r = { ok:true }; }
+    if (!r || !r.ok) { showToast(`Erreur pour ${cb.value}: ${r?.error||'inconnu'}`, 'error'); allOk = false; }
   }
+  if (allOk) showToast(`${checked.length} opérateur(s) assigné(s)`);
+  closeModal('attribModal');
+  selectDossier(selectedDossier.id);
 }
 
 async function openOperateurModal() {
