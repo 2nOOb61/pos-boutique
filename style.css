@@ -636,6 +636,7 @@ h1, h2, h3,
     .topbar-right { gap:8px; }
     .user-badge span { display:none; }
     .btn-logout { padding:6px 10px; font-size:12px; }
+    .btn-sync-desktop { display:none; }
     .page { padding:12px 12px calc(72px + env(safe-area-inset-bottom)) 12px; }
     #page-config { padding-top:24px; }
     .caisse-layout { grid-template-columns:1fr; height:auto; gap:0; }

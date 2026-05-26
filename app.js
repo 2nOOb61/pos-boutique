@@ -2786,17 +2786,45 @@ function openAirtableSettings() {
   AIRTABLE_BASE_ID = base.trim();
   localStorage.setItem('pos-airtable-key',  AIRTABLE_API_KEY);
   localStorage.setItem('pos-airtable-base', AIRTABLE_BASE_ID);
-  const btn = document.getElementById('btnAirtable');
+  _updateAirtableBtn();
   if (AIRTABLE_API_KEY && AIRTABLE_BASE_ID) {
-    if (btn) { btn.style.borderColor = 'rgba(26,74,58,0.4)'; btn.style.color = 'var(--accent)'; btn.title = 'Airtable connecté ✅'; }
     testAirtableConnection();
   } else {
-    if (btn) { btn.style.borderColor = 'rgba(232,131,74,0.4)'; btn.style.color = 'var(--accent2)'; btn.title = 'Configurer Airtable'; }
     showToast('Airtable désactivé', 'info');
   }
 }
 
+function saveAirtableConfig() {
+  const key  = (document.getElementById('cfgAirtableKey')?.value  || '').trim();
+  const base = (document.getElementById('cfgAirtableBase')?.value || '').trim();
+  AIRTABLE_API_KEY = key;
+  AIRTABLE_BASE_ID = base;
+  localStorage.setItem('pos-airtable-key',  key);
+  localStorage.setItem('pos-airtable-base', base);
+  _updateAirtableBtn();
+}
+
+function _updateAirtableBtn() {
+  const btn = document.getElementById('btnAirtable');
+  if (!btn) return;
+  const connected = !!(AIRTABLE_API_KEY && AIRTABLE_BASE_ID);
+  btn.style.borderColor = connected ? 'rgba(26,74,58,0.4)'    : 'rgba(232,131,74,0.4)';
+  btn.style.color       = connected ? 'var(--accent)'          : 'var(--accent2)';
+  btn.title             = connected ? 'Airtable connecté ✅'   : 'Configurer Airtable';
+}
+
+function _loadAirtableConfigFields() {
+  const k = document.getElementById('cfgAirtableKey');
+  const b = document.getElementById('cfgAirtableBase');
+  if (k) k.value = AIRTABLE_API_KEY;
+  if (b) b.value = AIRTABLE_BASE_ID;
+  const status = document.getElementById('airtableStatus');
+  if (status) status.textContent = (AIRTABLE_API_KEY && AIRTABLE_BASE_ID) ? '✅ Configuré' : 'Non configuré';
+}
+
 async function testAirtableConnection() {
+  const statusEl = document.getElementById('airtableStatus');
+  if (statusEl) statusEl.textContent = '⏳ Test en cours...';
   showLoader('Test Airtable...');
   try {
     const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${encodeURIComponent(AIRTABLE_TABLE)}?maxRecords=1`;
@@ -2804,13 +2832,18 @@ async function testAirtableConnection() {
     hideLoader();
     if (res.ok) {
       showToast('✅ Airtable connecté !');
+      if (statusEl) statusEl.textContent = '✅ Connexion OK';
+      _updateAirtableBtn();
     } else {
       const err = await res.json();
-      showToast('❌ Airtable : ' + (err?.error?.message || 'Erreur ' + res.status), 'error');
+      const msg = err?.error?.message || 'Erreur ' + res.status;
+      showToast('❌ Airtable : ' + msg, 'error');
+      if (statusEl) statusEl.textContent = '❌ ' + msg;
     }
   } catch(e) {
     hideLoader();
     showToast('❌ Airtable inaccessible : ' + e.message, 'error');
+    if (statusEl) statusEl.textContent = '❌ ' + e.message;
   }
 }
 
@@ -3229,6 +3262,8 @@ function renderConfigPage() {
   setChk('cfgShowPayDetail',  shopConfig.ticketShowPayDetail);
   // Logo
   _applyLogoPreview(shopConfig.ticketLogo);
+  // Airtable
+  _loadAirtableConfigFields();
   // Catégories + articles
   renderCategories();
   renderConfigArticles();
@@ -4039,13 +4074,4 @@ initPWA();
 renderCart();
 renderHeldCarts();
 
-// Indicateur bouton Airtable
-(function updateAirtableBtn() {
-  const btn = document.getElementById('btnAirtable');
-  if (!btn) return;
-  if (AIRTABLE_API_KEY && AIRTABLE_BASE_ID) {
-    btn.style.borderColor = 'rgba(26,74,58,0.4)';
-    btn.style.color       = 'var(--accent)';
-    btn.title             = 'Airtable connecté ✅';
-  }
-})();
+_updateAirtableBtn();
