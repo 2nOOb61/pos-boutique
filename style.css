@@ -1315,6 +1315,8 @@ tr:hover td {
 
 /* Page commandes active */
 #page-commandes.active { display: block; }
+#page-attribution.active { display: block; }
+#page-production.active { display: block; }
 
 
 

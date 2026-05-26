@@ -4118,18 +4118,22 @@ const ETAPES_CONFIG = [
 
 // --- INIT ---
 async function initModulesProduction() {
-  const r = await apiCall({ action:'getOperateurs' });
-  if (r && r.ok) {
-    operateurs = r.operateurs;
-    const sel = document.getElementById('opFilterSel');
-    if (sel) {
-      sel.innerHTML = '<option value="TOUS">Tous les opérateurs</option>';
-      operateurs.forEach(o => {
-        const opt = document.createElement('option');
-        opt.value = o.nom; opt.textContent = o.nom;
-        sel.appendChild(opt);
-      });
+  try {
+    const r = await apiCall({ action:'getOperateurs' });
+    if (r && r.ok) {
+      operateurs = r.operateurs;
+      const sel = document.getElementById('opFilterSel');
+      if (sel) {
+        sel.innerHTML = '<option value="TOUS">Tous les opérateurs</option>';
+        operateurs.forEach(o => {
+          const opt = document.createElement('option');
+          opt.value = o.nom; opt.textContent = o.nom;
+          sel.appendChild(opt);
+        });
+      }
     }
+  } catch(e) {
+    console.warn('initModulesProduction error (offline?):', e);
   }
 }
 
@@ -4137,14 +4141,19 @@ async function initModulesProduction() {
 // PAGE ATTRIBUTION
 // ============================================================
 async function loadDossiers() {
-  const filter = document.getElementById('dossierFilterSel')?.value || 'TOUS';
-  if (APPS_SCRIPT_URL) {
-    showLoader('Chargement des dossiers...');
-    const r = await apiCall({ action:'getDossiers', statut:filter });
+  try {
+    const filter = document.getElementById('dossierFilterSel')?.value || 'TOUS';
+    if (APPS_SCRIPT_URL) {
+      showLoader('Chargement des dossiers...');
+      const r = await apiCall({ action:'getDossiers', statut:filter });
+      hideLoader();
+      if (r && r.ok) dossiers = r.dossiers;
+      else dossiers = demoDossiers();
+    } else {
+      dossiers = demoDossiers();
+    }
+  } catch(e) {
     hideLoader();
-    if (r && r.ok) dossiers = r.dossiers;
-    else dossiers = demoDossiers();
-  } else {
     dossiers = demoDossiers();
   }
   renderDossiers();
@@ -4311,14 +4320,19 @@ async function saveOperateur() {
 // PAGE PRODUCTION
 // ============================================================
 async function loadTaches() {
-  opFilterVal = document.getElementById('opFilterSel')?.value || 'TOUS';
-  if (APPS_SCRIPT_URL) {
-    showLoader('Chargement...');
-    const r = await apiCall({ action:'getTaches', operateur:opFilterVal });
+  try {
+    opFilterVal = document.getElementById('opFilterSel')?.value || 'TOUS';
+    if (APPS_SCRIPT_URL) {
+      showLoader('Chargement...');
+      const r = await apiCall({ action:'getTaches', operateur:opFilterVal });
+      hideLoader();
+      if (r && r.ok) taches = r.taches;
+      else taches = demoTaches({});
+    } else {
+      taches = demoTaches({});
+    }
+  } catch(e) {
     hideLoader();
-    if (r && r.ok) taches = r.taches;
-    else taches = demoTaches({});
-  } else {
     taches = demoTaches({});
   }
   renderTaches();
