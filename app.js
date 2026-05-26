@@ -2713,6 +2713,107 @@ let APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxFsymwddqXY-_iUJ
 localStorage.setItem('pos-script-url', APPS_SCRIPT_URL);
 let syncEnabled = !!APPS_SCRIPT_URL;
 
+// ============================================================
+// AIRTABLE — COMMANDES
+// ============================================================
+let AIRTABLE_API_KEY  = localStorage.getItem('pos-airtable-key')  || '';
+let AIRTABLE_BASE_ID  = localStorage.getItem('pos-airtable-base') || '';
+const AIRTABLE_TABLE  = 'Commandes';
+
+async function _airtableCall(method, recordId, fields) {
+  if (!AIRTABLE_API_KEY || !AIRTABLE_BASE_ID) return null;
+  const base = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${encodeURIComponent(AIRTABLE_TABLE)}`;
+  const url  = recordId ? `${base}/${recordId}` : base;
+  const body = recordId
+    ? JSON.stringify({ fields })
+    : JSON.stringify({ records: [{ fields }] });
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}`, 'Content-Type': 'application/json' },
+      body
+    });
+    if (!res.ok) { console.warn('Airtable HTTP', res.status, await res.text()); return null; }
+    return await res.json();
+  } catch(e) { console.warn('Airtable error:', e.message); return null; }
+}
+
+function _cmdToAirtableFields(cmd) {
+  const articles = (cmd.items || [])
+    .map(i => `${i.qty}x ${i.name}${i.custom ? ' (libre)' : ''} — ${fmt(i.price)}`)
+    .join('\n');
+  const nbPhotos = (cmd.photos || []).length;
+  return {
+    'Nom':            cmd.clientName       || '',
+    'Date livraison': cmd.dateLivraison    || '',
+    'Articles':       articles             || '',
+    'Notes':          cmd.notes            || '',
+    'Statut':         cmd.status === 'completed' ? 'termine'
+                    : cmd.status === 'cancelled'  ? 'annule'
+                    : 'en attente',
+    'Photos':         nbPhotos > 0 ? `${nbPhotos} photo(s) — voir app POS` : ''
+  };
+}
+
+async function syncCommandeToAirtable(cmd) {
+  if (!AIRTABLE_API_KEY || !AIRTABLE_BASE_ID) return;
+  const res = await _airtableCall('POST', null, _cmdToAirtableFields(cmd));
+  if (res?.records?.[0]?.id) {
+    cmd.airtableId = res.records[0].id;
+    saveData();
+  } else {
+    console.warn('Airtable sync commande échouée');
+  }
+}
+
+async function syncCmdUpdateToAirtable(cmd) {
+  if (!AIRTABLE_API_KEY || !AIRTABLE_BASE_ID || !cmd.airtableId) return;
+  await _airtableCall('PATCH', cmd.airtableId, {
+    'Statut': cmd.status === 'completed' ? 'termine'
+            : cmd.status === 'cancelled'  ? 'annule'
+            : 'en attente'
+  });
+}
+
+function openAirtableSettings() {
+  const key  = prompt('🔑 Airtable Personal Access Token\n(commence par pat...)\nLaisser vide pour désactiver :', AIRTABLE_API_KEY);
+  if (key === null) return;
+  const base = key.trim()
+    ? prompt('🗄️ Airtable Base ID\n(commence par app... — visible dans l\'URL de ta base) :', AIRTABLE_BASE_ID)
+    : '';
+  if (base === null) return;
+  AIRTABLE_API_KEY = key.trim();
+  AIRTABLE_BASE_ID = base.trim();
+  localStorage.setItem('pos-airtable-key',  AIRTABLE_API_KEY);
+  localStorage.setItem('pos-airtable-base', AIRTABLE_BASE_ID);
+  const btn = document.getElementById('btnAirtable');
+  if (AIRTABLE_API_KEY && AIRTABLE_BASE_ID) {
+    if (btn) { btn.style.borderColor = 'rgba(26,74,58,0.4)'; btn.style.color = 'var(--accent)'; btn.title = 'Airtable connecté ✅'; }
+    testAirtableConnection();
+  } else {
+    if (btn) { btn.style.borderColor = 'rgba(232,131,74,0.4)'; btn.style.color = 'var(--accent2)'; btn.title = 'Configurer Airtable'; }
+    showToast('Airtable désactivé', 'info');
+  }
+}
+
+async function testAirtableConnection() {
+  showLoader('Test Airtable...');
+  try {
+    const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${encodeURIComponent(AIRTABLE_TABLE)}?maxRecords=1`;
+    const res = await fetch(url, { headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}` } });
+    hideLoader();
+    if (res.ok) {
+      showToast('✅ Airtable connecté !');
+    } else {
+      const err = await res.json();
+      showToast('❌ Airtable : ' + (err?.error?.message || 'Erreur ' + res.status), 'error');
+    }
+  } catch(e) {
+    hideLoader();
+    showToast('❌ Airtable inaccessible : ' + e.message, 'error');
+  }
+}
+
 // ── Requête générique ─────────────────────────────────────
 // Lectures : GET ?action=xxx  (réponse JSON lisible)
 // Écritures : GET ?payload=JSON  (Apps Script lit e.parameter.payload)
@@ -3620,6 +3721,7 @@ function saveCommande() {
   commandes.unshift(commande);
   saveData();
   syncCommandeToSheets(commande);
+  syncCommandeToAirtable(commande);
   closeModal('commandeModal');
   showToast(`🧾 Commande #${commande.id} créée — ${clientName}`);
   updateCmdBadge();
@@ -3823,6 +3925,7 @@ function _doCmdFinalize(c, method, given, change, provider, ref) {
   renderStats();
   syncToAppsScript(sale);
   syncCmdUpdateToSheets(c);
+  syncCmdUpdateToAirtable(c);
   closeModal('cmdFinalizeModal');
   printTicket(sale);
   showToast(`✅ Vente #${sale.id} enregistrée — Commande #${c.id} livrée !`);
@@ -3842,6 +3945,7 @@ function cancelCommande(id) {
   renderCommandes();
   updateCmdBadge();
   syncCmdUpdateToSheets(c);
+  syncCmdUpdateToAirtable(c);
   showToast(`Commande #${c.id} annulée`, 'info');
 }
 
@@ -3934,3 +4038,14 @@ loadUsers();
 initPWA();
 renderCart();
 renderHeldCarts();
+
+// Indicateur bouton Airtable
+(function updateAirtableBtn() {
+  const btn = document.getElementById('btnAirtable');
+  if (!btn) return;
+  if (AIRTABLE_API_KEY && AIRTABLE_BASE_ID) {
+    btn.style.borderColor = 'rgba(26,74,58,0.4)';
+    btn.style.color       = 'var(--accent)';
+    btn.title             = 'Airtable connecté ✅';
+  }
+})();

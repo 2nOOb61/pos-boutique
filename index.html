@@ -111,6 +111,7 @@
     <div class="topbar-right">
       <div class="user-badge"><div class="user-dot"></div><span id="currentUserLabel">Admin</span></div>
       <button class="btn-logout" onclick="openScriptSettings()" title="Configurer Apps Script" aria-label="Configurer Google Sheets" style="border-color:rgba(26,74,58,0.3);color:var(--accent)">Google Sheets</button>
+      <button class="btn-logout" onclick="openAirtableSettings()" title="Configurer Airtable" id="btnAirtable" style="border-color:rgba(232,131,74,0.4);color:var(--accent2)">Airtable</button>
       <span id="pendingBadge" title="Ventes en attente de sync" role="button" tabindex="0" aria-live="polite" style="display:none;background:var(--red);color:#fff;border-radius:20px;padding:3px 10px;font-size:12px;font-weight:700;cursor:pointer" onclick="syncPendingOfflineSales()" onkeydown="if(event.key==='Enter')syncPendingOfflineSales()"><span id="pendingCount">0</span> en attente</span>
       <button class="btn-logout" onclick="doLogout()" aria-label="Se déconnecter">Déconnexion</button>
     </div>
