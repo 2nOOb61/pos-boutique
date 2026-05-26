@@ -1776,7 +1776,241 @@ html, body { overflow-x: hidden; max-width: 100%; }
 .skip-link:focus { top:0; }
 
 /* ===================================================
-   RESPONSIVE FIX — Navigation mobile + KPI cards
+   GUIDE COMPLET RESPONSIVE v2 — FOREVER MG POS
+   Règles canoniques issues de GUIDE_COMPLET_RESPONSIVE_SECURITE_v2.md
+   =================================================== */
+
+/* ── 1. Variables :root manquantes (Guide R2) ────────────────────── */
+:root {
+  --bottom-nav-h:  60px;
+  --header-height: 56px;   /* hauteur topbar mobile */
+
+  /* Espacements */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+
+  /* Typographie */
+  --font-sm: 13px;
+  --font-md: 15px;
+  --font-lg: 18px;
+  --font-xl: 22px;
+
+  /* Ombres légères */
+  --shadow-card: 0 1px 4px rgba(0,0,0,0.08);
+}
+
+/* ── 2. Body padding-bottom = hauteur bottom nav (Guide R2 + R14) ── */
+@media (max-width: 1023px) {
+  body { padding-bottom: var(--bottom-nav-h); }
+}
+@media (min-width: 1024px) {
+  body { padding-bottom: 0; }
+}
+
+/* ── 3. KPI grille : 2×2 mobile → 4 colonnes desktop (Guide R5) ─── */
+
+/* Stats page */
+.stats-grid {
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+@media (min-width: 769px) {
+  .stats-grid {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+  }
+}
+@media (max-width: 400px) {
+  .stats-grid { grid-template-columns: 1fr; }
+}
+
+/* Valeur KPI : taille fluide + protection débordement */
+.stat-value {
+  font-size: clamp(13px, 3vw, 20px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  display: block;
+}
+@media (min-width: 769px) {
+  /* 4 colonnes : plus serré — limiter davantage */
+  .stat-value { font-size: clamp(13px, 1.6vw, 18px); }
+}
+@media (max-width: 400px) {
+  /* 1 colonne : pleine largeur, pas besoin de tronquer */
+  .stat-value { font-size: 18px; white-space: normal; text-overflow: clip; }
+}
+
+/* Réservations + Commandes : summary → grille 2×2 mobile (Guide R5) */
+@media (max-width: 767px) {
+  .res-summary,
+  .cmd-summary {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    width: 100%;
+  }
+  .res-toolbar,
+  .cmd-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 0 0 16px;
+  }
+  .res-sum-item,
+  .cmd-sum-item { min-width: unset; padding: 10px 12px; }
+}
+@media (min-width: 768px) {
+  .res-summary,
+  .cmd-summary {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+}
+
+/* ── 4. Panier : max-height 35vh + boutons paiement (Guide R7) ───── */
+
+/* max-height 35vh sur mobile/tablette */
+@media (max-width: 1023px) {
+  .cart-items {
+    max-height: 35vh;
+    overflow-y: auto;
+    flex: none;
+  }
+}
+
+/* Boutons paiement : min-height 50px partout */
+.btn-pay { min-height: 50px; }
+
+/* Sur mobile : empilés + pleine largeur */
+@media (max-width: 768px) {
+  .payment-btns {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .btn-pay { width: 100%; }
+}
+
+/* ── 5. Body padding + page clearance (correction cascade) ────────── */
+/* Le padding-bottom 40px défini sans media query écrase notre valeur ;
+   on réimpose ici (en fin de fichier) pour les deux états actif/inactif */
+@media (max-width: 768px) {
+  .page,
+  .page.active {
+    padding-bottom: calc(76px + env(safe-area-inset-bottom)) !important;
+    padding-left:   12px !important;
+    padding-right:  12px !important;
+  }
+  #toast-container {
+    bottom: calc(80px + env(safe-area-inset-bottom)) !important;
+  }
+}
+
+/* ── 6. Tous les éléments cliquables ≥ 44px (Guide R9 + R14) ──────── */
+@media (max-width: 1023px) {
+  .sidebar-toggle,
+  .bnav-btn,
+  .caisse-tab-btn,
+  .payment-tab,
+  .provider-btn,
+  .bs-tab,
+  .btn-finalize,
+  .btn-cancel-res,
+  .btn-reprint-res,
+  .btn-commande,
+  .btn-reserve,
+  .nav-drawer-item { min-height: 44px; }
+  .sidebar-toggle  { min-width: 44px; }
+}
+
+/* ── 7. Navigation mobile : hamburger drawer (Guide R4) ────────────── */
+
+/* Backdrop overlay */
+.nav-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 150;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  cursor: pointer;
+}
+.nav-overlay.open { display: block; }
+
+/* Sidebar → panneau fixe hors-écran à gauche sur mobile */
+@media (max-width: 768px) {
+  /* Montrer le hamburger */
+  .sidebar-toggle { display: flex !important; }
+
+  /* Sidebar transformée en drawer */
+  .sidebar {
+    display:   block !important;
+    position:  fixed !important;
+    top:       0     !important;
+    left:      -260px !important;
+    height:    100vh !important;
+    width:     240px !important;
+    min-width: 240px !important;
+    z-index:   160   !important;
+    visibility: hidden;
+    transition: left 0.25s cubic-bezier(0.4,0,0.2,1),
+                visibility 0s linear 0.25s !important;
+    box-shadow: none;
+  }
+
+  /* Drawer ouvert */
+  .sidebar.mobile-open {
+    left:       0 !important;
+    visibility: visible;
+    box-shadow: 6px 0 24px rgba(0,0,0,0.28) !important;
+    transition: left 0.25s cubic-bezier(0.4,0,0.2,1),
+                visibility 0s linear 0s !important;
+  }
+
+  /* La classe .collapsed n'a pas d'effet sur mobile */
+  .sidebar.collapsed {
+    width:     240px !important;
+    min-width: 240px !important;
+  }
+  .sidebar.collapsed.mobile-open { left: 0 !important; }
+  .sidebar.collapsed .sidebar-label {
+    opacity:        1    !important;
+    width:          auto !important;
+    pointer-events: auto !important;
+  }
+
+  /* App-body : hauteur correcte sans sidebar à compenser */
+  .app-body { height: calc(100vh - var(--header-height)) !important; }
+}
+
+/* ── 8. Bottom nav scrollable (inchangé) ──── */
+.bottom-nav-inner {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.bottom-nav-inner::-webkit-scrollbar { display: none; }
+
+@media (max-width: 768px) {
+  .bnav-btn {
+    flex: 1 0 auto;
+    min-width: 52px;
+    max-width: 76px;
+    padding: 6px 3px;
+    font-size: 10px;
+  }
+  .bnav-btn .bnav-icon { font-size: 20px !important; line-height: 1.2; }
+}
+
+/* ===================================================
+   (FIN GUIDE COMPLET RESPONSIVE v2)
    =================================================== */
 
 /* 1 — Page: le padding-bottom 40px !important (défini plus haut sans media query)

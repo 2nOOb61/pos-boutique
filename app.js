@@ -190,10 +190,27 @@ function doLogout() {
 // ============================================================
 function toggleSidebar() {
   const sidebar = document.getElementById('sidebar');
-  if (sidebar) sidebar.classList.toggle('collapsed');
+  if (!sidebar) return;
+  if (window.innerWidth <= 768) {
+    // Mobile : ouvrir/fermer le drawer
+    const isOpen = sidebar.classList.toggle('mobile-open');
+    const overlay = document.getElementById('navOverlay');
+    if (overlay) overlay.classList.toggle('open', isOpen);
+  } else {
+    // Desktop : réduire/agrandir la sidebar
+    sidebar.classList.toggle('collapsed');
+  }
+}
+
+function closeMobileNav() {
+  document.getElementById('sidebar')?.classList.remove('mobile-open');
+  const overlay = document.getElementById('navOverlay');
+  if (overlay) overlay.classList.remove('open');
 }
 
 function showPage(id, btn, bnavBtn) {
+  // Fermer le drawer mobile à chaque navigation
+  if (window.innerWidth <= 768) closeMobileNav();
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
   document.querySelectorAll('.bnav-btn').forEach(b=>b.classList.remove('active'));
