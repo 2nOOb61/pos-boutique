@@ -1315,82 +1315,73 @@
 <!-- Apps Script code: voir Code.gs -->
 
   <!-- MODAL ATTRIBUTION -->
-  <div class="modal" id="attribModal">
-    <div class="modal-box">
-      <div class="modal-header">
-        <h3 class="modal-title">Attribuer une tâche</h3>
-        <button class="modal-close" onclick="closeModal('attribModal')">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
+  <div class="modal-overlay" id="attribModal">
+    <div class="modal">
+      <div class="modal-title">
+        Attribuer une tâche
+        <button class="modal-close" onclick="closeModal('attribModal')">✕</button>
       </div>
-      <div class="modal-body">
-        <div style="padding:10px 12px;background:var(--color-primary-light);border-radius:8px;margin-bottom:16px;font-size:13px;color:var(--color-primary);font-weight:500" id="attribContextText"></div>
-        <label class="form-label">Opérateur</label>
-        <select id="attribOpSel" class="form-input" style="margin-bottom:14px"></select>
-        <label class="form-label">Commentaire <span style="color:var(--color-text-muted);font-weight:400">(optionnel)</span></label>
-        <input type="text" id="attribComment" class="form-input" placeholder="Instructions, précisions...">
+      <div id="attribContextText" style="padding:10px 12px;background:var(--color-primary-light);border-radius:8px;margin-bottom:16px;font-size:13px;color:var(--color-primary);font-weight:500"></div>
+      <div class="form-group">
+        <label>Opérateur</label>
+        <select id="attribOpSel"></select>
       </div>
-      <div class="modal-footer">
-        <button class="btn-modal-cancel" onclick="closeModal('attribModal')">Annuler</button>
-        <button class="btn-modal-primary" onclick="confirmAttribution()">Attribuer</button>
+      <div class="form-group">
+        <label>Commentaire <span style="font-weight:400;text-transform:none">(optionnel)</span></label>
+        <input type="text" id="attribComment" placeholder="Instructions, précisions...">
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
+        <button class="btn-logout" onclick="closeModal('attribModal')">Annuler</button>
+        <button class="btn-login" style="width:auto;padding:12px 20px;margin-top:0" onclick="confirmAttribution()">Attribuer</button>
       </div>
     </div>
   </div>
 
   <!-- MODAL OPÉRATEURS -->
-  <div class="modal" id="operateurModal">
-    <div class="modal-box">
-      <div class="modal-header">
-        <h3 class="modal-title">Gestion des opérateurs</h3>
-        <button class="modal-close" onclick="closeModal('operateurModal')">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
+  <div class="modal-overlay" id="operateurModal">
+    <div class="modal">
+      <div class="modal-title">
+        Gestion des opérateurs
+        <button class="modal-close" onclick="closeModal('operateurModal')">✕</button>
       </div>
-      <div class="modal-body">
-        <div id="opListEl" style="margin-bottom:16px"></div>
-        <hr style="border:none;border-top:1px solid var(--color-border);margin:16px 0">
-        <p style="font-size:13px;font-weight:600;color:var(--color-text-primary);margin-bottom:12px">Ajouter / modifier</p>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-          <div>
-            <label class="form-label">Nom</label>
-            <input type="text" id="opNomInput" class="form-input" placeholder="Prénom ou nom">
-          </div>
-          <div>
-            <label class="form-label">Rôle</label>
-            <select id="opRoleInput" class="form-input">
-              <option value="operateur">Opérateur</option>
-              <option value="chef_atelier">Chef atelier</option>
-            </select>
-          </div>
+      <div id="opListEl" style="margin-bottom:16px"></div>
+      <hr style="border:none;border-top:1px solid var(--border);margin:16px 0">
+      <p style="font-size:13px;font-weight:600;margin-bottom:12px">Ajouter / modifier</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-group" style="margin-bottom:0">
+          <label>Nom</label>
+          <input type="text" id="opNomInput" placeholder="Prénom ou nom">
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label>Rôle</label>
+          <select id="opRoleInput">
+            <option value="operateur">Opérateur</option>
+            <option value="chef_atelier">Chef atelier</option>
+          </select>
         </div>
       </div>
-      <div class="modal-footer">
-        <button class="btn-modal-cancel" onclick="closeModal('operateurModal')">Fermer</button>
-        <button class="btn-modal-primary" onclick="saveOperateur()">Enregistrer</button>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
+        <button class="btn-logout" onclick="closeModal('operateurModal')">Fermer</button>
+        <button class="btn-login" style="width:auto;padding:12px 20px;margin-top:0" onclick="saveOperateur()">Enregistrer</button>
       </div>
     </div>
   </div>
 
   <!-- MODAL POINTAGE -->
-  <div class="modal" id="pointageModal">
-    <div class="modal-box">
-      <div class="modal-header">
-        <h3 class="modal-title">Terminer la tâche</h3>
-        <button class="modal-close" onclick="closeModal('pointageModal')">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
+  <div class="modal-overlay" id="pointageModal">
+    <div class="modal">
+      <div class="modal-title">
+        Terminer la tâche
+        <button class="modal-close" onclick="closeModal('pointageModal')">✕</button>
       </div>
-      <div class="modal-body">
-        <div style="padding:10px 12px;background:var(--color-primary-light);border-radius:8px;margin-bottom:16px;font-size:13px;color:var(--color-primary);font-weight:500" id="pointageContextText"></div>
-        <label class="form-label">Commentaire <span style="color:var(--color-text-muted);font-weight:400">(optionnel)</span></label>
-        <textarea id="pointageCommentInput" class="form-input" placeholder="Observations, remarques..." rows="3" style="resize:none"></textarea>
+      <div id="pointageContextText" style="padding:10px 12px;background:var(--color-primary-light);border-radius:8px;margin-bottom:16px;font-size:13px;color:var(--color-primary);font-weight:500"></div>
+      <div class="form-group">
+        <label>Commentaire <span style="font-weight:400;text-transform:none">(optionnel)</span></label>
+        <textarea id="pointageCommentInput" placeholder="Observations, remarques..." rows="3" style="resize:none"></textarea>
       </div>
-      <div class="modal-footer">
-        <button class="btn-modal-cancel" onclick="closeModal('pointageModal')">Annuler</button>
-        <button class="btn-modal-primary" style="background:var(--color-success)" onclick="confirmPointage()">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right:4px"><polyline points="20 6 9 17 4 12"/></svg>
-          Marquer terminé
-        </button>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
+        <button class="btn-logout" onclick="closeModal('pointageModal')">Annuler</button>
+        <button class="btn-login" style="width:auto;padding:12px 20px;margin-top:0;background:var(--green)" onclick="confirmPointage()">✓ Marquer terminé</button>
       </div>
     </div>
   </div>
