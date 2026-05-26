@@ -4308,12 +4308,25 @@ async function saveOperateur() {
   if (!nom) { showToast('Nom obligatoire', 'error'); return; }
   let r;
   if (APPS_SCRIPT_URL) { r = await apiCall({ action:'saveOperateur', nom, role }); }
-  else { r = { ok:true }; operateurs.push({ nom, role }); }
+  else { r = { ok:true }; }
   if (r && r.ok) {
-    showToast(r.message || 'Opérateur enregistré');
     if (!operateurs.find(o => o.nom === nom)) operateurs.push({ nom, role });
+
+    // Auto-création du compte utilisateur
+    const roleMap = { chef_atelier:'chef_atelier', operateur:'operateur_prod', pao:'pao', finition:'finition', livreur:'livreur' };
+    const userRole = roleMap[role] || 'operateur_prod';
+    const username = nom.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,'');
+    const existing = localUsers.find(u => u.label === nom || u.username === username);
+    if (!existing) {
+      const newPass = '1234';
+      localUsers.push({ username, pass: newPass, role: userRole, label: nom, actif: true });
+      saveUsers();
+      showToast(`Opérateur + compte créé — login : ${username} / ${newPass}`, 'success');
+    } else {
+      showToast(r.message || 'Opérateur enregistré');
+    }
+
     openOperateurModal();
-    // Refresh filtre
     const sel = document.getElementById('opFilterSel');
     if (sel) {
       sel.innerHTML = '<option value="TOUS">Tous les opérateurs</option>';
@@ -4355,19 +4368,66 @@ function setProdFilter(f, btn) {
   renderTaches();
 }
 
+function _buildMonDashboard() {
+  const PROD_ROLES = ['chef_atelier','operateur_prod','pao','finition','livreur'];
+  if (!currentUser || !PROD_ROLES.includes(currentUser.role)) return '';
+  const myTaches = taches.filter(t => t.operateur === currentUser.label);
+  if (!myTaches.length) return '';
+  const blocking  = myTaches.filter(t => t.statut === 'A_FAIRE');
+  const inProgress = myTaches.filter(t => t.statut === 'EN_COURS');
+  const done      = myTaches.filter(t => t.statut === 'TERMINE');
+  const statusBadge = blocking.length
+    ? `<span style="background:var(--color-danger-bg);color:var(--color-danger);font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px">${blocking.length} en attente — je bloque</span>`
+    : inProgress.length
+      ? `<span style="background:var(--color-warning-bg);color:var(--color-warning);font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px">${inProgress.length} en cours</span>`
+      : `<span style="background:var(--color-success-bg);color:var(--color-success);font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px">Rien ne bloque</span>`;
+  const cards = myTaches.map(t => {
+    const etape = ETAPES_CONFIG.find(e => e.code === t.etapeCode) || { color:'#888', icon:'?', label: t.etapeLabel };
+    const isBlocking = t.statut === 'A_FAIRE';
+    const isEC  = t.statut === 'EN_COURS';
+    const isDone = t.statut === 'TERMINE';
+    const bg     = isBlocking ? 'var(--color-danger-bg)' : isDone ? 'var(--color-success-bg)' : 'var(--color-warning-bg)';
+    const border = isBlocking ? '#fca5a5' : isDone ? '#86efac' : '#fcd34d';
+    const statusText = isBlocking ? 'À démarrer' : isEC ? 'En cours' : 'Terminé';
+    const statusColor = isBlocking ? 'var(--color-danger)' : isEC ? 'var(--color-warning)' : 'var(--color-success)';
+    const btn = isBlocking
+      ? `<button onclick="pointerStart('${t.id}')" style="margin-top:8px;width:100%;padding:6px;background:var(--color-primary);color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">Démarrer</button>`
+      : isEC
+        ? `<button onclick="openPointage('${t.id}','${t.etapeCode}','${t.numeroDossier}')" style="margin-top:8px;width:100%;padding:6px;background:var(--color-success);color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">Terminer</button>`
+        : '';
+    return `<div style="flex:1;min-width:180px;max-width:260px;background:${bg};border:1px solid ${border};border-radius:10px;padding:12px">
+      <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--color-text-muted);margin-bottom:2px">${t.numeroDossier}</div>
+      <div style="font-size:13px;font-weight:700;color:${etape.color};margin-bottom:4px">${etape.icon} ${etape.label}</div>
+      <div style="font-size:11px;font-weight:700;color:${statusColor}">${statusText}</div>
+      ${btn}
+    </div>`;
+  }).join('');
+  return `<div style="background:var(--color-primary-light);border:1px solid rgba(26,74,58,0.15);border-radius:12px;padding:16px;margin-bottom:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:12px;flex-wrap:wrap">
+      <div>
+        <p style="font-size:13px;font-weight:700;color:var(--color-primary)">Mes tâches — ${currentUser.label}</p>
+        <p style="font-size:11px;color:var(--color-text-muted);margin-top:2px">${myTaches.length} tâche(s) · ${done.length} terminée(s)</p>
+      </div>
+      ${statusBadge}
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">${cards}</div>
+  </div>`;
+}
+
 function renderTaches() {
   const container = document.getElementById('tachesContainer');
   if (!container) return;
+  const dash = _buildMonDashboard();
   let list = taches;
   if (prodFilter !== 'TOUS') list = list.filter(t => t.statut === prodFilter);
   if (!list.length) {
-    container.innerHTML = `<div style="text-align:center;color:var(--color-text-muted);padding:80px 0;font-size:14px">
-      <div style="font-size:40px;margin-bottom:12px">✅</div>
+    container.innerHTML = dash + `<div style="text-align:center;color:var(--color-text-muted);padding:80px 0;font-size:14px">
+      <div style="font-size:32px;margin-bottom:12px">✓</div>
       Aucune tâche ${prodFilter !== 'TOUS' ? 'dans ce filtre' : ''}
     </div>`;
     return;
   }
-  container.innerHTML = list.map(t => {
+  container.innerHTML = dash + list.map(t => {
     const etape   = ETAPES_CONFIG.find(e => e.code === t.etapeCode) || { color:'#888', icon:'?', label:t.etapeLabel };
     const isEC    = t.statut === 'EN_COURS';
     const isDone  = t.statut === 'TERMINE';
@@ -4382,7 +4442,7 @@ function renderTaches() {
         <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--color-text-muted)">${t.numeroDossier}</div>
         <div style="font-weight:600;font-size:14px;color:${etape.color};margin:1px 0">${t.etapeLabel}</div>
         <div style="font-size:12px;color:var(--color-text-secondary)">
-          👤 ${t.operateur} · ${isEC ? '⏳ Démarré '+t.dateDebut : isDone ? '✅ Terminé '+t.dateFin : '📋 Assigné '+t.dateAssignation}
+          ${t.operateur} · ${isEC ? 'Démarré '+t.dateDebut : isDone ? 'Terminé '+t.dateFin : 'Assigné '+t.dateAssignation}
         </div>
       </div>
       <div style="flex-shrink:0">${actions}</div>
