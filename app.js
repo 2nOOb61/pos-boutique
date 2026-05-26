@@ -17,7 +17,11 @@ let localUsers = [
   { username:'caissier',     pass:'0000', role:'caissier',     label:'Caissier',          actif:true },
   { username:'utilisateur',  pass:'1111', role:'utilisateur',  label:'Utilisateur',       actif:true },
   { username:'gestionnaire', pass:'2222', role:'gestionnaire', label:'Gestionnaire Stock', actif:true },
-  { username:'comptable',    pass:'3333', role:'comptable',    label:'Comptable',         actif:true }
+  { username:'comptable',    pass:'3333', role:'comptable',    label:'Comptable',         actif:true },
+  { username:'chef_atelier', pass:'4444', role:'chef_atelier', label:'Chef Atelier',      actif:true },
+  { username:'pao',          pass:'5555', role:'pao',          label:'Graphiste PAO',     actif:true },
+  { username:'finition',     pass:'6666', role:'finition',     label:'Finisheur',         actif:true },
+  { username:'livreur',      pass:'7777', role:'livreur',      label:'Livreur',           actif:true },
 ];
 
 const ROLE_LABELS = {
@@ -25,23 +29,29 @@ const ROLE_LABELS = {
   caissier:     'Caissier',
   utilisateur:  'Utilisateur',
   gestionnaire: 'Gestionnaire Stock',
-  comptable:    'Comptable'
+  comptable:    'Comptable',
+  chef_atelier: 'Chef Atelier',
+  operateur_prod:'Opérateur Prod',
+  pao:          'Graphiste PAO',
+  finition:     'Finisheur',
+  livreur:      'Livreur',
 };
 
 const ROLE_ICONS = {
-  admin: '👑', caissier: '🛒', utilisateur: '👤', gestionnaire: '📦', comptable: '📊'
+  admin: '👑', caissier: '🛒', utilisateur: '👤', gestionnaire: '📦', comptable: '📊',
+  chef_atelier: '🏭', operateur_prod: '⚙️', pao: '🎨', finition: '✨', livreur: '🚚'
 };
 
 const PAGE_ACCESS = {
   caisse:       ['admin','caissier','utilisateur','gestionnaire'],
   reservations: ['admin','caissier','utilisateur','gestionnaire','comptable'],
-  commandes:    ['admin','caissier','gestionnaire','comptable'],
+  commandes:    ['admin','caissier','gestionnaire','comptable','livreur'],
   stock:        ['admin','gestionnaire'],
   stats:        ['admin','comptable'],
   config:       ['admin'],
   users:        ['admin'],
   attribution:  ['admin','chef_atelier'],
-  production:   ['admin','chef_atelier','operateur_prod'],
+  production:   ['admin','chef_atelier','operateur_prod','pao','finition','livreur'],
 };
 let editingUserId = null; // index dans localUsers
 
