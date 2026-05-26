@@ -2776,22 +2776,16 @@ async function syncCmdUpdateToAirtable(cmd) {
 }
 
 function openAirtableSettings() {
-  const key  = prompt('🔑 Airtable Personal Access Token\n(commence par pat...)\nLaisser vide pour désactiver :', AIRTABLE_API_KEY);
-  if (key === null) return;
-  const base = key.trim()
-    ? prompt('🗄️ Airtable Base ID\n(commence par app... — visible dans l\'URL de ta base) :', AIRTABLE_BASE_ID)
-    : '';
-  if (base === null) return;
-  AIRTABLE_API_KEY = key.trim();
-  AIRTABLE_BASE_ID = base.trim();
-  localStorage.setItem('pos-airtable-key',  AIRTABLE_API_KEY);
-  localStorage.setItem('pos-airtable-base', AIRTABLE_BASE_ID);
-  _updateAirtableBtn();
-  if (AIRTABLE_API_KEY && AIRTABLE_BASE_ID) {
-    testAirtableConnection();
-  } else {
-    showToast('Airtable désactivé', 'info');
-  }
+  showPage('config', null, null);
+  setTimeout(() => {
+    const section = document.getElementById('airtableConfigSection');
+    if (section) {
+      section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      section.style.outline = '2px solid var(--accent2)';
+      section.style.borderRadius = '14px';
+      setTimeout(() => { section.style.outline = ''; }, 1800);
+    }
+  }, 120);
 }
 
 function saveAirtableConfig() {
