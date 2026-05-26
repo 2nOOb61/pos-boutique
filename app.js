@@ -227,7 +227,7 @@ function showPage(id, btn, bnavBtn) {
   document.querySelectorAll('.nav-btn').forEach(b => {
     if (b.getAttribute('onclick') && b.getAttribute('onclick').includes("'"+id+"'")) b.classList.add('active');
   });
-  if (id==='stats')        { renderStats(); _autoRefreshStats(); }
+  if (id==='stats')        { renderStats(); _autoRefreshStats(); _loadProdStats(); }
   if (id==='config')       renderConfigPage();
   if (id==='users')        renderUsersPage();
   if (id==='reservations') { renderReservations(); _autoRefreshReservations(); }
@@ -4403,17 +4403,18 @@ async function confirmPointage() {
 }
 
 // ============================================================
-// STATS — PATCH pour ajouter les KPI production
+// STATS — KPI production (appelé depuis showPage via _loadProdStats)
 // ============================================================
-const _origRenderStats = typeof renderStats === 'function' ? renderStats : null;
-async function renderStats() {
-  if (_origRenderStats) _origRenderStats();
-  // Ajouter les KPI production après le rendu original
+async function _loadProdStats() {
   if (APPS_SCRIPT_URL) {
     const r = await apiCall({ action:'getDashboard' });
     if (r && r.ok) renderProdKpis(r);
   } else {
-    renderProdKpis({ ventes:{total:485000,nb:12}, dossiers:{total:8,cree:3,enCours:4,livre:1}, operateurs:[{nom:'Marie',aFaire:2,enCours:1,termine:5},{nom:'Jean',aFaire:1,enCours:2,termine:3}] });
+    renderProdKpis({
+      ventes:    { total:485000, nb:12 },
+      dossiers:  { total:8, cree:3, enCours:4, livre:1 },
+      operateurs:[{ nom:'Marie', aFaire:2, enCours:1, termine:5 }, { nom:'Jean', aFaire:1, enCours:2, termine:3 }]
+    });
   }
 }
 
@@ -4482,15 +4483,4 @@ function demoTaches(filters) {
   return res;
 }
 
-// Appel init au démarrage
-(function() {
-  const origInit = typeof initApp === 'function' ? initApp : null;
-  if (origInit) {
-    // Hook: après initApp, lancer initModulesProduction
-    const _o = window.initApp;
-    window.initApp = async function() {
-      await _o();
-      await initModulesProduction();
-    };
-  }
-})();
+// initModulesProduction est appelé lazily depuis showPage (attribution/production)
