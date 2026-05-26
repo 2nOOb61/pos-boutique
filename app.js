@@ -4118,12 +4118,14 @@ let prodFilter = 'TOUS';
 let opFilterVal = 'TOUS';
 
 const ETAPES_CONFIG = [
-  { code:'PAO',        label:'PAO / Conception',  color:'#6c63ff', icon:'M' },
-  { code:'BAT',        label:'BAT validé',         color:'#2563eb', icon:'B' },
-  { code:'ACHAT',      label:'Achat matières',     color:'#d97706', icon:'A' },
-  { code:'PRODUCTION', label:'Production atelier', color:'#e8834a', icon:'P' },
-  { code:'FINITION',   label:'Finition',           color:'#1a4a3a', icon:'F' },
-  { code:'LIVRE',      label:'Livré',              color:'#78716c', icon:'L' },
+  { code:'PAO',           label:'PAO / Conception',  short:'PAO',     color:'#6c63ff', icon:'1' },
+  { code:'BAT',           label:'BAT physique',       short:'BAT',     color:'#2563eb', icon:'2' },
+  { code:'RETOUR_CLIENT', label:'Retour client',      short:'Retour',  color:'#0891b2', icon:'3' },
+  { code:'MODIFICATIONS', label:'Modifications',      short:'Modifs',  color:'#7c3aed', icon:'4' },
+  { code:'ACHAT',         label:'Achat (si besoin)',  short:'Achat',   color:'#d97706', icon:'5' },
+  { code:'PRODUCTION',    label:'Opérateur machine',  short:'Machine', color:'#e8834a', icon:'6' },
+  { code:'FINITION',      label:'Finition',           short:'Finition',color:'#1a4a3a', icon:'7' },
+  { code:'LIVRE',         label:'Livraison',          short:'Livré',   color:'#16a34a', icon:'8' },
 ];
 
 // --- INIT ---
@@ -4381,6 +4383,41 @@ function setProdFilter(f, btn) {
   renderTaches();
 }
 
+function _buildProgressBar(dossierId) {
+  const dt = taches.filter(t => t.dossierId === dossierId);
+  let doneCount = 0;
+  const steps = ETAPES_CONFIG.map(e => {
+    const te = dt.filter(t => t.etapeCode === e.code);
+    let status = 'VIDE';
+    if (te.some(t => t.statut === 'TERMINE'))    { status = 'TERMINE'; doneCount++; }
+    else if (te.some(t => t.statut === 'EN_COURS')) status = 'EN_COURS';
+    else if (te.some(t => t.statut === 'A_FAIRE'))  status = 'A_FAIRE';
+    return { ...e, status };
+  });
+  const pct = Math.round(doneCount / ETAPES_CONFIG.length * 100);
+  const bg = s => s==='TERMINE'?'#16a34a':s==='EN_COURS'?'#d97706':s==='A_FAIRE'?'#2563eb':'#f5f5f4';
+  const bc = s => s==='VIDE'?'#d6d3d1':bg(s);
+  const tc = s => s==='VIDE'?'#a8a29e':'#fff';
+  const lc = s => s==='TERMINE'?'#16a34a':'#e5e3df';
+  const ic = s => s==='TERMINE'?'✓':s==='EN_COURS'?'▶':s==='A_FAIRE'?'●':'';
+  return `<div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:14px 16px;margin-bottom:10px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <span style="font-size:11px;font-weight:600;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:.05em">Progression du dossier</span>
+      <span style="font-size:12px;font-weight:700;color:${pct===100?'#16a34a':pct>0?'#d97706':'#a8a29e'}">${pct}%</span>
+    </div>
+    <div style="display:flex;align-items:flex-start;overflow-x:auto;padding-bottom:4px">
+      ${steps.map((s, i) => `<div style="display:flex;flex-direction:column;align-items:center;flex:1;min-width:42px;position:relative">
+        ${i < steps.length-1 ? `<div style="position:absolute;top:12px;left:50%;width:100%;height:2px;background:${lc(s.status)}"></div>` : ''}
+        <div style="width:24px;height:24px;border-radius:50%;border:2px solid ${bc(s.status)};background:${bg(s.status)};color:${tc(s.status)};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;position:relative;z-index:1;flex-shrink:0">${s.status!=='VIDE'?ic(s.status):i+1}</div>
+        <div style="font-size:8px;font-weight:500;color:${s.status==='VIDE'?'#a8a29e':s.status==='TERMINE'?'#16a34a':s.status==='EN_COURS'?'#d97706':'#2563eb'};margin-top:4px;text-align:center;line-height:1.2;max-width:42px;word-break:break-word">${s.short}</div>
+      </div>`).join('')}
+    </div>
+    <div style="margin-top:8px;height:3px;background:#f0ede8;border-radius:99px;overflow:hidden">
+      <div style="height:100%;width:${pct}%;background:${pct===100?'#16a34a':'#e8834a'};border-radius:99px;transition:width .4s"></div>
+    </div>
+  </div>`;
+}
+
 function _buildMonDashboard() {
   const PROD_ROLES = ['chef_atelier','operateur_prod','pao','finition','livreur'];
   if (!currentUser || !PROD_ROLES.includes(currentUser.role)) return '';
@@ -4427,6 +4464,28 @@ function _buildMonDashboard() {
   </div>`;
 }
 
+function _tacheRow(t) {
+  const etape  = ETAPES_CONFIG.find(e => e.code === t.etapeCode) || { color:'#888', icon:'?', label:t.etapeLabel, short:'?' };
+  const isEC   = t.statut === 'EN_COURS';
+  const isDone = t.statut === 'TERMINE';
+  const actions = isDone
+    ? `<span class="prod-badge" style="background:var(--color-success-bg);color:var(--color-success);padding:6px 12px">Terminé</span>`
+    : isEC
+      ? `<button class="btn-prod-done" onclick="openPointage('${t.id}','${t.etapeCode}','${t.numeroDossier}')">Terminer</button>`
+      : `<button class="btn-prod-start" onclick="pointerStart('${t.id}')">Démarrer</button>`;
+  return `<div class="tache-row ${isEC?'tache-row--encours':''} ${isDone?'tache-row--done':''}">
+    <div style="width:32px;height:32px;border-radius:50%;background:${etape.color}15;border:1.5px solid ${etape.color};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;font-weight:700;color:${etape.color}">${etape.icon}</div>
+    <div style="flex:1;min-width:0">
+      <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--color-text-muted)">${t.numeroDossier}</div>
+      <div style="font-weight:600;font-size:14px;color:${etape.color};margin:1px 0">${t.etapeLabel}</div>
+      <div style="font-size:12px;color:var(--color-text-secondary)">
+        ${t.operateur} · ${isEC ? 'Démarré '+t.dateDebut : isDone ? 'Terminé '+t.dateFin : 'Assigné '+t.dateAssignation}
+      </div>
+    </div>
+    <div style="flex-shrink:0">${actions}</div>
+  </div>`;
+}
+
 function renderTaches() {
   const container = document.getElementById('tachesContainer');
   if (!container) return;
@@ -4440,25 +4499,17 @@ function renderTaches() {
     </div>`;
     return;
   }
-  container.innerHTML = dash + list.map(t => {
-    const etape   = ETAPES_CONFIG.find(e => e.code === t.etapeCode) || { color:'#888', icon:'?', label:t.etapeLabel };
-    const isEC    = t.statut === 'EN_COURS';
-    const isDone  = t.statut === 'TERMINE';
-    const actions = isDone
-      ? `<span class="prod-badge" style="background:var(--color-success-bg);color:var(--color-success);padding:6px 12px">Terminé</span>`
-      : isEC
-        ? `<button class="btn-prod-done" onclick="openPointage('${t.id}','${t.etapeCode}','${t.numeroDossier}')">Terminer</button>`
-        : `<button class="btn-prod-start" onclick="pointerStart('${t.id}')">Démarrer</button>`;
-    return `<div class="tache-row ${isEC?'tache-row--encours':''} ${isDone?'tache-row--done':''}">
-      <div style="width:32px;height:32px;border-radius:50%;background:${etape.color}15;border:1.5px solid ${etape.color};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;font-weight:700;color:${etape.color}">${etape.icon}</div>
-      <div style="flex:1;min-width:0">
-        <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--color-text-muted)">${t.numeroDossier}</div>
-        <div style="font-weight:600;font-size:14px;color:${etape.color};margin:1px 0">${t.etapeLabel}</div>
-        <div style="font-size:12px;color:var(--color-text-secondary)">
-          ${t.operateur} · ${isEC ? 'Démarré '+t.dateDebut : isDone ? 'Terminé '+t.dateFin : 'Assigné '+t.dateAssignation}
-        </div>
-      </div>
-      <div style="flex-shrink:0">${actions}</div>
+  // Grouper par dossier pour afficher la barre de progression par dossier
+  const groups = {};
+  list.forEach(t => {
+    if (!groups[t.dossierId]) groups[t.dossierId] = { numeroDossier: t.numeroDossier, taches: [] };
+    groups[t.dossierId].taches.push(t);
+  });
+  container.innerHTML = dash + Object.entries(groups).map(([dossierId, g]) => {
+    return `<div style="margin-bottom:24px">
+      <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--color-text-muted);margin-bottom:6px;padding:0 2px">${g.numeroDossier}</div>
+      ${_buildProgressBar(dossierId)}
+      ${g.taches.map(_tacheRow).join('')}
     </div>`;
   }).join('');
 }
@@ -4567,12 +4618,15 @@ function demoDossiers() {
 
 function demoTaches(filters) {
   const all = [
-    {id:'T0001',dossierId:'D0001',numeroDossier:'POS-101-1',etapeCode:'PAO',etapeLabel:'PAO / Conception',operateur:'Marie',statut:'EN_COURS',dateAssignation:'14/05/2026 09:00',dateDebut:'14/05/2026 10:00',dateFin:'',commentaire:''},
-    {id:'T0002',dossierId:'D0001',numeroDossier:'POS-101-1',etapeCode:'ACHAT',etapeLabel:'Achat matières',operateur:'Jean',statut:'A_FAIRE',dateAssignation:'14/05/2026 09:00',dateDebut:'',dateFin:'',commentaire:''},
-    {id:'T0003',dossierId:'D0002',numeroDossier:'POS-102-1',etapeCode:'ACHAT',etapeLabel:'Achat matières',operateur:'Jean',statut:'EN_COURS',dateAssignation:'15/05/2026 08:00',dateDebut:'15/05/2026 09:00',dateFin:'',commentaire:''},
-    {id:'T0004',dossierId:'D0003',numeroDossier:'POS-103-1',etapeCode:'PAO',etapeLabel:'PAO / Conception',operateur:'Marie',statut:'A_FAIRE',dateAssignation:'16/05/2026 08:00',dateDebut:'',dateFin:'',commentaire:''},
-    {id:'T0005',dossierId:'D0004',numeroDossier:'POS-104-1',etapeCode:'PRODUCTION',etapeLabel:'Production atelier',operateur:'Paul',statut:'EN_COURS',dateAssignation:'16/05/2026 10:00',dateDebut:'16/05/2026 11:00',dateFin:'',commentaire:''},
-    {id:'T0006',dossierId:'D0001',numeroDossier:'POS-101-1',etapeCode:'PAO',etapeLabel:'PAO / Conception',operateur:'Marie',statut:'TERMINE',dateAssignation:'10/05/2026 09:00',dateDebut:'10/05/2026 10:00',dateFin:'10/05/2026 16:00',commentaire:'RAS'},
+    {id:'T0001',dossierId:'D0001',numeroDossier:'POS-101-1',etapeCode:'PAO',          etapeLabel:'PAO / Conception', operateur:'Marie',statut:'TERMINE', dateAssignation:'14/05/2026 09:00',dateDebut:'14/05/2026 10:00',dateFin:'14/05/2026 16:00',commentaire:'OK'},
+    {id:'T0002',dossierId:'D0001',numeroDossier:'POS-101-1',etapeCode:'BAT',          etapeLabel:'BAT physique',     operateur:'Marie',statut:'TERMINE', dateAssignation:'15/05/2026 08:00',dateDebut:'15/05/2026 09:00',dateFin:'15/05/2026 14:00',commentaire:'Validé'},
+    {id:'T0003',dossierId:'D0001',numeroDossier:'POS-101-1',etapeCode:'RETOUR_CLIENT',etapeLabel:'Retour client',    operateur:'Jean', statut:'EN_COURS',dateAssignation:'16/05/2026 08:00',dateDebut:'16/05/2026 09:00',dateFin:'',commentaire:''},
+    {id:'T0004',dossierId:'D0002',numeroDossier:'POS-102-1',etapeCode:'PAO',          etapeLabel:'PAO / Conception', operateur:'Marie',statut:'TERMINE', dateAssignation:'15/05/2026 08:00',dateDebut:'15/05/2026 09:00',dateFin:'15/05/2026 17:00',commentaire:'RAS'},
+    {id:'T0005',dossierId:'D0002',numeroDossier:'POS-102-1',etapeCode:'BAT',          etapeLabel:'BAT physique',     operateur:'Jean', statut:'TERMINE', dateAssignation:'16/05/2026 08:00',dateDebut:'16/05/2026 09:00',dateFin:'16/05/2026 12:00',commentaire:''},
+    {id:'T0006',dossierId:'D0002',numeroDossier:'POS-102-1',etapeCode:'RETOUR_CLIENT',etapeLabel:'Retour client',    operateur:'Jean', statut:'TERMINE', dateAssignation:'16/05/2026 13:00',dateDebut:'16/05/2026 14:00',dateFin:'16/05/2026 15:00',commentaire:''},
+    {id:'T0007',dossierId:'D0002',numeroDossier:'POS-102-1',etapeCode:'ACHAT',        etapeLabel:'Achat (si besoin)',operateur:'Jean', statut:'EN_COURS',dateAssignation:'17/05/2026 08:00',dateDebut:'17/05/2026 09:00',dateFin:'',commentaire:''},
+    {id:'T0008',dossierId:'D0003',numeroDossier:'POS-103-1',etapeCode:'PAO',          etapeLabel:'PAO / Conception', operateur:'Marie',statut:'A_FAIRE', dateAssignation:'16/05/2026 08:00',dateDebut:'',dateFin:'',commentaire:''},
+    {id:'T0009',dossierId:'D0004',numeroDossier:'POS-104-1',etapeCode:'PRODUCTION',   etapeLabel:'Opérateur machine',operateur:'Paul', statut:'EN_COURS',dateAssignation:'16/05/2026 10:00',dateDebut:'16/05/2026 11:00',dateFin:'',commentaire:''},
   ];
   let res = all;
   if (filters?.operateur && filters.operateur !== 'TOUS') res = res.filter(t => t.operateur === filters.operateur);
