@@ -2279,6 +2279,24 @@ function confirmDeleteSale() {
 let deferredPrompt = null;
 let swRegistration = null;
 
+async function forceAppUpdate() {
+  showLoader('Mise à jour en cours...');
+  try {
+    // Vider tous les caches SW
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+    // Désenregistrer le service worker
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    }
+  } catch(e) { console.warn('forceUpdate error:', e); }
+  // Recharger avec cache brisé
+  window.location.reload(true);
+}
+
 function showUpdateBanner() {
   let banner = document.getElementById('swUpdateBanner');
   if (banner) return;
