@@ -1774,3 +1774,72 @@ html, body { overflow-x: hidden; max-width: 100%; }
   .app-body { height: calc(100vh - 56px); }
 }
 .skip-link:focus { top:0; }
+
+/* ===================================================
+   RESPONSIVE FIX — Navigation mobile + KPI cards
+   =================================================== */
+
+/* 1 — Page: le padding-bottom 40px !important (défini plus haut sans media query)
+        écrase le calc(72px) prévu pour dégager le bottom nav fixe sur mobile.
+        On réimpose la bonne valeur en fin de fichier pour gagner la cascade. */
+@media (max-width: 768px) {
+  .page,
+  .page.active {
+    padding-bottom: calc(76px + env(safe-area-inset-bottom)) !important;
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+  /* Toast: repositionner au-dessus du bottom nav */
+  #toast-container {
+    bottom: calc(80px + env(safe-area-inset-bottom)) !important;
+  }
+}
+
+/* 2 — Bottom nav: scrollable quand beaucoup d'items (ex: admin = 7 boutons)
+        + label non-coupé sur petit écran */
+.bottom-nav-inner {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.bottom-nav-inner::-webkit-scrollbar { display: none; }
+
+@media (max-width: 768px) {
+  .bnav-btn {
+    flex: 1 0 auto;
+    min-width: 52px;
+    max-width: 76px;
+    padding: 6px 3px;
+    font-size: 10px;
+  }
+  .bnav-btn .bnav-icon { font-size: 20px !important; line-height: 1.2; }
+}
+
+/* 3 — KPI cards: valeur tronquée + taille de police adaptée au layout 2 colonnes.
+        Sur mobile 2-col (~141px de contenu utile), "1 234 567 Ar" en Syne 18px déborde. */
+@media (max-width: 768px) {
+  .stat-value {
+    font-size: 15px !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .stat-card {
+    overflow: hidden;
+    padding: 14px 12px;
+  }
+  .stat-icon { font-size: 22px; margin-bottom: 8px; }
+  .stats-grid { gap: 10px; }
+  .stat-detail-hint { display: none; }
+}
+
+/* Sur très petit écran (<400px) les cards passent déjà en 1 colonne
+   (règle existante) — on rétablit la taille normale de la valeur */
+@media (max-width: 400px) {
+  .stat-value {
+    font-size: 20px !important;
+    white-space: normal;
+    text-overflow: clip;
+  }
+  .stat-detail-hint { display: block; }
+}
