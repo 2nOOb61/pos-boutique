@@ -130,8 +130,11 @@ async function doLogin() {
     const r = await loginViaScript(u, p);
     if (r && r.ok) {
       loginOk = true; userInfo = r.user;
-      // Garantir que label est toujours défini (le Sheet peut ne pas le renvoyer)
-      if (!userInfo.label) userInfo.label = userInfo.username;
+      // Garantir que label est toujours une vraie valeur (le Sheet peut renvoyer
+      // undefined, null, ou la chaîne "undefined" si le champ était vide)
+      if (!userInfo.label || userInfo.label === 'undefined') {
+        userInfo.label = userInfo.username || u;
+      }
     } else if (r && !r.ok) {
       const errMsg = r.error || '';
       const isCredError = errMsg.toLowerCase().includes('identifiant') ||
@@ -153,7 +156,10 @@ async function doLogin() {
       (x.pass === p || x.pass === pHashed) &&
       x.actif !== false
     );
-    if (lu) { loginOk = true; userInfo = { username: lu.username, role: lu.role, label: lu.label || lu.username }; }
+    if (lu) {
+      const lbl = (lu.label && lu.label !== 'undefined') ? lu.label : (lu.username || u);
+      loginOk = true; userInfo = { username: lu.username, role: lu.role, label: lbl };
+    }
   }
 
   btn.disabled = false; btn.textContent = 'Se connecter';
@@ -2545,11 +2551,10 @@ function loadUsers() {
       // Restaurer le pass depuis les défauts si le stockage l'a perdu
       localUsers = stored.map(su => {
         const def = defaults.find(d => d.username === su.username);
-        if (!def) return su;
-        // Restaurer pass et label depuis les défauts si absents du stockage
         const patched = { ...su };
-        if (!patched.pass  && def.pass)  patched.pass  = def.pass;
-        if (!patched.label && def.label) patched.label = def.label;
+        const badLabel = !patched.label || patched.label === 'undefined';
+        if (badLabel) patched.label = def?.label || su.username;
+        if (!patched.pass && def?.pass) patched.pass = def.pass;
         return patched;
       });
     }
@@ -3086,7 +3091,9 @@ async function loadUsersFromScript() {
         const local = localUsers.find(lu => lu.username.toLowerCase() === su.username.toLowerCase());
         const patched = { ...su };
         if (!patched.pass  && local?.pass)  patched.pass  = local.pass;
-        if (!patched.label && local?.label) patched.label = local.label;
+        const badLabel = !patched.label || patched.label === 'undefined';
+        const goodLocal = local?.label && local.label !== 'undefined';
+        if (badLabel) patched.label = goodLocal ? local.label : su.username;
         return patched;
       }),
       ...localOnly
