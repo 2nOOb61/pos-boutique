@@ -173,7 +173,9 @@ async function doLogin() {
       await loadSalesFromScript();
       await loadUsersFromScript();
       await loadReservationsFromScript();
+      await loadCommandesFromScript();
       await syncPendingOfflineSales();
+      saveData(); // Persister l'état fusionné après tous les chargements
     }
     applyRolePermissions(currentUser.role);
     updatePendingBadge();
@@ -3052,8 +3054,8 @@ async function loadSalesFromScript(fullReload = false) {
       if (!db) return -1;
       return db - da;
     });
-    saveData();
   }
+  saveData();
 }
 
 // ── Charger les utilisateurs depuis Sheet ────────────────
@@ -3075,7 +3077,7 @@ async function loadReservationsFromScript() {
   showLoader('Chargement des réservations...');
   const r = await apiCall({ action: 'getReservations' });
   hideLoader();
-  if (!r || !r.ok || !Array.isArray(r.reservations) || r.reservations.length === 0) return;
+  if (!r || !r.ok || !Array.isArray(r.reservations) || r.reservations.length === 0) { saveData(); return; }
 
   // Dédupliquer les articles par nom au sein de chaque réservation (doublon possible dans le Sheet)
   const deduped = r.reservations.map(res => {
@@ -4053,8 +4055,8 @@ async function loadCommandesFromScript() {
     commandes = [...r.commandes, ...localOnly];
     commandes.sort((a, b) => (parseSaleDate(b.date)||0) - (parseSaleDate(a.date)||0));
     if (commandes.length > 0) nextCommandeId = Math.max(...commandes.map(c => Number(c.id))) + 1;
-    saveData();
   }
+  saveData();
 }
 
 // ============================================================
@@ -4113,6 +4115,7 @@ function exportSalesCSV() {
 // ============================================================
 // INIT
 // ============================================================
+let tachesLibres = []; // doit être déclaré avant loadTachesLibres()
 loadConfig();
 loadData();
 loadUsers();
@@ -4133,7 +4136,7 @@ _updateAirtableBtn();
 let dossiers = [];
 let operateurs = [];
 let taches = [];
-let tachesLibres = [];
+// tachesLibres est déclaré avant le bloc INIT (ligne ~4116) pour éviter la TDZ
 let selectedDossier = null;
 let pendingAttrib = null;
 let pendingPointage = null;
