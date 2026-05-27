@@ -4103,6 +4103,7 @@ function exportSalesCSV() {
 loadConfig();
 loadData();
 loadUsers();
+loadTachesLibres();
 initPWA();
 renderCart();
 renderHeldCarts();
@@ -4118,6 +4119,7 @@ _updateAirtableBtn();
 let dossiers = [];
 let operateurs = [];
 let taches = [];
+let tachesLibres = [];
 let selectedDossier = null;
 let pendingAttrib = null;
 let pendingPointage = null;
@@ -4250,6 +4252,78 @@ function _buildCardProductionSection(dossierId) {
     ${progressBar}
     ${assignHtml}
   </div>`;
+}
+
+// ============================================================
+// TÂCHES INDÉPENDANTES — persistance
+// ============================================================
+function saveTachesLibres() {
+  try { localStorage.setItem('pos-taches-libres', JSON.stringify(tachesLibres)); } catch(e) {}
+}
+
+function loadTachesLibres() {
+  try {
+    const raw = localStorage.getItem('pos-taches-libres');
+    if (raw) tachesLibres = JSON.parse(raw);
+  } catch(e) {}
+}
+
+function openTacheLibreModal() {
+  document.getElementById('tlTitre').value = '';
+  document.getElementById('tlDesc').value = '';
+  document.getElementById('tlPriorite').value = 'Normale';
+  document.getElementById('tlEcheance').value = '';
+  const ul = document.getElementById('tlUserList');
+  ul.innerHTML = localUsers.filter(u => u.actif !== false).map(u => `
+    <label style="display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;font-size:13px;color:var(--color-text-primary);transition:background .12s" onmouseover="this.style.background='var(--color-primary-light)'" onmouseout="this.style.background=''">
+      <input type="checkbox" value="${u.label}" style="accent-color:var(--color-primary);width:15px;height:15px;flex-shrink:0;cursor:pointer">
+      <span>${u.label} <span style="color:var(--color-text-muted);font-size:11px">(${ROLE_LABELS[u.role]||u.role})</span></span>
+    </label>`).join('');
+  openModal('tacheLibreModal');
+}
+
+function saveTacheLibre() {
+  const titre    = document.getElementById('tlTitre').value.trim();
+  const desc     = document.getElementById('tlDesc').value.trim();
+  const priorite = document.getElementById('tlPriorite').value;
+  const echeance = document.getElementById('tlEcheance').value;
+  if (!titre) { showToast('Le titre est obligatoire', 'error'); return; }
+  const checked = [...document.querySelectorAll('#tlUserList input[type=checkbox]:checked')];
+  if (!checked.length) { showToast('Sélectionnez au moins un utilisateur', 'error'); return; }
+  const now = new Date().toLocaleDateString('fr-FR') + ' ' + new Date().toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
+  let created = 0;
+  checked.forEach(cb => {
+    const t = {
+      id:              `TL_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+      dossierId:       'LIBRE',
+      numeroDossier:   'LIBRE',
+      titre,
+      etapeCode:       'LIBRE',
+      etapeLabel:      titre,
+      operateur:       cb.value,
+      statut:          'A_FAIRE',
+      dateAssignation: now,
+      dateDebut:       '',
+      dateFin:         '',
+      commentaire:     desc,
+      echeance,
+      priorite
+    };
+    tachesLibres.push(t);
+    created++;
+  });
+  saveTachesLibres();
+  closeModal('tacheLibreModal');
+  showToast(`${created} tâche(s) indépendante(s) créée(s)`);
+  renderTaches();
+}
+
+function deleteTacheLibre(id) {
+  if (!confirm('Supprimer cette tâche indépendante ?')) return;
+  tachesLibres = tachesLibres.filter(t => t.id !== id);
+  saveTachesLibres();
+  renderTaches();
+  showToast('Tâche supprimée', 'info');
 }
 
 // --- INIT ---
@@ -4508,7 +4582,7 @@ function _buildProgressBar(dossierId) {
 
 function _buildMonDashboard() {
   if (!currentUser) return '';
-  const myTaches = taches.filter(t => t.operateur === currentUser.label);
+  const myTaches = [...taches, ...tachesLibres].filter(t => t.operateur === currentUser.label);
   if (!myTaches.length) return '';
   const blocking  = myTaches.filter(t => t.statut === 'A_FAIRE');
   const inProgress = myTaches.filter(t => t.statut === 'EN_COURS');
@@ -4552,24 +4626,36 @@ function _buildMonDashboard() {
 }
 
 function _tacheRow(t) {
-  const etape  = ETAPES_CONFIG.find(e => e.code === t.etapeCode) || { color:'#888', icon:'?', label:t.etapeLabel, short:'?' };
+  const isLibre = t.dossierId === 'LIBRE';
+  const etape   = isLibre
+    ? { color:'#7c3aed', icon:'★', label: t.titre || 'Tâche libre', short:'Libre' }
+    : (ETAPES_CONFIG.find(e => e.code === t.etapeCode) || { color:'#888', icon:'?', label:t.etapeLabel, short:'?' });
   const isEC   = t.statut === 'EN_COURS';
   const isDone = t.statut === 'TERMINE';
+  const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
   const actions = isDone
     ? `<span class="prod-badge" style="background:var(--color-success-bg);color:var(--color-success);padding:6px 12px">Terminé</span>`
     : isEC
-      ? `<button class="btn-prod-done" onclick="openPointage('${t.id}','${t.etapeCode}','${t.numeroDossier}')">Terminer</button>`
+      ? `<button class="btn-prod-done" onclick="openPointage('${t.id}','${t.etapeCode}','${t.titre||t.numeroDossier}')">Terminer</button>`
       : `<button class="btn-prod-start" onclick="pointerStart('${t.id}')">Démarrer</button>`;
+  const deleteBtn = isLibre && isAdminOrChef && !isDone
+    ? `<button onclick="deleteTacheLibre('${t.id}')" style="margin-left:6px;width:26px;height:26px;border:none;background:var(--color-danger-bg);color:var(--color-danger);border-radius:6px;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">×</button>`
+    : '';
+  const subLine = isLibre
+    ? `${t.operateur}${t.echeance ? ' · Échéance : <strong>'+new Date(t.echeance+'T00:00:00').toLocaleDateString('fr-FR')+'</strong>' : ''}`
+    : `${t.operateur} · ${isEC ? 'Démarré '+t.dateDebut : isDone ? 'Terminé '+t.dateFin : 'Assigné '+t.dateAssignation}`;
+  const prioColor = t.priorite==='Urgente'?'var(--color-danger)':t.priorite==='Haute'?'var(--color-warning)':'';
+  const prioBadge = isLibre && t.priorite && t.priorite !== 'Normale'
+    ? `<span style="font-size:10px;font-weight:700;color:${prioColor};margin-left:6px">${t.priorite}</span>` : '';
   return `<div class="tache-row ${isEC?'tache-row--encours':''} ${isDone?'tache-row--done':''}">
-    <div style="width:32px;height:32px;border-radius:50%;background:${etape.color}15;border:1.5px solid ${etape.color};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;font-weight:700;color:${etape.color}">${etape.icon}</div>
+    <div style="width:32px;height:32px;border-radius:50%;background:${etape.color}15;border:1.5px solid ${etape.color};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:13px;font-weight:700;color:${etape.color}">${etape.icon}</div>
     <div style="flex:1;min-width:0">
-      <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--color-text-muted)">${t.numeroDossier}</div>
-      <div style="font-weight:600;font-size:14px;color:${etape.color};margin:1px 0">${t.etapeLabel}</div>
-      <div style="font-size:12px;color:var(--color-text-secondary)">
-        ${t.operateur} · ${isEC ? 'Démarré '+t.dateDebut : isDone ? 'Terminé '+t.dateFin : 'Assigné '+t.dateAssignation}
-      </div>
+      ${isLibre ? '' : `<div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--color-text-muted)">${t.numeroDossier}</div>`}
+      <div style="font-weight:600;font-size:14px;color:${etape.color};margin:1px 0">${isLibre ? t.titre : t.etapeLabel}${prioBadge}</div>
+      ${isLibre && t.commentaire ? `<div style="font-size:11px;color:var(--color-text-muted);margin-bottom:2px;white-space:pre-wrap">${t.commentaire}</div>` : ''}
+      <div style="font-size:12px;color:var(--color-text-secondary)">${subLine}</div>
     </div>
-    <div style="flex-shrink:0">${actions}</div>
+    <div style="display:flex;align-items:center;flex-shrink:0">${actions}${deleteBtn}</div>
   </div>`;
 }
 
@@ -4578,22 +4664,41 @@ function renderTaches() {
   if (!container) return;
   const dash = _buildMonDashboard();
   const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
-  let list = isAdminOrChef ? taches : taches.filter(t => t.operateur === currentUser?.label);
-  if (prodFilter !== 'TOUS') list = list.filter(t => t.statut === prodFilter);
-  if (!list.length) {
+
+  // Dossier-linked tasks
+  let dossierList = isAdminOrChef ? taches : taches.filter(t => t.operateur === currentUser?.label);
+  if (prodFilter !== 'TOUS') dossierList = dossierList.filter(t => t.statut === prodFilter);
+
+  // Independent tasks
+  let libreList = isAdminOrChef ? tachesLibres : tachesLibres.filter(t => t.operateur === currentUser?.label);
+  if (prodFilter !== 'TOUS') libreList = libreList.filter(t => t.statut === prodFilter);
+
+  if (!dossierList.length && !libreList.length) {
     container.innerHTML = dash + `<div style="text-align:center;color:var(--color-text-muted);padding:80px 0;font-size:14px">
       <div style="font-size:32px;margin-bottom:12px">✓</div>
       Aucune tâche ${prodFilter !== 'TOUS' ? 'dans ce filtre' : ''}
     </div>`;
     return;
   }
-  // Grouper par dossier pour afficher la barre de progression par dossier
+
+  // Section tâches indépendantes
+  const libreHtml = libreList.length ? `
+    <div style="margin-bottom:28px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#7c3aed">★ Tâches indépendantes</span>
+        <span style="background:#f3e8ff;color:#7c3aed;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px">${libreList.length}</span>
+      </div>
+      ${libreList.map(_tacheRow).join('')}
+    </div>` : '';
+
+  // Grouper par dossier
   const groups = {};
-  list.forEach(t => {
+  dossierList.forEach(t => {
     if (!groups[t.dossierId]) groups[t.dossierId] = { numeroDossier: t.numeroDossier, taches: [] };
     groups[t.dossierId].taches.push(t);
   });
-  container.innerHTML = dash + Object.entries(groups).map(([dossierId, g]) => {
+
+  container.innerHTML = dash + libreHtml + Object.entries(groups).map(([dossierId, g]) => {
     return `<div style="margin-bottom:24px">
       <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--color-text-muted);margin-bottom:6px;padding:0 2px">${g.numeroDossier}</div>
       ${_buildProgressBar(dossierId)}
@@ -4603,12 +4708,14 @@ function renderTaches() {
 }
 
 async function pointerStart(tacheId) {
+  const isLibre = tacheId.startsWith('TL_');
   let r;
-  if (APPS_SCRIPT_URL) { r = await apiCall({ action:'pointerAction', tacheId, action_:'START' }); }
+  if (APPS_SCRIPT_URL && !isLibre) { r = await apiCall({ action:'pointerAction', tacheId, action_:'START' }); }
   else { r = { ok:true }; }
   if (r && r.ok) {
-    const t = taches.find(x => x.id === tacheId);
+    const t = isLibre ? tachesLibres.find(x => x.id === tacheId) : taches.find(x => x.id === tacheId);
     if (t) { t.statut = 'EN_COURS'; t.dateDebut = new Date().toLocaleDateString('fr-FR'); }
+    if (isLibre) saveTachesLibres();
     renderTaches();
     showToast('Tâche démarrée');
   }
@@ -4625,13 +4732,15 @@ function openPointage(tacheId, etapeCode, numeroDossier) {
 async function confirmPointage() {
   if (!pendingPointage) return;
   const { tacheId, etapeCode } = pendingPointage;
+  const isLibre = tacheId.startsWith('TL_');
   const comment = document.getElementById('pointageCommentInput').value;
   let r;
-  if (APPS_SCRIPT_URL) { r = await apiCall({ action:'pointerAction', tacheId, action_:'END', etapeCode, commentaire:comment }); }
+  if (APPS_SCRIPT_URL && !isLibre) { r = await apiCall({ action:'pointerAction', tacheId, action_:'END', etapeCode, commentaire:comment }); }
   else { r = { ok:true }; }
   if (r && r.ok) {
-    const t = taches.find(x => x.id === tacheId);
-    if (t) { t.statut = 'TERMINE'; t.dateFin = new Date().toLocaleDateString('fr-FR'); t.commentaire = comment; }
+    const t = isLibre ? tachesLibres.find(x => x.id === tacheId) : taches.find(x => x.id === tacheId);
+    if (t) { t.statut = 'TERMINE'; t.dateFin = new Date().toLocaleDateString('fr-FR'); t.commentaire = comment || t.commentaire; }
+    if (isLibre) saveTachesLibres();
     renderTaches();
     closeModal('pointageModal');
     showToast('Tâche terminée ✅');

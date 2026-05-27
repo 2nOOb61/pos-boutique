@@ -695,6 +695,10 @@
           <option value="PRODUCTION">Production</option>
           <option value="FINITION">Finition</option>
         </select>
+        <button class="btn-secondary-action" onclick="openTacheLibreModal()" style="background:var(--color-secondary);color:#fff;border-color:var(--color-secondary)">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Tâche libre
+        </button>
         <button class="btn-secondary-action" onclick="openOperateurModal()">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
           Gérer opérateurs
@@ -1355,6 +1359,48 @@
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:4px">
         <button class="btn-logout" onclick="closeModal('operateurModal')">Fermer</button>
         <button class="btn-login" style="width:auto;padding:12px 20px;margin-top:0" onclick="closeModal('operateurModal');showPage('users',null,null)">Gérer les utilisateurs →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL TÂCHE LIBRE -->
+  <div class="modal-overlay" id="tacheLibreModal">
+    <div class="modal" style="max-width:520px">
+      <div class="modal-title">
+        Nouvelle tâche indépendante
+        <button class="modal-close" onclick="closeModal('tacheLibreModal')">✕</button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:14px;padding-top:4px">
+        <div class="form-group">
+          <label>Titre de la tâche *</label>
+          <input type="text" id="tlTitre" placeholder="Ex: Préparer devis client X, Vérifier stock…">
+        </div>
+        <div class="form-group">
+          <label>Description / Instructions</label>
+          <textarea id="tlDesc" rows="3" placeholder="Détails, consignes, informations utiles…" style="resize:vertical"></textarea>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="form-group" style="margin-bottom:0">
+            <label>Priorité</label>
+            <select id="tlPriorite">
+              <option value="Normale">Normale</option>
+              <option value="Haute">Haute</option>
+              <option value="Urgente">Urgente</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label>Échéance (optionnel)</label>
+            <input type="date" id="tlEcheance">
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label>Assigner à *</label>
+          <div id="tlUserList" style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;background:#fff"></div>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
+        <button class="btn-logout" onclick="closeModal('tacheLibreModal')">Annuler</button>
+        <button class="btn-login" style="width:auto;padding:12px 20px;margin-top:0" onclick="saveTacheLibre()">Créer la tâche</button>
       </div>
     </div>
   </div>
