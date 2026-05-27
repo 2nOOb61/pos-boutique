@@ -4858,6 +4858,21 @@ async function loadTaches() {
   renderTaches();
 }
 
+async function refreshTaches(btn) {
+  if (btn) {
+    btn.disabled = true;
+    const svg = btn.querySelector('svg');
+    if (svg) svg.style.animation = 'spin 0.8s linear infinite';
+  }
+  await loadTaches();
+  if (btn) {
+    btn.disabled = false;
+    const svg = btn.querySelector('svg');
+    if (svg) svg.style.animation = '';
+  }
+  showToast('Tâches actualisées');
+}
+
 function setProdFilter(f, btn) {
   prodFilter = f;
   document.querySelectorAll('.prod-filter-btn').forEach(b => b.classList.remove('prod-filter-btn--active'));
