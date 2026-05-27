@@ -4179,13 +4179,15 @@ function _createDossierFromSource(type, source) {
 
 function _ensureDossierLinks() {
   // Toujours reconstruire — dossiers[] n'est pas persisté, donc on recrée depuis la source à chaque fois
+  // Seules les commandes/réservations "pending" génèrent un dossier d'attribution ;
+  // les autres reçoivent leur dossierId (pour les liens internes) sans créer de dossier dans la liste.
   commandes.forEach(c => {
-    const d = _createDossierFromSource('commande', c);
-    c.dossierId = d.id;
+    c.dossierId = `D_COMMANDE_${c.id}`;
+    if (c.status === 'pending') _createDossierFromSource('commande', c);
   });
   reservations.forEach(r => {
-    const d = _createDossierFromSource('reservation', r);
-    r.dossierId = d.id;
+    r.dossierId = `D_RESERVATION_${r.id}`;
+    if (r.status === 'pending') _createDossierFromSource('reservation', r);
   });
 }
 
