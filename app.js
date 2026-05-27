@@ -244,7 +244,15 @@ function showPage(id, btn, bnavBtn) {
   if (id==='config')       renderConfigPage();
   if (id==='users')        renderUsersPage();
   if (id==='reservations') { _ensureDossierLinks(); renderReservations(); _autoRefreshReservations(); _loadTachesQuietly().then(renderReservations); }
-  if (id==='attribution')  { loadDossiers(); initModulesProduction(); }
+  if (id==='attribution')  {
+    // Reset uniquement à la navigation (pas lors des changements de filtre)
+    if (!_pendingSelectDossierId) {
+      selectedDossier = null;
+      const _ap = document.getElementById('attrPanel');
+      if (_ap) _ap.innerHTML = `<div style="text-align:center;color:var(--color-text-muted);padding:60px 24px"><svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin:0 auto 12px;display:block;opacity:.4"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg><p style="font-size:14px">Sélectionnez un dossier<br>pour assigner les étapes</p></div>`;
+    }
+    loadDossiers(); initModulesProduction();
+  }
   if (id==='production')   { loadTaches();   initModulesProduction(); }
   if (id==='commandes')    { _ensureDossierLinks(); renderCommandes(); _autoRefreshCommandes(); _loadTachesQuietly().then(renderCommandes); }
   // Garde d'accès par rôle
@@ -4523,22 +4531,12 @@ async function loadDossiers() {
   }
   // Toujours fusionner les dossiers issus des commandes/réservations (non persistés)
   _ensureDossierLinks();
+  renderDossiers();
   // Sélection différée depuis openAttribForDossier
   if (_pendingSelectDossierId) {
     const id = _pendingSelectDossierId;
     _pendingSelectDossierId = null;
-    renderDossiers();
     selectDossier(id);
-  } else {
-    // Arrivée directe sur la page : reset état pour ne pas afficher un dossier pré-sélectionné
-    selectedDossier = null;
-    renderDossiers();
-    const panel = document.getElementById('attrPanel');
-    if (panel) panel.innerHTML = `
-      <div style="text-align:center;color:var(--color-text-muted);padding:60px 24px">
-        <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin:0 auto 12px;display:block;opacity:.4"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-        <p style="font-size:14px">Sélectionnez un dossier<br>pour assigner les étapes</p>
-      </div>`;
   }
 }
 
