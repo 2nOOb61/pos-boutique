@@ -52,7 +52,7 @@ const PAGE_ACCESS = {
   config:       ['admin'],
   users:        ['admin'],
   attribution:  ['admin','chef_atelier'],
-  production:   ['admin','chef_atelier','operateur_prod','pao','finition','livreur'],
+  production:   ['admin','chef_atelier','operateur_prod','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
 };
 let editingUserId = null; // index dans localUsers
 
@@ -4254,14 +4254,18 @@ function _buildCardProductionSection(dossierId) {
 
 // --- INIT ---
 function initModulesProduction() {
+  const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
   const sel = document.getElementById('opFilterSel');
   if (sel) {
-    sel.innerHTML = '<option value="TOUS">Tous les opérateurs</option>';
-    localUsers.filter(u => u.actif !== false).forEach(u => {
-      const opt = document.createElement('option');
-      opt.value = u.label; opt.textContent = u.label;
-      sel.appendChild(opt);
-    });
+    sel.style.display = isAdminOrChef ? '' : 'none';
+    if (isAdminOrChef) {
+      sel.innerHTML = '<option value="TOUS">Tous les opérateurs</option>';
+      localUsers.filter(u => u.actif !== false).forEach(u => {
+        const opt = document.createElement('option');
+        opt.value = u.label; opt.textContent = u.label;
+        sel.appendChild(opt);
+      });
+    }
   }
 }
 
@@ -4440,7 +4444,10 @@ function openOperateurModal() {
 // ============================================================
 async function loadTaches() {
   try {
-    opFilterVal = document.getElementById('opFilterSel')?.value || 'TOUS';
+    const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
+    opFilterVal = isAdminOrChef
+      ? (document.getElementById('opFilterSel')?.value || 'TOUS')
+      : (currentUser?.label || 'TOUS');
     if (APPS_SCRIPT_URL) {
       showLoader('Chargement...');
       const r = await apiCall({ action:'getTaches', operateur:opFilterVal });
@@ -4500,8 +4507,7 @@ function _buildProgressBar(dossierId) {
 }
 
 function _buildMonDashboard() {
-  const PROD_ROLES = ['chef_atelier','operateur_prod','pao','finition','livreur'];
-  if (!currentUser || !PROD_ROLES.includes(currentUser.role)) return '';
+  if (!currentUser) return '';
   const myTaches = taches.filter(t => t.operateur === currentUser.label);
   if (!myTaches.length) return '';
   const blocking  = myTaches.filter(t => t.statut === 'A_FAIRE');
@@ -4571,7 +4577,8 @@ function renderTaches() {
   const container = document.getElementById('tachesContainer');
   if (!container) return;
   const dash = _buildMonDashboard();
-  let list = taches;
+  const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
+  let list = isAdminOrChef ? taches : taches.filter(t => t.operateur === currentUser?.label);
   if (prodFilter !== 'TOUS') list = list.filter(t => t.statut === prodFilter);
   if (!list.length) {
     container.innerHTML = dash + `<div style="text-align:center;color:var(--color-text-muted);padding:80px 0;font-size:14px">
