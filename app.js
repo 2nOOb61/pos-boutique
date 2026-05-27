@@ -165,6 +165,7 @@ async function doLogin() {
     document.getElementById('app').style.display='flex';
     document.getElementById('bottomNav').style.display='block';
     err.style.display='none';
+    _renderNotifBell();
     showToast(`Bonjour, ${currentUser.label} ! 👋`);
     // Charger les données depuis le Sheet
     if (APPS_SCRIPT_URL) {
@@ -191,6 +192,7 @@ async function doLogin() {
 }
 document.getElementById('loginPass').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
 function doLogout() {
+  closeNotifPanel();
   currentUser = null;
   document.getElementById('loginScreen').style.display='flex';
   document.getElementById('app').style.display='none';
@@ -4104,6 +4106,7 @@ loadConfig();
 loadData();
 loadUsers();
 loadTachesLibres();
+loadNotifications();
 initPWA();
 renderCart();
 renderHeldCarts();
@@ -4268,6 +4271,114 @@ function loadTachesLibres() {
     const raw = localStorage.getItem('pos-taches-libres');
     if (raw) tachesLibres = JSON.parse(raw);
   } catch(e) {}
+}
+
+// ============================================================
+// NOTIFICATIONS D'AVANCEMENT
+// ============================================================
+let notifications = [];
+
+function loadNotifications() {
+  try {
+    const raw = localStorage.getItem('pos-notifications');
+    if (raw) notifications = JSON.parse(raw);
+  } catch(e) { notifications = []; }
+}
+
+function saveNotifications() {
+  if (notifications.length > 100) notifications = notifications.slice(0, 100);
+  try { localStorage.setItem('pos-notifications', JSON.stringify(notifications)); } catch(e) {}
+}
+
+function _addNotification({ dossierId, numeroDossier, etapeCode, etapeLabel, operateur, message }) {
+  const notif = {
+    id: `N_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+    timestamp: new Date().toISOString(),
+    dossierId, numeroDossier, etapeCode, etapeLabel, operateur,
+    message: message || `${operateur} a terminé "${etapeLabel}" (${numeroDossier})`,
+    readBy: [],
+  };
+  notifications.unshift(notif);
+  saveNotifications();
+  _renderNotifBell();
+}
+
+function _getUnreadCount() {
+  if (!currentUser) return 0;
+  return notifications.filter(n => !n.readBy.includes(currentUser.username)).length;
+}
+
+function _renderNotifBell() {
+  const badge = document.getElementById('notifBadge');
+  if (!badge) return;
+  const count = _getUnreadCount();
+  badge.style.display = count > 0 ? 'flex' : 'none';
+  badge.textContent = count > 99 ? '99+' : String(count);
+}
+
+function toggleNotifPanel() {
+  const panel = document.getElementById('notifPanel');
+  if (!panel) return;
+  panel.classList.contains('open') ? closeNotifPanel() : openNotifPanel();
+}
+
+function openNotifPanel() {
+  const panel = document.getElementById('notifPanel');
+  if (!panel) return;
+  _renderNotifPanelList();
+  panel.classList.add('open');
+}
+
+function closeNotifPanel() {
+  const panel = document.getElementById('notifPanel');
+  if (panel) panel.classList.remove('open');
+}
+
+function markAllNotifRead() {
+  if (!currentUser) return;
+  notifications.forEach(n => {
+    if (!n.readBy.includes(currentUser.username)) n.readBy.push(currentUser.username);
+  });
+  saveNotifications();
+  _renderNotifBell();
+  _renderNotifPanelList();
+}
+
+function _renderNotifPanelList() {
+  const list = document.getElementById('notifPanelList');
+  const label = document.getElementById('notifCountLabel');
+  if (!list) return;
+  const unreadCt = _getUnreadCount();
+  if (label) label.textContent = `${notifications.length} notification${notifications.length !== 1 ? 's' : ''} · ${unreadCt} non lue${unreadCt !== 1 ? 's' : ''}`;
+  if (!notifications.length) {
+    list.innerHTML = `<div style="padding:48px 20px;text-align:center">
+      <div style="width:44px;height:44px;background:var(--color-primary-light);border-radius:12px;display:flex;align-items:center;justify-content:center;margin:0 auto 12px">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+      </div>
+      <p style="font-size:13px;font-weight:500;color:var(--color-text-muted)">Aucune notification</p>
+      <p style="font-size:12px;color:var(--color-text-muted);margin-top:4px">Les avancements apparaîtront ici.</p>
+    </div>`;
+    return;
+  }
+  list.innerHTML = notifications.map(n => {
+    const isUnread = !n.readBy.includes(currentUser?.username);
+    const dt = new Date(n.timestamp);
+    const dateStr = dt.toLocaleDateString('fr-FR', { day:'2-digit', month:'short' });
+    const timeStr = dt.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
+    const etapeConf = ETAPES_CONFIG.find(e => e.code === n.etapeCode);
+    const icon  = n.dossierId === 'LIBRE' ? '★' : (etapeConf ? etapeConf.icon : '✓');
+    const color = n.dossierId === 'LIBRE' ? '#7c3aed' : (etapeConf ? etapeConf.color : '#16a34a');
+    return `<div class="notif-item ${isUnread ? 'notif-item--unread' : ''}">
+      <div style="display:flex;gap:10px;align-items:flex-start">
+        <div style="width:30px;height:30px;border-radius:50%;background:${color}20;border:1.5px solid ${color};display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:${color};flex-shrink:0;margin-top:1px">${icon}</div>
+        <div style="flex:1;min-width:0">
+          <p class="notif-item-msg">${n.message}</p>
+          <p class="notif-item-meta">${dateStr} à ${timeStr}</p>
+        </div>
+        ${isUnread ? '<div style="width:7px;height:7px;border-radius:50%;background:var(--accent2);flex-shrink:0;margin-top:6px"></div>' : ''}
+      </div>
+    </div>`;
+  }).join('');
 }
 
 async function addTLPhotos(files) {
@@ -4619,23 +4730,44 @@ function _buildMonDashboard() {
   if (!currentUser) return '';
   const myTaches = [...taches, ...tachesLibres].filter(t => t.operateur === currentUser.label);
   if (!myTaches.length) return '';
-  const blocking  = myTaches.filter(t => t.statut === 'A_FAIRE');
+  // "blocking" = tâche A_FAIRE que l'opérateur PEUT démarrer maintenant (pas bloquée par une étape précédente)
+  const blocking = myTaches.filter(t => {
+    if (t.statut !== 'A_FAIRE') return false;
+    if (t.dossierId === 'LIBRE') return true;
+    const si = ETAPES_CONFIG.findIndex(e => e.code === t.etapeCode);
+    for (let i = 0; i < si; i++) {
+      const prev = ETAPES_CONFIG[i];
+      const pt = taches.filter(x => x.dossierId === t.dossierId && x.etapeCode === prev.code);
+      if (pt.length && !pt.every(x => x.statut === 'TERMINE')) return false;
+    }
+    return true;
+  });
   const inProgress = myTaches.filter(t => t.statut === 'EN_COURS');
   const done      = myTaches.filter(t => t.statut === 'TERMINE');
   const statusBadge = blocking.length
-    ? `<span style="background:var(--color-danger-bg);color:var(--color-danger);font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px">${blocking.length} en attente — je bloque</span>`
+    ? `<span style="background:var(--color-danger-bg);color:var(--color-danger);font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px">${blocking.length} prête(s) à démarrer</span>`
     : inProgress.length
       ? `<span style="background:var(--color-warning-bg);color:var(--color-warning);font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px">${inProgress.length} en cours</span>`
       : `<span style="background:var(--color-success-bg);color:var(--color-success);font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px">Rien ne bloque</span>`;
   const cards = myTaches.map(t => {
     const etape = ETAPES_CONFIG.find(e => e.code === t.etapeCode) || { color:'#888', icon:'?', label: t.etapeLabel };
-    const isBlocking = t.statut === 'A_FAIRE';
+    const isAFaire = t.statut === 'A_FAIRE';
     const isEC  = t.statut === 'EN_COURS';
     const isDone = t.statut === 'TERMINE';
-    const bg     = isBlocking ? 'var(--color-danger-bg)' : isDone ? 'var(--color-success-bg)' : 'var(--color-warning-bg)';
-    const border = isBlocking ? '#fca5a5' : isDone ? '#86efac' : '#fcd34d';
-    const statusText = isBlocking ? 'À démarrer' : isEC ? 'En cours' : 'Terminé';
-    const statusColor = isBlocking ? 'var(--color-danger)' : isEC ? 'var(--color-warning)' : 'var(--color-success)';
+    let isStepBlocked = false; let blockedByStep = '';
+    if (isAFaire && t.dossierId !== 'LIBRE') {
+      const si = ETAPES_CONFIG.findIndex(e => e.code === t.etapeCode);
+      for (let i = 0; i < si; i++) {
+        const prev = ETAPES_CONFIG[i];
+        const pt = taches.filter(x => x.dossierId === t.dossierId && x.etapeCode === prev.code);
+        if (pt.length && !pt.every(x => x.statut === 'TERMINE')) { isStepBlocked = true; blockedByStep = prev.label; break; }
+      }
+    }
+    const isBlocking = isAFaire && !isStepBlocked;
+    const bg     = isStepBlocked ? '#f5f5f4' : isAFaire ? 'var(--color-danger-bg)' : isDone ? 'var(--color-success-bg)' : 'var(--color-warning-bg)';
+    const border = isStepBlocked ? '#d6d3d1' : isAFaire ? '#fca5a5' : isDone ? '#86efac' : '#fcd34d';
+    const statusText = isStepBlocked ? `Attend : ${blockedByStep}` : isAFaire ? 'À démarrer' : isEC ? 'En cours' : 'Terminé';
+    const statusColor = isStepBlocked ? 'var(--color-text-muted)' : isAFaire ? 'var(--color-danger)' : isEC ? 'var(--color-warning)' : 'var(--color-success)';
     const btn = isBlocking
       ? `<button onclick="pointerStart('${t.id}')" style="margin-top:8px;width:100%;padding:6px;background:var(--color-primary);color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">Démarrer</button>`
       : isEC
@@ -4668,11 +4800,22 @@ function _tacheRow(t) {
   const isEC   = t.statut === 'EN_COURS';
   const isDone = t.statut === 'TERMINE';
   const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
+  let isStepBlocked = false; let blockedByStep = '';
+  if (!isLibre && !isEC && !isDone) {
+    const si = ETAPES_CONFIG.findIndex(e => e.code === t.etapeCode);
+    for (let i = 0; i < si; i++) {
+      const prev = ETAPES_CONFIG[i];
+      const pt = taches.filter(x => x.dossierId === t.dossierId && x.etapeCode === prev.code);
+      if (pt.length && !pt.every(x => x.statut === 'TERMINE')) { isStepBlocked = true; blockedByStep = prev.label; break; }
+    }
+  }
   const actions = isDone
     ? `<span class="prod-badge" style="background:var(--color-success-bg);color:var(--color-success);padding:6px 12px">Terminé</span>`
     : isEC
       ? `<button class="btn-prod-done" onclick="openPointage('${t.id}','${t.etapeCode}','${t.titre||t.numeroDossier}')">Terminer</button>`
-      : `<button class="btn-prod-start" onclick="pointerStart('${t.id}')">Démarrer</button>`;
+      : isStepBlocked
+        ? `<span style="font-size:11px;font-weight:600;color:var(--color-text-muted);padding:5px 10px;background:#f5f5f4;border:1px solid #d6d3d1;border-radius:6px;white-space:nowrap;display:inline-block">Attend : ${blockedByStep}</span>`
+        : `<button class="btn-prod-start" onclick="pointerStart('${t.id}')">Démarrer</button>`;
   const deleteBtn = isLibre && isAdminOrChef && !isDone
     ? `<button onclick="deleteTacheLibre('${t.id}')" style="margin-left:6px;width:26px;height:26px;border:none;background:var(--color-danger-bg);color:var(--color-danger);border-radius:6px;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">×</button>`
     : '';
@@ -4745,11 +4888,30 @@ function renderTaches() {
 
 async function pointerStart(tacheId) {
   const isLibre = tacheId.startsWith('TL_');
+  const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
+  const t = isLibre ? tachesLibres.find(x => x.id === tacheId) : taches.find(x => x.id === tacheId);
+  if (!t) return;
+  // Guard 1 : seul l'opérateur assigné (ou admin/chef) peut démarrer la tâche
+  if (!isAdminOrChef && t.operateur !== currentUser?.label) {
+    showToast('Vous ne pouvez pas démarrer une tâche qui ne vous est pas assignée.', 'error');
+    return;
+  }
+  // Guard 2 : toutes les étapes précédentes du même dossier doivent être terminées
+  if (!isLibre) {
+    const si = ETAPES_CONFIG.findIndex(e => e.code === t.etapeCode);
+    for (let i = 0; i < si; i++) {
+      const prev = ETAPES_CONFIG[i];
+      const pt = taches.filter(x => x.dossierId === t.dossierId && x.etapeCode === prev.code);
+      if (pt.length && !pt.every(x => x.statut === 'TERMINE')) {
+        showToast(`Impossible de démarrer : "${prev.label}" n'est pas encore terminée.`, 'error');
+        return;
+      }
+    }
+  }
   let r;
   if (APPS_SCRIPT_URL && !isLibre) { r = await apiCall({ action:'pointerAction', tacheId, action_:'START' }); }
   else { r = { ok:true }; }
   if (r && r.ok) {
-    const t = isLibre ? tachesLibres.find(x => x.id === tacheId) : taches.find(x => x.id === tacheId);
     if (t) { t.statut = 'EN_COURS'; t.dateDebut = new Date().toLocaleDateString('fr-FR'); }
     if (isLibre) saveTachesLibres();
     renderTaches();
@@ -4777,6 +4939,19 @@ async function confirmPointage() {
     const t = isLibre ? tachesLibres.find(x => x.id === tacheId) : taches.find(x => x.id === tacheId);
     if (t) { t.statut = 'TERMINE'; t.dateFin = new Date().toLocaleDateString('fr-FR'); t.commentaire = comment || t.commentaire; }
     if (isLibre) saveTachesLibres();
+    // Notification d'avancement visible par tous
+    if (t) {
+      _addNotification({
+        dossierId:     t.dossierId,
+        numeroDossier: isLibre ? 'Tâche libre' : t.numeroDossier,
+        etapeCode:     isLibre ? 'LIBRE' : t.etapeCode,
+        etapeLabel:    isLibre ? t.titre : t.etapeLabel,
+        operateur:     currentUser?.label || t.operateur,
+        message:       isLibre
+          ? `${currentUser?.label} a terminé la tâche libre "${t.titre}"`
+          : `${currentUser?.label} a terminé l'étape "${t.etapeLabel}" — dossier ${t.numeroDossier}`,
+      });
+    }
     renderTaches();
     closeModal('pointageModal');
     showToast('Tâche terminée ✅');

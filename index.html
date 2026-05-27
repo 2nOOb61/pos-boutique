@@ -58,6 +58,20 @@
 .btn-secondary-action:hover { border-color:var(--color-primary); color:var(--color-primary); }
 .kpi-grid-mini { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; }
 .kpi-card-mini { background:var(--color-surface); border:1px solid var(--color-border); border-radius:10px; padding:12px 14px; }
+/* ── Notifications ── */
+.notif-bell-wrap { position:relative; }
+.notif-bell-btn { display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:transparent;color:rgba(255,255,255,0.85);cursor:pointer;transition:.15s; }
+.notif-bell-btn:hover { background:rgba(255,255,255,0.15); }
+.notif-badge { position:absolute;top:-5px;right:-5px;min-width:17px;height:17px;background:var(--accent2);color:#fff;border-radius:20px;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px;border:2px solid var(--accent);line-height:1;pointer-events:none; }
+.notif-panel { position:fixed;top:52px;right:0;width:380px;max-width:100vw;height:calc(100vh - 52px);background:var(--color-surface);border-left:1px solid var(--color-border);box-shadow:-6px 0 32px rgba(0,0,0,0.13);z-index:500;display:flex;flex-direction:column;transform:translateX(100%);transition:transform .25s cubic-bezier(.4,0,.2,1); }
+.notif-panel.open { transform:translateX(0); }
+.notif-panel-head { display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--color-border);flex-shrink:0;background:var(--color-surface); }
+.notif-panel-list { flex:1;overflow-y:auto;padding:4px 0; }
+.notif-item { padding:14px 20px;border-bottom:1px solid #f5f5f4;transition:background .15s; }
+.notif-item:last-child { border-bottom:none; }
+.notif-item--unread { background:var(--color-primary-light); }
+.notif-item-msg { font-size:13px;font-weight:500;color:var(--color-text-primary);line-height:1.45;margin-bottom:3px; }
+.notif-item-meta { font-size:11px;color:var(--color-text-muted); }
 .kpi-mini-label { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; color:var(--color-text-muted); margin-bottom:4px; }
 .kpi-mini-val { font-size:22px; font-weight:700; color:var(--color-text-primary); }
 .spinner { width:20px; height:20px; border:2px solid var(--color-border); border-top-color:var(--color-primary); border-radius:50%; animation:_spin .6s linear infinite; }
@@ -171,6 +185,13 @@
       <button class="btn-logout btn-sync-desktop" onclick="openScriptSettings()" title="Configurer Apps Script" aria-label="Configurer Google Sheets" style="border-color:rgba(26,74,58,0.3);color:var(--accent)">Google Sheets</button>
       <button class="btn-logout btn-sync-desktop" onclick="openAirtableSettings()" title="Configurer Airtable" id="btnAirtable" style="border-color:rgba(232,131,74,0.4);color:var(--accent2)">Airtable</button>
       <span id="pendingBadge" title="Ventes en attente de sync" role="button" tabindex="0" aria-live="polite" style="display:none;background:var(--red);color:#fff;border-radius:20px;padding:3px 10px;font-size:12px;font-weight:700;cursor:pointer" onclick="syncPendingOfflineSales()" onkeydown="if(event.key==='Enter')syncPendingOfflineSales()"><span id="pendingCount">0</span> en attente</span>
+      <!-- Cloche notifications -->
+      <div class="notif-bell-wrap">
+        <button class="notif-bell-btn" id="notifBellBtn" onclick="toggleNotifPanel()" title="Notifications d'avancement">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          <span class="notif-badge" id="notifBadge" style="display:none">0</span>
+        </button>
+      </div>
       <button class="btn-logout" onclick="doLogout()" aria-label="Se déconnecter">Déconnexion</button>
     </div>
   </div>
@@ -1413,6 +1434,21 @@
         <button class="btn-login" style="width:auto;padding:12px 20px;margin-top:0" onclick="saveTacheLibre()">Créer la tâche</button>
       </div>
     </div>
+  </div>
+
+  <!-- PANNEAU NOTIFICATIONS -->
+  <div id="notifPanel" class="notif-panel">
+    <div class="notif-panel-head">
+      <div>
+        <p style="font-size:15px;font-weight:700;color:var(--color-text-primary);margin:0">Notifications</p>
+        <p style="font-size:12px;color:var(--color-text-muted);margin:2px 0 0" id="notifCountLabel">0 notification</p>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button onclick="markAllNotifRead()" style="font-size:12px;color:var(--accent);background:var(--color-primary-light);border:none;border-radius:6px;padding:5px 10px;cursor:pointer;font-weight:600;font-family:'DM Sans',sans-serif">Tout lire</button>
+        <button onclick="closeNotifPanel()" style="width:30px;height:30px;border-radius:7px;border:1px solid var(--color-border);background:var(--color-surface);color:var(--color-text-muted);cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center">✕</button>
+      </div>
+    </div>
+    <div class="notif-panel-list" id="notifPanelList"></div>
   </div>
 
   <!-- MODAL POINTAGE -->
