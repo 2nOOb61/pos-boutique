@@ -136,13 +136,11 @@ async function doLogin() {
                           errMsg.toLowerCase().includes('mot de passe') ||
                           errMsg.toLowerCase().includes('incorrect') ||
                           errMsg.toLowerCase().includes('password');
-      if (isCredError) {
-        btn.disabled = false; btn.textContent = 'Se connecter';
-        err.textContent = '❌ ' + errMsg;
-        err.style.display = 'block';
-        return;
+      if (!isCredError) {
+        showToast('⚠️ Google Sheets inaccessible — connexion locale. ' + errMsg, 'info');
       }
-      showToast('⚠️ Google Sheets inaccessible — connexion locale. ' + errMsg, 'info');
+      // isCredError : ne pas retourner ici — tenter le fallback local d'abord
+      // (les utilisateurs créés localement non encore synchronisés au Sheet)
     }
   }
 
