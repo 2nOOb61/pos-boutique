@@ -2537,7 +2537,20 @@ function saveUsers() {
 function loadUsers() {
   try {
     const u = localStorage.getItem('pos-users');
-    if (u) localUsers = JSON.parse(u);
+    if (u) {
+      const defaults = localUsers; // valeurs initiales avec pass avant écrasement
+      const stored   = JSON.parse(u);
+      // Restaurer le pass depuis les défauts si le stockage l'a perdu
+      localUsers = stored.map(su => {
+        const def = defaults.find(d => d.username === su.username);
+        if (!def) return su;
+        // Restaurer pass et label depuis les défauts si absents du stockage
+        const patched = { ...su };
+        if (!patched.pass  && def.pass)  patched.pass  = def.pass;
+        if (!patched.label && def.label) patched.label = def.label;
+        return patched;
+      });
+    }
   } catch(e) {}
 }
 
@@ -3061,10 +3074,18 @@ async function loadUsersFromScript() {
   if (!APPS_SCRIPT_URL) return;
   const r = await apiCall({ action: 'getUsers' });
   if (r && r.ok && Array.isArray(r.users) && r.users.length > 0) {
-    // Fusionner : le Sheet fait autorité, on garde les locaux absents du Sheet
+    // Fusionner : le Sheet fait autorité pour rôle/label/actif,
+    // mais on conserve le hash du mot de passe stocké localement
+    // (le Sheet ne renvoie jamais les mots de passe en clair)
     const sheetUsernames = new Set(r.users.map(u => u.username.toLowerCase()));
     const localOnly = localUsers.filter(u => !sheetUsernames.has(u.username.toLowerCase()));
-    localUsers = [...r.users, ...localOnly];
+    localUsers = [
+      ...r.users.map(su => {
+        const local = localUsers.find(lu => lu.username.toLowerCase() === su.username.toLowerCase());
+        return (local?.pass && !su.pass) ? { ...su, pass: local.pass } : su;
+      }),
+      ...localOnly
+    ];
     saveUsers();
   }
 }
@@ -4690,35 +4711,34 @@ async function confirmAttribution() {
     };
     let r;
     if (APPS_SCRIPT_URL) { r = await apiCall(payload); }
-    else {
-      // Crée la tâche localement et la persiste dans localStorage
+    else { r = { ok: true }; }
+    if (r && r.ok) {
+      // Mettre à jour taches[] en mémoire (et localStorage) dans tous les cas
+      // pour que la page Production ait les données sans attendre un rechargement depuis le backend
       const existing = taches.find(x =>
         x.dossierId === selectedDossier.id &&
         x.etapeCode === pendingAttrib.etapeCode &&
         x.operateur === cb.value
       );
       if (!existing) {
-        const newT = {
-          id: `T_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+        taches.push({
+          id: r.tacheId || `T_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
           dossierId: selectedDossier.id,
           numeroDossier: selectedDossier.numeroDossier,
           etapeCode: pendingAttrib.etapeCode,
           etapeLabel: pendingAttrib.etapeLabel,
           operateur: cb.value,
-          commentaire: commentaire,
+          commentaire,
           assignePar,
           statut: 'A_FAIRE',
           dateAssignation: new Date().toLocaleDateString('fr-FR'),
           dateDebut: '',
           dateFin: '',
-        };
-        taches.push(newT);
+        });
       }
-      r = { ok: true };
-    }
-    if (!r || !r.ok) { showToast(`Erreur pour ${cb.value}: ${r?.error||'inconnu'}`, 'error'); allOk = false; }
+    } else { showToast(`Erreur pour ${cb.value}: ${r?.error||'inconnu'}`, 'error'); allOk = false; }
   }
-  if (!APPS_SCRIPT_URL) saveTaches();
+  saveTaches();
   if (allOk) showToast(`${checked.length} opérateur(s) assigné(s)`);
   closeModal('attribModal');
   selectDossier(selectedDossier.id);
@@ -4740,6 +4760,10 @@ async function selfAssign(etapeCode, etapeLabel) {
   if (APPS_SCRIPT_URL) {
     r = await apiCall(payload);
   } else {
+    r = { ok: true };
+  }
+  if (r && r.ok) {
+    // Mettre à jour taches[] dans tous les cas pour que Production soit synchrone
     const existing = taches.find(x =>
       x.dossierId === selectedDossier.id &&
       x.etapeCode === etapeCode &&
@@ -4747,7 +4771,7 @@ async function selfAssign(etapeCode, etapeLabel) {
     );
     if (!existing) {
       taches.push({
-        id:              `T_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+        id:              r.tacheId || `T_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
         dossierId:       selectedDossier.id,
         numeroDossier:   selectedDossier.numeroDossier,
         etapeCode,
@@ -4762,9 +4786,6 @@ async function selfAssign(etapeCode, etapeLabel) {
       });
       saveTaches();
     }
-    r = { ok: true };
-  }
-  if (r && r.ok) {
     showToast(`✅ Vous êtes assigné à "${etapeLabel}"`);
     selectDossier(selectedDossier.id);
   } else {
@@ -4799,9 +4820,12 @@ async function loadTaches() {
       : (currentUser?.label || 'TOUS');
     if (APPS_SCRIPT_URL) {
       showLoader('Chargement...');
-      const r = await apiCall({ action:'getTaches', operateur:opFilterVal });
+      // Ne pas envoyer operateur=TOUS — le backend l'interpréterait comme un nom d'opérateur
+      const apiParams = { action:'getTaches' };
+      if (opFilterVal && opFilterVal !== 'TOUS') apiParams.operateur = opFilterVal;
+      const r = await apiCall(apiParams);
       hideLoader();
-      if (r && r.ok) taches = r.taches;
+      if (r && r.ok) { taches = r.taches; saveTaches(); }
       else { try { const raw = localStorage.getItem('pos-taches'); taches = raw ? JSON.parse(raw) : []; } catch(e) { taches = []; } }
     } else {
       try {
