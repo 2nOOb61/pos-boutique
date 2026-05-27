@@ -4266,6 +4266,10 @@ function saveTachesLibres() {
   try { localStorage.setItem('pos-taches-libres', JSON.stringify(tachesLibres)); } catch(e) {}
 }
 
+function saveTaches() {
+  try { localStorage.setItem('pos-taches', JSON.stringify(taches)); } catch(e) {}
+}
+
 function loadTachesLibres() {
   try {
     const raw = localStorage.getItem('pos-taches-libres');
@@ -4645,9 +4649,35 @@ async function confirmAttribution() {
     };
     let r;
     if (APPS_SCRIPT_URL) { r = await apiCall(payload); }
-    else { r = { ok:true }; }
+    else {
+      // Crée la tâche localement et la persiste dans localStorage
+      const existing = taches.find(x =>
+        x.dossierId === selectedDossier.id &&
+        x.etapeCode === pendingAttrib.etapeCode &&
+        x.operateur === cb.value
+      );
+      if (!existing) {
+        const newT = {
+          id: `T_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+          dossierId: selectedDossier.id,
+          numeroDossier: selectedDossier.numeroDossier,
+          etapeCode: pendingAttrib.etapeCode,
+          etapeLabel: pendingAttrib.etapeLabel,
+          operateur: cb.value,
+          commentaire: commentaire,
+          assignePar,
+          statut: 'A_FAIRE',
+          dateAssignation: new Date().toLocaleDateString('fr-FR'),
+          dateDebut: '',
+          dateFin: '',
+        };
+        taches.push(newT);
+      }
+      r = { ok: true };
+    }
     if (!r || !r.ok) { showToast(`Erreur pour ${cb.value}: ${r?.error||'inconnu'}`, 'error'); allOk = false; }
   }
+  if (!APPS_SCRIPT_URL) saveTaches();
   if (allOk) showToast(`${checked.length} opérateur(s) assigné(s)`);
   closeModal('attribModal');
   selectDossier(selectedDossier.id);
@@ -4685,11 +4715,17 @@ async function loadTaches() {
       if (r && r.ok) taches = r.taches;
       else taches = demoTaches({});
     } else {
-      taches = demoTaches({});
+      try {
+        const raw = localStorage.getItem('pos-taches');
+        taches = raw ? JSON.parse(raw) : [];
+      } catch(e) { taches = []; }
     }
   } catch(e) {
     hideLoader();
-    taches = demoTaches({});
+    try {
+      const raw = localStorage.getItem('pos-taches');
+      taches = raw ? JSON.parse(raw) : [];
+    } catch(e2) { taches = []; }
   }
   renderTaches();
 }
@@ -4810,6 +4846,7 @@ function _tacheRow(t) {
   const isEC   = t.statut === 'EN_COURS';
   const isDone = t.statut === 'TERMINE';
   const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
+  const canInteract = isAdminOrChef || t.operateur === currentUser?.label;
   let isStepBlocked = false; let blockedByStep = '';
   if (!isLibre && !isEC && !isDone) {
     const si = ETAPES_CONFIG.findIndex(e => e.code === t.etapeCode);
@@ -4822,10 +4859,14 @@ function _tacheRow(t) {
   const actions = isDone
     ? `<span class="prod-badge" style="background:var(--color-success-bg);color:var(--color-success);padding:6px 12px">Terminé</span>`
     : isEC
-      ? `<button class="btn-prod-done" onclick="openPointage('${t.id}','${t.etapeCode}','${t.titre||t.numeroDossier}')">Terminer</button>`
+      ? (canInteract
+          ? `<button class="btn-prod-done" onclick="openPointage('${t.id}','${t.etapeCode}','${t.titre||t.numeroDossier}')">Terminer</button>`
+          : `<span style="font-size:11px;font-weight:600;color:var(--color-text-muted);padding:5px 10px;background:#f5f5f4;border:1px solid #d6d3d1;border-radius:6px;white-space:nowrap;display:inline-block">En cours</span>`)
       : isStepBlocked
         ? `<span style="font-size:11px;font-weight:600;color:var(--color-text-muted);padding:5px 10px;background:#f5f5f4;border:1px solid #d6d3d1;border-radius:6px;white-space:nowrap;display:inline-block">Attend : ${blockedByStep}</span>`
-        : `<button class="btn-prod-start" onclick="pointerStart('${t.id}')">Démarrer</button>`;
+        : (canInteract
+            ? `<button class="btn-prod-start" onclick="pointerStart('${t.id}')">Démarrer</button>`
+            : `<span style="font-size:11px;font-weight:600;color:var(--color-text-muted);padding:5px 10px;background:#f5f5f4;border:1px solid #d6d3d1;border-radius:6px;white-space:nowrap;display:inline-block">Assigné à ${t.operateur}</span>`);
   const deleteBtn = isLibre && isAdminOrChef && !isDone
     ? `<button onclick="deleteTacheLibre('${t.id}')" style="margin-left:6px;width:26px;height:26px;border:none;background:var(--color-danger-bg);color:var(--color-danger);border-radius:6px;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">×</button>`
     : '';
@@ -4923,7 +4964,7 @@ async function pointerStart(tacheId) {
   else { r = { ok:true }; }
   if (r && r.ok) {
     if (t) { t.statut = 'EN_COURS'; t.dateDebut = new Date().toLocaleDateString('fr-FR'); }
-    if (isLibre) saveTachesLibres();
+    if (isLibre) saveTachesLibres(); else saveTaches();
     renderTaches();
     showToast('Tâche démarrée');
   }
@@ -4941,6 +4982,14 @@ async function confirmPointage() {
   if (!pendingPointage) return;
   const { tacheId, etapeCode } = pendingPointage;
   const isLibre = tacheId.startsWith('TL_');
+  const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
+  // Vérifier que l'utilisateur courant est l'opérateur assigné ou admin/chef
+  const tCheck = isLibre ? tachesLibres.find(x => x.id === tacheId) : taches.find(x => x.id === tacheId);
+  if (tCheck && !isAdminOrChef && tCheck.operateur !== currentUser?.label) {
+    showToast('Vous ne pouvez pas terminer une tâche qui ne vous est pas assignée.', 'error');
+    closeModal('pointageModal');
+    return;
+  }
   const comment = document.getElementById('pointageCommentInput').value;
   let r;
   if (APPS_SCRIPT_URL && !isLibre) { r = await apiCall({ action:'pointerAction', tacheId, action_:'END', etapeCode, commentaire:comment }); }
@@ -4948,7 +4997,7 @@ async function confirmPointage() {
   if (r && r.ok) {
     const t = isLibre ? tachesLibres.find(x => x.id === tacheId) : taches.find(x => x.id === tacheId);
     if (t) { t.statut = 'TERMINE'; t.dateFin = new Date().toLocaleDateString('fr-FR'); t.commentaire = comment || t.commentaire; }
-    if (isLibre) saveTachesLibres();
+    if (isLibre) saveTachesLibres(); else saveTaches();
     // Notification d'avancement visible par tous
     if (t) {
       _addNotification({
