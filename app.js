@@ -4170,17 +4170,14 @@ function _createDossierFromSource(type, source) {
 }
 
 function _ensureDossierLinks() {
+  // Toujours reconstruire — dossiers[] n'est pas persisté, donc on recrée depuis la source à chaque fois
   commandes.forEach(c => {
-    if (!c.dossierId) {
-      const d = _createDossierFromSource('commande', c);
-      c.dossierId = d.id;
-    }
+    const d = _createDossierFromSource('commande', c);
+    c.dossierId = d.id;
   });
   reservations.forEach(r => {
-    if (!r.dossierId) {
-      const d = _createDossierFromSource('reservation', r);
-      r.dossierId = d.id;
-    }
+    const d = _createDossierFromSource('reservation', r);
+    r.dossierId = d.id;
   });
 }
 
@@ -4199,11 +4196,14 @@ async function _loadTachesQuietly() {
 }
 
 function openAttribForDossier(dossierId) {
+  // S'assurer que le dossier est bien dans dossiers[] (non persisté, reconstruit depuis source)
+  _ensureDossierLinks();
   const d = dossiers.find(x => x.id === dossierId);
   if (!d) { showToast('Dossier introuvable', 'error'); return; }
   selectedDossier = d;
+  // Stocker l'id avant showPage qui appelle loadDossiers() (async, recrée dossiers[])
+  _pendingSelectDossierId = dossierId;
   showPage('attribution', null, null);
-  setTimeout(() => selectDossier(dossierId), 200);
 }
 
 function _buildCardProductionSection(dossierId) {
@@ -4492,6 +4492,8 @@ function initModulesProduction() {
 // ============================================================
 // PAGE ATTRIBUTION
 // ============================================================
+let _pendingSelectDossierId = null;
+
 async function loadDossiers() {
   try {
     const filter = document.getElementById('dossierFilterSel')?.value || 'TOUS';
@@ -4508,7 +4510,15 @@ async function loadDossiers() {
     hideLoader();
     dossiers = demoDossiers();
   }
+  // Toujours fusionner les dossiers issus des commandes/réservations (non persistés)
+  _ensureDossierLinks();
   renderDossiers();
+  // Sélection différée depuis openAttribForDossier
+  if (_pendingSelectDossierId) {
+    const id = _pendingSelectDossierId;
+    _pendingSelectDossierId = null;
+    selectDossier(id);
+  }
 }
 
 function renderDossiers() {
