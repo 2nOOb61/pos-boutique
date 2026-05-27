@@ -4835,13 +4835,24 @@ async function loadTaches() {
       : (currentUser?.label || currentUser?.username || 'TOUS');
     if (APPS_SCRIPT_URL) {
       showLoader('Chargement...');
-      // Ne pas envoyer operateur=TOUS — le backend l'interpréterait comme un nom d'opérateur
+      // Admin/chef : filtrer par opérateur côté backend si sélectionné
+      // Opérateur : récupérer TOUTES les tâches puis filtrer côté client
+      // (évite les disparitions dues à un nom d'opérateur mal stocké dans le Sheet)
       const apiParams = { action:'getTaches' };
-      if (opFilterVal && opFilterVal !== 'TOUS') apiParams.operateur = opFilterVal;
+      if (isAdminOrChef && opFilterVal && opFilterVal !== 'TOUS') apiParams.operateur = opFilterVal;
       const r = await apiCall(apiParams);
       hideLoader();
-      if (r && r.ok) { taches = r.taches; saveTaches(); }
-      else { try { const raw = localStorage.getItem('pos-taches'); taches = raw ? JSON.parse(raw) : []; } catch(e) { taches = []; } }
+      if (r && r.ok && Array.isArray(r.taches) && r.taches.length > 0) {
+        // Fusionner : backend fait autorité, conserver les tâches locales absentes du backend
+        const backendIds = new Set(r.taches.map(t => t.id));
+        const localOnly  = taches.filter(t => !backendIds.has(t.id));
+        taches = [...r.taches, ...localOnly];
+        saveTaches();
+      } else if (!r || !r.ok) {
+        // Erreur réseau : fallback localStorage
+        try { const raw = localStorage.getItem('pos-taches'); taches = raw ? JSON.parse(raw) : []; } catch(e) { taches = []; }
+      }
+      // Si r.ok mais r.taches vide : garder les taches actuelles (ne pas écraser)
     } else {
       try {
         const raw = localStorage.getItem('pos-taches');
