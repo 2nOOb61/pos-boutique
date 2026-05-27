@@ -2591,7 +2591,7 @@ function renderUsersPage() {
       <div class="user-card-top">
         <div class="user-avatar role-${u.role}">${roleIcon}</div>
         <div class="user-card-info">
-          <div class="user-card-name">${u.label}${isMe ? ' <span style="font-size:11px;color:var(--accent)">(vous)</span>' : ''}</div>
+          <div class="user-card-name">${u.label || u.username}${isMe ? ' <span style="font-size:11px;color:var(--accent)">(vous)</span>' : ''}</div>
           <div class="user-card-username">@${u.username}</div>
         </div>
       </div>
@@ -3082,7 +3082,10 @@ async function loadUsersFromScript() {
     localUsers = [
       ...r.users.map(su => {
         const local = localUsers.find(lu => lu.username.toLowerCase() === su.username.toLowerCase());
-        return (local?.pass && !su.pass) ? { ...su, pass: local.pass } : su;
+        const patched = { ...su };
+        if (!patched.pass  && local?.pass)  patched.pass  = local.pass;
+        if (!patched.label && local?.label) patched.label = local.label;
+        return patched;
       }),
       ...localOnly
     ];
@@ -4682,11 +4685,14 @@ function openAttrib(etapeCode, etapeLabel) {
   document.getElementById('attribContextText').textContent = `${selectedDossier.numeroDossier} — ${etapeLabel}`;
   const list = document.getElementById('attribOpList');
   const users = localUsers.filter(u => u.actif !== false);
-  list.innerHTML = users.length ? users.map(u => `
+  list.innerHTML = users.length ? users.map(u => {
+    const displayName = u.label || u.username;
+    return `
     <label style="display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;font-size:13px;color:var(--color-text-primary);transition:background .12s" onmouseover="this.style.background='var(--color-primary-light)'" onmouseout="this.style.background=''">
-      <input type="checkbox" value="${u.label}" style="accent-color:var(--color-primary);width:15px;height:15px;flex-shrink:0;cursor:pointer">
-      <span>${u.label} <span style="color:var(--color-text-muted);font-size:11px">(${ROLE_LABELS[u.role] || u.role})</span></span>
-    </label>`).join('')
+      <input type="checkbox" value="${displayName}" style="accent-color:var(--color-primary);width:15px;height:15px;flex-shrink:0;cursor:pointer">
+      <span>${displayName} <span style="color:var(--color-text-muted);font-size:11px">(${ROLE_LABELS[u.role] || u.role})</span></span>
+    </label>`;
+  }).join('')
   : '<div style="color:var(--color-text-muted);font-size:13px;padding:12px">Aucun utilisateur actif</div>';
   document.getElementById('attribComment').value = '';
   openModal('attribModal');
