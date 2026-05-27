@@ -4253,23 +4253,15 @@ function _buildCardProductionSection(dossierId) {
 }
 
 // --- INIT ---
-async function initModulesProduction() {
-  try {
-    const r = await apiCall({ action:'getOperateurs' });
-    if (r && r.ok) {
-      operateurs = r.operateurs;
-      const sel = document.getElementById('opFilterSel');
-      if (sel) {
-        sel.innerHTML = '<option value="TOUS">Tous les opérateurs</option>';
-        operateurs.forEach(o => {
-          const opt = document.createElement('option');
-          opt.value = o.nom; opt.textContent = o.nom;
-          sel.appendChild(opt);
-        });
-      }
-    }
-  } catch(e) {
-    console.warn('initModulesProduction error (offline?):', e);
+function initModulesProduction() {
+  const sel = document.getElementById('opFilterSel');
+  if (sel) {
+    sel.innerHTML = '<option value="TOUS">Tous les opérateurs</option>';
+    localUsers.filter(u => u.actif !== false).forEach(u => {
+      const opt = document.createElement('option');
+      opt.value = u.label; opt.textContent = u.label;
+      sel.appendChild(opt);
+    });
   }
 }
 
@@ -4389,11 +4381,13 @@ function openAttrib(etapeCode, etapeLabel) {
   pendingAttrib = { etapeCode, etapeLabel };
   document.getElementById('attribContextText').textContent = `${selectedDossier.numeroDossier} — ${etapeLabel}`;
   const list = document.getElementById('attribOpList');
-  list.innerHTML = operateurs.map(o => `
+  const users = localUsers.filter(u => u.actif !== false);
+  list.innerHTML = users.length ? users.map(u => `
     <label style="display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;font-size:13px;color:var(--color-text-primary);transition:background .12s" onmouseover="this.style.background='var(--color-primary-light)'" onmouseout="this.style.background=''">
-      <input type="checkbox" value="${o.nom}" style="accent-color:var(--color-primary);width:15px;height:15px;flex-shrink:0;cursor:pointer">
-      <span>${o.nom} <span style="color:var(--color-text-muted);font-size:11px">(${o.role})</span></span>
-    </label>`).join('');
+      <input type="checkbox" value="${u.label}" style="accent-color:var(--color-primary);width:15px;height:15px;flex-shrink:0;cursor:pointer">
+      <span>${u.label} <span style="color:var(--color-text-muted);font-size:11px">(${ROLE_LABELS[u.role] || u.role})</span></span>
+    </label>`).join('')
+  : '<div style="color:var(--color-text-muted);font-size:13px;padding:12px">Aucun utilisateur actif</div>';
   document.getElementById('attribComment').value = '';
   openModal('attribModal');
 }
@@ -4425,57 +4419,20 @@ async function confirmAttribution() {
   selectDossier(selectedDossier.id);
 }
 
-async function openOperateurModal() {
-  if (APPS_SCRIPT_URL) {
-    const r = await apiCall({ action:'getOperateurs' });
-    if (r && r.ok) operateurs = r.operateurs;
-  }
-  document.getElementById('opListEl').innerHTML = operateurs.map(o =>
-    `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--surface2);border-radius:8px;margin-bottom:6px">
-      <span style="flex:1;font-size:13px;font-weight:500">${o.nom}</span>
-      <span class="prod-badge" style="background:var(--color-primary-light);color:var(--color-primary)">${o.role}</span>
-    </div>`
-  ).join('') || '<div style="color:var(--color-text-muted);font-size:13px;text-align:center;padding:16px">Aucun opérateur</div>';
-  document.getElementById('opNomInput').value = '';
-  document.getElementById('opRoleInput').value = 'operateur';
+function openOperateurModal() {
+  const users = localUsers.filter(u => u.actif !== false);
+  document.getElementById('opListEl').innerHTML = users.length
+    ? users.map(u => `
+      <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--surface2);border-radius:8px;margin-bottom:6px">
+        <div style="width:32px;height:32px;border-radius:50%;background:var(--color-primary);display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:700;flex-shrink:0">${(u.label||'?')[0].toUpperCase()}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;color:var(--color-text-primary)">${u.label}</div>
+          <div style="font-size:11px;color:var(--color-text-muted)">${ROLE_LABELS[u.role] || u.role}</div>
+        </div>
+        <span class="prod-badge" style="background:var(--color-primary-light);color:var(--color-primary);font-size:10px">${u.username}</span>
+      </div>`).join('')
+    : '<div style="color:var(--color-text-muted);font-size:13px;text-align:center;padding:16px">Aucun utilisateur actif</div>';
   openModal('operateurModal');
-}
-
-async function saveOperateur() {
-  const nom  = document.getElementById('opNomInput').value.trim();
-  const role = document.getElementById('opRoleInput').value;
-  if (!nom) { showToast('Nom obligatoire', 'error'); return; }
-  let r;
-  if (APPS_SCRIPT_URL) { r = await apiCall({ action:'saveOperateur', nom, role }); }
-  else { r = { ok:true }; }
-  if (r && r.ok) {
-    if (!operateurs.find(o => o.nom === nom)) operateurs.push({ nom, role });
-
-    // Auto-création du compte utilisateur
-    const roleMap = { chef_atelier:'chef_atelier', operateur:'operateur_prod', pao:'pao', finition:'finition', livreur:'livreur' };
-    const userRole = roleMap[role] || 'operateur_prod';
-    const username = nom.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]/g,'_').replace(/_+/g,'_').replace(/^_|_$/g,'');
-    const existing = localUsers.find(u => u.label === nom || u.username === username);
-    if (!existing) {
-      const newPass = '1234';
-      localUsers.push({ username, pass: newPass, role: userRole, label: nom, actif: true });
-      saveUsers();
-      showToast(`Opérateur + compte créé — login : ${username} / ${newPass}`, 'success');
-    } else {
-      showToast(r.message || 'Opérateur enregistré');
-    }
-
-    openOperateurModal();
-    const sel = document.getElementById('opFilterSel');
-    if (sel) {
-      sel.innerHTML = '<option value="TOUS">Tous les opérateurs</option>';
-      operateurs.forEach(o => {
-        const opt = document.createElement('option');
-        opt.value = o.nom; opt.textContent = o.nom;
-        sel.appendChild(opt);
-      });
-    }
-  }
 }
 
 // ============================================================
