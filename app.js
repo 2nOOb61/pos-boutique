@@ -27,6 +27,7 @@ let localUsers = [
 const ROLE_LABELS = {
   admin:        'Administrateur',
   caissier:     'Caissier',
+  commerciale:  'Commerciale',
   utilisateur:  'Utilisateur',
   gestionnaire: 'Gestionnaire Stock',
   comptable:    'Comptable',
@@ -38,14 +39,14 @@ const ROLE_LABELS = {
 };
 
 const ROLE_ICONS = {
-  admin: '👑', caissier: '🛒', utilisateur: '👤', gestionnaire: '📦', comptable: '📊',
+  admin: '👑', caissier: '🛒', commerciale: '💼', utilisateur: '👤', gestionnaire: '📦', comptable: '📊',
   chef_atelier: '🏭', operateur_prod: '⚙️', pao: '🎨', finition: '✨', livreur: '🚚'
 };
 
 const PAGE_ACCESS = {
-  caisse:       ['admin','caissier','utilisateur','gestionnaire'],
-  reservations: ['admin','caissier','utilisateur','gestionnaire','comptable'],
-  commandes:    ['admin','caissier','gestionnaire','comptable','livreur'],
+  caisse:       ['admin','caissier','commerciale','utilisateur','gestionnaire'],
+  reservations: ['admin','caissier','commerciale','utilisateur','gestionnaire','comptable'],
+  commandes:    ['admin','caissier','commerciale','gestionnaire','comptable','livreur'],
   stock:        ['admin','gestionnaire'],
   stats:        ['admin','comptable'],
   config:       ['admin'],
