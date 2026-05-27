@@ -51,7 +51,7 @@ const PAGE_ACCESS = {
   stats:        ['admin','comptable'],
   config:       ['admin'],
   users:        ['admin'],
-  attribution:  ['admin','chef_atelier'],
+  attribution:  ['admin','chef_atelier','operateur_prod','pao','finition','livreur'],
   production:   ['admin','chef_atelier','operateur_prod','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
 };
 let editingUserId = null; // index dans localUsers
@@ -4619,6 +4619,8 @@ function renderAttrPanel(tachesD) {
       const currentUser_role = currentUser?.role||'';
       const canAssign = ['admin','chef_atelier'].includes(currentUser_role);
       const etapeComplete = tachesEtape.length > 0 && tachesEtape.every(t => t.statut === 'TERMINE');
+      const alreadySelfAssigned = tachesEtape.some(t => t.operateur === currentUser?.label);
+      const canSelfAssign = !canAssign && !etapeComplete && !alreadySelfAssigned;
       const operateursHtml = tachesEtape.length
         ? tachesEtape.map(t => {
             const badge = t.statut==='TERMINE'
@@ -4643,7 +4645,13 @@ function renderAttrPanel(tachesD) {
             ${operateursHtml}
           </div>
         </div>
-        ${canAssign ? `<button class="btn-attr-assign" onclick="openAttrib('${e.code}','${e.label}')">Assigner</button>` : ''}
+        ${canAssign
+          ? `<button class="btn-attr-assign" onclick="openAttrib('${e.code}','${e.label}')">Assigner</button>`
+          : canSelfAssign
+          ? `<button class="btn-attr-assign" style="background:var(--color-secondary);border-color:var(--color-secondary)" onclick="selfAssign('${e.code}','${e.label}')">Je m'assigne</button>`
+          : alreadySelfAssigned && !etapeComplete
+          ? `<span style="font-size:11px;font-weight:600;color:var(--color-secondary);padding:4px 10px;background:var(--color-secondary-light);border-radius:6px">✓ Assigné</span>`
+          : ''}
       </div>`;
     }).join('')}
   `;
@@ -4716,6 +4724,54 @@ async function confirmAttribution() {
   if (allOk) showToast(`${checked.length} opérateur(s) assigné(s)`);
   closeModal('attribModal');
   selectDossier(selectedDossier.id);
+}
+
+async function selfAssign(etapeCode, etapeLabel) {
+  if (!selectedDossier || !currentUser) return;
+  const operateur = currentUser.label;
+  const payload = {
+    action:        'attribuerTache',
+    dossierId:     selectedDossier.id,
+    numeroDossier: selectedDossier.numeroDossier,
+    etapeCode,
+    operateur,
+    commentaire:   '',
+    assignePar:    currentUser.username
+  };
+  let r;
+  if (APPS_SCRIPT_URL) {
+    r = await apiCall(payload);
+  } else {
+    const existing = taches.find(x =>
+      x.dossierId === selectedDossier.id &&
+      x.etapeCode === etapeCode &&
+      x.operateur === operateur
+    );
+    if (!existing) {
+      taches.push({
+        id:              `T_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+        dossierId:       selectedDossier.id,
+        numeroDossier:   selectedDossier.numeroDossier,
+        etapeCode,
+        etapeLabel,
+        operateur,
+        commentaire:     '',
+        assignePar:      currentUser.username,
+        statut:          'A_FAIRE',
+        dateAssignation: new Date().toLocaleDateString('fr-FR'),
+        dateDebut:       '',
+        dateFin:         '',
+      });
+      saveTaches();
+    }
+    r = { ok: true };
+  }
+  if (r && r.ok) {
+    showToast(`✅ Vous êtes assigné à "${etapeLabel}"`);
+    selectDossier(selectedDossier.id);
+  } else {
+    showToast(`Erreur : ${r?.error || 'inconnu'}`, 'error');
+  }
 }
 
 function openOperateurModal() {
