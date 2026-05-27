@@ -4141,11 +4141,11 @@ let prodFilter = 'TOUS';
 let opFilterVal = 'TOUS';
 
 const ETAPES_CONFIG = [
-  { code:'PAO',           label:'PAO / Conception',  short:'PAO',     color:'#6c63ff', icon:'1' },
-  { code:'BAT',           label:'BAT physique',       short:'BAT',     color:'#2563eb', icon:'2' },
-  { code:'RETOUR_CLIENT', label:'Retour client',      short:'Retour',  color:'#0891b2', icon:'3' },
-  { code:'MODIFICATIONS', label:'Modifications',      short:'Modifs',  color:'#7c3aed', icon:'4' },
-  { code:'ACHAT',         label:'Achat (si besoin)',  short:'Achat',   color:'#d97706', icon:'5' },
+  { code:'ACHAT',         label:'Achat (si besoin)',  short:'Achat',   color:'#d97706', icon:'1' },
+  { code:'PAO',           label:'PAO / Conception',  short:'PAO',     color:'#6c63ff', icon:'2' },
+  { code:'BAT',           label:'BAT physique',       short:'BAT',     color:'#2563eb', icon:'3' },
+  { code:'RETOUR_CLIENT', label:'Retour client',      short:'Retour',  color:'#0891b2', icon:'4' },
+  { code:'MODIFICATIONS', label:'Modifications',      short:'Modifs',  color:'#7c3aed', icon:'5' },
   { code:'PRODUCTION',    label:'Opérateur machine',  short:'Machine', color:'#e8834a', icon:'6' },
   { code:'FINITION',      label:'Finition',           short:'Finition',color:'#1a4a3a', icon:'7' },
   { code:'LIVRE',         label:'Livraison',          short:'Livré',   color:'#16a34a', icon:'8' },
