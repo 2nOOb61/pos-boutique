@@ -4186,12 +4186,18 @@ async function _loadTachesQuietly() {
     if (APPS_SCRIPT_URL) {
       const r = await apiCall({ action: 'getTaches' });
       if (r && r.ok) taches = r.taches;
-      else if (!taches.length) taches = demoTaches({});
+      else if (!taches.length) {
+        const raw = localStorage.getItem('pos-taches');
+        taches = raw ? JSON.parse(raw) : [];
+      }
     } else if (!taches.length) {
-      taches = demoTaches({});
+      const raw = localStorage.getItem('pos-taches');
+      taches = raw ? JSON.parse(raw) : [];
     }
   } catch(e) {
-    if (!taches.length) taches = demoTaches({});
+    if (!taches.length) {
+      try { const raw = localStorage.getItem('pos-taches'); taches = raw ? JSON.parse(raw) : []; } catch(e2) { taches = []; }
+    }
   }
 }
 
@@ -4571,7 +4577,12 @@ async function selectDossier(id) {
     const r = await apiCall({ action:'getTaches', dossierId:id });
     if (r && r.ok) tachesD = r.taches;
   } else {
-    tachesD = demoTaches({ dossierId:id });
+    // Lire depuis localStorage — même source que la page Production
+    try {
+      const raw = localStorage.getItem('pos-taches');
+      const allTaches = raw ? JSON.parse(raw) : [];
+      tachesD = allTaches.filter(t => t.dossierId === id);
+    } catch(e) { tachesD = []; }
   }
   renderAttrPanel(tachesD);
 }
@@ -4713,7 +4724,7 @@ async function loadTaches() {
       const r = await apiCall({ action:'getTaches', operateur:opFilterVal });
       hideLoader();
       if (r && r.ok) taches = r.taches;
-      else taches = demoTaches({});
+      else { try { const raw = localStorage.getItem('pos-taches'); taches = raw ? JSON.parse(raw) : []; } catch(e) { taches = []; } }
     } else {
       try {
         const raw = localStorage.getItem('pos-taches');
@@ -5075,12 +5086,7 @@ function renderProdKpis(data) {
 // DONNÉES DÉMO (sans backend)
 // ============================================================
 function demoDossiers() {
-  return [
-    {id:'D0001',numeroDossier:'POS-101-1',client:'Marie R.',produit:'Riz 1kg',quantite:10,statut:'PAO',progression:20,dateCreation:'14/05/2026',priorite:'Normale',sourceVente:'Vente #101'},
-    {id:'D0002',numeroDossier:'POS-102-1',client:'Jean M.',produit:'Huile 1L',quantite:5,statut:'ACHAT',progression:55,dateCreation:'15/05/2026',priorite:'Haute',sourceVente:'Vente #102'},
-    {id:'D0003',numeroDossier:'POS-103-1',client:'Paul K.',produit:'Sucre 1kg',quantite:20,statut:'CREE',progression:0,dateCreation:'16/05/2026',priorite:'Normale',sourceVente:'Vente #103'},
-    {id:'D0004',numeroDossier:'POS-104-1',client:'Admin',produit:'Savon Protex',quantite:50,statut:'PRODUCTION',progression:75,dateCreation:'16/05/2026',priorite:'Urgente',sourceVente:'Vente #104'},
-  ];
+  return [];
 }
 
 function demoTaches(filters) {
