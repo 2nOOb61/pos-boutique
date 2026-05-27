@@ -4218,9 +4218,10 @@ function _buildCardProductionSection(dossierId) {
   const steps = ETAPES_CONFIG.map(e => {
     const te = dt.filter(t => t.etapeCode === e.code);
     let status = 'VIDE';
-    if (te.some(t => t.statut === 'TERMINE'))      { status = 'TERMINE'; doneCount++; }
-    else if (te.some(t => t.statut === 'EN_COURS')) status = 'EN_COURS';
-    else if (te.some(t => t.statut === 'A_FAIRE'))  status = 'A_FAIRE';
+    // Toutes les tâches de l'étape doivent être TERMINE pour valider l'étape
+    if (te.length > 0 && te.every(t => t.statut === 'TERMINE'))                  { status = 'TERMINE'; doneCount++; }
+    else if (te.some(t => t.statut === 'EN_COURS' || t.statut === 'TERMINE'))     status = 'EN_COURS';
+    else if (te.some(t => t.statut === 'A_FAIRE'))                                status = 'A_FAIRE';
     return { ...e, status, tachesEtape: te };
   });
   const pct = Math.round(doneCount / ETAPES_CONFIG.length * 100);
@@ -4601,6 +4602,7 @@ function renderAttrPanel(tachesD) {
       const tachesEtape = tachesD.filter(t => t.etapeCode === e.code);
       const currentUser_role = currentUser?.role||'';
       const canAssign = ['admin','chef_atelier'].includes(currentUser_role);
+      const etapeComplete = tachesEtape.length > 0 && tachesEtape.every(t => t.statut === 'TERMINE');
       const operateursHtml = tachesEtape.length
         ? tachesEtape.map(t => {
             const badge = t.statut==='TERMINE'
@@ -4611,10 +4613,16 @@ function renderAttrPanel(tachesD) {
             return `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:6px;margin-bottom:2px">${t.operateur} ${badge}</span>`;
           }).join('')
         : '<em style="color:var(--color-text-muted)">Non assigné</em>';
+      const etapeIcon = etapeComplete
+        ? `<span style="font-size:10px;font-weight:700;color:var(--color-success);background:var(--color-success-bg);padding:2px 8px;border-radius:20px;margin-left:6px">✓ Étape complète</span>`
+        : '';
       return `<div class="etape-row-attr">
-        <div style="width:28px;height:28px;border-radius:50%;background:${e.color}18;border:1.5px solid ${e.color};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;font-weight:700;color:${e.color}">${e.icon}</div>
+        <div style="width:28px;height:28px;border-radius:50%;background:${etapeComplete?'#16a34a':e.color}18;border:1.5px solid ${etapeComplete?'#16a34a':e.color};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;font-weight:700;color:${etapeComplete?'#16a34a':e.color}">${etapeComplete?'✓':e.icon}</div>
         <div style="flex:1;min-width:0">
-          <div style="font-size:13px;font-weight:600;color:var(--color-text-primary)">${e.label}</div>
+          <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">
+            <span style="font-size:13px;font-weight:600;color:var(--color-text-primary)">${e.label}</span>
+            ${etapeIcon}
+          </div>
           <div style="font-size:12px;color:var(--color-text-secondary);margin-top:3px;display:flex;flex-wrap:wrap;gap:2px">
             ${operateursHtml}
           </div>
@@ -4754,9 +4762,10 @@ function _buildProgressBar(dossierId) {
   const steps = ETAPES_CONFIG.map(e => {
     const te = dt.filter(t => t.etapeCode === e.code);
     let status = 'VIDE';
-    if (te.some(t => t.statut === 'TERMINE'))    { status = 'TERMINE'; doneCount++; }
-    else if (te.some(t => t.statut === 'EN_COURS')) status = 'EN_COURS';
-    else if (te.some(t => t.statut === 'A_FAIRE'))  status = 'A_FAIRE';
+    // Toutes les tâches de l'étape doivent être TERMINE pour valider l'étape
+    if (te.length > 0 && te.every(t => t.statut === 'TERMINE'))              { status = 'TERMINE'; doneCount++; }
+    else if (te.some(t => t.statut === 'EN_COURS' || t.statut === 'TERMINE')) status = 'EN_COURS';
+    else if (te.some(t => t.statut === 'A_FAIRE'))                            status = 'A_FAIRE';
     return { ...e, status };
   });
   const pct = Math.round(doneCount / ETAPES_CONFIG.length * 100);
@@ -5009,6 +5018,26 @@ async function confirmPointage() {
     const t = isLibre ? tachesLibres.find(x => x.id === tacheId) : taches.find(x => x.id === tacheId);
     if (t) { t.statut = 'TERMINE'; t.dateFin = new Date().toLocaleDateString('fr-FR'); t.commentaire = comment || t.commentaire; }
     if (isLibre) saveTachesLibres(); else saveTaches();
+
+    // Vérifier si le dossier est maintenant complet à 100%
+    let dossierComplet = false;
+    if (!isLibre && t) {
+      const tachesD = taches.filter(x => x.dossierId === t.dossierId);
+      // Calculer le même pct que _buildProgressBar : chaque étape compte 1 si TOUS ses opérateurs ont terminé
+      let doneCount = 0;
+      for (const e of ETAPES_CONFIG) {
+        const te = tachesD.filter(x => x.etapeCode === e.code);
+        if (te.length > 0 && te.every(x => x.statut === 'TERMINE')) doneCount++;
+      }
+      const pct = Math.round(doneCount / ETAPES_CONFIG.length * 100);
+      if (pct === 100) {
+        dossierComplet = true;
+        // Mettre à jour le statut du dossier
+        const d = dossiers.find(x => x.id === t.dossierId);
+        if (d) { d.statut = 'LIVRE'; d.progression = 100; }
+      }
+    }
+
     // Notification d'avancement visible par tous
     if (t) {
       _addNotification({
@@ -5017,14 +5046,16 @@ async function confirmPointage() {
         etapeCode:     isLibre ? 'LIBRE' : t.etapeCode,
         etapeLabel:    isLibre ? t.titre : t.etapeLabel,
         operateur:     currentUser?.label || t.operateur,
-        message:       isLibre
+        message:       dossierComplet
+          ? `Dossier ${t.numeroDossier} terminé à 100% — toutes les étapes sont complètes`
+          : isLibre
           ? `${currentUser?.label} a terminé la tâche libre "${t.titre}"`
           : `${currentUser?.label} a terminé l'étape "${t.etapeLabel}" — dossier ${t.numeroDossier}`,
       });
     }
     renderTaches();
     closeModal('pointageModal');
-    showToast('Tâche terminée ✅');
+    showToast(dossierComplet ? 'Dossier complet à 100% — prêt à livrer !' : 'Tâche terminée ✅');
   }
 }
 
