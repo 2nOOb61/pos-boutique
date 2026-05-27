@@ -130,6 +130,8 @@ async function doLogin() {
     const r = await loginViaScript(u, p);
     if (r && r.ok) {
       loginOk = true; userInfo = r.user;
+      // Garantir que label est toujours défini (le Sheet peut ne pas le renvoyer)
+      if (!userInfo.label) userInfo.label = userInfo.username;
     } else if (r && !r.ok) {
       const errMsg = r.error || '';
       const isCredError = errMsg.toLowerCase().includes('identifiant') ||
@@ -151,7 +153,7 @@ async function doLogin() {
       (x.pass === p || x.pass === pHashed) &&
       x.actif !== false
     );
-    if (lu) { loginOk = true; userInfo = { username: lu.username, role: lu.role, label: lu.label }; }
+    if (lu) { loginOk = true; userInfo = { username: lu.username, role: lu.role, label: lu.label || lu.username }; }
   }
 
   btn.disabled = false; btn.textContent = 'Se connecter';
@@ -4752,7 +4754,7 @@ async function confirmAttribution() {
 
 async function selfAssign(etapeCode, etapeLabel) {
   if (!selectedDossier || !currentUser) return;
-  const operateur = currentUser.label;
+  const operateur = currentUser.label || currentUser.username;
   const payload = {
     action:        'attribuerTache',
     dossierId:     selectedDossier.id,
@@ -4806,7 +4808,7 @@ function openOperateurModal() {
       <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--surface2);border-radius:8px;margin-bottom:6px">
         <div style="width:32px;height:32px;border-radius:50%;background:var(--color-primary);display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:700;flex-shrink:0">${(u.label||'?')[0].toUpperCase()}</div>
         <div style="flex:1;min-width:0">
-          <div style="font-size:13px;font-weight:600;color:var(--color-text-primary)">${u.label}</div>
+          <div style="font-size:13px;font-weight:600;color:var(--color-text-primary)">${u.label || u.username}</div>
           <div style="font-size:11px;color:var(--color-text-muted)">${ROLE_LABELS[u.role] || u.role}</div>
         </div>
         <span class="prod-badge" style="background:var(--color-primary-light);color:var(--color-primary);font-size:10px">${u.username}</span>
@@ -4823,7 +4825,7 @@ async function loadTaches() {
     const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
     opFilterVal = isAdminOrChef
       ? (document.getElementById('opFilterSel')?.value || 'TOUS')
-      : (currentUser?.label || 'TOUS');
+      : (currentUser?.label || currentUser?.username || 'TOUS');
     if (APPS_SCRIPT_URL) {
       showLoader('Chargement...');
       // Ne pas envoyer operateur=TOUS — le backend l'interpréterait comme un nom d'opérateur
@@ -4894,7 +4896,8 @@ function _buildProgressBar(dossierId) {
 
 function _buildMonDashboard() {
   if (!currentUser) return '';
-  const myTaches = [...taches, ...tachesLibres].filter(t => t.operateur === currentUser.label);
+  const myLabel = currentUser.label || currentUser.username || '';
+  const myTaches = [...taches, ...tachesLibres].filter(t => t.operateur === myLabel);
   if (!myTaches.length) return '';
   // "blocking" = tâche A_FAIRE que l'opérateur PEUT démarrer maintenant (pas bloquée par une étape précédente)
   const blocking = myTaches.filter(t => {
@@ -5015,12 +5018,13 @@ function renderTaches() {
   const dash = _buildMonDashboard();
   const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
 
+  const myLabel = currentUser?.label || currentUser?.username || '';
   // Dossier-linked tasks
-  let dossierList = isAdminOrChef ? taches : taches.filter(t => t.operateur === currentUser?.label);
+  let dossierList = isAdminOrChef ? taches : taches.filter(t => t.operateur === myLabel);
   if (prodFilter !== 'TOUS') dossierList = dossierList.filter(t => t.statut === prodFilter);
 
   // Independent tasks
-  let libreList = isAdminOrChef ? tachesLibres : tachesLibres.filter(t => t.operateur === currentUser?.label);
+  let libreList = isAdminOrChef ? tachesLibres : tachesLibres.filter(t => t.operateur === myLabel);
   if (prodFilter !== 'TOUS') libreList = libreList.filter(t => t.statut === prodFilter);
 
   if (!dossierList.length && !libreList.length) {
