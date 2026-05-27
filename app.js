@@ -4257,6 +4257,8 @@ function _buildCardProductionSection(dossierId) {
 // ============================================================
 // TÂCHES INDÉPENDANTES — persistance
 // ============================================================
+let tlPhotos = [];
+
 function saveTachesLibres() {
   try { localStorage.setItem('pos-taches-libres', JSON.stringify(tachesLibres)); } catch(e) {}
 }
@@ -4268,11 +4270,43 @@ function loadTachesLibres() {
   } catch(e) {}
 }
 
+async function addTLPhotos(files) {
+  if (!files || files.length === 0) return;
+  const remaining = 5 - tlPhotos.length;
+  if (remaining <= 0) { showToast('Maximum 5 photos', 'error'); return; }
+  for (const file of Array.from(files).slice(0, remaining)) {
+    if (!file.type.startsWith('image/')) continue;
+    try {
+      const dataUrl = await _resizeImage(file, 800, 800);
+      tlPhotos.push(dataUrl);
+    } catch(e) { showToast('Erreur lecture : ' + file.name, 'error'); }
+  }
+  renderTLPhotos();
+  document.getElementById('tlPhotosInput').value = '';
+}
+
+function renderTLPhotos() {
+  const c = document.getElementById('tlPhotosPreviews');
+  if (!c) return;
+  c.innerHTML = tlPhotos.map((src, i) => `
+    <div style="position:relative;display:inline-block">
+      <img src="${src}" style="width:80px;height:80px;object-fit:cover;border-radius:10px;border:2px solid var(--border);cursor:pointer" onclick="window.open(this.src,'_blank')" />
+      <button onclick="removeTLPhoto(${i})" style="position:absolute;top:-6px;right:-6px;background:var(--red,#dc2626);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;line-height:1">×</button>
+    </div>`).join('');
+}
+
+function removeTLPhoto(index) {
+  tlPhotos.splice(index, 1);
+  renderTLPhotos();
+}
+
 function openTacheLibreModal() {
+  tlPhotos = [];
   document.getElementById('tlTitre').value = '';
   document.getElementById('tlDesc').value = '';
   document.getElementById('tlPriorite').value = 'Normale';
   document.getElementById('tlEcheance').value = '';
+  renderTLPhotos();
   const ul = document.getElementById('tlUserList');
   ul.innerHTML = localUsers.filter(u => u.actif !== false).map(u => `
     <label style="display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;font-size:13px;color:var(--color-text-primary);transition:background .12s" onmouseover="this.style.background='var(--color-primary-light)'" onmouseout="this.style.background=''">
@@ -4307,7 +4341,8 @@ function saveTacheLibre() {
       dateFin:         '',
       commentaire:     desc,
       echeance,
-      priorite
+      priorite,
+      photos:          [...tlPhotos]
     };
     tachesLibres.push(t);
     created++;
@@ -4653,6 +4688,7 @@ function _tacheRow(t) {
       ${isLibre ? '' : `<div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--color-text-muted)">${t.numeroDossier}</div>`}
       <div style="font-weight:600;font-size:14px;color:${etape.color};margin:1px 0">${isLibre ? t.titre : t.etapeLabel}${prioBadge}</div>
       ${isLibre && t.commentaire ? `<div style="font-size:11px;color:var(--color-text-muted);margin-bottom:2px;white-space:pre-wrap">${t.commentaire}</div>` : ''}
+      ${isLibre && t.photos?.length ? `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:4px;margin-bottom:2px">${t.photos.map(src=>`<img src="${src}" onclick="window.open(this.src,'_blank')" style="width:52px;height:52px;object-fit:cover;border-radius:8px;border:1.5px solid var(--color-border);cursor:pointer" />`).join('')}</div>` : ''}
       <div style="font-size:12px;color:var(--color-text-secondary)">${subLine}</div>
     </div>
     <div style="display:flex;align-items:center;flex-shrink:0">${actions}${deleteBtn}</div>
