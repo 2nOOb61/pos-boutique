@@ -240,10 +240,10 @@ function showPage(id, btn, bnavBtn) {
   if (id==='stats')        { renderStats(); _autoRefreshStats(); _loadProdStats(); }
   if (id==='config')       renderConfigPage();
   if (id==='users')        renderUsersPage();
-  if (id==='reservations') { renderReservations(); _autoRefreshReservations(); }
+  if (id==='reservations') { _ensureDossierLinks(); renderReservations(); _autoRefreshReservations(); _loadTachesQuietly().then(renderReservations); }
   if (id==='attribution')  { loadDossiers(); initModulesProduction(); }
   if (id==='production')   { loadTaches();   initModulesProduction(); }
-  if (id==='commandes')    { renderCommandes(); _autoRefreshCommandes(); }
+  if (id==='commandes')    { _ensureDossierLinks(); renderCommandes(); _autoRefreshCommandes(); _loadTachesQuietly().then(renderCommandes); }
   // Garde d'accès par rôle
   if (currentUser) {
     const allowed = PAGE_ACCESS[id];
@@ -632,6 +632,8 @@ function saveReservation(accompte, depositMethod, given, change, provider, ref, 
     saleId: null
   };
 
+  const _resDossier = _createDossierFromSource('reservation', reservation);
+  reservation.dossierId = _resDossier.id;
   reservations.unshift(reservation);
   saveData();
   syncReservationToSheets(reservation);
@@ -727,6 +729,7 @@ function renderReservations() {
         <div class="res-amount-item"><span class="lbl">Restant dû</span><span class="val" style="color:${r.status==='pending'?'var(--accent)':'var(--muted)'}">${fmt(r.restant)}</span></div>
       </div>
       <div class="res-actions">${actions}</div>
+      ${r.status === 'pending' && r.dossierId ? _buildCardProductionSection(r.dossierId) : ''}
     </div>`;
     } catch(e) {
       console.error('renderReservations card #' + r.id + ':', e);
@@ -3779,6 +3782,8 @@ function saveCommande() {
     saleId:           null
   };
 
+  const _cmdDossier = _createDossierFromSource('commande', commande);
+  commande.dossierId = _cmdDossier.id;
   commandes.unshift(commande);
   saveData();
   syncCommandeToSheets(commande);
@@ -3881,6 +3886,7 @@ function renderCommandes() {
           <div class="res-amount-item"><span class="lbl">Restant dû</span><span class="val" style="color:${c.status==='pending'?'var(--accent2)':'var(--muted)'}">${fmt(c.restant)}</span></div>
         </div>
         ${actions ? `<div class="res-actions">${actions}</div>` : ''}
+        ${c.status === 'pending' && c.dossierId ? _buildCardProductionSection(c.dossierId) : ''}
       </div>`;
     } catch(e) {
       return `<div class="cmd-card" style="color:var(--muted);font-size:13px;padding:12px">⚠️ Commande #${c.id} — erreur: ${e.message}</div>`;
@@ -4127,6 +4133,123 @@ const ETAPES_CONFIG = [
   { code:'FINITION',      label:'Finition',           short:'Finition',color:'#1a4a3a', icon:'7' },
   { code:'LIVRE',         label:'Livraison',          short:'Livré',   color:'#16a34a', icon:'8' },
 ];
+
+// ============================================================
+// DOSSIERS — LIAISON COMMANDES & RÉSERVATIONS
+// ============================================================
+
+function _createDossierFromSource(type, source) {
+  const dossierId = `D_${type.toUpperCase()}_${source.id}`;
+  const existing = dossiers.find(d => d.id === dossierId);
+  if (existing) return existing;
+  const prefix   = type === 'commande' ? 'CMD' : 'RES';
+  const produit  = (source.items||[]).map(i => i.name).join(', ') || 'Articles';
+  const quantite = (source.items||[]).reduce((s,i) => s + (i.qty||1), 0);
+  const dossier  = {
+    id: dossierId,
+    numeroDossier: `${prefix}-${String(source.id).padStart(3,'0')}`,
+    client:      source.clientName,
+    produit,
+    quantite,
+    statut:      'CREE',
+    progression: 0,
+    dateCreation: new Date().toLocaleDateString('fr-FR'),
+    priorite:    'Normale',
+    sourceVente: `${type === 'commande' ? 'Commande' : 'Réservation'} #${source.id}`,
+    sourceType:  type,
+    sourceId:    source.id
+  };
+  dossiers.push(dossier);
+  return dossier;
+}
+
+function _ensureDossierLinks() {
+  commandes.forEach(c => {
+    if (!c.dossierId) {
+      const d = _createDossierFromSource('commande', c);
+      c.dossierId = d.id;
+    }
+  });
+  reservations.forEach(r => {
+    if (!r.dossierId) {
+      const d = _createDossierFromSource('reservation', r);
+      r.dossierId = d.id;
+    }
+  });
+}
+
+async function _loadTachesQuietly() {
+  try {
+    if (APPS_SCRIPT_URL) {
+      const r = await apiCall({ action: 'getTaches' });
+      if (r && r.ok) taches = r.taches;
+      else if (!taches.length) taches = demoTaches({});
+    } else if (!taches.length) {
+      taches = demoTaches({});
+    }
+  } catch(e) {
+    if (!taches.length) taches = demoTaches({});
+  }
+}
+
+function openAttribForDossier(dossierId) {
+  const d = dossiers.find(x => x.id === dossierId);
+  if (!d) { showToast('Dossier introuvable', 'error'); return; }
+  selectedDossier = d;
+  showPage('attribution', null, null);
+  setTimeout(() => selectDossier(dossierId), 200);
+}
+
+function _buildCardProductionSection(dossierId) {
+  const dt = taches.filter(t => t.dossierId === dossierId);
+  let doneCount = 0;
+  const steps = ETAPES_CONFIG.map(e => {
+    const te = dt.filter(t => t.etapeCode === e.code);
+    let status = 'VIDE';
+    if (te.some(t => t.statut === 'TERMINE'))      { status = 'TERMINE'; doneCount++; }
+    else if (te.some(t => t.statut === 'EN_COURS')) status = 'EN_COURS';
+    else if (te.some(t => t.statut === 'A_FAIRE'))  status = 'A_FAIRE';
+    return { ...e, status, tachesEtape: te };
+  });
+  const pct = Math.round(doneCount / ETAPES_CONFIG.length * 100);
+  const bg  = s => s==='TERMINE'?'#16a34a':s==='EN_COURS'?'#d97706':s==='A_FAIRE'?'#2563eb':'#f5f5f4';
+  const bc  = s => s==='VIDE'?'#d6d3d1':bg(s);
+  const tc  = s => s==='VIDE'?'#a8a29e':'#fff';
+  const lc  = s => s==='TERMINE'?'#16a34a':'#e5e3df';
+  const ic  = s => s==='TERMINE'?'✓':s==='EN_COURS'?'▶':s==='A_FAIRE'?'●':'';
+
+  const progressBar = `<div style="display:flex;align-items:flex-start;overflow-x:auto;padding-bottom:2px">
+    ${steps.map((s, i) => `<div style="display:flex;flex-direction:column;align-items:center;flex:1;min-width:38px;position:relative">
+      ${i < steps.length-1 ? `<div style="position:absolute;top:11px;left:50%;width:100%;height:2px;background:${lc(s.status)}"></div>` : ''}
+      <div style="width:22px;height:22px;border-radius:50%;border:2px solid ${bc(s.status)};background:${bg(s.status)};color:${tc(s.status)};display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;position:relative;z-index:1;flex-shrink:0">${s.status!=='VIDE'?ic(s.status):i+1}</div>
+      <div style="font-size:7px;font-weight:500;color:${s.status==='VIDE'?'#a8a29e':s.status==='TERMINE'?'#16a34a':s.status==='EN_COURS'?'#d97706':'#2563eb'};margin-top:3px;text-align:center;line-height:1.2;max-width:38px;word-break:break-word">${s.short}</div>
+    </div>`).join('')}
+  </div>
+  <div style="margin-top:6px;height:3px;background:#f0ede8;border-radius:99px;overflow:hidden">
+    <div style="height:100%;width:${pct}%;background:${pct===100?'#16a34a':'#e8834a'};border-radius:99px;transition:width .4s"></div>
+  </div>`;
+
+  const assigned = steps.filter(s => s.tachesEtape.length > 0);
+  const assignHtml = assigned.length
+    ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px">${
+        assigned.flatMap(s => s.tachesEtape.map(t => {
+          const col = t.statut==='TERMINE'?'#16a34a':t.statut==='EN_COURS'?'#d97706':'#2563eb';
+          const bg2 = t.statut==='TERMINE'?'#dcfce7':t.statut==='EN_COURS'?'#fef3c7':'#dbeafe';
+          const ic2 = t.statut==='TERMINE'?'✓':t.statut==='EN_COURS'?'▶':'●';
+          return `<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:600;background:${bg2};color:${col};padding:2px 7px;border-radius:10px">${ic2} ${s.short} · ${t.operateur}</span>`;
+        })).join('')
+      }</div>`
+    : `<div style="margin-top:6px;font-size:11px;color:#a8a29e;font-style:italic">Aucun opérateur assigné — cliquer Gérer pour attribuer</div>`;
+
+  return `<div style="margin-top:12px;border-top:1px solid #f0ede8;padding-top:12px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <span style="font-size:11px;font-weight:700;color:#78716c;text-transform:uppercase;letter-spacing:.06em">Production — ${pct}%</span>
+      <button onclick="openAttribForDossier('${dossierId}')" style="font-size:11px;font-weight:600;color:#1a4a3a;background:#e8f4f0;border:1px solid rgba(26,74,58,.15);border-radius:6px;padding:3px 9px;cursor:pointer">Gérer attribution →</button>
+    </div>
+    ${progressBar}
+    ${assignHtml}
+  </div>`;
+}
 
 // --- INIT ---
 async function initModulesProduction() {
