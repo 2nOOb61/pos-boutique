@@ -2898,9 +2898,12 @@ async function apiCall(payload) {
   if (getActions.includes(payload.action)) {
     try {
       let url = APPS_SCRIPT_URL + '?action=' + payload.action;
-      if (payload.limit)    url += '&limit='    + encodeURIComponent(payload.limit);
-      if (payload.username) url += '&username=' + encodeURIComponent(payload.username);
-      if (payload.password) url += '&password=' + encodeURIComponent(payload.password);
+      if (payload.limit)     url += '&limit='     + encodeURIComponent(payload.limit);
+      if (payload.username)  url += '&username='  + encodeURIComponent(payload.username);
+      if (payload.password)  url += '&password='  + encodeURIComponent(payload.password);
+      if (payload.statut)    url += '&statut='    + encodeURIComponent(payload.statut);
+      if (payload.dossierId) url += '&dossierId=' + encodeURIComponent(payload.dossierId);
+      if (payload.operateur) url += '&operateur=' + encodeURIComponent(payload.operateur);
       const res  = await fetch(url);
       const text = await res.text();
       try { return JSON.parse(text); }
@@ -4586,7 +4589,7 @@ async function selectDossier(id) {
   let tachesD = [];
   if (APPS_SCRIPT_URL) {
     const r = await apiCall({ action:'getTaches', dossierId:id });
-    if (r && r.ok) tachesD = r.taches;
+    if (r && r.ok) tachesD = r.taches.filter(t => t.dossierId === id);
   } else {
     // Lire depuis localStorage — même source que la page Production
     try {
