@@ -4755,7 +4755,7 @@ function renderAttrPanel(tachesD) {
         ? items.map(i => `
           <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--color-border)">
             <span style="font-size:13px;color:var(--color-text-primary);font-weight:500">${i.name}</span>
-            <span style="font-size:12px;color:var(--color-text-secondary)">× ${i.qty || 1}${i.price ? ' — ' + fmt(i.price) : ''}</span>
+            <span style="font-size:12px;color:var(--color-text-secondary)">× ${i.qty || 1}</span>
           </div>`).join('')
         : `<div style="font-size:13px;color:var(--color-text-muted);font-style:italic">Aucun article</div>`;
 
