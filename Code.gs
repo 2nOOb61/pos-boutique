@@ -63,6 +63,7 @@ function doPost(e) {
     else if (action === 'deleteTache')       result = handleDeleteTache(data);
     else if (action === 'pointerAction')     result = handlePointerAction(data);
     else if (action === 'getDashboard')      result = handleGetDashboard();
+    else if (action === 'uploadFile')        result = handleUploadFile(data);
     else result = { ok:false, error:'Action inconnue: ' + action };
 
     return jsonResp(result);
@@ -139,7 +140,7 @@ function initSheets() {
   ensureSheet(ss, SHEET_SALES,      ['ID','Date','Heure','Article','Quantite','Prix_Unitaire','Sous_Total','Total_Vente','Paiement','Fournisseur','Reference','Caissier']);
   ensureSheet(ss, SHEET_STOCK_LOG,  ['Date','Article','Type','Quantite','Stock_Avant','Stock_Apres','Motif','Caissier']);
   ensureSheet(ss, SHEET_USERS,      ['Username','MotDePasse','Role','Nom','Actif']);
-  ensureSheet(ss, SHEET_RESERVATIONS,['ID','Date','Client','Tel','Produit','Quantite','Acompte','Statut','Notes','Caissier']);
+  ensureSheet(ss, SHEET_RESERVATIONS,['ID','Date','Heure','Client_Nom','Client_Contact','Article','Quantite','Prix_Unitaire','Sous_Total_Article','Sous_Total_Vente','Remise','Net_A_Payer','Accompte','Restant','Mode_Depot','Fournisseur_Mobile','Reference','Caissier','Statut','Date_Finalisation','Vente_ID']);
   ensureSheet(ss, SHEET_COMMANDES,  ['ID','Date','Fournisseur','Produit','Quantite','PrixUnit','Total','Statut','Notes','Admin']);
 
   // Nouvelles feuilles production
@@ -355,72 +356,125 @@ function handleDeleteUser(data) {
 
 // ============================================================
 // RÉSERVATIONS
+// Colonnes sheet (21) :
+// [0]ID [1]Date [2]Heure [3]Client_Nom [4]Client_Contact
+// [5]Article [6]Quantite [7]Prix_Unitaire [8]Sous_Total_Article
+// [9]Sous_Total_Vente [10]Remise [11]Net_A_Payer [12]Accompte
+// [13]Restant [14]Mode_Depot [15]Fournisseur_Mobile [16]Reference
+// [17]Caissier [18]Statut [19]Date_Finalisation [20]Vente_ID
+// UNE LIGNE PAR ARTICLE — grouper par ID pour reconstruire la réservation
 // ============================================================
 function handleGetReservations() {
   const sh = getSS().getSheetByName(SHEET_RESERVATIONS);
   if (!sh) return { ok:true, reservations:[] };
   const rows = sh.getDataRange().getValues();
-  const list = [];
+  const map = {};   // id → réservation
+  const order = []; // ordre d'apparition des IDs
   for (let i = 1; i < rows.length; i++) {
-    const r = rows[i]; if(!r[0]) continue;
-    const produitStr = String(r[4] || '');
-    // Reconstruire le tableau items depuis "Article x2, Article2 x1"
-    const items = produitStr ? produitStr.split(', ').map(s => {
-      const m = s.match(/^(.+) x(\d+)$/);
-      return m ? { name: m[1], qty: Number(m[2]), price: 0 } : { name: s, qty: 1, price: 0 };
-    }) : [];
-    const sheetStatut = String(r[7] || '');
-    const status = sheetStatut === 'Terminé' ? 'completed'
-                 : sheetStatut === 'Annulé'  ? 'cancelled'
-                 : 'pending';
-    list.push({
-      id: r[0], date: r[1],
-      clientName: r[2], clientContact: r[3],
-      items, quantite: Number(r[5]),
-      accompte: Number(r[6]), acompte: Number(r[6]),
-      status, statut: sheetStatut,
-      notes: r[8], caissier: r[9],
-      subtotal: 0, remise: 0, total: 0, restant: 0,
-    });
+    const r = rows[i];
+    if (!r[0]) continue;
+    const id = String(r[0]);
+    if (!map[id]) {
+      const sheetStatut = String(r[18] || '');
+      const status = (sheetStatut === 'Terminée' || sheetStatut === 'Terminé' || sheetStatut === 'completed')
+        ? 'completed'
+        : (sheetStatut === 'Annulée' || sheetStatut === 'Annulé' || sheetStatut === 'cancelled')
+        ? 'cancelled'
+        : 'pending';
+      map[id] = {
+        id,
+        date:           r[1],
+        clientName:     String(r[3] || ''),
+        clientContact:  String(r[4] || ''),
+        items:          [],
+        subtotal:       Number(r[9])  || 0,
+        remise:         Number(r[10]) || 0,
+        total:          Number(r[11]) || 0,
+        accompte:       Number(r[12]) || 0,
+        acompte:        Number(r[12]) || 0,
+        restant:        Number(r[13]) || 0,
+        depositMethod:  String(r[14] || ''),
+        depositProvider:String(r[15] || ''),
+        depositRef:     String(r[16] || ''),
+        caissier:       String(r[17] || ''),
+        status,
+        statut:         sheetStatut,
+        dateFinalisation: r[19] || null,
+        saleId:         r[20] || null,
+      };
+      order.push(id);
+    }
+    // Ajouter l'article à la liste items
+    const articleName = String(r[5] || '');
+    if (articleName) {
+      map[id].items.push({
+        name:  articleName,
+        qty:   Number(r[6]) || 1,
+        price: Number(r[7]) || 0,
+      });
+    }
   }
-  return { ok:true, reservations:list.reverse() };
+  const list = order.map(id => map[id]);
+  return { ok:true, reservations: list.reverse() };
 }
 
 function handleAddReservation(data) {
-  const ss = getSS(); const sh = ss.getSheetByName(SHEET_RESERVATIONS);
-  const r = data.reservation; const now = new Date();
-  const id = r.id ? String(r.id) : ('R' + now.getTime());
-  const client   = r.clientName   || r.client  || '';
-  const tel      = r.clientContact || r.tel     || '';
-  const produit  = Array.isArray(r.items)
-    ? r.items.map(i => `${i.name} x${i.qty}`).join(', ')
-    : (r.produit || '');
-  const quantite = Array.isArray(r.items)
-    ? r.items.reduce((s, i) => s + (Number(i.qty) || 0), 0)
-    : (r.quantite || 1);
-  const acompte  = r.accompte !== undefined ? r.accompte : (r.acompte || 0);
-  sh.appendRow([id, Utilities.formatDate(now, Session.getScriptTimeZone(), 'dd/MM/yyyy'),
-    client, tel, produit, quantite, acompte, 'En attente', r.notes || '', r.caissier || '']);
+  const ss = getSS();
+  const sh = ss.getSheetByName(SHEET_RESERVATIONS);
+  const r   = data.reservation;
+  const now = new Date();
+  const tz  = Session.getScriptTimeZone();
+  const dateStr  = Utilities.formatDate(now, tz, 'dd/MM/yyyy');
+  const heureStr = Utilities.formatDate(now, tz, 'HH:mm:ss');
+  const id           = r.id ? String(r.id) : ('R' + now.getTime());
+  const clientNom    = r.clientName    || r.client || '';
+  const clientTel    = r.clientContact || r.tel    || '';
+  const total        = r.total    || 0;
+  const accompte     = r.accompte !== undefined ? r.accompte : (r.acompte || 0);
+  const restant      = r.restant  !== undefined ? r.restant  : Math.max(0, total - accompte);
+  const remise       = r.remise   || 0;
+  const modeDepot    = r.depositMethod === 'cash'   ? 'Espèces'
+                     : r.depositMethod === 'mobile' ? 'Mobile Money' : '';
+  const fournisseur  = r.depositProvider || '';
+  const reference    = r.depositRef      || '';
+  const caissier     = r.caissier        || '';
+  const items        = Array.isArray(r.items) ? r.items : [];
+
+  if (items.length === 0) {
+    // Aucun article — une ligne de repli
+    sh.appendRow([id, dateStr, heureStr, clientNom, clientTel,
+      '', 0, 0, 0, total, remise, total, accompte, restant,
+      modeDepot, fournisseur, reference, caissier, 'En attente', '', '']);
+  } else {
+    // Une ligne par article
+    items.forEach(item => {
+      const sousTotal = (Number(item.price) || 0) * (Number(item.qty) || 0);
+      sh.appendRow([id, dateStr, heureStr, clientNom, clientTel,
+        item.name || '', Number(item.qty) || 1, Number(item.price) || 0,
+        sousTotal, total, remise, total, accompte, restant,
+        modeDepot, fournisseur, reference, caissier, 'En attente', '', '']);
+    });
+  }
   return { ok:true, id };
 }
 
 function handleUpdateReservation(data) {
-  const sh = getSS().getSheetByName(SHEET_RESERVATIONS);
+  const sh   = getSS().getSheetByName(SHEET_RESERVATIONS);
   const rows = sh.getDataRange().getValues();
+  const rawStatus = data.statut || data.status;
+  const sheetStatut = rawStatus === 'completed' ? 'Terminée'
+                    : rawStatus === 'cancelled'  ? 'Annulée'
+                    : (rawStatus || '');
+  let updated = false;
   for (let i = 1; i < rows.length; i++) {
-    if (String(rows[i][0]) === String(data.id)) {
-      const rawStatus = data.statut || data.status;
-      if (rawStatus) {
-        const sheetStatut = rawStatus === 'completed' ? 'Terminé'
-                          : rawStatus === 'cancelled'  ? 'Annulé'
-                          : rawStatus;
-        sh.getRange(i+1, 8).setValue(sheetStatut);
-      }
-      if (data.notes) sh.getRange(i+1, 9).setValue(data.notes);
-      return { ok:true };
-    }
+    if (String(rows[i][0]) !== String(data.id)) continue;
+    // Mettre à jour TOUTES les lignes de cette réservation (une par article)
+    if (sheetStatut)     sh.getRange(i+1, 19).setValue(sheetStatut);   // col 19 = Statut
+    if (data.dateFinalisation) sh.getRange(i+1, 20).setValue(data.dateFinalisation);
+    if (data.saleId)     sh.getRange(i+1, 21).setValue(String(data.saleId));
+    updated = true;
   }
-  return { ok:false, error:'Réservation introuvable' };
+  return updated ? { ok:true } : { ok:false, error:'Réservation introuvable' };
 }
 
 // ============================================================
@@ -644,4 +698,40 @@ function handleGetDashboard() {
     dossiers:kpi,
     operateurs:Object.values(opStats)
   };
+}
+
+// ============================================================
+// UPLOAD FICHIERS → GOOGLE DRIVE
+// ============================================================
+function _getPOSAttachmentsFolder() {
+  const FOLDER_NAME = 'POS_PiecesJointes';
+  const folders = DriveApp.getFoldersByName(FOLDER_NAME);
+  return folders.hasNext() ? folders.next() : DriveApp.createFolder(FOLDER_NAME);
+}
+
+function handleUploadFile(data) {
+  try {
+    const base64 = data.base64Data || '';
+    const mimeType = data.mimeType || 'application/octet-stream';
+    const fileName = data.fileName || ('fichier_' + Date.now());
+
+    // Extraire la partie base64 pure (après la virgule de "data:mime;base64,...")
+    const base64Pure = base64.includes(',') ? base64.split(',')[1] : base64;
+    const bytes = Utilities.base64Decode(base64Pure);
+    const blob  = Utilities.newBlob(bytes, mimeType, fileName);
+
+    const folder = _getPOSAttachmentsFolder();
+    const file   = folder.createFile(blob);
+
+    // Partage : quiconque a le lien peut voir
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+    const fileId  = file.getId();
+    const viewUrl = 'https://drive.google.com/file/d/' + fileId + '/view';
+    const dlUrl   = 'https://drive.google.com/uc?id=' + fileId + '&export=download';
+
+    return { ok:true, fileId, viewUrl, dlUrl, fileName };
+  } catch(err) {
+    return { ok:false, error: err.message };
+  }
 }

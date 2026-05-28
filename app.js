@@ -562,6 +562,35 @@ function recordSale(total, method, given, change, provider, ref, remise=0, accom
 }
 
 // ============================================================
+// RÉSERVATIONS — UPLOAD DRIVE
+// ============================================================
+async function _uploadReservationAttachments(reservationId, attachments) {
+  const res = reservations.find(r => String(r.id) === String(reservationId));
+  if (!res) return;
+  showLoader(`Upload ${attachments.length} pièce(s) jointe(s)...`);
+  const uploaded = [];
+  for (let i = 0; i < attachments.length; i++) {
+    const att = attachments[i];
+    showLoader(`Upload ${i + 1}/${attachments.length} : ${att.name}`);
+    try {
+      const r = await apiCall({ action:'uploadFile', fileName:att.name, mimeType:att.type, base64Data:att.data });
+      if (r && r.ok) {
+        uploaded.push({ name:r.fileName||att.name, type:att.type, viewUrl:r.viewUrl, dlUrl:r.dlUrl });
+      } else {
+        uploaded.push({ name:att.name, type:att.type, data:att.data }); // fallback local
+      }
+    } catch(e) {
+      uploaded.push({ name:att.name, type:att.type, data:att.data });
+    }
+  }
+  hideLoader();
+  res.attachments = uploaded;
+  saveData();
+  renderReservations();
+  showToast(`✅ ${uploaded.length} pièce(s) jointe(s) uploadée(s) sur Drive`);
+}
+
+// ============================================================
 // RÉSERVATIONS — CRÉER
 // ============================================================
 function openReservation() {
@@ -719,6 +748,10 @@ function saveReservation(accompte, depositMethod, given, change, provider, ref, 
   printReservationTicket(reservation);
   closeModal('reservationModal');
   showToast(`📋 Réservation #${reservation.id} créée — Acompte ${fmt(accompte)}`);
+  // Upload des pièces jointes vers Drive (après fermeture du modal)
+  if (resAttachments.length && APPS_SCRIPT_URL) {
+    _uploadReservationAttachments(reservation.id, [...resAttachments]);
+  }
   clearCart();
   renderProducts();
   renderStockTable();
@@ -4833,12 +4866,18 @@ function renderAttrPanel(tachesD) {
         ? `<div style="margin-top:10px">
              <div style="font-size:11px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Pièces jointes (${attachList.length})</div>
              <div style="display:flex;gap:8px;flex-wrap:wrap">
-               ${attachList.map((a, i) => {
+               ${attachList.map((a) => {
                  const isImg = (a.type || '').startsWith('image/');
-                 const ext = (a.name || '').split('.').pop().toUpperCase();
+                 const ext   = (a.name || '').split('.').pop().toUpperCase();
+                 // Drive URL prioritaire, fallback base64 local
+                 const openUrl = a.viewUrl || a.data || '';
+                 const dlUrl   = a.dlUrl   || a.data || '';
                  return isImg
-                   ? `<img src="${a.data}" onclick="window.open(this.src,'_blank')" title="${a.name}" style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1.5px solid var(--color-border);cursor:pointer" />`
-                   : `<a href="${a.data}" download="${a.name}" title="${a.name}" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;width:56px;height:56px;border-radius:8px;border:1.5px solid var(--color-border);background:var(--color-bg);text-decoration:none">
+                   ? `<img src="${a.viewUrl ? 'https://drive.google.com/thumbnail?id=' + a.viewUrl.split('/d/')[1]?.split('/')[0] + '&sz=w200' : a.data}"
+                          onclick="window.open('${openUrl}','_blank')"
+                          title="${a.name}"
+                          style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1.5px solid var(--color-border);cursor:pointer" />`
+                   : `<a href="${openUrl}" target="_blank" title="${a.name}" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;width:56px;height:56px;border-radius:8px;border:1.5px solid var(--color-border);background:var(--color-bg);text-decoration:none">
                         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--color-primary)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                         <span style="font-size:9px;color:var(--color-text-muted);font-weight:700">${ext}</span>
                       </a>`;
