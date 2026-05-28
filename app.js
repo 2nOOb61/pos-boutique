@@ -9,6 +9,12 @@ async function sha256(str) {
 }
 
 // ============================================================
+// VERSION APP — incrémenter à chaque déploiement pour déclencher
+// le vidage automatique du cache sur tous les navigateurs clients
+// ============================================================
+const APP_VERSION = '2.1.0';
+
+// ============================================================
 // DATA & STATE
 // ============================================================
 // Utilisateurs locaux (persistés dans localStorage)
@@ -2336,19 +2342,80 @@ async function forceAppUpdate() {
 function showUpdateBanner() {
   let banner = document.getElementById('swUpdateBanner');
   if (banner) return;
+
+  let countdown = 8;
   banner = document.createElement('div');
   banner.id = 'swUpdateBanner';
+
+  const _refresh = () => {
+    const msgSpan = banner.querySelector('#swBannerMsg');
+    if (msgSpan) msgSpan.textContent = `Mise à jour disponible — rechargement dans ${countdown}s`;
+  };
+
   banner.innerHTML = `
-    <span style="flex:1;font-size:13px;font-weight:500">🔄 Mise à jour disponible</span>
-    <button onclick="window.location.reload()" style="background:#fff;color:#1a4a3a;border:none;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0">Recharger</button>
-    <button onclick="this.parentElement.remove()" style="background:none;border:none;color:rgba(255,255,255,0.7);font-size:18px;cursor:pointer;padding:0 4px;flex-shrink:0">×</button>`;
+    <span id="swBannerMsg" style="flex:1;font-size:13px;font-weight:500">
+      Mise à jour disponible — rechargement dans ${countdown}s
+    </span>
+    <button onclick="forceAppUpdate()"
+      style="background:#fff;color:#1a4a3a;border:none;border-radius:8px;
+             padding:6px 14px;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0">
+      Maintenant
+    </button>
+    <button onclick="clearInterval(window._swBannerTimer);this.closest('#swUpdateBanner').remove()"
+      style="background:none;border:none;color:rgba(255,255,255,0.7);font-size:18px;
+             cursor:pointer;padding:0 4px;flex-shrink:0" title="Plus tard">×</button>`;
+
   Object.assign(banner.style, {
     position:'fixed', bottom:'80px', left:'50%', transform:'translateX(-50%)',
     background:'#1a4a3a', color:'#fff', borderRadius:'14px', padding:'10px 14px',
     display:'flex', alignItems:'center', gap:'10px', zIndex:'9999',
-    boxShadow:'0 4px 20px rgba(0,0,0,0.25)', maxWidth:'360px', width:'calc(100% - 32px)'
+    boxShadow:'0 4px 20px rgba(0,0,0,0.25)', maxWidth:'380px', width:'calc(100% - 32px)'
   });
   document.body.appendChild(banner);
+
+  // Compte à rebours — auto-reload à 0
+  window._swBannerTimer = setInterval(() => {
+    countdown--;
+    if (countdown <= 0) {
+      clearInterval(window._swBannerTimer);
+      forceAppUpdate();
+    } else {
+      _refresh();
+    }
+  }, 1000);
+}
+
+// ── Vider le cache automatiquement si la version a changé ──
+async function _autoClearCache() {
+  const stored = localStorage.getItem('pos-app-version');
+  if (stored === APP_VERSION) return; // Même version → rien à faire
+
+  console.log(`[Cache] v${stored || '?'} → v${APP_VERSION} — Nettoyage automatique`);
+  try {
+    // 1. Vider les caches SW via message
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_CACHE' });
+    }
+    // 2. Vider directement depuis la page (double sécurité)
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+    // 3. Désenregistrer l'ancien SW pour forcer une réinstallation propre
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    }
+  } catch(e) { console.warn('[Cache] Erreur nettoyage:', e); }
+
+  // Mémoriser la nouvelle version
+  localStorage.setItem('pos-app-version', APP_VERSION);
+
+  // Recharger seulement si ce n'est pas la toute première installation
+  if (stored) {
+    showToast('⚡ Nouvelle version — cache vidé, rechargement...', 'info');
+    setTimeout(() => window.location.reload(true), 1800);
+  }
 }
 
 function initPWA() {
@@ -2775,7 +2842,7 @@ function updatePendingBadge() {
 // ============================================================
 // GOOGLE APPS SCRIPT — CONNEXION COMPLÈTE
 // ============================================================
-let APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxFsymwddqXY-_iUJwFsTTWowmsXgtheFDX8YGpDeU5sIk8sjJ_z5_DkDaOnK8rX5bmOg/exec';
+let APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbx94vamSaYqKyD3CNbdvy3Ue7wl4DJkANdRWBmkt483NKzp1Wk1aEkTazS_Dtc8YekIug/exec';
 localStorage.setItem('pos-script-url', APPS_SCRIPT_URL);
 let syncEnabled = !!APPS_SCRIPT_URL;
 
@@ -3315,6 +3382,9 @@ function _persistConfig() {
 }
 
 function renderConfigPage() {
+  // Version affichée dans la section cache
+  const vLabel = document.getElementById('appVersionLabel');
+  if (vLabel) vLabel.textContent = `v${APP_VERSION}`;
   // Boutique
   document.getElementById('cfgShopName').value = shopConfig.name;
   document.getElementById('cfgAddress').value  = shopConfig.address;
@@ -4153,6 +4223,7 @@ loadUsers();
 loadTachesLibres();
 loadNotifications();
 initPWA();
+_autoClearCache(); // Vide le cache automatiquement si nouvelle version déployée
 renderCart();
 renderHeldCarts();
 
@@ -5122,6 +5193,17 @@ async function pointerStart(tacheId) {
   if (r && r.ok) {
     if (t) { t.statut = 'EN_COURS'; t.dateDebut = new Date().toLocaleDateString('fr-FR'); }
     if (isLibre) saveTachesLibres(); else saveTaches();
+    // Notification de début de tâche visible par tous
+    _addNotification({
+      dossierId:     t.dossierId,
+      numeroDossier: isLibre ? 'Tâche libre' : t.numeroDossier,
+      etapeCode:     isLibre ? 'LIBRE' : t.etapeCode,
+      etapeLabel:    isLibre ? t.titre : t.etapeLabel,
+      operateur:     currentUser?.label || t.operateur,
+      message:       isLibre
+        ? `${currentUser?.label} a commencé la tâche libre "${t.titre}"`
+        : `${currentUser?.label} a commencé l'étape "${t.etapeLabel}" — dossier ${t.numeroDossier}`,
+    });
     renderTaches();
     showToast('Tâche démarrée');
   }

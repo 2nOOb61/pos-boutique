@@ -1,0 +1,13 @@
+# Fichiers front-end — NE PAS envoyer à Google Apps Script
+# Seuls Code.gs et appsscript.json sont du code serveur
+
+app.js
+sw.js
+style.css
+manifest.json
+CLAUDE.md
+index.html
+icons/**
+*.png
+*.ico
+*.md

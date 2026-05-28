@@ -354,7 +354,7 @@ function handleDeleteUser(data) {
 }
 
 // ============================================================
-// RÉSERVATIONS — identiques à l'original
+// RÉSERVATIONS
 // ============================================================
 function handleGetReservations() {
   const sh = getSS().getSheetByName(SHEET_RESERVATIONS);
@@ -363,8 +363,25 @@ function handleGetReservations() {
   const list = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i]; if(!r[0]) continue;
-    list.push({ id:r[0], date:r[1], client:r[2], tel:r[3], produit:r[4],
-      quantite:Number(r[5]), acompte:Number(r[6]), statut:r[7], notes:r[8], caissier:r[9] });
+    const produitStr = String(r[4] || '');
+    // Reconstruire le tableau items depuis "Article x2, Article2 x1"
+    const items = produitStr ? produitStr.split(', ').map(s => {
+      const m = s.match(/^(.+) x(\d+)$/);
+      return m ? { name: m[1], qty: Number(m[2]), price: 0 } : { name: s, qty: 1, price: 0 };
+    }) : [];
+    const sheetStatut = String(r[7] || '');
+    const status = sheetStatut === 'Terminé' ? 'completed'
+                 : sheetStatut === 'Annulé'  ? 'cancelled'
+                 : 'pending';
+    list.push({
+      id: r[0], date: r[1],
+      clientName: r[2], clientContact: r[3],
+      items, quantite: Number(r[5]),
+      accompte: Number(r[6]), acompte: Number(r[6]),
+      status, statut: sheetStatut,
+      notes: r[8], caissier: r[9],
+      subtotal: 0, remise: 0, total: 0, restant: 0,
+    });
   }
   return { ok:true, reservations:list.reverse() };
 }
@@ -372,9 +389,18 @@ function handleGetReservations() {
 function handleAddReservation(data) {
   const ss = getSS(); const sh = ss.getSheetByName(SHEET_RESERVATIONS);
   const r = data.reservation; const now = new Date();
-  const id = 'R'+now.getTime();
-  sh.appendRow([id, Utilities.formatDate(now, Session.getScriptTimeZone(),'dd/MM/yyyy'),
-    r.client, r.tel||'', r.produit, r.quantite||1, r.acompte||0, 'En attente', r.notes||'', r.caissier||'']);
+  const id = r.id ? String(r.id) : ('R' + now.getTime());
+  const client   = r.clientName   || r.client  || '';
+  const tel      = r.clientContact || r.tel     || '';
+  const produit  = Array.isArray(r.items)
+    ? r.items.map(i => `${i.name} x${i.qty}`).join(', ')
+    : (r.produit || '');
+  const quantite = Array.isArray(r.items)
+    ? r.items.reduce((s, i) => s + (Number(i.qty) || 0), 0)
+    : (r.quantite || 1);
+  const acompte  = r.accompte !== undefined ? r.accompte : (r.acompte || 0);
+  sh.appendRow([id, Utilities.formatDate(now, Session.getScriptTimeZone(), 'dd/MM/yyyy'),
+    client, tel, produit, quantite, acompte, 'En attente', r.notes || '', r.caissier || '']);
   return { ok:true, id };
 }
 
@@ -382,9 +408,15 @@ function handleUpdateReservation(data) {
   const sh = getSS().getSheetByName(SHEET_RESERVATIONS);
   const rows = sh.getDataRange().getValues();
   for (let i = 1; i < rows.length; i++) {
-    if (rows[i][0]===data.id) {
-      if (data.statut) sh.getRange(i+1,8).setValue(data.statut);
-      if (data.notes)  sh.getRange(i+1,9).setValue(data.notes);
+    if (String(rows[i][0]) === String(data.id)) {
+      const rawStatus = data.statut || data.status;
+      if (rawStatus) {
+        const sheetStatut = rawStatus === 'completed' ? 'Terminé'
+                          : rawStatus === 'cancelled'  ? 'Annulé'
+                          : rawStatus;
+        sh.getRange(i+1, 8).setValue(sheetStatut);
+      }
+      if (data.notes) sh.getRange(i+1, 9).setValue(data.notes);
       return { ok:true };
     }
   }

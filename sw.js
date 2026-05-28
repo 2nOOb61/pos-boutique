@@ -4,7 +4,7 @@
 //             (HTML, JS, CSS) — toujours à jour quand connecté
 //             Cache First uniquement pour icônes/manifest
 // ============================================================
-const CACHE_NAME = 'boutique-pos-v7';
+const CACHE_NAME = 'boutique-pos-v8';
 const OFFLINE_URL = './index.html';
 
 const STATIC_ASSETS = [
@@ -86,6 +86,14 @@ self.addEventListener('message', event => {
   if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
   if (event.data?.type === 'CACHE_VERSION') {
     event.source.postMessage({ type: 'CACHE_INFO', version: CACHE_NAME });
+  }
+  // Vider tous les caches à la demande de l'app
+  if (event.data?.type === 'CLEAR_CACHE') {
+    caches.keys().then(keys =>
+      Promise.all(keys.map(k => caches.delete(k)))
+    ).then(() => {
+      if (event.source) event.source.postMessage({ type: 'CACHE_CLEARED' });
+    });
   }
 });
 
