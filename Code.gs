@@ -65,6 +65,7 @@ function doPost(e) {
     else if (action === 'getDashboard')      result = handleGetDashboard();
     else if (action === 'uploadFile')        result = handleUploadFile(data);
     else if (action === 'addComment')        result = handleAddComment(data);
+    else if (action === 'saveNotif')         result = handleSaveNotif(data);
     else result = { ok:false, error:'Action inconnue: ' + action };
 
     return jsonResp(result);
@@ -97,6 +98,7 @@ function doGet(e) {
       else if (action === 'saveOperateur')     result = handleSaveOperateur(data);
       else if (action === 'deleteTache')       result = handleDeleteTache(data);
       else if (action === 'addComment')        result = handleAddComment(data);
+      else if (action === 'saveNotif')         result = handleSaveNotif(data);
       else result = { ok:false, error:'Action payload inconnue: ' + action };
       return jsonResp(result);
     } catch(err) {
@@ -118,6 +120,7 @@ function doGet(e) {
     if (action === 'getTaches')       return jsonResp(handleGetTaches(e.parameter));
     if (action === 'getDashboard')    return jsonResp(handleGetDashboard());
     if (action === 'getComments')     return jsonResp(handleGetComments(e.parameter));
+    if (action === 'getNotifs')       return jsonResp(handleGetNotifs(e.parameter));
     if (action === 'initSheets')      return jsonResp(initSheets());
     return jsonResp({ ok:false, error:'Action GET inconnue: ' + action });
   } catch(err) {
@@ -787,4 +790,50 @@ function handleUploadFile(data) {
   } catch(err) {
     return { ok:false, error: err.message };
   }
+}
+
+// ============================================================
+// NOTIFICATIONS — partagées entre tous les opérateurs
+// ============================================================
+const SHEET_NOTIFS = 'Notifications';
+
+function handleGetNotifs(data) {
+  const since = data.since || '';
+  const ss = getSS();
+  const sh = ensureSheet(ss, SHEET_NOTIFS,
+    ['ID','Timestamp','DossierID','NumeroDossier','EtapeCode','EtapeLabel','Operateur','Message']);
+  const rows = sh.getDataRange().getValues().slice(1)
+    .filter(r => r[0]); // ignorer lignes vides
+  const notifs = rows
+    .map(r => ({
+      id:            String(r[0]),
+      timestamp:     String(r[1]),
+      dossierId:     String(r[2]),
+      numeroDossier: String(r[3]),
+      etapeCode:     String(r[4]),
+      etapeLabel:    String(r[5]),
+      operateur:     String(r[6]),
+      message:       String(r[7]),
+      readBy:        []
+    }))
+    .filter(n => !since || n.timestamp >= since)
+    .slice(-100); // 100 dernières
+  return { ok: true, notifs };
+}
+
+function handleSaveNotif(data) {
+  const ss = getSS();
+  const sh = ensureSheet(ss, SHEET_NOTIFS,
+    ['ID','Timestamp','DossierID','NumeroDossier','EtapeCode','EtapeLabel','Operateur','Message']);
+  sh.appendRow([
+    data.id            || ('N_' + Date.now()),
+    data.timestamp     || new Date().toISOString(),
+    data.dossierId     || '',
+    data.numeroDossier || '',
+    data.etapeCode     || '',
+    data.etapeLabel    || '',
+    data.operateur     || '',
+    data.message       || ''
+  ]);
+  return { ok: true };
 }

@@ -182,6 +182,8 @@ async function doLogin() {
     err.style.display='none';
     _renderNotifBell();
     showToast(`Bonjour, ${currentUser.label} ! 👋`);
+    // Charger les notifications des collègues en arrière-plan
+    loadNotifsFromGAS();
     // Charger les données depuis le Sheet
     if (APPS_SCRIPT_URL) {
       await loadProductsFromScript();
@@ -749,6 +751,14 @@ function saveReservation(accompte, depositMethod, given, change, provider, ref, 
   syncReservationToSheets(reservation);
   printReservationTicket(reservation);
   closeModal('reservationModal');
+  _addNotification({
+    dossierId:     reservation.dossierId,
+    numeroDossier: _resDossier.numeroDossier,
+    etapeCode:     'RESERVE',
+    etapeLabel:    'Réservation créée',
+    operateur:     currentUser?.label || 'Caissier',
+    message:       `Nouvelle réservation ${_resDossier.numeroDossier} — ${clientName} — ${reservation.items.map(i=>i.name).join(', ')}`
+  });
   showToast(`📋 Réservation #${reservation.id} créée — Acompte ${fmt(accompte)}`);
   // Upload des pièces jointes vers Drive (après fermeture du modal)
   if (resAttachments.length && APPS_SCRIPT_URL) {
@@ -948,6 +958,14 @@ function _doFinalize(r, method, given, change, provider, ref) {
   renderStats();
   syncToAppsScript(sale);
   syncReservationCompleteToSheets(r);
+  _addNotification({
+    dossierId:     r.dossierId || '',
+    numeroDossier: `RES-${String(r.id).padStart(3,'0')}`,
+    etapeCode:     'PAYE',
+    etapeLabel:    'Réservation finalisée',
+    operateur:     currentUser?.label || 'Caissier',
+    message:       `Réservation #${r.id} finalisée — ${r.clientName} — solde payé`
+  });
   closeModal('finalizeModal');
   printTicket(sale);
   showToast(`✅ Vente #${sale.id} enregistrée — Réservation #${r.id} finalisée !`);
@@ -975,6 +993,14 @@ function cancelReservation(id) {
   renderStockTable();
   renderReservations();
   updateResBadge();
+  _addNotification({
+    dossierId:     r.dossierId || '',
+    numeroDossier: `RES-${String(r.id).padStart(3,'0')}`,
+    etapeCode:     'ANNULE',
+    etapeLabel:    'Réservation annulée',
+    operateur:     currentUser?.label || 'Admin',
+    message:       `Réservation #${r.id} annulée — ${r.clientName}`
+  });
   showToast(`Réservation #${r.id} annulée — stock restitué`, 'info');
   syncReservationCompleteToSheets(r);
 }
@@ -3070,7 +3096,7 @@ async function apiCall(payload) {
   if (!APPS_SCRIPT_URL) return null;
 
   // ── LECTURES & LOGIN : requête GET avec params individuels ─
-  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getDossiers', 'getOperateurs', 'getTaches', 'getDashboard', 'getComments'];
+  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getDossiers', 'getOperateurs', 'getTaches', 'getDashboard', 'getComments', 'getNotifs'];
   if (getActions.includes(payload.action)) {
     try {
       let url = APPS_SCRIPT_URL + '?action=' + payload.action;
@@ -4018,6 +4044,14 @@ function saveCommande() {
   saveData();
   syncCommandeToSheets(commande);
   syncCommandeToAirtable(commande);
+  _addNotification({
+    dossierId:     commande.dossierId,
+    numeroDossier: _cmdDossier.numeroDossier,
+    etapeCode:     'RESERVE',
+    etapeLabel:    'Commande créée',
+    operateur:     currentUser?.label || 'Caissier',
+    message:       `Nouvelle commande ${_cmdDossier.numeroDossier} — ${clientName} — ${commande.items.map(i=>i.name).join(', ')}`
+  });
   closeModal('commandeModal');
   showToast(`🧾 Commande #${commande.id} créée — ${clientName}`);
   updateCmdBadge();
@@ -4223,6 +4257,14 @@ function _doCmdFinalize(c, method, given, change, provider, ref) {
   syncToAppsScript(sale);
   syncCmdUpdateToSheets(c);
   syncCmdUpdateToAirtable(c);
+  _addNotification({
+    dossierId:     c.dossierId || '',
+    numeroDossier: `CMD-${String(c.id).padStart(3,'0')}`,
+    etapeCode:     'PAYE',
+    etapeLabel:    'Commande livrée',
+    operateur:     currentUser?.label || 'Caissier',
+    message:       `Commande #${c.id} livrée — ${c.clientName} — paiement complet`
+  });
   closeModal('cmdFinalizeModal');
   printTicket(sale);
   showToast(`✅ Vente #${sale.id} enregistrée — Commande #${c.id} livrée !`);
@@ -4243,6 +4285,14 @@ function cancelCommande(id) {
   updateCmdBadge();
   syncCmdUpdateToSheets(c);
   syncCmdUpdateToAirtable(c);
+  _addNotification({
+    dossierId:     c.dossierId || '',
+    numeroDossier: `CMD-${String(c.id).padStart(3,'0')}`,
+    etapeCode:     'ANNULE',
+    etapeLabel:    'Commande annulée',
+    operateur:     currentUser?.label || 'Admin',
+    message:       `Commande #${c.id} annulée — ${c.clientName}`
+  });
   showToast(`Commande #${c.id} annulée`, 'info');
 }
 
@@ -4544,11 +4594,40 @@ function _addNotification({ dossierId, numeroDossier, etapeCode, etapeLabel, ope
   notifications.unshift(notif);
   saveNotifications();
   _renderNotifBell();
+  // Sync vers GAS — les autres opérateurs verront cette notification au prochain refresh
+  if (APPS_SCRIPT_URL) apiCall({ action:'saveNotif', ...notif });
+}
+
+// Charger les notifications récentes depuis GAS (7 derniers jours)
+async function loadNotifsFromGAS() {
+  if (!APPS_SCRIPT_URL) return;
+  try {
+    const since = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+    const r = await apiCall({ action:'getNotifs', since });
+    if (r && r.ok && Array.isArray(r.notifs) && r.notifs.length) {
+      const localIds = new Set(notifications.map(n => n.id));
+      const fresh = r.notifs.filter(n => !localIds.has(n.id));
+      if (fresh.length) {
+        notifications = [...fresh, ...notifications]
+          .sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp))
+          .slice(0, 100);
+        saveNotifications();
+        _renderNotifBell();
+      }
+    }
+  } catch(e) {}
+}
+
+// Lu/non-lu par timestamp par utilisateur (plus léger que readBy[])
+function _getLastReadTs() {
+  if (!currentUser) return Date.now();
+  return parseInt(localStorage.getItem('pos-notif-ts-' + currentUser.username) || '0');
 }
 
 function _getUnreadCount() {
   if (!currentUser) return 0;
-  return notifications.filter(n => !n.readBy.includes(currentUser.username)).length;
+  const lastRead = _getLastReadTs();
+  return notifications.filter(n => new Date(n.timestamp).getTime() > lastRead).length;
 }
 
 function _renderNotifBell() {
@@ -4565,13 +4644,6 @@ function toggleNotifPanel() {
   panel.classList.contains('open') ? closeNotifPanel() : openNotifPanel();
 }
 
-function openNotifPanel() {
-  const panel = document.getElementById('notifPanel');
-  if (!panel) return;
-  _renderNotifPanelList();
-  panel.classList.add('open');
-}
-
 function closeNotifPanel() {
   const panel = document.getElementById('notifPanel');
   if (panel) panel.classList.remove('open');
@@ -4579,12 +4651,18 @@ function closeNotifPanel() {
 
 function markAllNotifRead() {
   if (!currentUser) return;
-  notifications.forEach(n => {
-    if (!n.readBy.includes(currentUser.username)) n.readBy.push(currentUser.username);
-  });
-  saveNotifications();
+  localStorage.setItem('pos-notif-ts-' + currentUser.username, String(Date.now()));
   _renderNotifBell();
   _renderNotifPanelList();
+}
+
+function openNotifPanel() {
+  const panel = document.getElementById('notifPanel');
+  if (!panel) return;
+  _renderNotifPanelList();
+  panel.classList.add('open');
+  // Refresh silencieux depuis GAS pour voir les actions des collègues
+  loadNotifsFromGAS().then(() => _renderNotifPanelList());
 }
 
 function _renderNotifPanelList() {
@@ -4603,14 +4681,25 @@ function _renderNotifPanelList() {
     </div>`;
     return;
   }
+  const lastRead = _getLastReadTs();
+  // Icônes et couleurs pour chaque type d'événement
+  const _ntMap = {
+    RESERVE:     { icon:'📋', color:'#2563eb' },
+    PAYE:        { icon:'✅', color:'#16a34a' },
+    ANNULE:      { icon:'✗',  color:'#dc2626' },
+    COMMENT:     { icon:'💬', color:'#7c3aed' },
+    ATTRIBUTION: { icon:'👤', color:'#e8834a' },
+    SELF_ASSIGN: { icon:'✋', color:'#e8834a' },
+  };
   list.innerHTML = notifications.map(n => {
-    const isUnread = !n.readBy.includes(currentUser?.username);
+    const isUnread = new Date(n.timestamp).getTime() > lastRead;
     const dt = new Date(n.timestamp);
     const dateStr = dt.toLocaleDateString('fr-FR', { day:'2-digit', month:'short' });
     const timeStr = dt.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
+    const typeConf  = _ntMap[n.etapeCode];
     const etapeConf = ETAPES_CONFIG.find(e => e.code === n.etapeCode);
-    const icon  = n.dossierId === 'LIBRE' ? '★' : (etapeConf ? etapeConf.icon : '✓');
-    const color = n.dossierId === 'LIBRE' ? '#7c3aed' : (etapeConf ? etapeConf.color : '#16a34a');
+    const icon  = n.dossierId === 'LIBRE' ? '★' : (typeConf ? typeConf.icon : (etapeConf ? etapeConf.icon : '✓'));
+    const color = n.dossierId === 'LIBRE' ? '#7c3aed' : (typeConf ? typeConf.color : (etapeConf ? etapeConf.color : '#16a34a'));
     return `<div class="notif-item ${isUnread ? 'notif-item--unread' : ''}">
       <div style="display:flex;gap:10px;align-items:flex-start">
         <div style="width:30px;height:30px;border-radius:50%;background:${color}20;border:1.5px solid ${color};display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:${color};flex-shrink:0;margin-top:1px">${icon}</div>
@@ -4967,7 +5056,16 @@ async function submitComment(dossierId) {
   _refresh();
   showToast('Commentaire envoyé');
 
-  // Notifications locales pour @mentions
+  // Notification globale pour toute l'équipe (activité sur le dossier)
+  _addNotification({
+    dossierId,
+    numeroDossier: comment.numeroDossier,
+    etapeCode:     'COMMENT',
+    etapeLabel:    'Commentaire',
+    operateur:     comment.author,
+    message:       `${comment.author} a commenté sur ${comment.numeroDossier}${text ? ' : "'+text.slice(0,70)+(text.length>70?'…':'')+'"' : ' (pièce jointe)'}`
+  });
+  // Notifications ciblées pour les @mentions
   mentions.forEach(lbl => {
     _addNotification({ dossierId, numeroDossier:comment.numeroDossier, etapeCode:'COMMENT', etapeLabel:'Commentaire',
       operateur:comment.author, message:`${comment.author} vous a mentionné dans ${comment.numeroDossier}: "${text.slice(0,60)}${text.length>60?'…':''}"` });
@@ -5330,6 +5428,15 @@ async function confirmAttribution() {
           dateFin: '',
         });
       }
+      // Notification pour toute l'équipe
+      _addNotification({
+        dossierId:     selectedDossier.id,
+        numeroDossier: selectedDossier.numeroDossier,
+        etapeCode:     'ATTRIBUTION',
+        etapeLabel:    pendingAttrib.etapeLabel,
+        operateur:     currentUser?.label || 'Admin',
+        message:       `${currentUser?.label||'Admin'} a assigné ${cb.value} à "${pendingAttrib.etapeLabel}" — ${selectedDossier.numeroDossier}`
+      });
     } else { showToast(`Erreur pour ${cb.value}: ${r?.error||'inconnu'}`, 'error'); allOk = false; }
   }
   saveTaches();
@@ -5381,6 +5488,14 @@ async function selfAssign(etapeCode, etapeLabel) {
       });
       saveTaches();
     }
+    _addNotification({
+      dossierId:     selectedDossier.id,
+      numeroDossier: selectedDossier.numeroDossier,
+      etapeCode:     'SELF_ASSIGN',
+      etapeLabel,
+      operateur,
+      message:       `${operateur} s'est assigné à "${etapeLabel}" — ${selectedDossier.numeroDossier}`
+    });
     showToast(`✅ Vous êtes assigné à "${etapeLabel}"`);
     selectDossier(selectedDossier.id);
   } else {
