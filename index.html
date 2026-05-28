@@ -1147,6 +1147,15 @@
       <input id="resClientContact" placeholder="Ex: +261 34 XX XXX XX" autocomplete="off" />
     </div>
     <div class="form-group" style="margin-bottom:12px">
+      <label>Pièces jointes <span style="color:var(--muted);font-weight:400;font-size:12px">(PDF, image — max 6 fichiers)</span></label>
+      <label for="resAttachmentsInput" style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:var(--color-primary-light,#e8f4f0);color:var(--color-primary,#1a4a3a);border:1px dashed rgba(26,74,58,.3);border-radius:8px;cursor:pointer;font-size:13px;font-weight:500">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+        Ajouter des fichiers
+      </label>
+      <input id="resAttachmentsInput" type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" multiple style="display:none" onchange="addResAttachments(this.files)" />
+      <div id="resAttachmentsPreviews" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"></div>
+    </div>
+    <div class="form-group" style="margin-bottom:12px">
       <label>Acompte versé (Ar) <span style="color:var(--red)">*</span></label>
       <div style="display:flex;align-items:center;gap:10px">
         <input id="resAccompte" type="number" placeholder="0" min="0" oninput="updateResRestant()" style="flex:1" />
@@ -1363,7 +1372,7 @@
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=dossier05"></script>
+<script src="./app.js?v=attach01"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

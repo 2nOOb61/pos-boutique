@@ -91,6 +91,7 @@ let nextId = 9;
 let nextSaleId = 3;
 
 let reservations = [];
+let resAttachments = []; // { name, type, data (base64) }
 let nextReservationId = 1;
 let resPaymentMode = 'cash';
 let resSelectedProvider = 'MVola';
@@ -576,8 +577,60 @@ function openReservation() {
   document.getElementById('resMobileRef').value = '';
   resPaymentMode = 'cash';
   resSelectedProvider = 'MVola';
+  resAttachments = [];
+  renderResAttachments();
   switchResPayTab('cash');
   openModal('reservationModal');
+}
+
+async function addResAttachments(files) {
+  if (!files || !files.length) return;
+  const MAX = 6;
+  if (resAttachments.length >= MAX) { showToast(`Maximum ${MAX} pièces jointes`, 'error'); return; }
+  const remaining = MAX - resAttachments.length;
+  for (const file of Array.from(files).slice(0, remaining)) {
+    if (file.size > 8 * 1024 * 1024) { showToast(`${file.name} trop volumineux (max 8 Mo)`, 'error'); continue; }
+    try {
+      let data;
+      if (file.type.startsWith('image/')) {
+        data = await _resizeImage(file, 1200, 1200);
+      } else {
+        data = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = e => res(e.target.result);
+          r.onerror = rej;
+          r.readAsDataURL(file);
+        });
+      }
+      resAttachments.push({ name: file.name, type: file.type, data });
+    } catch(e) { showToast('Erreur lecture : ' + file.name, 'error'); }
+  }
+  renderResAttachments();
+  document.getElementById('resAttachmentsInput').value = '';
+}
+
+function removeResAttachment(idx) {
+  resAttachments.splice(idx, 1);
+  renderResAttachments();
+}
+
+function renderResAttachments() {
+  const c = document.getElementById('resAttachmentsPreviews');
+  if (!c) return;
+  if (!resAttachments.length) { c.innerHTML = ''; return; }
+  c.innerHTML = resAttachments.map((a, i) => {
+    const isImg = a.type.startsWith('image/');
+    const thumb = isImg
+      ? `<img src="${a.data}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1.5px solid var(--color-border);display:block" />`
+      : `<div style="width:64px;height:64px;border-radius:8px;border:1.5px solid var(--color-border);background:var(--color-bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px">
+           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="var(--color-primary)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+           <span style="font-size:9px;color:var(--color-text-muted);text-transform:uppercase;font-weight:700">${a.name.split('.').pop()}</span>
+         </div>`;
+    return `<div style="position:relative;display:inline-block;cursor:pointer" onclick="window.open('${a.data}','_blank')" title="${a.name}">
+      ${thumb}
+      <button onclick="event.stopPropagation();removeResAttachment(${i})" style="position:absolute;top:-6px;right:-6px;background:var(--color-danger,#dc2626);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;line-height:1">×</button>
+    </div>`;
+  }).join('');
 }
 
 function updateResRestant() {
@@ -654,7 +707,8 @@ function saveReservation(accompte, depositMethod, given, change, provider, ref, 
     depositGiven: given, depositChange: change,
     status: 'pending',
     dateFinalisation: null,
-    saleId: null
+    saleId: null,
+    attachments: resAttachments.map(a => ({ name: a.name, type: a.type, data: a.data }))
   };
 
   const _resDossier = _createDossierFromSource('reservation', reservation);
@@ -4774,6 +4828,25 @@ function renderAttrPanel(tachesD) {
            </div>`
         : '';
 
+      const attachList = (src.attachments || []);
+      const attachRow = attachList.length
+        ? `<div style="margin-top:10px">
+             <div style="font-size:11px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Pièces jointes (${attachList.length})</div>
+             <div style="display:flex;gap:8px;flex-wrap:wrap">
+               ${attachList.map((a, i) => {
+                 const isImg = (a.type || '').startsWith('image/');
+                 const ext = (a.name || '').split('.').pop().toUpperCase();
+                 return isImg
+                   ? `<img src="${a.data}" onclick="window.open(this.src,'_blank')" title="${a.name}" style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1.5px solid var(--color-border);cursor:pointer" />`
+                   : `<a href="${a.data}" download="${a.name}" title="${a.name}" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;width:56px;height:56px;border-radius:8px;border:1.5px solid var(--color-border);background:var(--color-bg);text-decoration:none">
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--color-primary)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                        <span style="font-size:9px;color:var(--color-text-muted);font-weight:700">${ext}</span>
+                      </a>`;
+               }).join('')}
+             </div>
+           </div>`
+        : '';
+
       sourceHtml = `
         <div style="background:var(--color-bg);border-radius:10px;padding:12px 14px;margin-bottom:14px;border:1px solid var(--color-border)">
           <div style="font-size:11px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">
@@ -4781,8 +4854,8 @@ function renderAttrPanel(tachesD) {
           </div>
           ${itemsHtml}
           ${contactLine}
-          ${finRow}
           ${notesRow}
+          ${attachRow}
         </div>`;
     }
   }
