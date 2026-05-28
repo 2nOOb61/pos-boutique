@@ -3144,9 +3144,25 @@ async function loadSalesFromScript(fullReload = false) {
 }
 
 // ── Charger les utilisateurs depuis Sheet ────────────────
+async function syncAllUsersToSheet() {
+  if (!APPS_SCRIPT_URL) return;
+  showLoader('Synchronisation des utilisateurs...');
+  let ok = 0;
+  for (const u of localUsers) {
+    try { await apiCall({ action: 'saveUser', user: u }); ok++; } catch(e) {}
+  }
+  hideLoader();
+  showToast(`${ok} utilisateur(s) synchronisé(s) vers le Sheet`);
+}
+
 async function loadUsersFromScript() {
   if (!APPS_SCRIPT_URL) return;
   const r = await apiCall({ action: 'getUsers' });
+  // Sheet vide → pousser tous les utilisateurs locaux pour initialiser le Sheet
+  if (r && r.ok && Array.isArray(r.users) && r.users.length === 0) {
+    await syncAllUsersToSheet();
+    return;
+  }
   if (r && r.ok && Array.isArray(r.users) && r.users.length > 0) {
     // Fusionner : le Sheet fait autorité pour rôle/label/actif,
     // mais on conserve le hash du mot de passe stocké localement
