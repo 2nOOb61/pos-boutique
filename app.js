@@ -4722,7 +4722,10 @@ function renderAttrPanel(tachesD) {
       const canAssign = ['admin','chef_atelier'].includes(currentUser_role);
       const etapeComplete = tachesEtape.length > 0 && tachesEtape.every(t => t.statut === 'TERMINE');
       const alreadySelfAssigned = tachesEtape.some(t => t.operateur === currentUser?.label);
-      const canSelfAssign = !canAssign && !etapeComplete && !alreadySelfAssigned;
+      // Seul le rôle correspondant à l'étape peut s'auto-assigner
+      const ROLE_ETAPE_MAP = { pao:'PAO', operateur_prod:'PRODUCTION', finition:'FINITION', livreur:'LIVRE' };
+      const userEtape = ROLE_ETAPE_MAP[currentUser_role];
+      const canSelfAssign = !canAssign && !etapeComplete && !alreadySelfAssigned && userEtape === e.code;
       const operateursHtml = tachesEtape.length
         ? tachesEtape.map(t => {
             const badge = t.statut==='TERMINE'
@@ -4833,6 +4836,7 @@ async function confirmAttribution() {
 async function selfAssign(etapeCode, etapeLabel) {
   if (!selectedDossier || !currentUser) return;
   const operateur = currentUser.label || currentUser.username;
+  if (!operateur) { showToast('Impossible : nom opérateur introuvable', 'error'); return; }
   const payload = {
     action:        'attribuerTache',
     dossierId:     selectedDossier.id,
