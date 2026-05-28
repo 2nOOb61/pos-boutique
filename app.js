@@ -4865,22 +4865,27 @@ function renderAttrPanel(tachesD) {
       const attachRow = attachList.length
         ? `<div style="margin-top:10px">
              <div style="font-size:11px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Pièces jointes (${attachList.length})</div>
-             <div style="display:flex;gap:8px;flex-wrap:wrap">
-               ${attachList.map((a) => {
-                 const isImg = (a.type || '').startsWith('image/');
-                 const ext   = (a.name || '').split('.').pop().toUpperCase();
-                 // Drive URL prioritaire, fallback base64 local
-                 const openUrl = a.viewUrl || a.data || '';
+             <div style="display:flex;flex-direction:column;gap:6px">
+               ${attachList.map(a => {
+                 const isImg  = (a.type || '').startsWith('image/');
+                 const ext    = (a.name || 'fichier').split('.').pop().toUpperCase();
+                 const viewUrl = a.viewUrl || a.data || '';
                  const dlUrl   = a.dlUrl   || a.data || '';
-                 return isImg
-                   ? `<img src="${a.viewUrl ? 'https://drive.google.com/thumbnail?id=' + a.viewUrl.split('/d/')[1]?.split('/')[0] + '&sz=w200' : a.data}"
-                          onclick="window.open('${openUrl}','_blank')"
-                          title="${a.name}"
-                          style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1.5px solid var(--color-border);cursor:pointer" />`
-                   : `<a href="${openUrl}" target="_blank" title="${a.name}" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;width:56px;height:56px;border-radius:8px;border:1.5px solid var(--color-border);background:var(--color-bg);text-decoration:none">
-                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="var(--color-primary)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                        <span style="font-size:9px;color:var(--color-text-muted);font-weight:700">${ext}</span>
-                      </a>`;
+                 const fileId  = a.viewUrl ? (a.viewUrl.split('/d/')[1] || '').split('/')[0] : '';
+                 const thumbSrc = isImg ? (fileId ? 'https://drive.google.com/thumbnail?id=' + fileId + '&sz=w120' : (a.data || '')) : '';
+                 const iconSvg = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+                 const eyeSvg  = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+                 const dlSvg   = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+                 return '<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--color-bg);border:1px solid var(--color-border);border-radius:8px">'
+                   + (isImg && thumbSrc
+                     ? '<img src="' + thumbSrc + '" style="width:40px;height:40px;object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid var(--color-border)" />'
+                     : '<div style="width:40px;height:40px;background:var(--color-primary-light);border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;flex-shrink:0;color:var(--color-primary)">' + iconSvg + '<span style="font-size:8px;font-weight:700">' + ext + '</span></div>')
+                   + '<span style="flex:1;min-width:0;font-size:12px;font-weight:500;color:var(--color-text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + a.name + '">' + a.name + '</span>'
+                   + '<div style="display:flex;gap:5px;flex-shrink:0">'
+                   +   '<a href="' + viewUrl + '" target="_blank" title="Visualiser dans un nouvel onglet" style="display:inline-flex;align-items:center;gap:4px;padding:4px 8px;background:var(--color-primary-light);color:var(--color-primary);border:1px solid rgba(26,74,58,.2);border-radius:6px;text-decoration:none;font-size:11px;font-weight:600">' + eyeSvg + ' Voir</a>'
+                   +   '<a href="' + dlUrl + '" download="' + a.name + '" target="_blank" title="Télécharger" style="display:inline-flex;align-items:center;gap:4px;padding:4px 8px;background:#fdf0e8;color:#e8834a;border:1px solid rgba(232,131,74,.2);border-radius:6px;text-decoration:none;font-size:11px;font-weight:600">' + dlSvg + ' DL</a>'
+                   + '</div>'
+                   + '</div>';
                }).join('')}
              </div>
            </div>`
