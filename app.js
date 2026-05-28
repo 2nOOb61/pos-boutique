@@ -4710,6 +4710,8 @@ function renderDossiers() {
 async function selectDossier(id) {
   selectedDossier = dossiers.find(d => d.id === id);
   renderDossiers();
+  // Mobile : masquer la liste, afficher le panneau détail
+  document.querySelector('.attr-layout')?.classList.add('dossier-selected');
   const panel = document.getElementById('attrPanel');
   if (!panel) return;
   panel.innerHTML = `<div style="text-align:center;padding:40px 0;color:var(--color-text-muted)">
@@ -4730,16 +4732,81 @@ async function selectDossier(id) {
   renderAttrPanel(tachesD);
 }
 
+function backToDossierList() {
+  document.querySelector('.attr-layout')?.classList.remove('dossier-selected');
+  selectedDossier = null;
+  renderDossiers();
+}
+
 function renderAttrPanel(tachesD) {
   const panel = document.getElementById('attrPanel');
   if (!panel || !selectedDossier) return;
   const d = selectedDossier;
+
+  // Récupérer la source (réservation ou commande) pour afficher les vrais détails
+  let sourceHtml = '';
+  if (d.sourceType && d.sourceId) {
+    const src = d.sourceType === 'reservation'
+      ? reservations.find(r => String(r.id) === String(d.sourceId))
+      : commandes.find(c => String(c.id) === String(d.sourceId));
+    if (src) {
+      const items = (src.items || []);
+      const itemsHtml = items.length
+        ? items.map(i => `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--color-border)">
+            <span style="font-size:13px;color:var(--color-text-primary);font-weight:500">${i.name}</span>
+            <span style="font-size:12px;color:var(--color-text-secondary)">× ${i.qty || 1}${i.price ? ' — ' + formatMGA(i.price) : ''}</span>
+          </div>`).join('')
+        : `<div style="font-size:13px;color:var(--color-text-muted);font-style:italic">Aucun article</div>`;
+
+      const contactLine = src.clientContact
+        ? `<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--color-text-secondary);margin-top:6px">
+             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.37 2 2 0 0 1 3.6 1.17h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.91 8.91a16 16 0 0 0 6.16 6.16l.91-.91a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+             ${src.clientContact}
+           </div>`
+        : '';
+
+      const finRow = (d.sourceType === 'reservation' && (src.total || src.accompte !== undefined))
+        ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+             ${src.total    ? `<span style="background:var(--color-primary-light);color:var(--color-primary);padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600">Total: ${formatMGA(src.total)}</span>` : ''}
+             ${src.accompte ? `<span style="background:var(--color-success-bg);color:var(--color-success);padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600">Acompte: ${formatMGA(src.accompte)}</span>` : ''}
+             ${src.restant  ? `<span style="background:var(--color-warning-bg);color:var(--color-warning);padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600">Restant: ${formatMGA(src.restant)}</span>` : ''}
+           </div>`
+        : '';
+
+      const notesRow = src.notes
+        ? `<div style="margin-top:8px;padding:8px 10px;background:var(--color-warning-bg);border-radius:8px;font-size:12px;color:var(--color-text-primary);border-left:3px solid var(--color-warning)">
+             <strong>Notes :</strong> ${src.notes}
+           </div>`
+        : '';
+
+      sourceHtml = `
+        <div style="background:var(--color-bg);border-radius:10px;padding:12px 14px;margin-bottom:14px;border:1px solid var(--color-border)">
+          <div style="font-size:11px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">
+            ${d.sourceType === 'reservation' ? '📋 Réservation' : '🛒 Commande'} #${d.sourceId}
+          </div>
+          ${itemsHtml}
+          ${contactLine}
+          ${finRow}
+          ${notesRow}
+        </div>`;
+    }
+  }
+
   panel.innerHTML = `
-    <div style="border-bottom:1px solid var(--color-border);padding-bottom:14px;margin-bottom:16px">
-      <div style="font-size:12px;font-family:'DM Mono',monospace;color:var(--color-text-muted);margin-bottom:4px">${d.numeroDossier}</div>
-      <div style="font-weight:700;font-size:16px;color:var(--color-primary)">${d.produit}</div>
-      <div style="font-size:13px;color:var(--color-text-secondary);margin-top:2px">Client: ${d.client} · Qté: ${d.quantite}</div>
+    <div style="padding:14px 16px;border-bottom:1px solid var(--color-border);display:flex;align-items:center;gap:10px">
+      <button class="btn-back-dossier" onclick="backToDossierList()" style="display:none;align-items:center;gap:4px;padding:5px 10px;border-radius:7px;background:var(--color-primary-light);color:var(--color-primary);border:1px solid rgba(26,74,58,.2);cursor:pointer;font-size:12px;font-weight:600">
+        ← Retour
+      </button>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:11px;font-family:'DM Mono',monospace;color:var(--color-text-muted)">${d.numeroDossier} · ${d.sourceVente || ''}</div>
+        <div style="font-weight:700;font-size:15px;color:var(--color-primary);margin-top:2px">${d.produit}</div>
+        <div style="font-size:12px;color:var(--color-text-secondary);margin-top:1px">Client: <strong>${d.client}</strong> · Qté totale: ${d.quantite} · Priorité: <span style="font-weight:600;color:${d.priorite==='Urgente'?'var(--color-danger)':d.priorite==='Haute'?'var(--color-warning)':'var(--color-text-muted)'}">${d.priorite}</span></div>
+      </div>
     </div>
+    <div style="padding:14px 16px">
+      ${sourceHtml}
+      <div style="margin:0 -16px">
     ${ETAPES_CONFIG.map(e => {
       const tachesEtape = tachesD.filter(t => t.etapeCode === e.code);
       const currentUser_role = currentUser?.role||'';
@@ -4783,6 +4850,8 @@ function renderAttrPanel(tachesD) {
           : ''}
       </div>`;
     }).join('')}
+      </div>
+    </div>
   `;
 }
 

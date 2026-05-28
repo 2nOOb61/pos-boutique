@@ -30,7 +30,14 @@
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
 .attr-layout { display:grid; grid-template-columns:1fr 340px; gap:20px; align-items:start; }
-@media(max-width:900px) { .attr-layout { grid-template-columns:1fr; } .attr-right { position:static; } }
+@media(max-width:900px) {
+  .attr-layout { grid-template-columns:1fr; }
+  .attr-right { position:static; }
+  .attr-layout.dossier-selected .attr-left { display:none; }
+  .attr-layout.dossier-selected .attr-right { display:block; }
+  .btn-back-dossier { display:inline-flex !important; }
+}
+@media(min-width:901px) { .btn-back-dossier { display:none !important; } }
 .attr-left { display:flex; flex-direction:column; gap:10px; }
 .attr-right { position:sticky; top:80px; }
 .attr-panel { background:var(--color-surface); border:1px solid var(--color-border); border-radius:14px; overflow:hidden; min-height:200px; }
@@ -146,7 +153,7 @@
     <button class="bnav-btn" id="bnav-users" data-roles="admin" onclick="showPage('users',null,this)">
       <span class="bnav-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>Comptes
     </button>
-    <button class="bnav-btn" id="bnav-attribution" data-roles="admin,chef_atelier" onclick="showPage('attribution',null,this)">
+    <button class="bnav-btn" id="bnav-attribution" data-roles="admin,chef_atelier,operateur_prod,pao,finition,livreur" onclick="showPage('attribution',null,this)">
       <span class="bnav-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>Attribution
     </button>
     <button class="bnav-btn" id="bnav-production" data-roles="admin,chef_atelier,operateur_prod,pao,finition,livreur,caissier,commerciale,utilisateur,gestionnaire,comptable" onclick="showPage('production',null,this)">
@@ -232,7 +239,7 @@
           <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
           <span class="sidebar-label">Utilisateurs</span>
         </button>
-        <button class="nav-btn sidebar-btn" data-roles="admin,chef_atelier" onclick="showPage('attribution',this)" aria-label="Attribution">
+        <button class="nav-btn sidebar-btn" data-roles="admin,chef_atelier,operateur_prod,pao,finition,livreur" onclick="showPage('attribution',this)" aria-label="Attribution">
           <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg></span>
           <span class="sidebar-label">Attribution</span>
         </button>
@@ -1356,7 +1363,7 @@
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=1bd1639"></script>
+<script src="./app.js?v=dossier01"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
