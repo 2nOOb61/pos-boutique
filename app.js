@@ -577,7 +577,7 @@ async function _uploadReservationAttachments(reservationId, attachments) {
     try {
       const r = await apiCall({ action:'uploadFile', fileName:att.name, mimeType:att.type, base64Data:att.data });
       if (r && r.ok) {
-        uploaded.push({ name:r.fileName||att.name, type:att.type, viewUrl:r.viewUrl, dlUrl:r.dlUrl });
+        uploaded.push({ name:r.fileName||att.name, type:att.type, fileId:r.fileId, viewUrl:r.viewUrl, dlUrl:r.dlUrl });
       } else {
         uploaded.push({ name:att.name, type:att.type, data:att.data }); // fallback local
       }
@@ -4735,6 +4735,17 @@ function initModulesProduction() {
 // ============================================================
 // COMMENTAIRES DOSSIER
 // ============================================================
+// Retourne l'URL d'une image Drive utilisable dans un <img src="">
+// drive.google.com/uc?id=X sert le contenu brut — fiable pour "anyone with link"
+function _driveImgSrc(att) {
+  if (!att) return '';
+  const fileId = att.fileId
+    || (att.viewUrl ? (att.viewUrl.split('/d/')[1]||'').split('/')[0] : '')
+    || (att.dlUrl   ? (att.dlUrl.split('id=')[1]||'').split('&')[0]  : '');
+  if (fileId) return 'https://drive.google.com/uc?id=' + fileId;
+  return att.data || ''; // fallback base64 local
+}
+
 function saveComments() {
   try { localStorage.setItem('pos-comments', JSON.stringify(dossierComments)); } catch(e) {}
 }
@@ -4775,11 +4786,10 @@ function renderCommentsSection(dossierId, comments) {
         const attachHtml = (c.attachments||[]).length
           ? '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:6px">'
             + c.attachments.map(a => {
-                const isImg = (a.type||'').startsWith('image/');
+                const isImg   = (a.type||'').startsWith('image/');
                 const viewUrl = a.viewUrl || a.data || '';
                 const dlUrl   = a.dlUrl   || a.data || '';
-                const fileId  = a.viewUrl ? (a.viewUrl.split('/d/')[1]||'').split('/')[0] : '';
-                const thumbSrc = isImg ? (fileId ? 'https://drive.google.com/thumbnail?id='+fileId+'&sz=w80' : a.data||'') : '';
+                const thumbSrc = isImg ? _driveImgSrc(a) : '';
                 const ext = (a.name||'').split('.').pop().toUpperCase();
                 return '<div style="position:relative">'
                   + (isImg && thumbSrc
@@ -4971,7 +4981,7 @@ async function submitComment(dossierId) {
       for (const att of comment.attachments) {
         try {
           const r = await apiCall({ action:'uploadFile', fileName:att.name, mimeType:att.type, base64Data:att.data });
-          uploaded.push(r?.ok ? { name:r.fileName||att.name, type:att.type, viewUrl:r.viewUrl, dlUrl:r.dlUrl } : att);
+          uploaded.push(r?.ok ? { name:r.fileName||att.name, type:att.type, fileId:r.fileId, viewUrl:r.viewUrl, dlUrl:r.dlUrl } : att);
         } catch(e) { uploaded.push(att); }
       }
       // Remplacer les base64 locaux par les URLs Drive dans le commentaire
@@ -5125,12 +5135,11 @@ function renderAttrPanel(tachesD, commentsD = []) {
              <div style="font-size:11px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Pièces jointes (${attachList.length})</div>
              <div style="display:flex;flex-direction:column;gap:6px">
                ${attachList.map(a => {
-                 const isImg  = (a.type || '').startsWith('image/');
-                 const ext    = (a.name || 'fichier').split('.').pop().toUpperCase();
+                 const isImg   = (a.type || '').startsWith('image/');
+                 const ext     = (a.name || 'fichier').split('.').pop().toUpperCase();
                  const viewUrl = a.viewUrl || a.data || '';
                  const dlUrl   = a.dlUrl   || a.data || '';
-                 const fileId  = a.viewUrl ? (a.viewUrl.split('/d/')[1] || '').split('/')[0] : '';
-                 const thumbSrc = isImg ? (fileId ? 'https://drive.google.com/thumbnail?id=' + fileId + '&sz=w120' : (a.data || '')) : '';
+                 const thumbSrc = isImg ? _driveImgSrc(a) : '';
                  const iconSvg = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
                  const eyeSvg  = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
                  const dlSvg   = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
