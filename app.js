@@ -91,7 +91,9 @@ let nextId = 9;
 let nextSaleId = 3;
 
 let reservations = [];
-let resAttachments = []; // { name, type, data (base64) }
+let resAttachments   = []; // { name, type, data (base64) }
+let dossierComments  = []; // tous les commentaires chargés
+let commentAttachments = []; // pièces jointes du commentaire en cours
 let nextReservationId = 1;
 let resPaymentMode = 'cash';
 let resSelectedProvider = 'MVola';
@@ -3068,7 +3070,7 @@ async function apiCall(payload) {
   if (!APPS_SCRIPT_URL) return null;
 
   // ── LECTURES & LOGIN : requête GET avec params individuels ─
-  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getDossiers', 'getOperateurs', 'getTaches', 'getDashboard'];
+  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getDossiers', 'getOperateurs', 'getTaches', 'getDashboard', 'getComments'];
   if (getActions.includes(payload.action)) {
     try {
       let url = APPS_SCRIPT_URL + '?action=' + payload.action;
@@ -4332,6 +4334,7 @@ loadConfig();
 loadData();
 loadUsers();
 loadTachesLibres();
+loadCommentsLocal();
 loadNotifications();
 initPWA();
 _autoClearCache(); // Vide le cache automatiquement si nouvelle version déployée
@@ -4730,6 +4733,252 @@ function initModulesProduction() {
 }
 
 // ============================================================
+// COMMENTAIRES DOSSIER
+// ============================================================
+function saveComments() {
+  try { localStorage.setItem('pos-comments', JSON.stringify(dossierComments)); } catch(e) {}
+}
+function loadCommentsLocal() {
+  try { const r = localStorage.getItem('pos-comments'); if (r) dossierComments = JSON.parse(r); } catch(e) {}
+}
+
+async function loadCommentsForDossier(dossierId) {
+  if (!APPS_SCRIPT_URL) return dossierComments.filter(c => c.dossierId === dossierId);
+  try {
+    const r = await apiCall({ action:'getComments', dossierId });
+    if (r && r.ok && Array.isArray(r.comments)) {
+      // Merger : GAS fait autorité, garder les locaux non encore synchés
+      const sheetIds = new Set(r.comments.map(c => c.id));
+      const localOnly = dossierComments.filter(c => c.dossierId === dossierId && !sheetIds.has(c.id));
+      const merged = [...r.comments, ...localOnly].sort((a,b) => new Date(a.timestamp)-new Date(b.timestamp));
+      // Mettre à jour dossierComments pour ce dossier
+      dossierComments = [...dossierComments.filter(c => c.dossierId !== dossierId), ...merged];
+      saveComments();
+      return merged;
+    }
+  } catch(e) {}
+  return dossierComments.filter(c => c.dossierId === dossierId);
+}
+
+function renderCommentsSection(dossierId, comments) {
+  const container = document.getElementById('commentsSection');
+  if (!container) return;
+  const myLabel = currentUser?.label || currentUser?.username || '';
+
+  const listHtml = comments.length
+    ? comments.map(c => {
+        const dt = new Date(c.timestamp);
+        const dateStr = dt.toLocaleDateString('fr-FR',{day:'2-digit',month:'short'}) + ' ' + dt.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+        const isMe = c.author === myLabel;
+        const highlighted = (c.text || '').replace(/(@[\wÀ-ÿ]+(?:\s+[\wÀ-ÿ]+)?)/g,
+          '<span style="color:var(--color-secondary);font-weight:600">$1</span>');
+        const attachHtml = (c.attachments||[]).length
+          ? '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:6px">'
+            + c.attachments.map(a => {
+                const isImg = (a.type||'').startsWith('image/');
+                const viewUrl = a.viewUrl || a.data || '';
+                const dlUrl   = a.dlUrl   || a.data || '';
+                const fileId  = a.viewUrl ? (a.viewUrl.split('/d/')[1]||'').split('/')[0] : '';
+                const thumbSrc = isImg ? (fileId ? 'https://drive.google.com/thumbnail?id='+fileId+'&sz=w80' : a.data||'') : '';
+                const ext = (a.name||'').split('.').pop().toUpperCase();
+                return '<div style="position:relative">'
+                  + (isImg && thumbSrc
+                      ? '<img src="'+thumbSrc+'" onclick="window.open(\''+viewUrl+'\',\'_blank\')" style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--color-border);cursor:pointer" title="'+a.name+'" />'
+                      : '<a href="'+viewUrl+'" target="_blank" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:44px;height:44px;border-radius:6px;border:1px solid var(--color-border);background:var(--color-bg);text-decoration:none;color:var(--color-primary)">'
+                        + '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>'
+                        + '<span style="font-size:7px;font-weight:700">'+ext+'</span></a>')
+                  + (a.dlUrl ? '<a href="'+dlUrl+'" download="'+a.name+'" title="Télécharger" style="position:absolute;bottom:-4px;right:-4px;background:var(--color-secondary);color:#fff;border-radius:50%;width:14px;height:14px;display:flex;align-items:center;justify-content:center;text-decoration:none;font-size:8px">↓</a>' : '')
+                  + '</div>';
+              }).join('')
+            + '</div>'
+          : '';
+        return '<div style="margin-bottom:10px">'
+          + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">'
+          +   '<span style="font-size:11px;font-weight:700;color:'+(isMe?'var(--color-secondary)':'var(--color-primary)')+'">'+c.author+'</span>'
+          +   '<span style="font-size:10px;color:var(--color-text-muted)">'+dateStr+'</span>'
+          + '</div>'
+          + '<div style="background:'+(isMe?'#fdf0e8':'var(--color-bg)')+';border:1px solid '+(isMe?'rgba(232,131,74,.25)':'var(--color-border)')+';border-radius:8px;padding:8px 10px">'
+          +   '<div style="font-size:13px;color:var(--color-text-primary);white-space:pre-wrap;word-break:break-word;line-height:1.5">'+highlighted+'</div>'
+          +   attachHtml
+          + '</div>'
+          + '</div>';
+      }).join('')
+    : '<div style="font-size:12px;color:var(--color-text-muted);text-align:center;padding:10px 0;font-style:italic">Aucun commentaire</div>';
+
+  container.innerHTML = `
+    <div style="max-height:260px;overflow-y:auto;margin-bottom:10px;padding-right:4px">${listHtml}</div>
+    <div style="position:relative">
+      <textarea id="commentTextarea" onkeyup="handleCommentMention(event)"
+        placeholder="Ajouter une note… tapez @ pour mentionner un utilisateur"
+        style="width:100%;padding:8px 10px;border:1px solid var(--color-border);border-radius:8px;font-size:13px;resize:vertical;min-height:56px;box-sizing:border-box;font-family:inherit;color:var(--color-text-primary);background:var(--color-surface)"
+        onfocus="this.style.borderColor='var(--color-primary)'"
+        onblur="this.style.borderColor='var(--color-border)'"></textarea>
+      <div id="mentionDropdown" style="display:none;position:absolute;bottom:calc(100% + 4px);left:0;background:#fff;border:1px solid var(--color-border);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);z-index:200;min-width:200px;max-height:180px;overflow-y:auto"></div>
+    </div>
+    <div id="commentAttachPreviews" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"></div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+      <label for="commentAttachInput" style="display:inline-flex;align-items:center;gap:5px;padding:5px 10px;background:var(--color-bg);color:var(--color-text-secondary);border:1px solid var(--color-border);border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;flex-shrink:0">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+        Fichier
+      </label>
+      <input id="commentAttachInput" type="file" accept="image/*,.pdf,.doc,.docx" multiple style="display:none" onchange="addCommentAttachment(this.files)" />
+      <div style="flex:1"></div>
+      <button onclick="submitComment('${dossierId}')"
+        style="display:inline-flex;align-items:center;gap:5px;padding:7px 16px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        Envoyer
+      </button>
+    </div>`;
+}
+
+function handleCommentMention(event) {
+  const textarea = document.getElementById('commentTextarea');
+  const dropdown = document.getElementById('mentionDropdown');
+  if (!textarea || !dropdown) return;
+  const text = textarea.value;
+  const cursor = textarea.selectionStart;
+  const before = text.substring(0, cursor);
+  const match  = before.match(/@([\wÀ-ÿ]*)$/);
+  if (!match) { dropdown.style.display = 'none'; return; }
+  const query = match[1].toLowerCase();
+  const results = localUsers.filter(u => u.actif !== false && (
+    (u.label||'').toLowerCase().includes(query) || u.username.toLowerCase().includes(query)
+  )).slice(0, 6);
+  if (!results.length) { dropdown.style.display = 'none'; return; }
+  dropdown.style.display = 'block';
+  dropdown.innerHTML = results.map(u =>
+    '<div onclick="insertMention(\''+encodeURIComponent(u.label||u.username)+'\')"'
+    + ' style="padding:7px 12px;cursor:pointer;font-size:13px"'
+    + ' onmouseover="this.style.background=\'var(--color-primary-light)\'"'
+    + ' onmouseout="this.style.background=\'\'">'
+    + '<span style="font-weight:600">'+(u.label||u.username)+'</span>'
+    + ' <span style="font-size:11px;color:var(--color-text-muted)">'+(ROLE_LABELS[u.role]||u.role)+'</span>'
+    + '</div>'
+  ).join('');
+}
+
+function insertMention(encodedLabel) {
+  const label = decodeURIComponent(encodedLabel);
+  const textarea = document.getElementById('commentTextarea');
+  const dropdown = document.getElementById('mentionDropdown');
+  if (!textarea) return;
+  const text   = textarea.value;
+  const cursor = textarea.selectionStart;
+  const before = text.substring(0, cursor).replace(/@([\wÀ-ÿ]*)$/, '@'+label+' ');
+  textarea.value = before + text.substring(cursor);
+  textarea.focus();
+  textarea.setSelectionRange(before.length, before.length);
+  if (dropdown) dropdown.style.display = 'none';
+}
+
+async function addCommentAttachment(files) {
+  if (!files || !files.length) return;
+  const MAX = 4;
+  if (commentAttachments.length >= MAX) { showToast('Maximum 4 fichiers par commentaire', 'error'); return; }
+  const remaining = MAX - commentAttachments.length;
+  for (const file of Array.from(files).slice(0, remaining)) {
+    if (file.size > 8*1024*1024) { showToast(file.name+' trop volumineux (max 8 Mo)', 'error'); continue; }
+    try {
+      const data = file.type.startsWith('image/')
+        ? await _resizeImage(file, 1200, 1200)
+        : await new Promise((res,rej) => { const r=new FileReader(); r.onload=e=>res(e.target.result); r.onerror=rej; r.readAsDataURL(file); });
+      commentAttachments.push({ name:file.name, type:file.type, data });
+    } catch(e) { showToast('Erreur : '+file.name, 'error'); }
+  }
+  renderCommentAttachments();
+  const input = document.getElementById('commentAttachInput');
+  if (input) input.value = '';
+}
+
+function removeCommentAttachment(idx) {
+  commentAttachments.splice(idx, 1);
+  renderCommentAttachments();
+}
+
+function renderCommentAttachments() {
+  const c = document.getElementById('commentAttachPreviews');
+  if (!c) return;
+  if (!commentAttachments.length) { c.innerHTML = ''; return; }
+  c.innerHTML = commentAttachments.map((a,i) => {
+    const isImg = a.type.startsWith('image/');
+    return '<div style="position:relative;display:inline-block">'
+      + (isImg
+          ? '<img src="'+a.data+'" style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1.5px solid var(--color-border)" />'
+          : '<div style="width:44px;height:44px;border-radius:6px;border:1.5px solid var(--color-border);background:var(--color-bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:var(--color-primary)">'
+            + '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>'
+            + '<span style="font-size:8px;font-weight:700">'+a.name.split('.').pop().toUpperCase()+'</span>'
+            + '</div>')
+      + '<button onclick="removeCommentAttachment('+i+')" style="position:absolute;top:-5px;right:-5px;background:#dc2626;color:#fff;border:none;border-radius:50%;width:16px;height:16px;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0">×</button>'
+      + '</div>';
+  }).join('');
+}
+
+async function submitComment(dossierId) {
+  const textarea = document.getElementById('commentTextarea');
+  if (!textarea) return;
+  const text = textarea.value.trim();
+  if (!text && !commentAttachments.length) { showToast('Commentaire vide', 'error'); return; }
+
+  // Extraire les @mentions
+  const mentions = [];
+  const rx = /@([\wÀ-ÿ]+(?:\s+[\wÀ-ÿ]+)?)/g;
+  let m;
+  while ((m = rx.exec(text)) !== null) {
+    const u = localUsers.find(u => (u.label||u.username||'').toLowerCase() === m[1].toLowerCase());
+    if (u && !mentions.includes(u.label||u.username)) mentions.push(u.label||u.username);
+  }
+
+  // Upload pièces jointes vers Drive
+  let uploaded = [];
+  if (commentAttachments.length) {
+    showLoader('Upload pièces jointes…');
+    for (const att of commentAttachments) {
+      try {
+        const r = APPS_SCRIPT_URL ? await apiCall({ action:'uploadFile', fileName:att.name, mimeType:att.type, base64Data:att.data }) : null;
+        uploaded.push(r?.ok ? { name:r.fileName||att.name, type:att.type, viewUrl:r.viewUrl, dlUrl:r.dlUrl } : { name:att.name, type:att.type, data:att.data });
+      } catch(e) { uploaded.push({ name:att.name, type:att.type, data:att.data }); }
+    }
+    hideLoader();
+  }
+
+  const comment = {
+    id:            'CMT_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
+    dossierId,
+    numeroDossier: selectedDossier?.numeroDossier || '',
+    author:        currentUser?.label || currentUser?.username || 'Anonyme',
+    authorRole:    currentUser?.role || '',
+    text,
+    mentions,
+    attachments:   uploaded,
+    timestamp:     new Date().toISOString()
+  };
+
+  // Sauvegarde locale + GAS (fire-and-forget)
+  dossierComments.push(comment);
+  saveComments();
+  if (APPS_SCRIPT_URL) apiCall({ action:'addComment', ...comment });
+
+  // Notification locale pour les utilisateurs mentionnés
+  mentions.forEach(lbl => {
+    _addNotification({ dossierId, numeroDossier:comment.numeroDossier, etapeCode:'COMMENT', etapeLabel:'Commentaire',
+      operateur:comment.author, message:`${comment.author} vous a mentionné dans ${comment.numeroDossier}: "${text.slice(0,60)}${text.length>60?'…':''}"` });
+  });
+
+  // Vider le formulaire
+  textarea.value = '';
+  commentAttachments = [];
+  renderCommentAttachments();
+
+  // Rafraîchir l'affichage
+  const updated = dossierComments.filter(c => c.dossierId === dossierId)
+    .sort((a,b) => new Date(a.timestamp)-new Date(b.timestamp));
+  renderCommentsSection(dossierId, updated);
+  const countEl = document.getElementById('commentCount');
+  if (countEl) countEl.textContent = updated.length;
+  showToast('Commentaire ajouté');
+}
+
+// ============================================================
 // PAGE ATTRIBUTION
 // ============================================================
 let _pendingSelectDossierId = null;
@@ -4802,12 +5051,17 @@ async function selectDossier(id) {
   const panel = document.getElementById('attrPanel');
   if (!panel) return;
   panel.innerHTML = `<div style="text-align:center;padding:40px 0;color:var(--color-text-muted)">
-    <div class="spinner" style="margin:0 auto 12px"></div>Chargement des tâches...
+    <div class="spinner" style="margin:0 auto 12px"></div>Chargement...
   </div>`;
   let tachesD = [];
+  let commentsD = [];
   if (APPS_SCRIPT_URL) {
-    const r = await apiCall({ action:'getTaches', dossierId:id });
-    if (r && r.ok) tachesD = r.taches.filter(t => t.dossierId === id);
+    const [r1, c1] = await Promise.all([
+      apiCall({ action:'getTaches', dossierId:id }),
+      loadCommentsForDossier(id)
+    ]);
+    if (r1 && r1.ok) tachesD = r1.taches.filter(t => t.dossierId === id);
+    commentsD = c1 || [];
   } else {
     // Lire depuis localStorage — même source que la page Production
     try {
@@ -4815,8 +5069,9 @@ async function selectDossier(id) {
       const allTaches = raw ? JSON.parse(raw) : [];
       tachesD = allTaches.filter(t => t.dossierId === id);
     } catch(e) { tachesD = []; }
+    commentsD = dossierComments.filter(c => c.dossierId === id);
   }
-  renderAttrPanel(tachesD);
+  renderAttrPanel(tachesD, commentsD);
 }
 
 function backToDossierList() {
@@ -4825,7 +5080,7 @@ function backToDossierList() {
   renderDossiers();
 }
 
-function renderAttrPanel(tachesD) {
+function renderAttrPanel(tachesD, commentsD = []) {
   const panel = document.getElementById('attrPanel');
   if (!panel || !selectedDossier) return;
   const d = selectedDossier;
@@ -4963,7 +5218,16 @@ function renderAttrPanel(tachesD) {
     }).join('')}
       </div>
     </div>
+    <div style="border-top:1.5px solid var(--color-border);padding:14px 16px">
+      <div style="font-size:12px;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">
+        💬 Commentaires &amp; notes (<span id="commentCount">${commentsD.length}</span>)
+      </div>
+      <div id="commentsSection"></div>
+    </div>
   `;
+  // Initialiser la section commentaires
+  commentAttachments = [];
+  renderCommentsSection(d.id, commentsD);
 }
 
 function openAttrib(etapeCode, etapeLabel) {

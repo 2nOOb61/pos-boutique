@@ -64,6 +64,7 @@ function doPost(e) {
     else if (action === 'pointerAction')     result = handlePointerAction(data);
     else if (action === 'getDashboard')      result = handleGetDashboard();
     else if (action === 'uploadFile')        result = handleUploadFile(data);
+    else if (action === 'addComment')        result = handleAddComment(data);
     else result = { ok:false, error:'Action inconnue: ' + action };
 
     return jsonResp(result);
@@ -95,6 +96,7 @@ function doGet(e) {
       else if (action === 'pointerAction')     result = handlePointerAction(data);
       else if (action === 'saveOperateur')     result = handleSaveOperateur(data);
       else if (action === 'deleteTache')       result = handleDeleteTache(data);
+      else if (action === 'addComment')        result = handleAddComment(data);
       else result = { ok:false, error:'Action payload inconnue: ' + action };
       return jsonResp(result);
     } catch(err) {
@@ -115,6 +117,7 @@ function doGet(e) {
     if (action === 'getOperateurs')   return jsonResp(handleGetOperateurs());
     if (action === 'getTaches')       return jsonResp(handleGetTaches(e.parameter));
     if (action === 'getDashboard')    return jsonResp(handleGetDashboard());
+    if (action === 'getComments')     return jsonResp(handleGetComments(e.parameter));
     if (action === 'initSheets')      return jsonResp(initSheets());
     return jsonResp({ ok:false, error:'Action GET inconnue: ' + action });
   } catch(err) {
@@ -698,6 +701,56 @@ function handleGetDashboard() {
     dossiers:kpi,
     operateurs:Object.values(opStats)
   };
+}
+
+// ============================================================
+// COMMENTAIRES DOSSIER
+// ============================================================
+const SHEET_COMMENTS = 'Commentaires';
+
+function handleGetComments(data) {
+  const dossierId = data.dossierId || '';
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sh = ensureSheet(ss, SHEET_COMMENTS,
+    ['ID','DossierID','NumeroDossier','Auteur','Role','Texte','Mentions','Attachments','Timestamp']);
+  const rows = sh.getDataRange().getValues().slice(1);
+  const comments = rows
+    .filter(r => !dossierId || String(r[1]) === String(dossierId))
+    .map(r => ({
+      id:            String(r[0]),
+      dossierId:     String(r[1]),
+      numeroDossier: String(r[2]),
+      author:        String(r[3]),
+      authorRole:    String(r[4]),
+      text:          String(r[5]),
+      mentions:      _safeParse(r[6], []),
+      attachments:   _safeParse(r[7], []),
+      timestamp:     String(r[8])
+    }));
+  return { ok: true, comments };
+}
+
+function handleAddComment(data) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sh = ensureSheet(ss, SHEET_COMMENTS,
+    ['ID','DossierID','NumeroDossier','Auteur','Role','Texte','Mentions','Attachments','Timestamp']);
+  const id = data.id || ('CMT_' + Date.now() + '_' + Math.random().toString(36).slice(2,6));
+  sh.appendRow([
+    id,
+    data.dossierId     || '',
+    data.numeroDossier || '',
+    data.author        || '',
+    data.authorRole    || '',
+    data.text          || '',
+    JSON.stringify(data.mentions     || []),
+    JSON.stringify(data.attachments  || []),
+    data.timestamp     || new Date().toISOString()
+  ]);
+  return { ok: true, commentId: id };
+}
+
+function _safeParse(val, fallback) {
+  try { return val ? JSON.parse(val) : fallback; } catch(e) { return fallback; }
 }
 
 // ============================================================
