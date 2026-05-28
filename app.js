@@ -3175,7 +3175,15 @@ async function loadReservationsFromScript() {
   showLoader('Chargement des réservations...');
   const r = await apiCall({ action: 'getReservations' });
   hideLoader();
-  if (!r || !r.ok || !Array.isArray(r.reservations) || r.reservations.length === 0) { saveData(); return; }
+  if (!r || !r.ok || !Array.isArray(r.reservations)) { saveData(); return; }
+
+  // Sheet vide (effacé volontairement) → le Sheet fait autorité, vider le local
+  if (r.reservations.length === 0) {
+    reservations = [];
+    nextReservationId = 1;
+    saveData();
+    return;
+  }
 
   // Dédupliquer les articles par nom au sein de chaque réservation (doublon possible dans le Sheet)
   const deduped = r.reservations.map(res => {
