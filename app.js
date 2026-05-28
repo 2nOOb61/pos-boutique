@@ -4928,19 +4928,7 @@ async function submitComment(dossierId) {
     if (u && !mentions.includes(u.label||u.username)) mentions.push(u.label||u.username);
   }
 
-  // Upload pièces jointes vers Drive
-  let uploaded = [];
-  if (commentAttachments.length) {
-    showLoader('Upload pièces jointes…');
-    for (const att of commentAttachments) {
-      try {
-        const r = APPS_SCRIPT_URL ? await apiCall({ action:'uploadFile', fileName:att.name, mimeType:att.type, base64Data:att.data }) : null;
-        uploaded.push(r?.ok ? { name:r.fileName||att.name, type:att.type, viewUrl:r.viewUrl, dlUrl:r.dlUrl } : { name:att.name, type:att.type, data:att.data });
-      } catch(e) { uploaded.push({ name:att.name, type:att.type, data:att.data }); }
-    }
-    hideLoader();
-  }
-
+  // Créer le commentaire immédiatement avec les previews locaux (base64)
   const comment = {
     id:            'CMT_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
     dossierId,
@@ -4949,33 +4937,51 @@ async function submitComment(dossierId) {
     authorRole:    currentUser?.role || '',
     text,
     mentions,
-    attachments:   uploaded,
+    attachments:   commentAttachments.map(a => ({ name:a.name, type:a.type, data:a.data })),
     timestamp:     new Date().toISOString()
   };
 
-  // Sauvegarde locale + GAS (fire-and-forget)
+  // ── 1. Afficher IMMÉDIATEMENT ──
   dossierComments.push(comment);
   saveComments();
-  if (APPS_SCRIPT_URL) apiCall({ action:'addComment', ...comment });
+  textarea.value = '';
+  commentAttachments = [];
+  renderCommentAttachments();
+  const _refresh = () => {
+    const updated = dossierComments.filter(c => c.dossierId === dossierId)
+      .sort((a,b) => new Date(a.timestamp)-new Date(b.timestamp));
+    if (selectedDossier?.id === dossierId) renderCommentsSection(dossierId, updated);
+    const countEl = document.getElementById('commentCount');
+    if (countEl) countEl.textContent = updated.length;
+  };
+  _refresh();
+  showToast('Commentaire envoyé');
 
-  // Notification locale pour les utilisateurs mentionnés
+  // Notifications locales pour @mentions
   mentions.forEach(lbl => {
     _addNotification({ dossierId, numeroDossier:comment.numeroDossier, etapeCode:'COMMENT', etapeLabel:'Commentaire',
       operateur:comment.author, message:`${comment.author} vous a mentionné dans ${comment.numeroDossier}: "${text.slice(0,60)}${text.length>60?'…':''}"` });
   });
 
-  // Vider le formulaire
-  textarea.value = '';
-  commentAttachments = [];
-  renderCommentAttachments();
-
-  // Rafraîchir l'affichage
-  const updated = dossierComments.filter(c => c.dossierId === dossierId)
-    .sort((a,b) => new Date(a.timestamp)-new Date(b.timestamp));
-  renderCommentsSection(dossierId, updated);
-  const countEl = document.getElementById('commentCount');
-  if (countEl) countEl.textContent = updated.length;
-  showToast('Commentaire ajouté');
+  // ── 2. Upload Drive + sync GAS en arrière-plan (sans bloquer l'UI) ──
+  if (!APPS_SCRIPT_URL) return;
+  (async () => {
+    if (comment.attachments.length) {
+      const uploaded = [];
+      for (const att of comment.attachments) {
+        try {
+          const r = await apiCall({ action:'uploadFile', fileName:att.name, mimeType:att.type, base64Data:att.data });
+          uploaded.push(r?.ok ? { name:r.fileName||att.name, type:att.type, viewUrl:r.viewUrl, dlUrl:r.dlUrl } : att);
+        } catch(e) { uploaded.push(att); }
+      }
+      // Remplacer les base64 locaux par les URLs Drive dans le commentaire
+      comment.attachments = uploaded;
+      saveComments();
+      _refresh(); // re-render avec les URLs Drive (thumbnails Drive visibles par tous)
+    }
+    // Sauvegarder dans GAS (avec les URLs Drive finales)
+    apiCall({ action:'addComment', ...comment });
+  })();
 }
 
 // ============================================================
@@ -5048,30 +5054,27 @@ async function selectDossier(id) {
   renderDossiers();
   // Mobile : masquer la liste, afficher le panneau détail
   document.querySelector('.attr-layout')?.classList.add('dossier-selected');
-  const panel = document.getElementById('attrPanel');
-  if (!panel) return;
-  panel.innerHTML = `<div style="text-align:center;padding:40px 0;color:var(--color-text-muted)">
-    <div class="spinner" style="margin:0 auto 12px"></div>Chargement...
-  </div>`;
-  let tachesD = [];
-  let commentsD = [];
-  if (APPS_SCRIPT_URL) {
-    const [r1, c1] = await Promise.all([
-      apiCall({ action:'getTaches', dossierId:id }),
-      loadCommentsForDossier(id)
-    ]);
-    if (r1 && r1.ok) tachesD = r1.taches.filter(t => t.dossierId === id);
-    commentsD = c1 || [];
-  } else {
-    // Lire depuis localStorage — même source que la page Production
-    try {
-      const raw = localStorage.getItem('pos-taches');
-      const allTaches = raw ? JSON.parse(raw) : [];
-      tachesD = allTaches.filter(t => t.dossierId === id);
-    } catch(e) { tachesD = []; }
-    commentsD = dossierComments.filter(c => c.dossierId === id);
-  }
-  renderAttrPanel(tachesD, commentsD);
+
+  // ── 1. Affichage IMMÉDIAT depuis les données locales (zéro délai) ──
+  const localTaches   = taches.filter(t => t.dossierId === id);
+  const localComments = dossierComments.filter(c => c.dossierId === id)
+    .sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+  renderAttrPanel(localTaches, localComments);
+
+  // ── 2. Refresh silencieux depuis GAS en arrière-plan ──
+  if (!APPS_SCRIPT_URL) return;
+  Promise.all([
+    apiCall({ action:'getTaches', dossierId:id }),
+    loadCommentsForDossier(id)
+  ]).then(([r1, c1]) => {
+    if (selectedDossier?.id !== id) return; // l'opérateur a changé de dossier entre-temps
+    const freshTaches   = r1?.ok ? r1.taches.filter(t => t.dossierId === id) : localTaches;
+    const freshComments = c1 || localComments;
+    // Ne re-rendre que si quelque chose a changé
+    const sameT = JSON.stringify(freshTaches)   === JSON.stringify(localTaches);
+    const sameC = JSON.stringify(freshComments) === JSON.stringify(localComments);
+    if (!sameT || !sameC) renderAttrPanel(freshTaches, freshComments);
+  }).catch(() => {});
 }
 
 function backToDossierList() {
@@ -5219,8 +5222,16 @@ function renderAttrPanel(tachesD, commentsD = []) {
       </div>
     </div>
     <div style="border-top:1.5px solid var(--color-border);padding:14px 16px">
-      <div style="font-size:12px;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">
-        💬 Commentaires &amp; notes (<span id="commentCount">${commentsD.length}</span>)
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-size:12px;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:.06em">
+          💬 Commentaires &amp; notes (<span id="commentCount">${commentsD.length}</span>)
+        </div>
+        <button onclick="refreshComments('${d.id}')" id="refreshCommentsBtn"
+          title="Voir les derniers commentaires des collègues"
+          style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;background:var(--color-bg);color:var(--color-text-secondary);border:1px solid var(--color-border);border-radius:6px;cursor:pointer;font-size:11px;font-weight:500">
+          <svg id="refreshCommentsIcon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.2"/></svg>
+          Actualiser
+        </button>
       </div>
       <div id="commentsSection"></div>
     </div>
@@ -5228,6 +5239,23 @@ function renderAttrPanel(tachesD, commentsD = []) {
   // Initialiser la section commentaires
   commentAttachments = [];
   renderCommentsSection(d.id, commentsD);
+}
+
+async function refreshComments(dossierId) {
+  const btn  = document.getElementById('refreshCommentsBtn');
+  const icon = document.getElementById('refreshCommentsIcon');
+  if (btn) btn.disabled = true;
+  if (icon) icon.style.animation = 'spin 0.7s linear infinite';
+  try {
+    const fresh = await loadCommentsForDossier(dossierId);
+    if (selectedDossier?.id === dossierId) {
+      renderCommentsSection(dossierId, fresh || []);
+      const countEl = document.getElementById('commentCount');
+      if (countEl) countEl.textContent = (fresh||[]).length;
+    }
+  } catch(e) {}
+  if (icon) icon.style.animation = '';
+  if (btn) btn.disabled = false;
 }
 
 function openAttrib(etapeCode, etapeLabel) {
