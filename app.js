@@ -5194,6 +5194,9 @@ function _tacheRow(t) {
   const prioColor = t.priorite==='Urgente'?'var(--color-danger)':t.priorite==='Haute'?'var(--color-warning)':'';
   const prioBadge = isLibre && t.priorite && t.priorite !== 'Normale'
     ? `<span style="font-size:10px;font-weight:700;color:${prioColor};margin-left:6px">${t.priorite}</span>` : '';
+  const voirBtn = !isLibre
+    ? `<button onclick="openAttribForDossier('${t.dossierId}')" title="Voir les détails du dossier" style="margin-left:6px;padding:4px 9px;border-radius:6px;background:var(--color-primary-light);color:var(--color-primary);border:1px solid rgba(26,74,58,.18);cursor:pointer;font-size:11px;font-weight:600;white-space:nowrap;flex-shrink:0">Détails →</button>`
+    : '';
   return `<div class="tache-row ${isEC?'tache-row--encours':''} ${isDone?'tache-row--done':''}">
     <div style="width:32px;height:32px;border-radius:50%;background:${etape.color}15;border:1.5px solid ${etape.color};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:13px;font-weight:700;color:${etape.color}">${etape.icon}</div>
     <div style="flex:1;min-width:0">
@@ -5203,7 +5206,7 @@ function _tacheRow(t) {
       ${isLibre && t.photos?.length ? `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:4px;margin-bottom:2px">${t.photos.map(src=>`<img src="${src}" onclick="window.open(this.src,'_blank')" style="width:52px;height:52px;object-fit:cover;border-radius:8px;border:1.5px solid var(--color-border);cursor:pointer" />`).join('')}</div>` : ''}
       <div style="font-size:12px;color:var(--color-text-secondary)">${subLine}</div>
     </div>
-    <div style="display:flex;align-items:center;flex-shrink:0">${actions}${deleteBtn}</div>
+    <div style="display:flex;align-items:center;gap:4px;flex-shrink:0">${actions}${voirBtn}${deleteBtn}</div>
   </div>`;
 }
 
