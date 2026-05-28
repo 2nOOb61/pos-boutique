@@ -4766,13 +4766,7 @@ function renderAttrPanel(tachesD) {
            </div>`
         : '';
 
-      const finRow = (d.sourceType === 'reservation' && (src.total || src.accompte !== undefined))
-        ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
-             ${src.total    ? `<span style="background:var(--color-primary-light);color:var(--color-primary);padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600">Total: ${formatMGA(src.total)}</span>` : ''}
-             ${src.accompte ? `<span style="background:var(--color-success-bg);color:var(--color-success);padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600">Acompte: ${formatMGA(src.accompte)}</span>` : ''}
-             ${src.restant  ? `<span style="background:var(--color-warning-bg);color:var(--color-warning);padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600">Restant: ${formatMGA(src.restant)}</span>` : ''}
-           </div>`
-        : '';
+      const finRow = '';
 
       const notesRow = src.notes
         ? `<div style="margin-top:8px;padding:8px 10px;background:var(--color-warning-bg);border-radius:8px;font-size:12px;color:var(--color-text-primary);border-left:3px solid var(--color-warning)">
