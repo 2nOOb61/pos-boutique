@@ -1414,6 +1414,25 @@
       <input id="clientContact" placeholder="Ex: +261 34 XX XXX XX" autocomplete="off" />
     </div>
 
+    <!-- Type client -->
+    <div style="margin-bottom:12px">
+      <label style="display:block;font-size:12px;font-weight:600;color:#57534e;margin-bottom:6px">Type de client</label>
+      <div style="display:flex;gap:8px">
+        <button id="payBtnParticulier" onclick="setClientType('pay','particulier')"
+          style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 10px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;border:2px solid #1a4a3a;background:#1a4a3a;color:#fff;transition:all .15s">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          Particulier
+        </button>
+        <button id="payBtnCorporate" onclick="setClientType('pay','corporate')"
+          style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 10px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;border:2px solid #e5e3df;background:#fff;color:#78716c;transition:all .15s">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
+          Corporate
+        </button>
+      </div>
+      <input id="payClientCompany" placeholder="Nom de la société / entreprise" autocomplete="off"
+        style="display:none;margin-top:8px;width:100%;padding:8px 12px;border:1px solid #e5e3df;border-radius:8px;font-size:13px;color:#1c1917;background:#fff;outline:none" />
+    </div>
+
     <!-- Mode de récupération -->
     <div style="margin-bottom:12px">
       <label style="display:block;font-size:12px;font-weight:600;color:#57534e;margin-bottom:6px">Mode de récupération</label>
@@ -1502,6 +1521,25 @@
     <div class="form-group" style="margin-bottom:12px">
       <label>Contact / Téléphone</label>
       <input id="resClientContact" placeholder="Ex: +261 34 XX XXX XX" autocomplete="off" />
+    </div>
+
+    <!-- Type client réservation -->
+    <div style="margin-bottom:12px">
+      <label style="display:block;font-size:12px;font-weight:600;color:#57534e;margin-bottom:6px">Type de client</label>
+      <div style="display:flex;gap:8px">
+        <button id="resBtnParticulier" onclick="setClientType('res','particulier')"
+          style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 10px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;border:2px solid #1a4a3a;background:#1a4a3a;color:#fff;transition:all .15s">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          Particulier
+        </button>
+        <button id="resBtnCorporate" onclick="setClientType('res','corporate')"
+          style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 10px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;border:2px solid #e5e3df;background:#fff;color:#78716c;transition:all .15s">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
+          Corporate
+        </button>
+      </div>
+      <input id="resClientCompany" placeholder="Nom de la société / entreprise" autocomplete="off"
+        style="display:none;margin-top:8px;width:100%;padding:8px 12px;border:1px solid #e5e3df;border-radius:8px;font-size:13px;color:#1c1917;background:#fff;outline:none" />
     </div>
 
     <!-- Mode de récupération réservation -->

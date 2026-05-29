@@ -496,6 +496,9 @@ function openPayment(mode) {
   document.getElementById('mobileRef').value='';
   document.getElementById('clientName').value='';
   document.getElementById('clientContact').value='';
+  // Reset type client
+  setClientType('pay', 'particulier');
+  document.getElementById('payClientCompany').value = '';
   // Reset livraison
   setDeliveryMode('retrait');
   document.getElementById('deliveryAddress').value = '';
@@ -503,6 +506,18 @@ function openPayment(mode) {
   document.getElementById('deliveryDate').value = '';
   switchPayTab(mode);
   openModal('paymentModal');
+}
+
+// ── Type client (Particulier / Corporate) ──
+function setClientType(ctx, type) {
+  const isCorp = type === 'corporate';
+  const prefix = ctx === 'res' ? 'res' : 'pay';
+  const btnP = document.getElementById(`${prefix}BtnParticulier`);
+  const btnC = document.getElementById(`${prefix}BtnCorporate`);
+  const inp  = document.getElementById(`${prefix}ClientCompany`);
+  if (btnP) { btnP.style.background = isCorp ? '#fff' : '#1a4a3a'; btnP.style.color = isCorp ? '#78716c' : '#fff'; btnP.style.borderColor = isCorp ? '#e5e3df' : '#1a4a3a'; }
+  if (btnC) { btnC.style.background = isCorp ? '#2563eb' : '#fff'; btnC.style.color = isCorp ? '#fff' : '#78716c'; btnC.style.borderColor = isCorp ? '#2563eb' : '#e5e3df'; }
+  if (inp)  { inp.style.display = isCorp ? 'block' : 'none'; if (!isCorp) inp.value = ''; }
 }
 
 // ── Livraison / Retrait ──
@@ -560,6 +575,9 @@ function confirmPayment() {
   const acc = getAccompte();
   const clientName    = document.getElementById('clientName').value.trim();
   const clientContact = document.getElementById('clientContact').value.trim();
+  const isCorp        = document.getElementById('payBtnCorporate')?.style.background === 'rgb(37, 99, 235)';
+  const clientType    = isCorp ? 'corporate' : 'particulier';
+  const clientCompany = isCorp ? (document.getElementById('payClientCompany')?.value.trim() || '') : '';
   // Livraison
   const isLiv          = document.getElementById('btnModeLivraison')?.style.background === 'rgb(232, 131, 74)';
   const deliveryMode   = isLiv ? 'livraison' : 'retrait';
@@ -575,13 +593,13 @@ function confirmPayment() {
   if(paymentMode==='cash') {
     const given = parseFloat(document.getElementById('givenAmount').value)||0;
     if(given < due) { showToast('Montant insuffisant !','error'); return; }
-    recordSale(totalWithDelivery, 'cash', given, given-due, null, null, rem, acc, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate);
+    recordSale(totalWithDelivery, 'cash', given, given-due, null, null, rem, acc, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate, clientType, clientCompany);
   } else {
     const ref = document.getElementById('mobileRef').value.trim();
-    recordSale(totalWithDelivery, 'mobile', due, 0, selectedProvider, ref, rem, acc, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate);
+    recordSale(totalWithDelivery, 'mobile', due, 0, selectedProvider, ref, rem, acc, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate, clientType, clientCompany);
   }
 }
-function recordSale(total, method, given, change, provider, ref, remise=0, accompte=0, clientName='', clientContact='', deliveryMode='retrait', deliveryAddress='', deliveryFee=0, deliveryDate='') {
+function recordSale(total, method, given, change, provider, ref, remise=0, accompte=0, clientName='', clientContact='', deliveryMode='retrait', deliveryAddress='', deliveryFee=0, deliveryDate='', clientType='particulier', clientCompany='') {
   cart.forEach(item => {
     const p = products.find(pr=>pr.id===item.id);
     if(p) p.stock -= item.qty;
@@ -596,7 +614,8 @@ function recordSale(total, method, given, change, provider, ref, remise=0, accom
     subtotal, remise, total, accompte,
     due: Math.max(0, total - accompte),
     method, given, change, provider, ref,
-    deliveryMode, deliveryAddress, deliveryFee, deliveryDate
+    deliveryMode, deliveryAddress, deliveryFee, deliveryDate,
+    clientType, clientCompany
   };
   sales.unshift(sale);
   printTicket(sale);
@@ -659,6 +678,9 @@ function openReservation() {
   resAttachments = [];
   renderResAttachments();
   switchResPayTab('cash');
+  // Reset type client
+  setClientType('res', 'particulier');
+  document.getElementById('resClientCompany').value = '';
   // Reset livraison
   setResDeliveryMode('retrait');
   document.getElementById('resDeliveryAddress').value = '';
@@ -778,6 +800,10 @@ function confirmReservation() {
   if (acc <= 0)    { showToast('L\'acompte doit être supérieur à 0 !', 'error'); return; }
   if (acc > net)   { showToast('L\'acompte ne peut pas dépasser le total !', 'error'); return; }
 
+  // Type client
+  const isResCorp     = document.getElementById('resBtnCorporate')?.style.background === 'rgb(37, 99, 235)';
+  const clientType    = isResCorp ? 'corporate' : 'particulier';
+  const clientCompany = isResCorp ? (document.getElementById('resClientCompany')?.value.trim() || '') : '';
   // Livraison
   const isLiv          = document.getElementById('resBtnModeLivraison')?.style.background === 'rgb(232, 131, 74)';
   const deliveryMode   = isLiv ? 'livraison' : 'retrait';
@@ -790,14 +816,14 @@ function confirmReservation() {
     const given = parseFloat(document.getElementById('resGiven').value) || 0;
     if (given < acc) { showToast('Montant remis insuffisant pour l\'acompte !', 'error'); return; }
     const change = given - acc;
-    saveReservation(acc, 'cash', given, change, null, null, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate);
+    saveReservation(acc, 'cash', given, change, null, null, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate, clientType, clientCompany);
   } else {
     const ref = document.getElementById('resMobileRef').value.trim();
-    saveReservation(acc, 'mobile', acc, 0, resSelectedProvider, ref, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate);
+    saveReservation(acc, 'mobile', acc, 0, resSelectedProvider, ref, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate, clientType, clientCompany);
   }
 }
 
-function saveReservation(accompte, depositMethod, given, change, provider, ref, clientName, clientContact, deliveryMode='retrait', deliveryAddress='', deliveryFee=0, deliveryDate='') {
+function saveReservation(accompte, depositMethod, given, change, provider, ref, clientName, clientContact, deliveryMode='retrait', deliveryAddress='', deliveryFee=0, deliveryDate='', clientType='particulier', clientCompany='') {
   const subtotal = getSubtotal();
   const remise   = getRemise();
   const total    = getNetTotal();
@@ -822,7 +848,8 @@ function saveReservation(accompte, depositMethod, given, change, provider, ref, 
     dateFinalisation: null,
     saleId: null,
     attachments: resAttachments.map(a => ({ name: a.name, type: a.type, data: a.data })),
-    deliveryMode, deliveryAddress, deliveryFee, deliveryDate
+    deliveryMode, deliveryAddress, deliveryFee, deliveryDate,
+    clientType, clientCompany
   };
 
   const _resDossier = _createDossierFromSource('reservation', reservation);
