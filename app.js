@@ -659,7 +659,33 @@ function openReservation() {
   resAttachments = [];
   renderResAttachments();
   switchResPayTab('cash');
+  // Reset livraison
+  setResDeliveryMode('retrait');
+  document.getElementById('resDeliveryAddress').value = '';
+  document.getElementById('resDeliveryFee').value = '';
+  document.getElementById('resDeliveryDate').value = '';
   openModal('reservationModal');
+}
+
+function setResDeliveryMode(mode) {
+  const isLiv = mode === 'livraison';
+  const btnR = document.getElementById('resBtnModeRetrait');
+  const btnL = document.getElementById('resBtnModeLivraison');
+  if (btnR) { btnR.style.background = isLiv?'#fff':'#1a4a3a'; btnR.style.color = isLiv?'#78716c':'#fff'; btnR.style.borderColor = isLiv?'#e5e3df':'#1a4a3a'; }
+  if (btnL) { btnL.style.background = isLiv?'#e8834a':'#fff'; btnL.style.color = isLiv?'#fff':'#78716c'; btnL.style.borderColor = isLiv?'#e8834a':'#e5e3df'; }
+  const fields = document.getElementById('resDeliveryFields');
+  if (fields) fields.style.display = isLiv ? 'block' : 'none';
+}
+
+function setCmdDeliveryMode(mode) {
+  const isLiv = mode === 'livraison';
+  const btnR = document.getElementById('cmdBtnModeRetrait');
+  const btnL = document.getElementById('cmdBtnModeLivraison');
+  if (btnR) { btnR.style.background = isLiv?'#fff':'#1a4a3a'; btnR.style.color = isLiv?'#78716c':'#fff'; btnR.style.borderColor = isLiv?'#e5e3df':'#1a4a3a'; }
+  if (btnL) { btnL.style.background = isLiv?'#e8834a':'#fff'; btnL.style.color = isLiv?'#fff':'#78716c'; btnL.style.borderColor = isLiv?'#e8834a':'#e5e3df'; }
+  const fields = document.getElementById('cmdDeliveryFields');
+  if (fields) fields.style.display = isLiv ? 'block' : 'none';
+  updateCmdTotals();
 }
 
 async function addResAttachments(files) {
@@ -752,18 +778,26 @@ function confirmReservation() {
   if (acc <= 0)    { showToast('L\'acompte doit être supérieur à 0 !', 'error'); return; }
   if (acc > net)   { showToast('L\'acompte ne peut pas dépasser le total !', 'error'); return; }
 
+  // Livraison
+  const isLiv          = document.getElementById('resBtnModeLivraison')?.style.background === 'rgb(232, 131, 74)';
+  const deliveryMode   = isLiv ? 'livraison' : 'retrait';
+  const deliveryAddress= isLiv ? (document.getElementById('resDeliveryAddress')?.value.trim() || '') : '';
+  const deliveryFee    = isLiv ? (parseFloat(document.getElementById('resDeliveryFee')?.value) || 0) : 0;
+  const deliveryDate   = isLiv ? (document.getElementById('resDeliveryDate')?.value || '') : '';
+  if (isLiv && !deliveryAddress) { showToast("Veuillez saisir l'adresse de livraison.", 'error'); return; }
+
   if (resPaymentMode === 'cash') {
     const given = parseFloat(document.getElementById('resGiven').value) || 0;
     if (given < acc) { showToast('Montant remis insuffisant pour l\'acompte !', 'error'); return; }
     const change = given - acc;
-    saveReservation(acc, 'cash', given, change, null, null, clientName, clientContact);
+    saveReservation(acc, 'cash', given, change, null, null, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate);
   } else {
     const ref = document.getElementById('resMobileRef').value.trim();
-    saveReservation(acc, 'mobile', acc, 0, resSelectedProvider, ref, clientName, clientContact);
+    saveReservation(acc, 'mobile', acc, 0, resSelectedProvider, ref, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate);
   }
 }
 
-function saveReservation(accompte, depositMethod, given, change, provider, ref, clientName, clientContact) {
+function saveReservation(accompte, depositMethod, given, change, provider, ref, clientName, clientContact, deliveryMode='retrait', deliveryAddress='', deliveryFee=0, deliveryDate='') {
   const subtotal = getSubtotal();
   const remise   = getRemise();
   const total    = getNetTotal();
@@ -787,7 +821,8 @@ function saveReservation(accompte, depositMethod, given, change, provider, ref, 
     status: 'pending',
     dateFinalisation: null,
     saleId: null,
-    attachments: resAttachments.map(a => ({ name: a.name, type: a.type, data: a.data }))
+    attachments: resAttachments.map(a => ({ name: a.name, type: a.type, data: a.data })),
+    deliveryMode, deliveryAddress, deliveryFee, deliveryDate
   };
 
   const _resDossier = _createDossierFromSource('reservation', reservation);
@@ -1211,6 +1246,15 @@ function printReservationTicket(res) {
     ${tc.ticketShowCaissier !== false ? `<div class="row"><span>Caissier</span><span>${res.caissier||''}</span></div>` : ''}
     ${res.clientName    ? `<div class="row"><span>Client</span><span>${res.clientName}</span></div>` : ''}
     ${res.clientContact ? `<div class="row"><span>Contact</span><span>${res.clientContact}</span></div>` : ''}
+    ${res.deliveryMode === 'livraison'
+      ? `<div class="row" style="background:#fdf0e8;border-radius:4px;padding:3px 6px;margin:3px 0">
+           <span style="color:#e8834a;font-weight:700">🚚 LIVRAISON</span>
+           <span style="color:#e8834a;font-weight:600">${res.deliveryAddress||''}</span>
+         </div>
+         ${res.deliveryFee > 0 ? `<div class="row"><span>Frais livraison</span><span>+${fmt(res.deliveryFee)}</span></div>` : ''}
+         ${res.deliveryDate ? `<div class="row"><span>Date livraison</span><span>${new Date(res.deliveryDate+'T00:00:00').toLocaleDateString('fr-FR')}</span></div>` : ''}`
+      : `<div class="row"><span>Récupération</span><span>🏪 Retrait boutique</span></div>`
+    }
     <hr style="${st.sepLight}"/>
     <div class="items-section">
       ${(Array.isArray(res.items)?res.items:[]).map(i=>`<div class="row"><span>${i.name||'?'} <em style="color:#777">×${Number(i.qty)||1}</em></span><span>${((Number(i.price)||0)*(Number(i.qty)||1)).toLocaleString()} Ar</span></div>`).join('')}
@@ -3851,6 +3895,8 @@ function openCommandeModal(fromCart) {
   document.getElementById('cmdClientContact').value = '';
   document.getElementById('cmdAdresse').value = '';
   document.getElementById('cmdDateLivraison').value = '';
+  if (document.getElementById('cmdFraisLivraison')) document.getElementById('cmdFraisLivraison').value = '';
+  setCmdDeliveryMode('retrait');
   document.getElementById('cmdNotes').value = '';
   document.getElementById('cmdRemise').value = '';
   document.getElementById('cmdAccompte').value = '';
@@ -3958,11 +4004,12 @@ function updateCmdTotals() {
     const cell = document.getElementById(`cmdRowTotal_${idx}`);
     if (cell) cell.textContent = fmt((item.qty || 1) * (item.price || 0));
   });
-  const subtotal = cmdModalItems.reduce((s, i) => s + ((i.qty || 1) * (i.price || 0)), 0);
-  const remise   = Math.max(0, Math.min(subtotal, parseFloat(document.getElementById('cmdRemise')?.value) || 0));
-  const total    = Math.max(0, subtotal - remise);
-  const accompte = Math.max(0, Math.min(total, parseFloat(document.getElementById('cmdAccompte')?.value) || 0));
-  const restant  = Math.max(0, total - accompte);
+  const subtotal  = cmdModalItems.reduce((s, i) => s + ((i.qty || 1) * (i.price || 0)), 0);
+  const remise    = Math.max(0, Math.min(subtotal, parseFloat(document.getElementById('cmdRemise')?.value) || 0));
+  const fraisLiv  = parseFloat(document.getElementById('cmdFraisLivraison')?.value) || 0;
+  const total     = Math.max(0, subtotal - remise + fraisLiv);
+  const accompte  = Math.max(0, Math.min(total, parseFloat(document.getElementById('cmdAccompte')?.value) || 0));
+  const restant   = Math.max(0, total - accompte);
   if (document.getElementById('cmdSubtotalVal')) document.getElementById('cmdSubtotalVal').textContent = fmt(subtotal);
   if (document.getElementById('cmdTotalVal'))    document.getElementById('cmdTotalVal').textContent    = fmt(total);
   if (document.getElementById('cmdRestantVal'))  document.getElementById('cmdRestantVal').textContent  = fmt(restant);
@@ -4046,8 +4093,12 @@ function removeCmdPhoto(index) {
 function saveCommande() {
   const clientName    = document.getElementById('cmdClientName').value.trim();
   const clientContact = document.getElementById('cmdClientContact').value.trim();
-  const adresse       = document.getElementById('cmdAdresse').value.trim();
-  const dateLiv       = document.getElementById('cmdDateLivraison').value;
+  const isCmdLiv      = document.getElementById('cmdBtnModeLivraison')?.style.background === 'rgb(232, 131, 74)';
+  const cmdDelivMode  = isCmdLiv ? 'livraison' : 'retrait';
+  const adresse       = isCmdLiv ? (document.getElementById('cmdAdresse')?.value.trim() || '') : '';
+  const fraisLiv      = isCmdLiv ? (parseFloat(document.getElementById('cmdFraisLivraison')?.value) || 0) : 0;
+  const dateLiv       = isCmdLiv ? (document.getElementById('cmdDateLivraison')?.value || '') : '';
+  if (isCmdLiv && !adresse) { showToast("Veuillez saisir l'adresse de livraison.", 'error'); return; }
   const notes         = document.getElementById('cmdNotes').value.trim();
   const remise        = Math.max(0, parseFloat(document.getElementById('cmdRemise').value) || 0);
   const accompte      = Math.max(0, parseFloat(document.getElementById('cmdAccompte').value) || 0);
@@ -4080,12 +4131,14 @@ function saveCommande() {
     date:             new Date().toISOString(),
     caissier:         currentUser?.username || 'caissier',
     clientName, clientContact,
+    deliveryMode:     cmdDelivMode,
     adresseLivraison: adresse,
+    fraisLivraison:   fraisLiv,
     dateLivraison:    dateLiv,
     items:            cmdModalItems.map(i => ({ name: i.name.trim(), qty: i.qty, price: i.price, custom: !!i.custom })),
     notes,
     photos:           [...cmdModalPhotos],
-    subtotal, remise, total, accompte, restant,
+    subtotal, remise, total: total + fraisLiv, accompte, restant: Math.max(0, total + fraisLiv - accompte),
     depositMethod:    cmdPayMode,
     depositProvider, depositRef,
     status:           'pending',
