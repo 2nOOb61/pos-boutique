@@ -3,7 +3,11 @@
     "allow": [
       "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\Gino Ramiada\\\\Desktop\\\\appscit\\\\Nouveau dossier \\(2\\)\\\\pos-boutique\" -Force)",
       "Bash(Select-Object Name, FullName)",
-      "Bash(Format-List)"
+      "Bash(Format-List)",
+      "Bash(npm install *)",
+      "Bash(node -e ' *)",
+      "Bash(cd /tmp)",
+      "Bash(npm init *)"
     ]
   }
 }

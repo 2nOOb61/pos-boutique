@@ -4405,9 +4405,11 @@ let taches = [];
 // tachesLibres est déclaré avant le bloc INIT (ligne ~4116) pour éviter la TDZ
 let selectedDossier = null;
 let pendingAttrib = null;
+let _dossierView = 'list'; // 'list' | 'card'
 let pendingPointage = null;
 let prodFilter = 'TOUS';
 let opFilterVal = 'TOUS';
+let _prodView   = 'tasks'; // 'tasks' | 'charge'
 
 const ETAPES_CONFIG = [
   { code:'ACHAT',         label:'Achat (si besoin)',  short:'Achat',   color:'#d97706', icon:'1' },
@@ -5127,38 +5129,260 @@ async function loadDossiers() {
 function renderDossiers() {
   const container = document.getElementById('dossierListContainer');
   if (!container) return;
-  if (!dossiers.length) {
-    container.innerHTML = `<div style="text-align:center;color:var(--muted);padding:60px 0;font-size:14px">
-      <div style="font-size:40px;margin-bottom:12px">📋</div>
-      Aucun dossier — les dossiers sont créés automatiquement lors des ventes
+
+  // Mettre à jour les tabs avec les compteurs
+  _renderDossierTabs();
+
+  // Filtre recherche client-side
+  const search = (document.getElementById('dossierSearchInput')?.value || '').toLowerCase().trim();
+  let list = dossiers;
+  if (search) {
+    list = dossiers.filter(d =>
+      (d.numeroDossier || '').toLowerCase().includes(search) ||
+      (d.client || '').toLowerCase().includes(search) ||
+      (d.produit || '').toLowerCase().includes(search)
+    );
+  }
+
+  if (!list.length) {
+    container.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:56px 16px;text-align:center">
+      <div style="width:44px;height:44px;background:var(--color-bg);border-radius:12px;display:flex;align-items:center;justify-content:center;margin-bottom:12px">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.4"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      </div>
+      <p style="font-size:13px;font-weight:500;color:var(--color-text-secondary)">Aucun dossier${search?' trouvé':''}</p>
+      <p style="font-size:11px;color:var(--color-text-muted);margin-top:3px">${search?'Modifiez votre recherche':'Les dossiers sont créés automatiquement lors des ventes'}</p>
     </div>`;
     return;
   }
-  container.innerHTML = dossiers.map(d => {
-    const etape = ETAPES_CONFIG.find(e => e.code === d.statut);
-    const pct   = d.progression || 0;
-    const prioColor = d.priorite==='Urgente'?'var(--red)':d.priorite==='Haute'?'var(--yellow)':'var(--color-text-secondary)';
+
+  // Adapter le container selon le mode
+  container.className = _dossierView === 'card' ? '' : 'dossier-list-wrap';
+
+  if (_dossierView === 'card') {
+    container.innerHTML = _renderDossierCardGrid(list);
+    return;
+  }
+
+  container.innerHTML = list.map(d => {
+    const etape      = ETAPES_CONFIG.find(e => e.code === d.statut);
+    const pct        = d.progression || 0;
+    const isUrgent   = d.priorite === 'Urgente';
+    const isHaute    = d.priorite === 'Haute';
+    const prioColor  = isUrgent ? '#dc2626' : isHaute ? '#d97706' : '#d6d3d1';
+    const pctColor   = pct === 100 ? '#16a34a' : pct > 0 ? '#e8834a' : '#d6d3d1';
     const isSelected = selectedDossier?.id === d.id;
-    return `<div class="dossier-card ${isSelected?'dossier-card--selected':''}" onclick="selectDossier('${d.id}')">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-        <span style="font-family:'DM Mono',monospace;font-size:11px;color:var(--color-text-muted)">${d.numeroDossier}</span>
-        ${etape?`<span class="prod-badge" style="background:${etape.color}18;color:${etape.color}">${etape.label}</span>`:`<span class="prod-badge" style="background:var(--color-primary-light);color:var(--color-primary)">Créé</span>`}
+    const etapeColor = etape?.color || 'var(--color-primary)';
+    const etapeShort = etape?.short || 'Créé';
+
+    // Mini pipeline : 8 points colorés selon statut des tâches
+    const dTaches   = taches.filter(t => t.dossierId === d.id);
+    const pipeDots  = ETAPES_CONFIG.map(e => {
+      const te = dTaches.filter(t => t.etapeCode === e.code);
+      const s  = te.length === 0 ? 'vide'
+        : te.every(t => t.statut === 'TERMINE') ? 'done'
+        : te.some(t => t.statut === 'EN_COURS') ? 'encours'
+        : 'todo';
+      const bg = s==='done'?'#16a34a':s==='encours'?'#d97706':s==='todo'?'#2563eb':'#e5e3df';
+      return `<span class="dossier-row__pipedot" style="background:${bg}" title="${e.short}"></span>`;
+    }).join('');
+
+    return `<div class="dossier-row ${isSelected?'dossier-row--selected':''}" onclick="selectDossier('${d.id}')">
+      <div class="dossier-row__prio" style="background:${prioColor}"></div>
+      <div class="dossier-row__main">
+        <div class="dossier-row__top">
+          <span class="dossier-row__num">${d.numeroDossier}</span>
+          <span style="background:${etapeColor}18;color:${etapeColor};font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;white-space:nowrap">${etapeShort}</span>
+          ${isUrgent?`<span style="background:#fee2e2;color:#dc2626;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px">URGENT</span>`:''}
+          ${isHaute&&!isUrgent?`<span style="background:#fef3c7;color:#d97706;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px">HAUTE</span>`:''}
+        </div>
+        <div class="dossier-row__client">${d.client}</div>
+        <div class="dossier-row__produit">${d.produit} × ${d.quantite}</div>
       </div>
-      <div style="font-weight:600;font-size:14px;color:var(--color-text-primary);margin-bottom:2px">${d.client}</div>
-      <div style="font-size:13px;color:var(--color-text-secondary)">${d.produit} × ${d.quantite}</div>
-      <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:12px">
-        <span style="color:var(--color-text-muted)">📅 ${d.dateCreation}</span>
-        <span style="color:${prioColor};font-weight:500">${d.priorite}</span>
-      </div>
-      <div style="margin-top:10px;height:3px;background:var(--color-border);border-radius:2px;overflow:hidden">
-        <div style="height:100%;width:${pct}%;background:var(--color-primary);border-radius:2px;transition:.4s"></div>
+      <div class="dossier-row__right">
+        <div class="dossier-row__pipe">${pipeDots}</div>
+        <div class="dossier-row__meta">
+          <div class="dossier-row__bar"><div class="dossier-row__bar-fill" style="width:${pct}%;background:${pctColor}"></div></div>
+          <span class="dossier-row__pct" style="color:${pctColor}">${pct}%</span>
+        </div>
       </div>
     </div>`;
   }).join('');
 }
 
+function _renderDossierTabs() {
+  const el = document.getElementById('dossierStatusTabs');
+  if (!el) return;
+  const selVal = document.getElementById('dossierFilterSel')?.value || 'TOUS';
+  const tabDefs = [
+    { val:'TOUS',       label:'Tous' },
+    { val:'CREE',       label:'Créés' },
+    { val:'PAO',        label:'PAO' },
+    { val:'BAT',        label:'BAT' },
+    { val:'ACHAT',      label:'Achat' },
+    { val:'PRODUCTION', label:'Production' },
+    { val:'FINITION',   label:'Finition' },
+  ];
+  const counts = {};
+  dossiers.forEach(d => { counts[d.statut] = (counts[d.statut]||0)+1; });
+  el.innerHTML = tabDefs.map(t => {
+    const count  = t.val === 'TOUS' ? dossiers.length : (counts[t.val] || 0);
+    const active = selVal === t.val;
+    return `<button class="dossier-tab ${active?'dossier-tab--active':''}" onclick="setDossierTab('${t.val}')">
+      ${t.label}<span class="dossier-tab__count">${count}</span>
+    </button>`;
+  }).join('');
+}
+
+function setDossierTab(val) {
+  const sel = document.getElementById('dossierFilterSel');
+  if (sel) sel.value = val;
+  loadDossiers();
+}
+
+function toggleDossierView(mode) {
+  _dossierView = mode;
+  // Mettre à jour les boutons toggle
+  document.getElementById('viewToggleList')?.classList.toggle('view-toggle-btn--active', mode === 'list');
+  document.getElementById('viewToggleCard')?.classList.toggle('view-toggle-btn--active', mode === 'card');
+  // En vue carte : panel droit masqué jusqu'à sélection, liste prend toute la largeur
+  const layout = document.getElementById('attrLayout');
+  const right  = document.getElementById('attrRight');
+  if (layout && right) {
+    if (mode === 'card') {
+      layout.style.gridTemplateColumns = '1fr';
+      right.style.display = 'none';
+    } else {
+      layout.style.gridTemplateColumns = '';
+      right.style.display = '';
+    }
+  }
+  // Réinitialiser la sélection pour éviter un panel orphelin
+  selectedDossier = null;
+  renderDossiers();
+}
+
+function _renderDossierCardGrid(list) {
+  if (!list.length) {
+    return `<div style="display:flex;flex-direction:column;align-items:center;padding:56px 16px;text-align:center">
+      <div style="width:44px;height:44px;background:var(--color-bg);border-radius:12px;display:flex;align-items:center;justify-content:center;margin-bottom:12px">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.4"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      </div>
+      <p style="font-size:13px;font-weight:500;color:var(--color-text-secondary)">Aucun dossier</p>
+      <p style="font-size:11px;color:var(--color-text-muted);margin-top:3px">Les dossiers sont créés automatiquement lors des ventes</p>
+    </div>`;
+  }
+
+  const cards = list.map(d => {
+    const isUrgent  = d.priorite === 'Urgente';
+    const isHaute   = d.priorite === 'Haute';
+    const pct       = d.progression || 0;
+    const pctColor  = pct === 100 ? '#16a34a' : pct > 0 ? '#e8834a' : '#d6d3d1';
+    const topColor  = isUrgent ? '#dc2626' : isHaute ? '#d97706' : pct === 100 ? '#16a34a' : 'var(--color-border)';
+    const isSelected = selectedDossier?.id === d.id;
+    const etape     = ETAPES_CONFIG.find(e => e.code === d.statut);
+
+    // Pipeline complet avec opérateurs
+    const dTaches = taches.filter(t => t.dossierId === d.id);
+    const steps = ETAPES_CONFIG.map((e, i) => {
+      const te = dTaches.filter(t => t.etapeCode === e.code);
+      const s  = te.length === 0 ? 'vide'
+        : te.every(t => t.statut === 'TERMINE') ? 'done'
+        : te.some(t => t.statut === 'EN_COURS')  ? 'encours'
+        : 'todo';
+      const dotBg     = s==='done'?'#16a34a':s==='encours'?'#d97706':s==='todo'?'#2563eb':'#f5f5f4';
+      const dotBorder = s==='done'?'#16a34a':s==='encours'?'#d97706':s==='todo'?'#2563eb':'#d6d3d1';
+      const dotColor  = s==='vide'?'#a8a29e':'#fff';
+      const ic        = s==='done'?'✓':s==='encours'?'▶':s==='todo'?'●':'';
+      const lineColor = s==='done'?'#16a34a30':'#e5e3df';
+      const labelColor = s==='done'?'#16a34a':s==='encours'?'#d97706':s==='todo'?'#2563eb':'#c2bdb8';
+      const ops = te.map(t => t.operateur).join(',');
+      return { e, s, dotBg, dotBorder, dotColor, ic, lineColor, labelColor, ops, i };
+    });
+
+    const stepsHtml = steps.map(({ e, s, dotBg, dotBorder, dotColor, ic, lineColor, labelColor, ops, i }) => `
+      <div class="dossier-card-v2__step">
+        ${i < steps.length-1 ? `<div class="dossier-card-v2__step-line" style="background:${lineColor}"></div>` : ''}
+        <div class="dossier-card-v2__step-dot" style="background:${dotBg};border-color:${dotBorder};color:${dotColor}">
+          ${ic || (i+1)}
+        </div>
+        <div class="dossier-card-v2__step-label" style="color:${labelColor}">${e.short}</div>
+        ${ops ? `<div class="dossier-card-v2__step-op">${ops}</div>` : ''}
+      </div>`).join('');
+
+    // Badges priorité + statut
+    const prioBadge = isUrgent
+      ? `<span style="background:#fee2e2;color:#dc2626;font-size:9px;font-weight:700;padding:2px 6px;border-radius:6px">URGENT</span>`
+      : isHaute
+        ? `<span style="background:#fef3c7;color:#d97706;font-size:9px;font-weight:700;padding:2px 6px;border-radius:6px">HAUTE</span>`
+        : '';
+    const etapeBadge = etape
+      ? `<span style="background:${etape.color}18;color:${etape.color};font-size:9px;font-weight:700;padding:2px 6px;border-radius:6px">${etape.short}</span>`
+      : `<span style="background:var(--color-primary-light);color:var(--color-primary);font-size:9px;font-weight:700;padding:2px 6px;border-radius:6px">Créé</span>`;
+
+    // Date livraison
+    let dateHtml = '';
+    if (d.dateLivraison) {
+      const dlDate = new Date(d.dateLivraison.split('/').reverse().join('-'));
+      const today  = new Date(); today.setHours(0,0,0,0);
+      const diff   = Math.round((dlDate - today) / 86400000);
+      const isLate = diff < 0;
+      const txt    = isLate
+        ? `${Math.abs(diff)}j de retard`
+        : diff === 0 ? 'Aujourd\'hui !'
+        : `${diff}j restants`;
+      dateHtml = `<span class="dossier-card-v2__date ${isLate?'dossier-card-v2__date--late':''}">
+        <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        ${d.dateLivraison} · ${txt}
+      </span>`;
+    } else {
+      dateHtml = `<span class="dossier-card-v2__date">
+        <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        ${d.dateCreation || '—'}
+      </span>`;
+    }
+
+    return `<div class="dossier-card-v2 ${isSelected?'dossier-card-v2--selected':''}" onclick="selectDossier('${d.id}')">
+      <div class="dossier-card-v2__top-bar" style="background:${topColor}"></div>
+      <div class="dossier-card-v2__header">
+        <div class="dossier-card-v2__meta">
+          <span class="dossier-card-v2__num">${d.numeroDossier}</span>
+          <div class="dossier-card-v2__badges">${etapeBadge}${prioBadge}</div>
+        </div>
+        <div class="dossier-card-v2__client">${d.client}</div>
+        <div class="dossier-card-v2__produit">${d.produit} <span style="color:var(--color-text-muted)">× ${d.quantite}</span></div>
+      </div>
+      <div class="dossier-card-v2__body">
+        <div class="dossier-card-v2__pipeline-label">Pipeline de production</div>
+        <div class="dossier-card-v2__steps">${stepsHtml}</div>
+        <div class="dossier-card-v2__progress-row">
+          <div class="dossier-card-v2__progress-bar">
+            <div class="dossier-card-v2__progress-fill" style="width:${pct}%;background:${pctColor}"></div>
+          </div>
+          <span class="dossier-card-v2__pct" style="color:${pctColor}">${pct}%</span>
+        </div>
+      </div>
+      <div class="dossier-card-v2__footer">
+        ${dateHtml}
+        <button class="dossier-card-v2__action" onclick="event.stopPropagation();selectDossier('${d.id}')">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          Attribuer
+        </button>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `<div class="dossier-grid">${cards}</div>`;
+}
+
 async function selectDossier(id) {
   selectedDossier = dossiers.find(d => d.id === id);
+  // En vue carte : faire apparaître le panel droit et réduire la grille
+  if (_dossierView === 'card') {
+    const layout = document.getElementById('attrLayout');
+    const right  = document.getElementById('attrRight');
+    if (layout) layout.style.gridTemplateColumns = '1fr 420px';
+    if (right)  right.style.display = '';
+  }
   renderDossiers();
   // Mobile : masquer la liste, afficher le panneau détail
   document.querySelector('.attr-layout')?.classList.add('dossier-selected');
@@ -5256,10 +5480,14 @@ function renderAttrPanel(tachesD, commentsD = []) {
            </div>`
         : '';
 
+      const srcIcon = d.sourceType === 'reservation'
+        ? '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>'
+        : '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>';
+      const srcLabel = d.sourceType === 'reservation' ? 'Réservation' : 'Commande';
       sourceHtml = `
-        <div style="background:var(--color-bg);border-radius:10px;padding:12px 14px;margin-bottom:14px;border:1px solid var(--color-border)">
-          <div style="font-size:11px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">
-            ${d.sourceType === 'reservation' ? '📋 Réservation' : '🛒 Commande'} #${d.sourceId}
+        <div class="attr-source-card">
+          <div class="attr-source-label">
+            ${srcIcon} ${srcLabel} #${d.sourceId}
           </div>
           ${itemsHtml}
           ${contactLine}
@@ -5269,20 +5497,42 @@ function renderAttrPanel(tachesD, commentsD = []) {
     }
   }
 
+  const prioColor = d.priorite==='Urgente'?'var(--color-danger)':d.priorite==='Haute'?'var(--color-warning)':'var(--color-text-muted)';
+  const prioBg    = d.priorite==='Urgente'?'var(--color-danger-bg)':d.priorite==='Haute'?'var(--color-warning-bg)':'var(--color-bg)';
+  const pct       = d.progression || 0;
+  const pctColor  = pct===100?'var(--color-success)':pct>0?'var(--color-secondary)':'var(--color-text-muted)';
+
   panel.innerHTML = `
-    <div style="padding:14px 16px;border-bottom:1px solid var(--color-border);display:flex;align-items:center;gap:10px">
-      <button class="btn-back-dossier" onclick="backToDossierList()" style="display:none;align-items:center;gap:4px;padding:5px 10px;border-radius:7px;background:var(--color-primary-light);color:var(--color-primary);border:1px solid rgba(26,74,58,.2);cursor:pointer;font-size:12px;font-weight:600">
+    <div class="attr-panel-header">
+      <button class="btn-back-dossier" onclick="backToDossierList()" style="display:none;align-items:center;gap:4px;padding:5px 10px;border-radius:7px;background:var(--color-primary-light);color:var(--color-primary);border:1px solid rgba(26,74,58,.2);cursor:pointer;font-size:12px;font-weight:600;margin-bottom:10px">
         ← Retour
       </button>
-      <div style="flex:1;min-width:0">
-        <div style="font-size:11px;font-family:'DM Mono',monospace;color:var(--color-text-muted)">${d.numeroDossier} · ${d.sourceVente || ''}</div>
-        <div style="font-weight:700;font-size:15px;color:var(--color-primary);margin-top:2px">${d.produit}</div>
-        <div style="font-size:12px;color:var(--color-text-secondary);margin-top:1px">Client: <strong>${d.client}</strong> · Qté totale: ${d.quantite} · Priorité: <span style="font-weight:600;color:${d.priorite==='Urgente'?'var(--color-danger)':d.priorite==='Haute'?'var(--color-warning)':'var(--color-text-muted)'}">${d.priorite}</span></div>
+      <div class="attr-panel-dossier-meta">
+        <span>${d.numeroDossier}</span>
+        ${d.sourceVente?`<span>·</span><span>${d.sourceVente}</span>`:''}
+        ${d.dateCreation?`<span>·</span><span>${d.dateCreation}</span>`:''}
+      </div>
+      <div class="attr-panel-title">${d.produit}</div>
+      <div class="attr-panel-sub">
+        <span><strong style="color:var(--color-text-primary)">${d.client}</strong></span>
+        <span style="color:var(--color-border)">·</span>
+        <span>Qté : <strong style="color:var(--color-text-primary)">${d.quantite}</strong></span>
+        <span style="color:var(--color-border)">·</span>
+        <span style="background:${prioBg};color:${prioColor};font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px">${d.priorite}</span>
+      </div>
+      <div style="margin-top:10px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+          <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted)">Progression</span>
+          <span style="font-size:11px;font-weight:700;color:${pctColor}">${pct}%</span>
+        </div>
+        <div style="height:4px;background:var(--color-border);border-radius:4px;overflow:hidden">
+          <div style="height:100%;width:${pct}%;background:${pctColor};border-radius:4px;transition:width .4s"></div>
+        </div>
       </div>
     </div>
-    <div style="padding:14px 16px">
+    <div class="attr-panel-body">
       ${sourceHtml}
-      <div style="margin:0 -16px">
+      <div class="attr-etapes-list">
     ${ETAPES_CONFIG.map(e => {
       const tachesEtape = tachesD.filter(t => t.etapeCode === e.code);
       const currentUser_role = currentUser?.role||'';
@@ -5328,10 +5578,12 @@ function renderAttrPanel(tachesD, commentsD = []) {
     }).join('')}
       </div>
     </div>
-    <div style="border-top:1.5px solid var(--color-border);padding:14px 16px">
+    <div style="border-top:1px solid var(--color-border);padding:14px 18px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <div style="font-size:12px;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:.06em">
-          💬 Commentaires &amp; notes (<span id="commentCount">${commentsD.length}</span>)
+        <div style="font-size:11px;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:.06em;display:flex;align-items:center;gap:6px">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          Commentaires &amp; notes
+          <span style="background:var(--color-border);color:var(--color-text-secondary);font-size:10px;padding:1px 6px;border-radius:8px" id="commentCount">${commentsD.length}</span>
         </div>
         <button onclick="refreshComments('${d.id}')" id="refreshCommentsBtn"
           title="Voir les derniers commentaires des collègues"
@@ -5592,42 +5844,48 @@ function _buildProgressBar(dossierId) {
   const steps = ETAPES_CONFIG.map(e => {
     const te = dt.filter(t => t.etapeCode === e.code);
     let status = 'VIDE';
-    // Toutes les tâches de l'étape doivent être TERMINE pour valider l'étape
     if (te.length > 0 && te.every(t => t.statut === 'TERMINE'))              { status = 'TERMINE'; doneCount++; }
     else if (te.some(t => t.statut === 'EN_COURS' || t.statut === 'TERMINE')) status = 'EN_COURS';
     else if (te.some(t => t.statut === 'A_FAIRE'))                            status = 'A_FAIRE';
     return { ...e, status };
   });
-  const pct = Math.round(doneCount / ETAPES_CONFIG.length * 100);
-  const bg = s => s==='TERMINE'?'#16a34a':s==='EN_COURS'?'#d97706':s==='A_FAIRE'?'#2563eb':'#f5f5f4';
-  const bc = s => s==='VIDE'?'#d6d3d1':bg(s);
-  const tc = s => s==='VIDE'?'#a8a29e':'#fff';
-  const lc = s => s==='TERMINE'?'#16a34a':'#e5e3df';
-  const ic = s => s==='TERMINE'?'✓':s==='EN_COURS'?'▶':s==='A_FAIRE'?'●':'';
-  return `<div style="background:#fff;border:1px solid var(--color-border);border-radius:12px;padding:14px 16px;margin-bottom:10px">
+  const pct      = Math.round(doneCount / ETAPES_CONFIG.length * 100);
+  const pctColor = pct===100?'#16a34a':pct>0?'#e8834a':'#a8a29e';
+  const bg  = s => s==='TERMINE'?'#16a34a':s==='EN_COURS'?'#d97706':s==='A_FAIRE'?'#2563eb':'#f5f5f4';
+  const bc  = s => s==='VIDE'?'#e5e3df':bg(s);
+  const tc  = s => s==='VIDE'?'#a8a29e':'#fff';
+  const lc  = s => s==='TERMINE'?'#16a34a30':'#e5e3df';
+  const ic  = s => s==='TERMINE'?'✓':s==='EN_COURS'?'▶':s==='A_FAIRE'?'●':'';
+  const ops = s => {
+    const t0 = dt.filter(t => t.etapeCode === s.code);
+    if (!t0.length) return '';
+    return `<div style="font-size:9px;color:var(--color-text-muted);margin-top:2px;text-align:center;max-width:44px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t0.map(t=>t.operateur).join(',')}</div>`;
+  };
+  return `<div style="background:#fff;border:1.5px solid var(--color-border);border-radius:12px;padding:12px 14px;margin-bottom:10px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-      <span style="font-size:11px;font-weight:600;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:.05em">Progression du dossier</span>
-      <span style="font-size:12px;font-weight:700;color:${pct===100?'#16a34a':pct>0?'#d97706':'#a8a29e'}">${pct}%</span>
+      <span style="font-size:10px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.06em">Pipeline de production</span>
+      <span style="font-size:12px;font-weight:800;color:${pctColor}">${pct}%</span>
     </div>
-    <div style="display:flex;align-items:flex-start;overflow-x:auto;padding-bottom:4px">
-      ${steps.map((s, i) => `<div style="display:flex;flex-direction:column;align-items:center;flex:1;min-width:42px;position:relative">
-        ${i < steps.length-1 ? `<div style="position:absolute;top:12px;left:50%;width:100%;height:2px;background:${lc(s.status)}"></div>` : ''}
-        <div style="width:24px;height:24px;border-radius:50%;border:2px solid ${bc(s.status)};background:${bg(s.status)};color:${tc(s.status)};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;position:relative;z-index:1;flex-shrink:0">${s.status!=='VIDE'?ic(s.status):i+1}</div>
-        <div style="font-size:8px;font-weight:500;color:${s.status==='VIDE'?'#a8a29e':s.status==='TERMINE'?'#16a34a':s.status==='EN_COURS'?'#d97706':'#2563eb'};margin-top:4px;text-align:center;line-height:1.2;max-width:42px;word-break:break-word">${s.short}</div>
+    <div style="display:flex;align-items:flex-start;overflow-x:auto;padding-bottom:2px;gap:0">
+      ${steps.map((s, i) => `<div style="display:flex;flex-direction:column;align-items:center;flex:1;min-width:40px;position:relative">
+        ${i < steps.length-1 ? `<div style="position:absolute;top:11px;left:50%;width:100%;height:2px;background:${lc(s.status)};z-index:0"></div>` : ''}
+        <div style="width:22px;height:22px;border-radius:50%;border:2px solid ${bc(s.status)};background:${bg(s.status)};color:${tc(s.status)};display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:800;position:relative;z-index:1;flex-shrink:0">${s.status!=='VIDE'?ic(s.status):i+1}</div>
+        <div style="font-size:8px;font-weight:600;color:${s.status==='VIDE'?'#c2bdb8':s.status==='TERMINE'?'#16a34a':s.status==='EN_COURS'?'#d97706':'#2563eb'};margin-top:3px;text-align:center;line-height:1.2;max-width:44px;word-break:break-word">${s.short}</div>
+        ${ops(s)}
       </div>`).join('')}
     </div>
-    <div style="margin-top:8px;height:3px;background:#f0ede8;border-radius:99px;overflow:hidden">
-      <div style="height:100%;width:${pct}%;background:${pct===100?'#16a34a':'#e8834a'};border-radius:99px;transition:width .4s"></div>
+    <div style="margin-top:10px;height:3px;background:#f0ede8;border-radius:99px;overflow:hidden">
+      <div style="height:100%;width:${pct}%;background:${pctColor};border-radius:99px;transition:width .4s"></div>
     </div>
   </div>`;
 }
 
 function _buildMonDashboard() {
   if (!currentUser) return '';
-  const myLabel = currentUser.label || currentUser.username || '';
+  const myLabel  = currentUser.label || currentUser.username || '';
   const myTaches = [...taches, ...tachesLibres].filter(t => t.operateur === myLabel);
   if (!myTaches.length) return '';
-  // "blocking" = tâche A_FAIRE que l'opérateur PEUT démarrer maintenant (pas bloquée par une étape précédente)
+
   const blocking = myTaches.filter(t => {
     if (t.statut !== 'A_FAIRE') return false;
     if (t.dossierId === 'LIBRE') return true;
@@ -5640,156 +5898,438 @@ function _buildMonDashboard() {
     return true;
   });
   const inProgress = myTaches.filter(t => t.statut === 'EN_COURS');
-  const done      = myTaches.filter(t => t.statut === 'TERMINE');
-  const statusBadge = blocking.length
+  const done       = myTaches.filter(t => t.statut === 'TERMINE');
+
+  const alertBadge = blocking.length
     ? `<span style="background:var(--color-danger-bg);color:var(--color-danger);font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px">${blocking.length} prête(s) à démarrer</span>`
     : inProgress.length
       ? `<span style="background:var(--color-warning-bg);color:var(--color-warning);font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px">${inProgress.length} en cours</span>`
-      : `<span style="background:var(--color-success-bg);color:var(--color-success);font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px">Rien ne bloque</span>`;
+      : `<span style="background:var(--color-success-bg);color:var(--color-success);font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px">Tout à jour</span>`;
+
   const cards = myTaches.map(t => {
-    const etape = ETAPES_CONFIG.find(e => e.code === t.etapeCode) || { color:'#888', icon:'?', label: t.etapeLabel };
-    const isAFaire = t.statut === 'A_FAIRE';
-    const isEC  = t.statut === 'EN_COURS';
-    const isDone = t.statut === 'TERMINE';
-    let isStepBlocked = false; let blockedByStep = '';
+    const etape     = ETAPES_CONFIG.find(e => e.code === t.etapeCode) || { color:'#888', icon:'?', label:t.etapeLabel||'Tâche' };
+    const isAFaire  = t.statut === 'A_FAIRE';
+    const isEC      = t.statut === 'EN_COURS';
+    const isDone    = t.statut === 'TERMINE';
+    let isBlocked = false; let blockedBy = '';
     if (isAFaire && t.dossierId !== 'LIBRE') {
       const si = ETAPES_CONFIG.findIndex(e => e.code === t.etapeCode);
       for (let i = 0; i < si; i++) {
         const prev = ETAPES_CONFIG[i];
         const pt = taches.filter(x => x.dossierId === t.dossierId && x.etapeCode === prev.code);
-        if (pt.length && !pt.every(x => x.statut === 'TERMINE')) { isStepBlocked = true; blockedByStep = prev.label; break; }
+        if (pt.length && !pt.every(x => x.statut === 'TERMINE')) { isBlocked = true; blockedBy = prev.short || prev.label; break; }
       }
     }
-    const isBlocking = isAFaire && !isStepBlocked;
-    const bg     = isStepBlocked ? '#f5f5f4' : isAFaire ? 'var(--color-danger-bg)' : isDone ? 'var(--color-success-bg)' : 'var(--color-warning-bg)';
-    const border = isStepBlocked ? '#d6d3d1' : isAFaire ? '#fca5a5' : isDone ? '#86efac' : '#fcd34d';
-    const statusText = isStepBlocked ? `Attend : ${blockedByStep}` : isAFaire ? 'À démarrer' : isEC ? 'En cours' : 'Terminé';
-    const statusColor = isStepBlocked ? 'var(--color-text-muted)' : isAFaire ? 'var(--color-danger)' : isEC ? 'var(--color-warning)' : 'var(--color-success)';
-    const btn = isBlocking
-      ? `<button onclick="pointerStart('${t.id}')" style="margin-top:8px;width:100%;padding:6px;background:var(--color-primary);color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">Démarrer</button>`
+    const canStart = isAFaire && !isBlocked;
+    const bg      = isBlocked?'#fafafa':isAFaire?'var(--color-danger-bg)':isDone?'var(--color-success-bg)':'var(--color-warning-bg)';
+    const border  = isBlocked?'#e5e3df':isAFaire?'#fca5a5':isDone?'#86efac':'#fcd34d';
+    const sTxt    = isBlocked?`Attend : ${blockedBy}`:isAFaire?'À démarrer':isEC?'En cours':'Terminé';
+    const sColor  = isBlocked?'var(--color-text-muted)':isAFaire?'var(--color-danger)':isEC?'var(--color-warning)':'var(--color-success)';
+    const btn = canStart
+      ? `<button onclick="pointerStart('${t.id}')" class="mon-task-card__btn" style="background:var(--color-primary);color:#fff">▶ Démarrer</button>`
       : isEC
-        ? `<button onclick="openPointage('${t.id}','${t.etapeCode}','${t.numeroDossier}')" style="margin-top:8px;width:100%;padding:6px;background:var(--color-success);color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer">Terminer</button>`
+        ? `<button onclick="openPointage('${t.id}','${t.etapeCode||''}','${t.numeroDossier||t.titre||''}')" class="mon-task-card__btn" style="background:var(--color-success);color:#fff">✓ Terminer</button>`
         : '';
-    return `<div style="flex:1;min-width:180px;max-width:260px;background:${bg};border:1px solid ${border};border-radius:10px;padding:12px">
-      <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--color-text-muted);margin-bottom:2px">${t.numeroDossier}</div>
-      <div style="font-size:13px;font-weight:700;color:${etape.color};margin-bottom:4px">${etape.icon} ${etape.label}</div>
-      <div style="font-size:11px;font-weight:700;color:${statusColor}">${statusText}</div>
+    return `<div class="mon-task-card" style="background:${bg};border-color:${border}">
+      <div class="mon-task-card__num">${t.dossierId==='LIBRE'?'Tâche libre':(t.numeroDossier||'')}</div>
+      <div class="mon-task-card__etape" style="color:${etape.color}">${etape.label}</div>
+      <div class="mon-task-card__status" style="color:${sColor}">${sTxt}</div>
       ${btn}
     </div>`;
   }).join('');
-  return `<div style="background:var(--color-primary-light);border:1px solid rgba(26,74,58,0.15);border-radius:12px;padding:16px;margin-bottom:20px">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:12px;flex-wrap:wrap">
+
+  return `<div class="mon-dashboard">
+    <div class="mon-dashboard-head">
       <div>
-        <p style="font-size:13px;font-weight:700;color:var(--color-primary)">Mes tâches — ${currentUser.label}</p>
-        <p style="font-size:11px;color:var(--color-text-muted);margin-top:2px">${myTaches.length} tâche(s) · ${done.length} terminée(s)</p>
+        <div class="mon-dashboard-name">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" style="display:inline;margin-right:4px;vertical-align:middle"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          Mes tâches — ${myLabel}
+        </div>
+        <div class="mon-dashboard-sub">${myTaches.length} tâche(s) · ${done.length} terminée(s) · ${inProgress.length} en cours</div>
       </div>
-      ${statusBadge}
+      ${alertBadge}
     </div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap">${cards}</div>
+    <div class="mon-dashboard-cards">${cards}</div>
   </div>`;
 }
 
 function _tacheRow(t) {
   const isLibre = t.dossierId === 'LIBRE';
   const etape   = isLibre
-    ? { color:'#7c3aed', icon:'★', label: t.titre || 'Tâche libre', short:'Libre' }
+    ? { color:'#7c3aed', icon:'★', label:t.titre||'Tâche libre', short:'Libre' }
     : (ETAPES_CONFIG.find(e => e.code === t.etapeCode) || { color:'#888', icon:'?', label:t.etapeLabel, short:'?' });
   const isEC   = t.statut === 'EN_COURS';
   const isDone = t.statut === 'TERMINE';
   const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
-  const canInteract = isAdminOrChef || t.operateur === currentUser?.label;
+  const canInteract   = isAdminOrChef || t.operateur === currentUser?.label;
+
   let isStepBlocked = false; let blockedByStep = '';
   if (!isLibre && !isEC && !isDone) {
     const si = ETAPES_CONFIG.findIndex(e => e.code === t.etapeCode);
     for (let i = 0; i < si; i++) {
       const prev = ETAPES_CONFIG[i];
-      const pt = taches.filter(x => x.dossierId === t.dossierId && x.etapeCode === prev.code);
-      if (pt.length && !pt.every(x => x.statut === 'TERMINE')) { isStepBlocked = true; blockedByStep = prev.label; break; }
+      const pt   = taches.filter(x => x.dossierId === t.dossierId && x.etapeCode === prev.code);
+      if (pt.length && !pt.every(x => x.statut === 'TERMINE')) { isStepBlocked = true; blockedByStep = prev.short||prev.label; break; }
     }
   }
+
   const actions = isDone
-    ? `<span class="prod-badge" style="background:var(--color-success-bg);color:var(--color-success);padding:6px 12px">Terminé</span>`
+    ? `<span class="prod-badge" style="background:var(--color-success-bg);color:var(--color-success);padding:5px 10px;font-size:11px">✓ Terminé</span>`
     : isEC
       ? (canInteract
-          ? `<button class="btn-prod-done" onclick="openPointage('${t.id}','${t.etapeCode}','${t.titre||t.numeroDossier}')">Terminer</button>`
-          : `<span style="font-size:11px;font-weight:600;color:var(--color-text-muted);padding:5px 10px;background:#f5f5f4;border:1px solid #d6d3d1;border-radius:6px;white-space:nowrap;display:inline-block">En cours</span>`)
+          ? `<button class="btn-prod-done" onclick="openPointage('${t.id}','${t.etapeCode||''}','${(t.titre||t.numeroDossier||'').replace(/'/g,"\\'")}')">✓ Terminer</button>`
+          : `<span style="font-size:10px;font-weight:600;color:var(--color-warning);padding:4px 8px;background:var(--color-warning-bg);border-radius:6px;white-space:nowrap">En cours</span>`)
       : isStepBlocked
-        ? `<span style="font-size:11px;font-weight:600;color:var(--color-text-muted);padding:5px 10px;background:#f5f5f4;border:1px solid #d6d3d1;border-radius:6px;white-space:nowrap;display:inline-block">Attend : ${blockedByStep}</span>`
+        ? `<span style="font-size:10px;font-weight:600;color:var(--color-text-muted);padding:4px 8px;background:#f5f5f4;border:1px solid #e5e3df;border-radius:6px;white-space:nowrap" title="Attend l'étape : ${blockedByStep}">⏸ ${blockedByStep}</span>`
         : (canInteract
-            ? `<button class="btn-prod-start" onclick="pointerStart('${t.id}')">Démarrer</button>`
-            : `<span style="font-size:11px;font-weight:600;color:var(--color-text-muted);padding:5px 10px;background:#f5f5f4;border:1px solid #d6d3d1;border-radius:6px;white-space:nowrap;display:inline-block">Assigné à ${t.operateur}</span>`);
+            ? `<button class="btn-prod-start" onclick="pointerStart('${t.id}')">▶ Démarrer</button>`
+            : `<span style="font-size:10px;font-weight:600;color:var(--color-text-muted);padding:4px 8px;background:#f5f5f4;border-radius:6px;white-space:nowrap">${t.operateur}</span>`);
+
   const deleteBtn = isLibre && isAdminOrChef && !isDone
-    ? `<button onclick="deleteTacheLibre('${t.id}')" style="margin-left:6px;width:26px;height:26px;border:none;background:var(--color-danger-bg);color:var(--color-danger);border-radius:6px;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">×</button>`
+    ? `<button onclick="deleteTacheLibre('${t.id}')" style="width:24px;height:24px;border:none;background:var(--color-danger-bg);color:var(--color-danger);border-radius:6px;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;line-height:1">×</button>`
     : '';
-  const subLine = isLibre
-    ? `${t.operateur}${t.echeance ? ' · Échéance : <strong>'+new Date(t.echeance+'T00:00:00').toLocaleDateString('fr-FR')+'</strong>' : ''}`
-    : `${t.operateur} · ${isEC ? 'Démarré '+t.dateDebut : isDone ? 'Terminé '+t.dateFin : 'Assigné '+t.dateAssignation}`;
-  const prioColor = t.priorite==='Urgente'?'var(--color-danger)':t.priorite==='Haute'?'var(--color-warning)':'';
-  const prioBadge = isLibre && t.priorite && t.priorite !== 'Normale'
-    ? `<span style="font-size:10px;font-weight:700;color:${prioColor};margin-left:6px">${t.priorite}</span>` : '';
   const voirBtn = !isLibre
-    ? `<button onclick="openAttribForDossier('${t.dossierId}')" title="Voir les détails du dossier" style="margin-left:6px;padding:4px 9px;border-radius:6px;background:var(--color-primary-light);color:var(--color-primary);border:1px solid rgba(26,74,58,.18);cursor:pointer;font-size:11px;font-weight:600;white-space:nowrap;flex-shrink:0">Détails →</button>`
+    ? `<button onclick="openAttribForDossier('${t.dossierId}')" title="Voir les détails du dossier" style="padding:4px 8px;border-radius:6px;background:var(--color-primary-light);color:var(--color-primary);border:1px solid rgba(26,74,58,.18);cursor:pointer;font-size:10px;font-weight:600;white-space:nowrap;flex-shrink:0">→</button>`
     : '';
-  return `<div class="tache-row ${isEC?'tache-row--encours':''} ${isDone?'tache-row--done':''}">
-    <div style="width:32px;height:32px;border-radius:50%;background:${etape.color}15;border:1.5px solid ${etape.color};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:13px;font-weight:700;color:${etape.color}">${etape.icon}</div>
-    <div style="flex:1;min-width:0">
-      ${isLibre ? '' : `<div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--color-text-muted)">${t.numeroDossier}</div>`}
-      <div style="font-weight:600;font-size:14px;color:${etape.color};margin:1px 0">${isLibre ? t.titre : t.etapeLabel}${prioBadge}</div>
-      ${isLibre && t.commentaire ? `<div style="font-size:11px;color:var(--color-text-muted);margin-bottom:2px;white-space:pre-wrap">${t.commentaire}</div>` : ''}
-      ${isLibre && t.photos?.length ? `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:4px;margin-bottom:2px">${t.photos.map(src=>`<img src="${src}" onclick="window.open(this.src,'_blank')" style="width:52px;height:52px;object-fit:cover;border-radius:8px;border:1.5px solid var(--color-border);cursor:pointer" />`).join('')}</div>` : ''}
-      <div style="font-size:12px;color:var(--color-text-secondary)">${subLine}</div>
+
+  const prioColor = t.priorite==='Urgente'?'var(--color-danger)':t.priorite==='Haute'?'var(--color-warning)':'';
+  const prioBadge = isLibre && t.priorite && t.priorite!=='Normale'
+    ? `<span style="font-size:9px;font-weight:700;color:${prioColor};background:${t.priorite==='Urgente'?'var(--color-danger-bg)':'var(--color-warning-bg)'};padding:1px 5px;border-radius:6px;margin-left:4px">${t.priorite}</span>` : '';
+
+  const subLine = isLibre
+    ? `${t.operateur}${t.echeance?' · Échéance : <strong>'+new Date(t.echeance+'T00:00:00').toLocaleDateString('fr-FR')+'</strong>':''}`
+    : `${t.operateur} · ${isEC?'Démarré '+t.dateDebut:isDone?'Terminé '+t.dateFin:'Assigné '+t.dateAssignation}`;
+
+  return `<div class="tache-card ${isEC?'tache-card--encours':''} ${isDone?'tache-card--done':''}">
+    <div class="tache-card__icon" style="background:${etape.color}15;border-color:${etape.color};color:${etape.color}">${etape.icon}</div>
+    <div class="tache-card__body">
+      <div class="tache-card__label" style="color:${etape.color}">${isLibre?t.titre:t.etapeLabel}${prioBadge}</div>
+      ${isLibre&&t.commentaire?`<div style="font-size:10px;color:var(--color-text-muted);margin-bottom:2px;white-space:pre-wrap">${t.commentaire}</div>`:''}
+      ${isLibre&&t.photos?.length?`<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:3px;margin-bottom:2px">${t.photos.map(src=>`<img src="${src}" onclick="window.open(this.src,'_blank')" style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--color-border);cursor:pointer" />`).join('')}</div>`:''}
+      <div class="tache-card__sub">${subLine}</div>
     </div>
-    <div style="display:flex;align-items:center;gap:4px;flex-shrink:0">${actions}${voirBtn}${deleteBtn}</div>
+    <div class="tache-card__actions">${actions}${voirBtn}${deleteBtn}</div>
+  </div>`;
+}
+
+function toggleProdView(mode) {
+  _prodView = mode;
+  document.getElementById('prodViewTasks')?.classList.toggle('view-toggle-btn--active', mode === 'tasks');
+  document.getElementById('prodViewCharge')?.classList.toggle('view-toggle-btn--active', mode === 'charge');
+  // Masquer les filtres statut en vue charge (non pertinents)
+  const fb = document.getElementById('prodFilterBar');
+  if (fb) fb.style.display = mode === 'charge' ? 'none' : '';
+  // Masquer la mini barre charge en vue charge (redondant)
+  const wl = document.getElementById('opWorkloadContainer');
+  if (wl) wl.style.display = mode === 'charge' ? 'none' : '';
+  renderTaches();
+}
+
+function _renderChargeView() {
+  const container = document.getElementById('tachesContainer');
+  if (!container) return;
+
+  const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
+  const allTaches     = [...taches, ...tachesLibres];
+
+  // Construire la map opérateur → leurs tâches
+  const opMap = {};
+  allTaches.forEach(t => {
+    if (!t.operateur) return;
+    if (!opMap[t.operateur]) opMap[t.operateur] = [];
+    opMap[t.operateur].push(t);
+  });
+
+  // Si pas admin/chef : n'afficher que sa propre carte
+  const myLabel = currentUser?.label || currentUser?.username || '';
+  const opKeys  = isAdminOrChef
+    ? Object.keys(opMap).sort()
+    : (opMap[myLabel] ? [myLabel] : []);
+
+  if (!opKeys.length) {
+    container.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;padding:64px 0;text-align:center">
+      <div style="width:44px;height:44px;background:var(--color-bg);border-radius:12px;display:flex;align-items:center;justify-content:center;margin-bottom:12px">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.4"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      </div>
+      <p style="font-size:13px;font-weight:500;color:var(--color-text-secondary)">Aucune tâche assignée</p>
+    </div>`;
+    return;
+  }
+
+  // KPI globaux (admin seulement)
+  let kpiHtml = '';
+  if (isAdminOrChef) {
+    const totalOps      = opKeys.length;
+    const totalActifs   = allTaches.filter(t => t.statut !== 'TERMINE').length;
+    const totalEnCours  = allTaches.filter(t => t.statut === 'EN_COURS').length;
+    const urgentDossiers = [...new Set(
+      taches.filter(t => {
+        const d = dossiers.find(x => x.id === t.dossierId);
+        return d?.priorite === 'Urgente' && t.statut !== 'TERMINE';
+      }).map(t => t.dossierId)
+    )].length;
+    const maxCharge = Math.max(...opKeys.map(op => opMap[op].filter(t => t.statut !== 'TERMINE').length), 1);
+    const surcharges = opKeys.filter(op => {
+      const actif = opMap[op].filter(t => t.statut !== 'TERMINE').length;
+      return actif / maxCharge >= 0.85;
+    }).length;
+
+    kpiHtml = `<div class="charge-kpi-bar">
+      <div class="charge-kpi-card">
+        <div class="charge-kpi-card__val">${totalOps}</div>
+        <div class="charge-kpi-card__label">Opérateurs actifs</div>
+      </div>
+      <div class="charge-kpi-card charge-kpi-card--warn">
+        <div class="charge-kpi-card__val">${totalActifs}</div>
+        <div class="charge-kpi-card__label">Tâches en file</div>
+      </div>
+      <div class="charge-kpi-card charge-kpi-card--ok">
+        <div class="charge-kpi-card__val">${totalEnCours}</div>
+        <div class="charge-kpi-card__label">En cours maintenant</div>
+      </div>
+      ${urgentDossiers ? `<div class="charge-kpi-card charge-kpi-card--alert">
+        <div class="charge-kpi-card__val">${urgentDossiers}</div>
+        <div class="charge-kpi-card__label">Dossiers urgents actifs</div>
+      </div>` : ''}
+      ${surcharges ? `<div class="charge-kpi-card charge-kpi-card--alert">
+        <div class="charge-kpi-card__val">${surcharges}</div>
+        <div class="charge-kpi-card__label">Opérateur(s) surchargé(s)</div>
+      </div>` : ''}
+    </div>`;
+  }
+
+  // Grille des cartes opérateurs
+  const maxActif = Math.max(...opKeys.map(op => opMap[op].filter(t => t.statut !== 'TERMINE').length), 1);
+
+  const ROLE_LABELS_LOCAL = { admin:'Admin', chef_atelier:'Chef atelier', operateur_prod:'Opérateur', pao:'PAO', finition:'Finition', livreur:'Livreur', caissier:'Caissier', commerciale:'Commercial', comptable:'Comptable', gestionnaire:'Gestionnaire', utilisateur:'Utilisateur' };
+
+  const cards = opKeys.map(op => {
+    const opTaches   = opMap[op];
+    const aFaire     = opTaches.filter(t => t.statut === 'A_FAIRE');
+    const enCours    = opTaches.filter(t => t.statut === 'EN_COURS');
+    const termine    = opTaches.filter(t => t.statut === 'TERMINE');
+    const actif      = aFaire.length + enCours.length;
+    const pct        = Math.round(actif / maxActif * 100);
+    const overloaded = pct >= 85;
+
+    // Trouver le rôle depuis localUsers
+    const userObj  = (localUsers || []).find(u => (u.label || u.username) === op);
+    const roleLabel = userObj ? (ROLE_LABELS_LOCAL[userObj.role] || userObj.role) : '';
+
+    const avatar = op.charAt(0).toUpperCase();
+    const barColor = overloaded ? 'var(--color-danger)' : actif > 0 ? 'var(--color-primary)' : '#d6d3d1';
+
+    // Construire les lignes de tâches (en cours d'abord, puis à faire, puis terminées)
+    const renderTaskRows = (list, statut) => list.map(t => {
+      const isEC   = statut === 'EN_COURS';
+      const isDone = statut === 'TERMINE';
+      const etape  = t.dossierId === 'LIBRE'
+        ? { color:'#7c3aed', label: t.titre || 'Tâche libre' }
+        : (ETAPES_CONFIG.find(e => e.code === t.etapeCode) || { color:'#888', label: t.etapeLabel || '?' });
+      const dotBg  = isEC ? '#d97706' : isDone ? '#16a34a' : '#2563eb';
+      const d = dossiers.find(x => x.id === t.dossierId);
+      const isUrgent = d?.priorite === 'Urgente';
+      const btn = isEC && (isAdminOrChef || op === myLabel)
+        ? `<button class="charge-task-btn" onclick="openPointage('${t.id}','${t.etapeCode||''}','${(t.numeroDossier||t.titre||'').replace(/'/g,"\\'")}'); event.stopPropagation();" style="background:var(--color-success-bg);color:var(--color-success)">✓</button>`
+        : t.statut === 'A_FAIRE' && (isAdminOrChef || op === myLabel)
+          ? `<button class="charge-task-btn" onclick="pointerStart('${t.id}'); event.stopPropagation();" style="background:var(--color-primary-light);color:var(--color-primary)">▶</button>`
+          : '';
+      return `<div class="charge-task-row ${isEC?'charge-task-row--encours':''} ${isDone?'charge-task-row--done':''}" onclick="openAttribForDossier('${t.dossierId}')">
+        <span class="charge-task-dot" style="background:${dotBg}"></span>
+        <span class="charge-task-etape" style="color:${etape.color}">${etape.label}${isUrgent?'&nbsp;<span style="color:var(--color-danger);font-size:9px;font-weight:800">⬤</span>':''}</span>
+        <span class="charge-task-num">${t.dossierId==='LIBRE'?'Libre':(t.numeroDossier||'')}</span>
+        ${btn}
+      </div>`;
+    }).join('');
+
+    const enCoursSection = enCours.length ? `
+      <div class="charge-section-hd" style="color:var(--color-warning)">
+        <span style="width:7px;height:7px;border-radius:50%;background:var(--color-warning);display:inline-block"></span>
+        En cours (${enCours.length})
+      </div>
+      ${renderTaskRows(enCours,'EN_COURS')}` : '';
+
+    const aFaireSection = aFaire.length ? `
+      <div class="charge-section-hd" style="color:var(--color-info)">
+        <span style="width:7px;height:7px;border-radius:50%;background:var(--color-info);display:inline-block"></span>
+        À faire (${aFaire.length})
+      </div>
+      ${renderTaskRows(aFaire,'A_FAIRE')}` : '';
+
+    const termineSection = termine.length ? `
+      <div class="charge-section-hd" style="color:var(--color-text-muted)">
+        <span style="width:7px;height:7px;border-radius:50%;background:#d6d3d1;display:inline-block"></span>
+        Terminées (${termine.length})
+      </div>
+      ${renderTaskRows(termine.slice(-3),'TERMINE')}
+      ${termine.length > 3 ? `<div style="font-size:11px;color:var(--color-text-muted);padding:2px 7px">+${termine.length-3} autres terminées</div>` : ''}` : '';
+
+    const emptyHtml = !actif && !termine.length
+      ? `<div class="charge-card__empty">Aucune tâche assignée</div>` : '';
+
+    return `<div class="charge-card ${overloaded?'charge-card--overloaded':''} ${actif===0?'charge-card--idle':''}">
+      <div class="charge-card__header">
+        <div class="charge-card__top">
+          <div class="charge-card__avatar">${avatar}</div>
+          <div>
+            <div class="charge-card__name">${op}</div>
+            ${roleLabel?`<div class="charge-card__role">${roleLabel}</div>`:''}
+          </div>
+          ${overloaded?`<span style="margin-left:auto;font-size:9px;font-weight:700;background:var(--color-danger-bg);color:var(--color-danger);padding:2px 7px;border-radius:8px;white-space:nowrap">Surchargé</span>`:''}
+        </div>
+        <div class="charge-card__bar-row">
+          <span class="charge-card__bar-lbl">Charge</span>
+          <span class="charge-card__bar-count" style="color:${barColor}">${actif} tâche${actif>1?'s':''} active${actif>1?'s':''}</span>
+        </div>
+        <div class="charge-card__bar-bg">
+          <div class="charge-card__bar-fill" style="width:${pct}%;background:${barColor}"></div>
+        </div>
+      </div>
+      <div class="charge-card__kpis">
+        <div class="charge-kpi-cell">
+          <div class="charge-kpi-cell__val" style="color:var(--color-info)">${aFaire.length}</div>
+          <div class="charge-kpi-cell__lbl">À faire</div>
+        </div>
+        <div class="charge-kpi-cell">
+          <div class="charge-kpi-cell__val" style="color:var(--color-warning)">${enCours.length}</div>
+          <div class="charge-kpi-cell__lbl">En cours</div>
+        </div>
+        <div class="charge-kpi-cell">
+          <div class="charge-kpi-cell__val" style="color:var(--color-success)">${termine.length}</div>
+          <div class="charge-kpi-cell__lbl">Terminées</div>
+        </div>
+      </div>
+      <div class="charge-card__tasks">
+        ${enCoursSection}${aFaireSection}${termineSection}${emptyHtml}
+      </div>
+    </div>`;
+  }).join('');
+
+  container.innerHTML = kpiHtml + `<div class="charge-grid">${cards}</div>`;
+}
+
+function _buildOpWorkload() {
+  const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
+  if (!isAdminOrChef) return '';
+  const counts = {};
+  [...taches, ...tachesLibres].forEach(t => {
+    if (t.statut === 'TERMINE' || !t.operateur) return;
+    if (!counts[t.operateur]) counts[t.operateur] = { aFaire:0, enCours:0 };
+    if (t.statut === 'A_FAIRE')   counts[t.operateur].aFaire++;
+    else if (t.statut === 'EN_COURS') counts[t.operateur].enCours++;
+  });
+  const ops = Object.entries(counts);
+  if (!ops.length) return '';
+  const maxCount = Math.max(...ops.map(([,v]) => v.aFaire + v.enCours), 1);
+
+  const cards = ops.sort((a,b) => (b[1].aFaire+b[1].enCours)-(a[1].aFaire+a[1].enCours)).map(([name, v]) => {
+    const total      = v.aFaire + v.enCours;
+    const pct        = Math.round(total / maxCount * 100);
+    const overloaded = pct >= 85;
+    const avatar     = name.charAt(0).toUpperCase();
+    return `<div class="op-workload-card ${overloaded?'op-workload-card--overloaded':''}">
+      <div class="op-workload-card__avatar">${avatar}</div>
+      <div class="op-workload-card__name">${name}</div>
+      <div class="op-workload-card__count">${total}</div>
+      <div class="op-workload-card__sub">tâches actives</div>
+      <div class="op-workload-bar-bg"><div class="op-workload-bar-fill" style="width:${pct}%"></div></div>
+    </div>`;
+  }).join('');
+
+  return `<div class="op-workload-section">
+    <div class="op-workload-title">Charge opérateurs</div>
+    <div class="op-workload-row">${cards}</div>
   </div>`;
 }
 
 function renderTaches() {
   const container = document.getElementById('tachesContainer');
   if (!container) return;
-  const dash = _buildMonDashboard();
-  const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
 
-  const myLabel = currentUser?.label || currentUser?.username || '';
-  // Dossier-linked tasks
+  if (_prodView === 'charge') {
+    _renderChargeView();
+    return;
+  }
+
+  // Mettre à jour la barre charge opérateurs
+  const wlEl = document.getElementById('opWorkloadContainer');
+  if (wlEl) wlEl.innerHTML = _buildOpWorkload();
+
+  const dash          = _buildMonDashboard();
+  const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
+  const myLabel       = currentUser?.label || currentUser?.username || '';
+
   let dossierList = isAdminOrChef ? taches : taches.filter(t => t.operateur === myLabel);
   if (prodFilter !== 'TOUS') dossierList = dossierList.filter(t => t.statut === prodFilter);
 
-  // Independent tasks
   let libreList = isAdminOrChef ? tachesLibres : tachesLibres.filter(t => t.operateur === myLabel);
   if (prodFilter !== 'TOUS') libreList = libreList.filter(t => t.statut === prodFilter);
 
+  // Mettre à jour les compteurs dans les boutons filtre
+  const allVisible = [...taches, ...tachesLibres].filter(t => isAdminOrChef || t.operateur === myLabel);
+  const _cnt = s => allVisible.filter(t => s==='TOUS'||t.statut===s).length;
+  ['TOUS','A_FAIRE','EN_COURS','TERMINE'].forEach(s => {
+    const sfx = {'TOUS':'Tous','A_FAIRE':'AFaire','EN_COURS':'EnCours','TERMINE':'Termine'}[s];
+    const el  = document.getElementById(`prodCount${sfx}`);
+    if (el) { el.textContent = _cnt(s); el.style.display = _cnt(s)?'':'none'; }
+  });
+
   if (!dossierList.length && !libreList.length) {
-    container.innerHTML = dash + `<div style="text-align:center;color:var(--color-text-muted);padding:80px 0;font-size:14px">
-      <div style="font-size:32px;margin-bottom:12px">✓</div>
-      Aucune tâche ${prodFilter !== 'TOUS' ? 'dans ce filtre' : ''}
+    container.innerHTML = dash + `<div style="display:flex;flex-direction:column;align-items:center;padding:64px 0;text-align:center">
+      <div style="width:44px;height:44px;background:var(--color-bg);border-radius:12px;display:flex;align-items:center;justify-content:center;margin-bottom:12px">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.4"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <p style="font-size:13px;font-weight:500;color:var(--color-text-secondary)">Aucune tâche${prodFilter!=='TOUS'?' dans ce filtre':''}</p>
     </div>`;
     return;
   }
 
-  // Section tâches indépendantes
+  // Section tâches libres
   const libreHtml = libreList.length ? `
-    <div style="margin-bottom:28px">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-        <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#7c3aed">★ Tâches indépendantes</span>
-        <span style="background:#f3e8ff;color:#7c3aed;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px">${libreList.length}</span>
+    <div class="prod-group" style="border-color:#e9d5ff">
+      <div class="prod-group-header" style="background:#faf5ff">
+        <div class="prod-group-left">
+          <span style="font-size:14px;color:#7c3aed">★</span>
+          <span class="prod-group-info" style="color:#7c3aed">Tâches indépendantes</span>
+        </div>
+        <span style="background:#f3e8ff;color:#7c3aed;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px">${libreList.length}</span>
       </div>
-      ${libreList.map(_tacheRow).join('')}
+      <div class="prod-group-tasks">${libreList.map(_tacheRow).join('')}</div>
     </div>` : '';
 
   // Grouper par dossier
   const groups = {};
   dossierList.forEach(t => {
-    if (!groups[t.dossierId]) groups[t.dossierId] = { numeroDossier: t.numeroDossier, taches: [] };
+    if (!groups[t.dossierId]) groups[t.dossierId] = { numeroDossier:t.numeroDossier, taches:[] };
     groups[t.dossierId].taches.push(t);
   });
 
-  container.innerHTML = dash + libreHtml + Object.entries(groups).map(([dossierId, g]) => {
-    return `<div style="margin-bottom:24px">
-      <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--color-text-muted);margin-bottom:6px;padding:0 2px">${g.numeroDossier}</div>
-      ${_buildProgressBar(dossierId)}
-      ${g.taches.map(_tacheRow).join('')}
+  const groupsHtml = Object.entries(groups).map(([dossierId, g]) => {
+    const d          = dossiers.find(x => x.id === dossierId);
+    const isUrgent   = d?.priorite === 'Urgente';
+    const isHaute    = d?.priorite === 'Haute';
+    const prio       = isUrgent?`<span style="background:#fee2e2;color:#dc2626;font-size:9px;font-weight:700;padding:1px 5px;border-radius:6px">URGENT</span>`:isHaute?`<span style="background:#fef3c7;color:#d97706;font-size:9px;font-weight:700;padding:1px 5px;border-radius:6px">HAUTE</span>`:'';
+    const client     = d?.client ? `<span class="prod-group-info">${d.client}</span>` : '';
+    const produit    = d?.produit ? `<span style="font-size:11px;color:var(--color-text-secondary)">${d.produit}</span>` : '';
+    const borderClr  = isUrgent?'#fca5a5':isHaute?'#fcd34d':'var(--color-border)';
+    const doneCount  = g.taches.filter(t=>t.statut==='TERMINE').length;
+    const total      = g.taches.length;
+    return `<div class="prod-group" style="border-color:${borderClr}">
+      <div class="prod-group-header">
+        <div class="prod-group-left" style="min-width:0">
+          <span class="prod-group-num">${g.numeroDossier}</span>
+          ${prio}
+          ${client}
+          ${produit}
+        </div>
+        <span style="font-size:11px;font-weight:600;color:var(--color-text-muted);flex-shrink:0">${doneCount}/${total}</span>
+      </div>
+      <div style="padding:8px 10px 0">${_buildProgressBar(dossierId)}</div>
+      <div class="prod-group-tasks">${g.taches.map(_tacheRow).join('')}</div>
     </div>`;
   }).join('');
+
+  container.innerHTML = dash + libreHtml + groupsHtml;
 }
 
 async function pointerStart(tacheId) {

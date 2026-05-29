@@ -29,7 +29,7 @@
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
-.attr-layout { display:grid; grid-template-columns:1fr 340px; gap:20px; align-items:start; }
+.attr-layout { display:grid; grid-template-columns:1fr 420px; gap:16px; align-items:start; }
 @media(max-width:900px) {
   .attr-layout { grid-template-columns:1fr; }
   .attr-right { position:static; }
@@ -85,6 +85,184 @@
 .notif-item-meta { font-size:11px;color:var(--color-text-muted); }
 .kpi-mini-label { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; color:var(--color-text-muted); margin-bottom:4px; }
 .kpi-mini-val { font-size:22px; font-weight:700; color:var(--color-text-primary); }
+
+/* ══ ATTRIBUTION — Status tabs ══ */
+.dossier-tabs-row { display:flex; gap:5px; flex-wrap:wrap; margin-bottom:14px; }
+.dossier-tab { display:inline-flex; align-items:center; gap:5px; padding:6px 12px; border-radius:8px; border:1.5px solid var(--color-border); background:var(--color-surface); color:var(--color-text-secondary); cursor:pointer; font-size:12px; font-weight:500; transition:.15s; white-space:nowrap; font-family:'DM Sans',sans-serif; }
+.dossier-tab:hover { border-color:var(--color-primary); color:var(--color-primary); }
+.dossier-tab--active { background:var(--color-primary); border-color:var(--color-primary); color:#fff; font-weight:600; }
+.dossier-tab__count { font-size:10px; font-weight:700; padding:1px 5px; border-radius:8px; background:rgba(0,0,0,0.12); line-height:1.4; }
+.dossier-tab--active .dossier-tab__count { background:rgba(255,255,255,0.22); }
+
+/* ══ ATTRIBUTION — Search bar ══ */
+.dossier-search-wrap { position:relative; margin-bottom:10px; }
+.dossier-search-wrap svg { position:absolute; left:10px; top:50%; transform:translateY(-50%); color:var(--color-text-muted); pointer-events:none; }
+.dossier-search-input { width:100%; padding:8px 10px 8px 32px; border-radius:9px; border:1.5px solid var(--color-border); background:var(--color-surface); font-size:13px; font-family:'DM Sans',sans-serif; color:var(--color-text-primary); outline:none; transition:.15s; }
+.dossier-search-input:focus { border-color:var(--color-primary); }
+.dossier-search-input::placeholder { color:var(--color-text-muted); }
+
+/* ══ ATTRIBUTION — Compact dossier row card ══ */
+.dossier-list-wrap { display:flex; flex-direction:column; gap:6px; }
+.dossier-row { display:flex; align-items:center; gap:10px; padding:9px 12px; background:var(--color-surface); border:1.5px solid var(--color-border); border-radius:10px; cursor:pointer; transition:border-color .15s, box-shadow .15s; }
+.dossier-row:hover { border-color:var(--color-primary); box-shadow:0 2px 8px rgba(26,74,58,.07); }
+.dossier-row--selected { border-color:var(--color-primary) !important; background:var(--color-primary-light); }
+.dossier-row__prio { width:3px; min-height:38px; border-radius:2px; flex-shrink:0; align-self:stretch; }
+.dossier-row__main { flex:1; min-width:0; }
+.dossier-row__top { display:flex; align-items:center; gap:5px; margin-bottom:2px; flex-wrap:wrap; }
+.dossier-row__num { font-family:'DM Mono',monospace; font-size:10px; color:var(--color-text-muted); white-space:nowrap; }
+.dossier-row__client { font-size:13px; font-weight:600; color:var(--color-text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.dossier-row__produit { font-size:11px; color:var(--color-text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.dossier-row__right { display:flex; flex-direction:column; align-items:flex-end; gap:5px; flex-shrink:0; }
+.dossier-row__pipe { display:flex; align-items:center; gap:2px; }
+.dossier-row__pipedot { width:7px; height:7px; border-radius:50%; }
+.dossier-row__pct { font-size:10px; font-weight:700; }
+.dossier-row__bar { width:44px; height:3px; background:var(--color-border); border-radius:2px; overflow:hidden; }
+.dossier-row__bar-fill { height:100%; border-radius:2px; transition:width .4s; }
+.dossier-row__meta { display:flex; align-items:center; gap:4px; }
+
+/* ══ ATTRIBUTION — Panel header redesign ══ */
+.attr-panel-header { padding:16px 18px; border-bottom:1px solid var(--color-border); }
+.attr-panel-dossier-meta { font-family:'DM Mono',monospace; font-size:10px; color:var(--color-text-muted); margin-bottom:4px; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.attr-panel-title { font-size:16px; font-weight:700; color:var(--color-primary); margin-bottom:2px; }
+.attr-panel-sub { font-size:12px; color:var(--color-text-secondary); display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.attr-panel-body { padding:14px 18px; }
+.attr-source-card { background:var(--color-bg); border:1px solid var(--color-border); border-radius:10px; padding:12px 14px; margin-bottom:14px; }
+.attr-source-label { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; color:var(--color-text-muted); margin-bottom:8px; display:flex; align-items:center; gap:5px; }
+.attr-etapes-list { margin:0 -18px; }
+.etape-row-attr { display:flex; align-items:center; gap:10px; padding:10px 18px; border-bottom:1px solid var(--color-border); transition:background .12s; }
+.etape-row-attr:hover { background:var(--color-bg); }
+.etape-row-attr:last-child { border-bottom:none; }
+.btn-attr-assign { padding:5px 11px; border-radius:7px; background:var(--color-primary-light); color:var(--color-primary); border:1px solid rgba(26,74,58,.2); cursor:pointer; font-size:11px; font-weight:600; transition:.15s; white-space:nowrap; }
+.btn-attr-assign:hover { background:rgba(26,74,58,.15); }
+
+/* ══ PRODUCTION — Operator workload bar ══ */
+.op-workload-section { margin-bottom:16px; }
+.op-workload-title { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--color-text-muted); margin-bottom:8px; }
+.op-workload-row { display:flex; gap:7px; flex-wrap:wrap; }
+.op-workload-card { background:var(--color-surface); border:1.5px solid var(--color-border); border-radius:10px; padding:10px 12px; min-width:100px; flex:1; max-width:160px; }
+.op-workload-card--overloaded { border-color:#fca5a5; background:#fff9f9; }
+.op-workload-card__avatar { width:28px; height:28px; border-radius:50%; background:var(--color-primary); display:flex; align-items:center; justify-content:center; color:#fff; font-size:11px; font-weight:700; margin-bottom:6px; }
+.op-workload-card--overloaded .op-workload-card__avatar { background:var(--color-danger); }
+.op-workload-card__name { font-size:11px; font-weight:600; color:var(--color-text-secondary); margin-bottom:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.op-workload-card__count { font-size:18px; font-weight:800; color:var(--color-text-primary); line-height:1; }
+.op-workload-card--overloaded .op-workload-card__count { color:var(--color-danger); }
+.op-workload-card__sub { font-size:10px; color:var(--color-text-muted); margin-bottom:5px; }
+.op-workload-bar-bg { height:3px; background:var(--color-border); border-radius:2px; overflow:hidden; }
+.op-workload-bar-fill { height:100%; border-radius:2px; background:var(--color-primary); transition:width .4s; }
+.op-workload-card--overloaded .op-workload-bar-fill { background:var(--color-danger); }
+
+/* ══ PRODUCTION — Task group card ══ */
+.prod-group { background:var(--color-surface); border:1.5px solid var(--color-border); border-radius:12px; margin-bottom:10px; overflow:hidden; }
+.prod-group-header { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid var(--color-border); background:var(--color-bg); gap:10px; flex-wrap:wrap; }
+.prod-group-left { display:flex; align-items:center; gap:8px; min-width:0; }
+.prod-group-num { font-family:'DM Mono',monospace; font-size:10px; color:var(--color-text-muted); white-space:nowrap; }
+.prod-group-info { font-size:12px; font-weight:600; color:var(--color-text-primary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.prod-group-tasks { padding:6px 8px; display:flex; flex-direction:column; gap:5px; }
+
+/* ══ PRODUCTION — Task card (remplace tache-row) ══ */
+.tache-card { display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:8px; border:1.5px solid var(--color-border); background:var(--color-surface); transition:border-color .15s; }
+.tache-card--encours { border-color:var(--color-warning); background:var(--color-warning-bg); }
+.tache-card--done { opacity:.5; }
+.tache-card__icon { width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:11px; font-weight:800; border:1.5px solid transparent; }
+.tache-card__body { flex:1; min-width:0; }
+.tache-card__label { font-size:12px; font-weight:700; margin-bottom:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tache-card__sub { font-size:11px; color:var(--color-text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tache-card__actions { display:flex; align-items:center; gap:5px; flex-shrink:0; }
+.btn-prod-start { padding:6px 12px; border-radius:7px; background:var(--color-primary-light); color:var(--color-primary); border:1px solid rgba(26,74,58,.2); cursor:pointer; font-size:11px; font-weight:600; transition:.15s; white-space:nowrap; }
+.btn-prod-start:hover { background:rgba(26,74,58,.15); }
+.btn-prod-done { padding:6px 12px; border-radius:7px; background:var(--color-success-bg); color:var(--color-success); border:1px solid rgba(22,163,74,.2); cursor:pointer; font-size:11px; font-weight:600; transition:.15s; white-space:nowrap; }
+.btn-prod-done:hover { background:rgba(22,163,74,.15); }
+
+/* ══ PRODUCTION — Mon dashboard perso ══ */
+.mon-dashboard { background:var(--color-primary-light); border:1px solid rgba(26,74,58,.15); border-radius:12px; padding:14px 16px; margin-bottom:16px; }
+.mon-dashboard-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; gap:10px; flex-wrap:wrap; }
+.mon-dashboard-name { font-size:13px; font-weight:700; color:var(--color-primary); }
+.mon-dashboard-sub { font-size:11px; color:var(--color-text-muted); margin-top:1px; }
+.mon-dashboard-cards { display:flex; gap:8px; flex-wrap:wrap; }
+.mon-task-card { flex:1; min-width:160px; max-width:240px; border-radius:9px; padding:10px 12px; border:1.5px solid; }
+.mon-task-card__num { font-family:'DM Mono',monospace; font-size:9px; color:var(--color-text-muted); margin-bottom:2px; }
+.mon-task-card__etape { font-size:12px; font-weight:700; margin-bottom:3px; }
+.mon-task-card__status { font-size:11px; font-weight:600; margin-bottom:6px; }
+.mon-task-card__btn { width:100%; padding:5px; border:none; border-radius:6px; font-size:11px; font-weight:600; cursor:pointer; }
+
+/* ══ PRODUCTION — Vue charge : KPI bar ══ */
+.charge-kpi-bar { display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap; }
+.charge-kpi-card { background:var(--color-surface); border:1.5px solid var(--color-border); border-radius:12px; padding:12px 16px; flex:1; min-width:130px; }
+.charge-kpi-card__val { font-size:26px; font-weight:800; color:var(--color-text-primary); line-height:1; }
+.charge-kpi-card__label { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--color-text-muted); margin-top:4px; }
+.charge-kpi-card--alert .charge-kpi-card__val { color:var(--color-danger); }
+.charge-kpi-card--warn .charge-kpi-card__val { color:var(--color-warning); }
+.charge-kpi-card--ok .charge-kpi-card__val { color:var(--color-success); }
+
+/* ══ PRODUCTION — Vue charge : grille opérateurs ══ */
+.charge-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(270px,1fr)); gap:12px; }
+.charge-card { background:var(--color-surface); border:1.5px solid var(--color-border); border-radius:14px; overflow:hidden; transition:box-shadow .15s; }
+.charge-card:hover { box-shadow:0 4px 16px rgba(0,0,0,.07); }
+.charge-card--overloaded { border-color:#fca5a5; }
+.charge-card--idle { opacity:.7; }
+.charge-card__header { padding:14px 16px 12px; }
+.charge-card__top { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+.charge-card__avatar { width:38px; height:38px; border-radius:50%; background:var(--color-primary); color:#fff; display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:700; flex-shrink:0; }
+.charge-card--overloaded .charge-card__avatar { background:var(--color-danger); }
+.charge-card__name { font-size:14px; font-weight:700; color:var(--color-text-primary); margin-bottom:1px; }
+.charge-card__role { font-size:11px; color:var(--color-text-muted); }
+.charge-card__bar-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:5px; }
+.charge-card__bar-lbl { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--color-text-muted); }
+.charge-card__bar-count { font-size:12px; font-weight:800; }
+.charge-card__bar-bg { height:6px; background:var(--color-border); border-radius:4px; overflow:hidden; }
+.charge-card__bar-fill { height:100%; border-radius:4px; transition:width .4s; background:var(--color-primary); }
+.charge-card--overloaded .charge-card__bar-fill { background:var(--color-danger); }
+.charge-card__kpis { display:flex; border-top:1px solid var(--color-border); }
+.charge-kpi-cell { flex:1; text-align:center; padding:8px 4px; border-right:1px solid var(--color-border); }
+.charge-kpi-cell:last-child { border-right:none; }
+.charge-kpi-cell__val { font-size:18px; font-weight:800; line-height:1; }
+.charge-kpi-cell__lbl { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--color-text-muted); margin-top:2px; }
+.charge-card__tasks { padding:8px 12px 10px; border-top:1px solid var(--color-border); }
+.charge-section-hd { font-size:9px; font-weight:800; text-transform:uppercase; letter-spacing:.08em; padding:6px 4px 4px; display:flex; align-items:center; gap:6px; }
+.charge-task-row { display:flex; align-items:center; gap:8px; padding:5px 7px; border-radius:7px; margin-bottom:2px; cursor:pointer; transition:background .12s; }
+.charge-task-row:hover { background:var(--color-bg); }
+.charge-task-row--encours { background:var(--color-warning-bg); }
+.charge-task-row--done { opacity:.4; }
+.charge-task-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.charge-task-etape { font-size:12px; font-weight:600; color:var(--color-text-primary); flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.charge-task-num { font-family:'DM Mono',monospace; font-size:10px; color:var(--color-text-muted); white-space:nowrap; flex-shrink:0; }
+.charge-task-btn { flex-shrink:0; padding:3px 8px; border:none; border-radius:6px; font-size:10px; font-weight:600; cursor:pointer; white-space:nowrap; }
+.charge-card__empty { padding:12px; text-align:center; font-size:12px; color:var(--color-text-muted); }
+
+/* ══ VIEW TOGGLE ══ */
+.view-toggle { display:flex; gap:2px; background:var(--color-border); border-radius:8px; padding:2px; flex-shrink:0; }
+.view-toggle-btn { display:flex; align-items:center; justify-content:center; width:30px; height:26px; border:none; border-radius:6px; background:transparent; color:var(--color-text-muted); cursor:pointer; transition:.15s; }
+.view-toggle-btn--active { background:var(--color-surface); color:var(--color-primary); box-shadow:0 1px 3px rgba(0,0,0,0.10); }
+
+/* ══ CARTE DOSSIER — vue grille ══ */
+.dossier-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px,1fr)); gap:12px; }
+.dossier-card-v2 { background:var(--color-surface); border:1.5px solid var(--color-border); border-radius:14px; overflow:hidden; cursor:pointer; transition:border-color .15s, box-shadow .2s, transform .15s; display:flex; flex-direction:column; }
+.dossier-card-v2:hover { border-color:var(--color-primary); box-shadow:0 4px 16px rgba(26,74,58,.10); transform:translateY(-1px); }
+.dossier-card-v2--selected { border-color:var(--color-primary); box-shadow:0 0 0 3px rgba(26,74,58,.12); }
+.dossier-card-v2__top-bar { height:4px; width:100%; flex-shrink:0; }
+.dossier-card-v2__header { padding:12px 14px 10px; border-bottom:1px solid var(--color-border); }
+.dossier-card-v2__meta { display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; gap:6px; flex-wrap:wrap; }
+.dossier-card-v2__num { font-family:'DM Mono',monospace; font-size:10px; color:var(--color-text-muted); }
+.dossier-card-v2__badges { display:flex; align-items:center; gap:4px; }
+.dossier-card-v2__client { font-size:14px; font-weight:700; color:var(--color-text-primary); margin-bottom:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.dossier-card-v2__produit { font-size:12px; color:var(--color-text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.dossier-card-v2__body { padding:12px 14px; flex:1; }
+.dossier-card-v2__pipeline-label { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--color-text-muted); margin-bottom:8px; }
+.dossier-card-v2__steps { display:flex; align-items:flex-start; gap:0; margin-bottom:10px; }
+.dossier-card-v2__step { display:flex; flex-direction:column; align-items:center; flex:1; position:relative; }
+.dossier-card-v2__step-line { position:absolute; top:9px; left:50%; width:100%; height:2px; z-index:0; }
+.dossier-card-v2__step-dot { width:18px; height:18px; border-radius:50%; border:2px solid; display:flex; align-items:center; justify-content:center; font-size:7px; font-weight:800; position:relative; z-index:1; flex-shrink:0; }
+.dossier-card-v2__step-label { font-size:8px; font-weight:500; margin-top:3px; text-align:center; line-height:1.2; max-width:36px; word-break:break-word; }
+.dossier-card-v2__step-op { font-size:7px; color:var(--color-text-muted); margin-top:1px; text-align:center; max-width:36px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.dossier-card-v2__progress-row { display:flex; align-items:center; gap:8px; margin-top:4px; }
+.dossier-card-v2__progress-bar { flex:1; height:5px; background:var(--color-border); border-radius:4px; overflow:hidden; }
+.dossier-card-v2__progress-fill { height:100%; border-radius:4px; transition:width .4s; }
+.dossier-card-v2__pct { font-size:11px; font-weight:800; flex-shrink:0; min-width:32px; text-align:right; }
+.dossier-card-v2__footer { padding:10px 14px; border-top:1px solid var(--color-border); display:flex; align-items:center; justify-content:space-between; background:var(--color-bg); }
+.dossier-card-v2__date { font-size:11px; color:var(--color-text-muted); display:flex; align-items:center; gap:4px; }
+.dossier-card-v2__date--late { color:var(--color-danger); font-weight:600; }
+.dossier-card-v2__action { display:flex; align-items:center; gap:4px; padding:5px 10px; background:var(--color-primary); color:#fff; border:none; border-radius:7px; font-size:11px; font-weight:600; cursor:pointer; transition:.15s; white-space:nowrap; }
+.dossier-card-v2__action:hover { background:var(--color-primary-hover); }
 .spinner { width:20px; height:20px; border:2px solid var(--color-border); border-top-color:var(--color-primary); border-radius:50%; animation:_spin .6s linear infinite; }
 @keyframes _spin { to { transform:rotate(360deg); } }
 .modal-header { display:flex; align-items:center; justify-content:space-between; padding:20px 24px 16px; border-bottom:1px solid var(--color-border); }
@@ -725,7 +903,8 @@
         <p class="page-subtitle">Assignez chaque étape de production à un opérateur</p>
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <select id="dossierFilterSel" class="select-input" onchange="loadDossiers()" style="min-width:160px">
+        <!-- select gardé masqué — lu par loadDossiers() -->
+        <select id="dossierFilterSel" class="select-input" onchange="loadDossiers()" style="display:none">
           <option value="TOUS">Tous les dossiers</option>
           <option value="CREE">Créés</option>
           <option value="PAO">PAO</option>
@@ -734,6 +913,15 @@
           <option value="PRODUCTION">Production</option>
           <option value="FINITION">Finition</option>
         </select>
+        <!-- Toggle vue liste / carte -->
+        <div class="view-toggle" title="Changer de vue">
+          <button id="viewToggleList" class="view-toggle-btn view-toggle-btn--active" onclick="toggleDossierView('list')" title="Vue liste">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+          </button>
+          <button id="viewToggleCard" class="view-toggle-btn" onclick="toggleDossierView('card')" title="Vue cartes">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          </button>
+        </div>
         <button class="btn-secondary-action" onclick="openTacheLibreModal()" style="background:var(--color-secondary);color:#fff;border-color:var(--color-secondary)">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           Tâche libre
@@ -744,15 +932,27 @@
         </button>
       </div>
     </div>
-    <div class="attr-layout">
-      <div class="attr-left">
+
+    <!-- Barre de tabs statut + compteurs -->
+    <div id="dossierStatusTabs" class="dossier-tabs-row"></div>
+
+    <div class="attr-layout" id="attrLayout">
+      <div class="attr-left" id="attrLeft">
+        <!-- Recherche client-side -->
+        <div class="dossier-search-wrap">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input id="dossierSearchInput" class="dossier-search-input" placeholder="Rechercher client, N° dossier, produit…" oninput="renderDossiers()" />
+        </div>
         <div id="dossierListContainer" class="dossier-list-wrap"></div>
       </div>
-      <div class="attr-right">
+      <div class="attr-right" id="attrRight">
         <div id="attrPanel" class="attr-panel">
-          <div style="text-align:center;color:var(--color-text-muted);padding:60px 24px">
-            <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin:0 auto 12px;display:block;opacity:.4"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-            <p style="font-size:14px">Sélectionnez un dossier<br>pour assigner les étapes</p>
+          <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:64px 24px;text-align:center;color:var(--color-text-muted)">
+            <div style="width:52px;height:52px;background:var(--color-bg);border-radius:14px;display:flex;align-items:center;justify-content:center;margin-bottom:14px">
+              <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.45"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            </div>
+            <p style="font-size:13px;font-weight:600;color:var(--color-text-secondary)">Sélectionnez un dossier</p>
+            <p style="font-size:11px;color:var(--color-text-muted);margin-top:4px">Les étapes de production apparaîtront ici</p>
           </div>
         </div>
       </div>
@@ -768,20 +968,45 @@
         <h1 class="page-title">Suivi de production</h1>
         <p class="page-subtitle">Pointez vos tâches en temps réel</p>
       </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
+        <!-- Toggle Vue tâches / Vue charge -->
+        <div class="view-toggle" title="Changer de vue">
+          <button id="prodViewTasks" class="view-toggle-btn view-toggle-btn--active" onclick="toggleProdView('tasks')" title="Vue par tâches">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+          </button>
+          <button id="prodViewCharge" class="view-toggle-btn" onclick="toggleProdView('charge')" title="Vue charge opérateurs">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          </button>
+        </div>
+        <button id="btnRefreshTaches" onclick="refreshTaches(this)" style="display:flex;align-items:center;gap:6px;padding:7px 14px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;flex-shrink:0" title="Actualiser">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+          Actualiser
+        </button>
+      </div>
     </div>
-    <div style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap;align-items:center">
-      <button class="prod-filter-btn prod-filter-btn--active" onclick="setProdFilter('TOUS',this)">Toutes</button>
-      <button class="prod-filter-btn" onclick="setProdFilter('A_FAIRE',this)">À faire</button>
-      <button class="prod-filter-btn" onclick="setProdFilter('EN_COURS',this)">En cours</button>
-      <button class="prod-filter-btn" onclick="setProdFilter('TERMINE',this)">Terminées</button>
+
+    <!-- Barre charge opérateurs mini (vue tâches uniquement) -->
+    <div id="opWorkloadContainer"></div>
+
+    <!-- Filtres statut + filtre opérateur (masqués en vue charge) -->
+    <div id="prodFilterBar" style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
+      <button class="prod-filter-btn prod-filter-btn--active" onclick="setProdFilter('TOUS',this)">
+        Toutes <span id="prodCountTous" class="dossier-tab__count" style="background:rgba(0,0,0,0.1)"></span>
+      </button>
+      <button class="prod-filter-btn" onclick="setProdFilter('A_FAIRE',this)">
+        À faire <span id="prodCountAFaire" class="dossier-tab__count"></span>
+      </button>
+      <button class="prod-filter-btn" onclick="setProdFilter('EN_COURS',this)">
+        En cours <span id="prodCountEnCours" class="dossier-tab__count"></span>
+      </button>
+      <button class="prod-filter-btn" onclick="setProdFilter('TERMINE',this)">
+        Terminées <span id="prodCountTermine" class="dossier-tab__count"></span>
+      </button>
       <select id="opFilterSel" class="select-input" onchange="loadTaches()" style="min-width:160px;margin-left:auto">
         <option value="TOUS">Tous les opérateurs</option>
       </select>
-      <button id="btnRefreshTaches" onclick="refreshTaches(this)" style="display:flex;align-items:center;gap:6px;padding:7px 14px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;flex-shrink:0" title="Actualiser">
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
-        Actualiser
-      </button>
     </div>
+
     <div id="tachesContainer"></div>
   </div>
 
