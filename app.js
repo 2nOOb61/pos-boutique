@@ -273,6 +273,7 @@ function showPage(id, btn, bnavBtn) {
     loadDossiers(); initModulesProduction();
   }
   if (id==='production')   { loadTaches(); _autoRefreshProduction(); initModulesProduction(); }
+  if (id==='patron')       { renderPatronDashboard(); _autoRefreshPatron(); }
   if (id==='commandes')    { _ensureDossierLinks(); renderCommandes(); _autoRefreshCommandes(); _loadTachesQuietly().then(renderCommandes); }
   // Garde d'accès par rôle
   if (currentUser) {
@@ -7077,6 +7078,370 @@ function demoTaches(filters) {
   if (filters?.operateur && filters.operateur !== 'TOUS') res = res.filter(t => t.operateur === filters.operateur);
   if (filters?.dossierId) res = res.filter(t => t.dossierId === filters.dossierId);
   return res;
+}
+
+// ============================================================
+// PATRON DASHBOARD — Vue globale admin
+// ============================================================
+let _lastPatronRefresh = 0;
+
+async function _autoRefreshPatron() {
+  if (!APPS_SCRIPT_URL) { renderPatronDashboard(); return; }
+  const now = Date.now();
+  if (now - _lastPatronRefresh < 45000) return;
+  _lastPatronRefresh = now;
+  try {
+    const [rT, rD] = await Promise.all([
+      apiCall({ action: 'getTaches' }),
+      apiCall({ action: 'getDossiers', statut: 'TOUS' }),
+    ]);
+    if (rT && rT.ok && Array.isArray(rT.taches) && rT.taches.length > 0) {
+      const ids = new Set(rT.taches.map(t => t.id));
+      taches = [...rT.taches, ...taches.filter(t => !ids.has(t.id))];
+    }
+    if (rD && rD.ok && Array.isArray(rD.dossiers)) {
+      dossiers = rD.dossiers;
+      _ensureDossierLinks();
+    }
+  } catch(e) {}
+  renderPatronDashboard();
+}
+
+async function refreshPatronDashboard(btn) {
+  _lastPatronRefresh = 0;
+  if (btn) { btn.disabled = true; document.getElementById('patronRefreshIcon').style.animation = 'spin .8s linear infinite'; }
+  await _autoRefreshPatron();
+  if (btn) { btn.disabled = false; document.getElementById('patronRefreshIcon').style.animation = ''; }
+  showToast('Tableau de bord actualisé');
+}
+
+function renderPatronDashboard() {
+  const body = document.getElementById('patronDashboardBody');
+  if (!body) return;
+
+  // ── Données de base ──
+  const now       = new Date();
+  const todayStr  = now.toDateString();
+  const monthKey  = now.toISOString().slice(0, 7);
+  const weekAgo   = new Date(now - 7 * 864e5);
+
+  const todaySales  = sales.filter(s => { const d = parseSaleDate(s.date); return d && d.toDateString() === todayStr; });
+  const monthSales  = sales.filter(s => saleDateKey(s.date).startsWith(monthKey));
+  const totalToday  = todaySales.reduce((a, s) => a + (Number(s.total) || 0), 0);
+  const totalMonth  = monthSales.reduce((a, s) => a + (Number(s.total) || 0), 0);
+  const totalCreances = sales.reduce((a, s) => a + (Number(s.due) || 0), 0);
+  const nbCreances  = sales.filter(s => (Number(s.due) || 0) > 0).length;
+  const pendingRes  = reservations.filter(r => r.status === 'pending');
+  const pendingCmd  = commandes.filter(c => c.status === 'pending');
+  const dossiersActifs = dossiers.filter(d => d.statut !== 'LIVRE');
+  const stockAlertes = products.filter(p => p.stock <= p.minStock && p.stock >= 0);
+  const resCreances  = reservations.filter(r => (Number(r.restant) || 0) > 0 && r.status === 'pending');
+  const totalResCreances = resCreances.reduce((a, r) => a + (Number(r.restant) || 0), 0);
+
+  // Mise à jour sous-titre
+  const subEl = document.getElementById('patronSubtitle');
+  if (subEl) subEl.textContent = now.toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+  const lastEl = document.getElementById('patronLastRefresh');
+  if (lastEl) lastEl.textContent = 'Mis à jour à ' + now.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
+
+  // ── KPI ──
+  const kpiHtml = `
+  <div class="pdb-kpi-grid">
+    ${_pdbKpi('Ventes aujourd\'hui', fmt(totalToday), todaySales.length + ' transaction' + (todaySales.length > 1 ? 's' : ''), '#1a4a3a')}
+    ${_pdbKpi('Ventes ce mois', fmt(totalMonth), monthSales.length + ' transactions', '#2563eb')}
+    ${_pdbKpi('Dossiers actifs', dossiersActifs.length, dossiers.filter(d => d.priorite === 'Urgente').length + ' urgent(s)', '#d97706')}
+    ${_pdbKpi('Réservations', pendingRes.length, 'en attente', '#7c3aed')}
+    ${_pdbKpi('Commandes', pendingCmd.length, 'en attente', '#0891b2')}
+    ${_pdbKpi('Créances', fmt(totalCreances + totalResCreances), nbCreances + resCreances.length + ' dossier(s)', '#dc2626')}
+    ${_pdbKpi('Stock alertes', stockAlertes.length, 'sous seuil minimum', '#ea580c')}
+    ${_pdbKpi('Tâches en cours', taches.filter(t => t.statut === 'EN_COURS').length + tachesLibres.filter(t => t.statut === 'EN_COURS').length, 'tous opérateurs', '#16a34a')}
+  </div>`;
+
+  // ── Ventes par caissier (ce mois) ──
+  const byCaissier = {};
+  monthSales.forEach(s => {
+    const c = s.caissier || 'Inconnu';
+    if (!byCaissier[c]) byCaissier[c] = { nb: 0, total: 0 };
+    byCaissier[c].nb++;
+    byCaissier[c].total += Number(s.total) || 0;
+  });
+  const caissierList = Object.entries(byCaissier).sort((a, b) => b[1].total - a[1].total);
+  const maxCaissier  = Math.max(...caissierList.map(c => c[1].total), 1);
+  const caissierRows = caissierList.length
+    ? caissierList.map(([nom, d]) => {
+        const pct = Math.round(d.total / maxCaissier * 100);
+        const moy = d.nb ? Math.round(d.total / d.nb) : 0;
+        return `<tr>
+          <td><span style="font-weight:600">${nom}</span></td>
+          <td style="text-align:center"><span style="background:#e8f4f0;color:#1a4a3a;padding:2px 8px;border-radius:12px;font-weight:700;font-size:11px">${d.nb}</span></td>
+          <td><div class="pdb-bar-wrap"><div class="pdb-bar-fill" style="width:${pct}%"></div></div>${fmt(d.total)}</td>
+          <td style="color:#78716c">${fmt(moy)}</td>
+        </tr>`;
+      }).join('')
+    : `<tr><td colspan="4"><div class="pdb-empty"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:.4"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>Aucune vente ce mois</div></td></tr>`;
+
+  const caissierHtml = `
+  <div class="pdb-section">
+    <div class="pdb-section-head">
+      <div><div class="pdb-section-title">Ventes par caissier — ce mois</div><div class="pdb-section-sub">${monthSales.length} transactions · ${fmt(totalMonth)}</div></div>
+      <span class="pdb-section-badge" style="background:#e8f4f0;color:#1a4a3a">${caissierList.length} caissier(s)</span>
+    </div>
+    <table class="pdb-table">
+      <thead><tr><th>Caissier</th><th style="text-align:center">Nb ventes</th><th>Total (Ar)</th><th>Panier moyen</th></tr></thead>
+      <tbody>${caissierRows}</tbody>
+    </table>
+  </div>`;
+
+  // ── Charge opérateurs ──
+  const allTaches = [...taches, ...tachesLibres];
+  const opMap = {};
+  allTaches.forEach(t => {
+    if (!t.operateur) return;
+    if (!opMap[t.operateur]) opMap[t.operateur] = { aFaire: 0, enCours: 0, termine: 0, total: 0 };
+    opMap[t.operateur].total++;
+    if (t.statut === 'A_FAIRE')  opMap[t.operateur].aFaire++;
+    if (t.statut === 'EN_COURS') opMap[t.operateur].enCours++;
+    if (t.statut === 'TERMINE')  opMap[t.operateur].termine++;
+  });
+  const opList = Object.entries(opMap).sort((a, b) => b[1].enCours - a[1].enCours);
+  const opRows = opList.length
+    ? opList.map(([nom, d]) => {
+        const pct = d.total ? Math.round(d.termine / d.total * 100) : 0;
+        return `<tr>
+          <td><span style="font-weight:600">${nom}</span></td>
+          <td style="text-align:center"><span style="background:#dbeafe;color:#2563eb;padding:2px 7px;border-radius:10px;font-size:11px;font-weight:700">${d.aFaire}</span></td>
+          <td style="text-align:center"><span style="background:#fef3c7;color:#d97706;padding:2px 7px;border-radius:10px;font-size:11px;font-weight:700">${d.enCours}</span></td>
+          <td style="text-align:center"><span style="background:#dcfce7;color:#16a34a;padding:2px 7px;border-radius:10px;font-size:11px;font-weight:700">${d.termine}</span></td>
+          <td><div class="pdb-bar-wrap" style="width:100px"><div class="pdb-bar-fill" style="width:${pct}%;background:${pct===100?'#16a34a':'#1a4a3a'}"></div></div><span style="font-size:11px;color:#78716c">${pct}%</span></td>
+        </tr>`;
+      }).join('')
+    : `<tr><td colspan="5"><div class="pdb-empty">Aucune tâche assignée</div></td></tr>`;
+
+  const opsHtml = `
+  <div class="pdb-section">
+    <div class="pdb-section-head">
+      <div><div class="pdb-section-title">Charge des opérateurs</div><div class="pdb-section-sub">${allTaches.length} tâches au total</div></div>
+      <span class="pdb-section-badge" style="background:#fef3c7;color:#d97706">${allTaches.filter(t=>t.statut==='EN_COURS').length} en cours</span>
+    </div>
+    <table class="pdb-table">
+      <thead><tr><th>Opérateur</th><th style="text-align:center">À faire</th><th style="text-align:center">En cours</th><th style="text-align:center">Terminé</th><th>Avancement</th></tr></thead>
+      <tbody>${opRows}</tbody>
+    </table>
+  </div>`;
+
+  // ── Suivi dossiers de production ──
+  const urgents = dossiersActifs.filter(d => d.priorite === 'Urgente');
+  const dossierRows = dossiersActifs.length
+    ? dossiersActifs.slice(0, 15).map(d => {
+        const pct  = d.progression || 0;
+        const etape = ETAPES_CONFIG?.find(e => e.code === d.statut);
+        const etapeLabel = etape?.short || d.statut || '—';
+        const etapeColor = etape?.color || '#1a4a3a';
+        const urgBadge = d.priorite === 'Urgente' ? '<span style="background:#fee2e2;color:#dc2626;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;margin-left:4px">URGENT</span>' : '';
+        const pctColor = pct === 100 ? '#16a34a' : pct > 0 ? '#d97706' : '#a8a29e';
+        return `<div class="pdb-dossier-row">
+          <div style="min-width:90px"><span style="font-size:11px;font-weight:700;color:#1a4a3a">${d.numeroDossier}</span>${urgBadge}</div>
+          <div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:600;color:#1c1917;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${d.client || '—'}</div><div style="font-size:11px;color:#78716c">${d.produit || ''}</div></div>
+          <div style="min-width:70px;text-align:right"><span style="background:${etapeColor}18;color:${etapeColor};font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px">${etapeLabel}</span></div>
+          <div style="min-width:110px;display:flex;align-items:center;gap:6px">
+            <div class="pdb-prog-wrap"><div class="pdb-prog-fill" style="width:${pct}%;background:${pctColor}"></div></div>
+            <span style="font-size:11px;font-weight:700;color:${pctColor};min-width:28px">${pct}%</span>
+          </div>
+        </div>`;
+      }).join('')
+    : `<div class="pdb-empty"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:.4"><polyline points="20 6 9 17 4 12"/></svg>Aucun dossier actif</div>`;
+
+  const prodHtml = `
+  <div class="pdb-section">
+    <div class="pdb-section-head">
+      <div><div class="pdb-section-title">Suivi des dossiers de production</div><div class="pdb-section-sub">${dossiersActifs.length} dossier(s) actif(s)</div></div>
+      ${urgents.length ? `<span class="pdb-section-badge" style="background:#fee2e2;color:#dc2626">${urgents.length} urgent(s)</span>` : `<span class="pdb-section-badge" style="background:#dcfce7;color:#16a34a">Aucun urgent</span>`}
+    </div>
+    <div>${dossierRows}</div>
+    ${dossiersActifs.length > 15 ? `<div style="text-align:center;padding:10px;font-size:12px;color:#78716c">+ ${dossiersActifs.length - 15} autres dossiers — voir page Attribution</div>` : ''}
+  </div>`;
+
+  // ── Réservations en attente ──
+  const resRows = pendingRes.length
+    ? pendingRes.slice(0, 8).map(r => {
+        const items = (r.items || []).slice(0, 2).map(i => `${i.name} ×${i.qty}`).join(', ');
+        const tag = r.clientType === 'corporate'
+          ? `<span style="background:#dbeafe;color:#2563eb;font-size:9px;font-weight:700;padding:1px 5px;border-radius:6px">CORP</span>`
+          : '';
+        return `<div style="padding:9px 14px;border-bottom:1px solid #fafaf9;font-size:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+            <div><span style="font-weight:700">${r.clientName || '—'}</span> ${tag} <span style="color:#78716c;font-size:11px">${items}</span></div>
+            <div style="text-align:right;flex-shrink:0">
+              <div style="font-weight:700;color:#1a4a3a">${fmt(r.total)}</div>
+              <div style="font-size:10px;color:#dc2626">Reste : ${fmt(r.restant || 0)}</div>
+            </div>
+          </div>
+        </div>`;
+      }).join('')
+    : `<div class="pdb-empty">Aucune réservation en attente</div>`;
+
+  // ── Commandes en attente ──
+  const cmdRows = pendingCmd.length
+    ? pendingCmd.slice(0, 8).map(c => {
+        const items = (c.items || []).slice(0, 2).map(i => `${i.name} ×${i.qty}`).join(', ');
+        const tag = c.clientType === 'corporate'
+          ? `<span style="background:#dbeafe;color:#2563eb;font-size:9px;font-weight:700;padding:1px 5px;border-radius:6px">CORP</span>`
+          : '';
+        return `<div style="padding:9px 14px;border-bottom:1px solid #fafaf9;font-size:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+            <div><span style="font-weight:700">${c.clientName || '—'}</span> ${tag} <span style="color:#78716c;font-size:11px">${items}</span></div>
+            <div style="text-align:right;flex-shrink:0">
+              <div style="font-weight:700;color:#1a4a3a">${fmt(c.total)}</div>
+              <div style="font-size:10px;color:#78716c">Reste : ${fmt(c.restant || 0)}</div>
+            </div>
+          </div>
+        </div>`;
+      }).join('')
+    : `<div class="pdb-empty">Aucune commande en attente</div>`;
+
+  const resCmdHtml = `
+  <div class="pdb-two-col">
+    <div class="pdb-section">
+      <div class="pdb-section-head">
+        <div><div class="pdb-section-title">Réservations en attente</div></div>
+        <span class="pdb-section-badge" style="background:#f3e8ff;color:#7c3aed">${pendingRes.length}</span>
+      </div>
+      ${resRows}
+    </div>
+    <div class="pdb-section">
+      <div class="pdb-section-head">
+        <div><div class="pdb-section-title">Commandes en attente</div></div>
+        <span class="pdb-section-badge" style="background:#e0f2fe;color:#0891b2">${pendingCmd.length}</span>
+      </div>
+      ${cmdRows}
+    </div>
+  </div>`;
+
+  // ── Alertes stock ──
+  const stockRows = stockAlertes.length
+    ? stockAlertes.map(p => {
+        const pct = p.minStock > 0 ? Math.min(100, Math.round(p.stock / p.minStock * 100)) : 0;
+        const col = p.stock === 0 ? '#dc2626' : p.stock <= p.minStock ? '#d97706' : '#16a34a';
+        return `<tr>
+          <td><span style="font-weight:600">${p.name}</span></td>
+          <td style="text-align:center"><span style="font-weight:700;color:${col};font-size:13px">${p.stock}</span></td>
+          <td style="text-align:center;color:#78716c">${p.minStock}</td>
+          <td>${p.stock === 0 ? '<span style="background:#fee2e2;color:#dc2626;font-size:10px;font-weight:700;padding:2px 6px;border-radius:8px">RUPTURE</span>' : '<span style="background:#fef3c7;color:#d97706;font-size:10px;font-weight:700;padding:2px 6px;border-radius:8px">BAS</span>'}</td>
+        </tr>`;
+      }).join('')
+    : `<tr><td colspan="4"><div class="pdb-empty" style="padding:20px">Aucune alerte stock</div></td></tr>`;
+
+  const stockHtml = `
+  <div class="pdb-section">
+    <div class="pdb-section-head">
+      <div><div class="pdb-section-title">Alertes stock</div><div class="pdb-section-sub">Articles sous seuil minimum</div></div>
+      <span class="pdb-section-badge" style="background:${stockAlertes.length ? '#fee2e2' : '#dcfce7'};color:${stockAlertes.length ? '#dc2626' : '#16a34a'}">${stockAlertes.length} article(s)</span>
+    </div>
+    <table class="pdb-table">
+      <thead><tr><th>Article</th><th style="text-align:center">Stock actuel</th><th style="text-align:center">Seuil min</th><th>Statut</th></tr></thead>
+      <tbody>${stockRows}</tbody>
+    </table>
+  </div>`;
+
+  // ── Créances (ventes + réservations) ──
+  const creanceSales = sales.filter(s => (Number(s.due) || 0) > 0).slice(0, 6);
+  const creanceRows = [...creanceSales.map(s => ({
+    nom: s.clientName || '—', contact: s.clientContact || '', montant: s.total, restant: Number(s.due) || 0, date: s.date, type: 'Vente'
+  })), ...resCreances.slice(0, 6).map(r => ({
+    nom: r.clientName || '—', contact: r.clientContact || '', montant: r.total, restant: Number(r.restant) || 0, date: r.date, type: 'Réservation'
+  }))].sort((a, b) => b.restant - a.restant);
+
+  const creanceHtml = creanceRows.length
+    ? creanceRows.map(c => `<tr>
+        <td><span style="font-weight:600">${c.nom}</span>${c.contact ? `<div style="font-size:10px;color:#78716c">${c.contact}</div>` : ''}</td>
+        <td><span style="background:${c.type==='Vente'?'#e8f4f0':'#f3e8ff'};color:${c.type==='Vente'?'#1a4a3a':'#7c3aed'};font-size:10px;font-weight:700;padding:2px 6px;border-radius:8px">${c.type}</span></td>
+        <td style="text-align:right">${fmt(c.montant)}</td>
+        <td style="text-align:right"><span style="font-weight:700;color:#dc2626">${fmt(c.restant)}</span></td>
+      </tr>`).join('')
+    : `<tr><td colspan="4"><div class="pdb-empty">Aucune créance</div></td></tr>`;
+
+  const totalCr = creanceRows.reduce((a, c) => a + c.restant, 0);
+  const creancesHtml = `
+  <div class="pdb-section">
+    <div class="pdb-section-head">
+      <div><div class="pdb-section-title">Créances — Restes à encaisser</div><div class="pdb-section-sub">Total : ${fmt(totalCr)}</div></div>
+      <span class="pdb-section-badge" style="background:#fee2e2;color:#dc2626">${creanceRows.length} dossier(s)</span>
+    </div>
+    <table class="pdb-table">
+      <thead><tr><th>Client</th><th>Type</th><th style="text-align:right">Total</th><th style="text-align:right">Reste dû</th></tr></thead>
+      <tbody>${creanceHtml}</tbody>
+    </table>
+  </div>`;
+
+  // ── Activité récente (timeline) ──
+  const events = [
+    ...sales.slice(0, 20).map(s => ({ ts: new Date(s.date||0), label: `Vente #${s.id} — ${s.clientName||'Client'} — ${fmt(s.total)}`, sub: `Caissier : ${s.caissier||'—'}`, color: '#16a34a' })),
+    ...reservations.slice(0, 10).map(r => ({ ts: new Date(r.date||0), label: `Réservation — ${r.clientName||'Client'} — ${fmt(r.total)}`, sub: `Acompte : ${fmt(r.accompte)} · Reste : ${fmt(r.restant||0)}`, color: '#7c3aed' })),
+    ...commandes.slice(0, 10).map(c => ({ ts: new Date(c.date||0), label: `Commande — ${c.clientName||'Client'} — ${fmt(c.total)}`, sub: `Statut : ${c.status === 'pending' ? 'En attente' : 'Traitée'}`, color: '#0891b2' })),
+  ].sort((a, b) => b.ts - a.ts).slice(0, 20);
+
+  const activityHtml = events.length
+    ? events.map(e => {
+        const dateStr = isNaN(e.ts) ? '—' : e.ts.toLocaleDateString('fr-FR', { day:'2-digit', month:'short' }) + ' ' + e.ts.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
+        return `<div class="pdb-activity-item">
+          <div class="pdb-activity-dot" style="background:${e.color}"></div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12px;font-weight:600;color:#1c1917">${e.label}</div>
+            <div style="font-size:11px;color:#78716c">${e.sub}</div>
+          </div>
+          <div style="font-size:10px;color:#a8a29e;white-space:nowrap;flex-shrink:0">${dateStr}</div>
+        </div>`;
+      }).join('')
+    : `<div class="pdb-empty">Aucune activité récente</div>`;
+
+  const actHtml = `
+  <div class="pdb-section">
+    <div class="pdb-section-head">
+      <div><div class="pdb-section-title">Activité récente</div><div class="pdb-section-sub">Ventes · Réservations · Commandes</div></div>
+    </div>
+    ${activityHtml}
+  </div>`;
+
+  // ── Ventes des 7 derniers jours (mini chart) ──
+  const days7 = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now); d.setDate(d.getDate() - i);
+    const ds = d.toDateString();
+    const tot = sales.filter(s => { const sd = parseSaleDate(s.date); return sd && sd.toDateString() === ds; }).reduce((a, s) => a + (Number(s.total) || 0), 0);
+    days7.push({ label: d.toLocaleDateString('fr-FR', { weekday:'short', day:'numeric' }), tot });
+  }
+  const maxDay = Math.max(...days7.map(d => d.tot), 1);
+  const chartBars = days7.map(d => {
+    const h = Math.max(4, Math.round(d.tot / maxDay * 80));
+    const isToday = d.label === new Date().toLocaleDateString('fr-FR', { weekday:'short', day:'numeric' });
+    return `<div style="display:flex;flex-direction:column;align-items:center;gap:4px;flex:1">
+      <span style="font-size:9px;color:#78716c;white-space:nowrap">${d.tot > 0 ? fmt(d.tot) : ''}</span>
+      <div style="width:100%;background:${d.tot > 0 ? (isToday ? '#e8834a' : '#1a4a3a') : '#f5f4f2'};border-radius:4px 4px 0 0;height:${h}px;transition:height .3s"></div>
+      <span style="font-size:9px;color:${isToday ? '#e8834a' : '#78716c'};font-weight:${isToday ? '700' : '400'}">${d.label}</span>
+    </div>`;
+  }).join('');
+
+  const chartHtml = `
+  <div class="pdb-section" style="margin-bottom:20px">
+    <div class="pdb-section-head">
+      <div><div class="pdb-section-title">Ventes — 7 derniers jours</div></div>
+      <span class="pdb-section-badge" style="background:#e8f4f0;color:#1a4a3a">${fmt(days7.reduce((a,d)=>a+d.tot,0))}</span>
+    </div>
+    <div style="display:flex;align-items:flex-end;gap:6px;padding:16px 16px 8px;height:130px">
+      ${chartBars}
+    </div>
+  </div>`;
+
+  // ── Assemblage final ──
+  body.innerHTML = kpiHtml + chartHtml + caissierHtml + opsHtml + prodHtml + resCmdHtml + creancesHtml + stockHtml + actHtml;
+}
+
+function _pdbKpi(label, val, sub, color) {
+  return `<div class="pdb-kpi pdb-kpi-accent" style="--ka:${color}">
+    <div class="pdb-kpi-label">${label}</div>
+    <div class="pdb-kpi-val" style="color:${color}">${val}</div>
+    <div class="pdb-kpi-sub">${sub}</div>
+  </div>`;
 }
 
 // initModulesProduction est appelé lazily depuis showPage (attribution/production)
