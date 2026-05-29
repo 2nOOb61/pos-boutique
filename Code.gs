@@ -808,8 +808,17 @@ function handleGetNotifs(data) {
   const ss = getSS();
   const sh = ensureSheet(ss, SHEET_NOTIFS,
     ['ID','Timestamp','DossierID','NumeroDossier','EtapeCode','EtapeLabel','Operateur','Message']);
-  const rows = sh.getDataRange().getValues().slice(1)
+
+  const lastRow = sh.getLastRow();
+  if (lastRow <= 1) return { ok: true, notifs: [] };
+
+  // Lire uniquement les 300 dernières lignes (appendRow ajoute en bas → les plus récentes y sont)
+  // Évite le scan linéaire de toute la feuille quand elle grossit
+  const startRow = Math.max(2, lastRow - 299);
+  const numRows  = lastRow - startRow + 1;
+  const rows = sh.getRange(startRow, 1, numRows, 8).getValues()
     .filter(r => r[0]); // ignorer lignes vides
+
   const notifs = rows
     .map(r => ({
       id:            String(r[0]),
@@ -823,7 +832,7 @@ function handleGetNotifs(data) {
       readBy:        []
     }))
     .filter(n => !since || n.timestamp >= since)
-    .slice(-100); // 100 dernières
+    .slice(-50); // 50 dernières suffisent pour un poll delta
   return { ok: true, notifs };
 }
 

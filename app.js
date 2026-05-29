@@ -18,6 +18,13 @@ const APP_VERSION = '2.1.0';
 // RYTHME DE PRODUCTION — déclaré ici pour être sûrement initialisé
 // avant tout appel de fonction (évite la TDZ dans le bloc init)
 // ============================================================
+// Polling notifications — déclarés en tête pour éviter TDZ
+var _notifRetryQueue   = [];
+var _notifPollInterval = null;
+var notifications      = (function() {
+  try { var r = localStorage.getItem('pos-notifications'); return r ? JSON.parse(r) : []; } catch(e) { return []; }
+}());
+
 var RYTHME_DEFAULTS = {
   ACHAT:         24,
   PAO:           8,
@@ -206,8 +213,9 @@ async function doLogin() {
     err.style.display='none';
     _renderNotifBell();
     showToast(`Bonjour, ${currentUser.label} ! 👋`);
-    // Charger les notifications des collègues en arrière-plan
+    // Charger les notifications des collègues en arrière-plan + démarrer le polling
     loadNotifsFromGAS();
+    _startNotifPolling();
     // Charger les données depuis le Sheet
     if (APPS_SCRIPT_URL) {
       await loadProductsFromScript();
@@ -235,6 +243,7 @@ async function doLogin() {
 }
 document.getElementById('loginPass').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
 function doLogout() {
+  _stopNotifPolling();
   closeNotifPanel();
   currentUser = null;
   document.getElementById('loginScreen').style.display='flex';
@@ -4910,18 +4919,25 @@ function loadTachesLibres() {
 // ============================================================
 // NOTIFICATIONS D'AVANCEMENT
 // ============================================================
-let notifications = [];
-
-function loadNotifications() {
-  try {
-    const raw = localStorage.getItem('pos-notifications');
-    if (raw) notifications = JSON.parse(raw);
-  } catch(e) { notifications = []; }
-}
+// notifications est déclaré en tête de fichier (avec initialisation depuis localStorage)
+function loadNotifications() { /* déjà chargé à l'init via var notifications = IIFE() */ }
 
 function saveNotifications() {
   if (notifications.length > 100) notifications = notifications.slice(0, 100);
   try { localStorage.setItem('pos-notifications', JSON.stringify(notifications)); } catch(e) {}
+}
+
+// ── RETRY QUEUE : notifs non envoyées à GAS (réseau down, GAS indisponible) ──
+// _notifRetryQueue et _notifPollInterval sont déclarés en tête de fichier
+
+function _flushNotifRetryQueue() {
+  if (!APPS_SCRIPT_URL || !_notifRetryQueue.length) return;
+  const batch = _notifRetryQueue.splice(0);
+  batch.forEach(notif => {
+    apiCall({ action:'saveNotif', ...notif }).catch(() => {
+      _notifRetryQueue.push(notif); // remet en queue si toujours en échec
+    });
+  });
 }
 
 function _addNotification({ dossierId, numeroDossier, etapeCode, etapeLabel, operateur, message }) {
@@ -4935,15 +4951,29 @@ function _addNotification({ dossierId, numeroDossier, etapeCode, etapeLabel, ope
   notifications.unshift(notif);
   saveNotifications();
   _renderNotifBell();
-  // Sync vers GAS — les autres opérateurs verront cette notification au prochain refresh
-  if (APPS_SCRIPT_URL) apiCall({ action:'saveNotif', ...notif });
+  if (APPS_SCRIPT_URL) {
+    apiCall({ action:'saveNotif', ...notif }).catch(() => {
+      _notifRetryQueue.push(notif); // retry au prochain poll si échec
+    });
+  }
 }
 
-// Charger les notifications récentes depuis GAS (7 derniers jours)
+// ── SINCE OPTIMISÉ : ne récupère que le delta depuis la dernière notif connue ──
+function _getNotifSince() {
+  if (notifications.length) {
+    // Timestamp de la plus récente notif locale — on récupère juste ce qui est plus récent
+    const latest = notifications.reduce((max, n) => n.timestamp > max ? n.timestamp : max, '');
+    if (latest) return latest;
+  }
+  // Première fois : 48h seulement (pas 7 jours qui charge trop)
+  return new Date(Date.now() - 48 * 3600 * 1000).toISOString();
+}
+
+// Charger les notifications depuis GAS (delta uniquement)
 async function loadNotifsFromGAS() {
   if (!APPS_SCRIPT_URL) return;
   try {
-    const since = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+    const since = _getNotifSince();
     const r = await apiCall({ action:'getNotifs', since });
     if (r && r.ok && Array.isArray(r.notifs) && r.notifs.length) {
       const localIds = new Set(notifications.map(n => n.id));
@@ -4954,9 +4984,28 @@ async function loadNotifsFromGAS() {
           .slice(0, 100);
         saveNotifications();
         _renderNotifBell();
+        return fresh.length; // retourne le nb de nouvelles notifs
       }
     }
   } catch(e) {}
+  return 0;
+}
+
+// ── POLLING AUTOMATIQUE : vérifie toutes les 30s sans intervention utilisateur ──
+
+function _startNotifPolling() {
+  if (_notifPollInterval) clearInterval(_notifPollInterval);
+  _notifPollInterval = setInterval(async () => {
+    _flushNotifRetryQueue();
+    const newCount = await loadNotifsFromGAS();
+    if (newCount > 0 && document.getElementById('notifPanel')?.classList.contains('open')) {
+      _renderNotifPanelList(); // rafraîchit le panneau si ouvert
+    }
+  }, 30000); // 30 secondes
+}
+
+function _stopNotifPolling() {
+  if (_notifPollInterval) { clearInterval(_notifPollInterval); _notifPollInterval = null; }
 }
 
 // Lu/non-lu par timestamp par utilisateur (plus léger que readBy[])
