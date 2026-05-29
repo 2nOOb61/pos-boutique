@@ -716,7 +716,22 @@
 
     <!-- Section Boutique -->
     <div class="config-section">
-      <div class="config-section-title">Informations de la boutique</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px">
+        <div class="config-section-title" style="margin-bottom:0">Informations de la boutique</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span id="cfgSyncStatus" style="font-size:11px;color:#78716c;font-style:italic"></span>
+          <button onclick="exportConfig()" title="Exporter la config en JSON pour la partager sur d'autres postes"
+            style="display:flex;align-items:center;gap:5px;padding:6px 12px;background:#e8f4f0;color:#1a4a3a;border:1px solid rgba(26,74,58,.2);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Exporter
+          </button>
+          <button onclick="importConfig()" title="Importer une config depuis un autre poste"
+            style="display:flex;align-items:center;gap:5px;padding:6px 12px;background:#fdf0e8;color:#e8834a;border:1px solid rgba(232,131,74,.25);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Importer
+          </button>
+        </div>
+      </div>
       <div class="config-grid">
         <div class="form-group"><label>Nom de la boutique</label><input id="cfgShopName" placeholder="MA BOUTIQUE" oninput="saveConfig()" /></div>
         <div class="form-group"><label>Adresse / Ville</label><input id="cfgAddress" placeholder="Antananarivo, Madagascar" oninput="saveConfig()" /></div>

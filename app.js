@@ -2605,6 +2605,13 @@ async function _autoClearCache() {
   if (stored === APP_VERSION) return; // Même version → rien à faire
 
   console.log(`[Cache] v${stored || '?'} → v${APP_VERSION} — Nettoyage automatique`);
+
+  // ⚠️ Sauvegarder les données critiques AVANT tout nettoyage
+  const _savedConfig     = localStorage.getItem('pos-config');
+  const _savedConfigBak  = localStorage.getItem('pos-config-backup');
+  const _savedCategories = localStorage.getItem('pos-categories');
+  const _savedUsers      = localStorage.getItem('pos-users');
+
   try {
     // 1. Vider les caches SW via message
     if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
@@ -2621,6 +2628,14 @@ async function _autoClearCache() {
       await Promise.all(regs.map(r => r.unregister()));
     }
   } catch(e) { console.warn('[Cache] Erreur nettoyage:', e); }
+
+  // ✅ Restaurer les données critiques après nettoyage (au cas où le navigateur les aurait effacées)
+  try {
+    if (_savedConfig)     localStorage.setItem('pos-config', _savedConfig);
+    if (_savedConfigBak)  localStorage.setItem('pos-config-backup', _savedConfigBak);
+    if (_savedCategories) localStorage.setItem('pos-categories', _savedCategories);
+    if (_savedUsers)      localStorage.setItem('pos-users', _savedUsers);
+  } catch(e) {}
 
   // Mémoriser la nouvelle version
   localStorage.setItem('pos-app-version', APP_VERSION);
@@ -3195,7 +3210,7 @@ async function apiCall(payload) {
   if (!APPS_SCRIPT_URL) return null;
 
   // ── LECTURES & LOGIN : requête GET avec params individuels ─
-  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getDossiers', 'getOperateurs', 'getTaches', 'getDashboard', 'getComments', 'getNotifs'];
+  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getDossiers', 'getOperateurs', 'getTaches', 'getDashboard', 'getComments', 'getNotifs', 'getShopConfig'];
   if (getActions.includes(payload.action)) {
     try {
       let url = APPS_SCRIPT_URL + '?action=' + payload.action;
@@ -3585,11 +3600,33 @@ let categories = ['Alimentation','Boissons','Hygiène','Électronique','Vêtemen
 
 function loadConfig() {
   try {
-    const c = localStorage.getItem('pos-config');
+    // 1. Essayer pos-config (clé principale)
+    let c = localStorage.getItem('pos-config');
+    // 2. Fallback sur pos-config-backup si la clé principale est vide/absente
+    if (!c) c = localStorage.getItem('pos-config-backup');
     const k = localStorage.getItem('pos-categories');
-    if (c) shopConfig = { ...shopConfig, ...JSON.parse(c) };
+    if (c) {
+      shopConfig = { ...shopConfig, ...JSON.parse(c) };
+      // Restaurer la clé principale si elle manquait
+      localStorage.setItem('pos-config', c);
+    }
     if (k) categories = JSON.parse(k);
   } catch(e) {}
+}
+
+async function loadConfigFromGAS() {
+  if (!APPS_SCRIPT_URL) return;
+  // Si on a déjà une config avec un nom personnalisé, ne pas écraser
+  if (shopConfig.name && shopConfig.name !== 'MA BOUTIQUE') return;
+  try {
+    const r = await apiCall({ action: 'getShopConfig' });
+    if (r && r.ok && r.config && typeof r.config === 'object') {
+      shopConfig = { ...shopConfig, ...r.config };
+      _persistConfig();
+      // Rafraîchir la page config si ouverte
+      if (document.getElementById('cfgShopName')) renderConfigPage();
+    }
+  } catch(e) { /* silencieux — GAS peut ne pas supporter cette action */ }
 }
 
 function saveConfig() {
@@ -3598,6 +3635,7 @@ function saveConfig() {
   shopConfig.phone   = document.getElementById('cfgPhone').value    || '';
   shopConfig.footer  = document.getElementById('cfgFooter').value   || 'Merci de votre visite !';
   _persistConfig();
+  syncConfigToGAS();
   showToast('✅ Boutique enregistrée', 'success');
 }
 
@@ -3612,11 +3650,78 @@ function saveTicketConfig() {
   shopConfig.ticketShowSubtotal  = document.getElementById('cfgShowSubtotal')?.checked   ?? true;
   shopConfig.ticketShowPayDetail = document.getElementById('cfgShowPayDetail')?.checked  ?? true;
   _persistConfig();
+  syncConfigToGAS();
   renderTicketPreview();
 }
 
 function _persistConfig() {
-  localStorage.setItem('pos-config', JSON.stringify(shopConfig));
+  const json = JSON.stringify(shopConfig);
+  // Double écriture : clé principale + clé de secours
+  try { localStorage.setItem('pos-config', json); } catch(e) {}
+  try { localStorage.setItem('pos-config-backup', json); } catch(e) {}
+}
+
+async function syncConfigToGAS() {
+  if (!APPS_SCRIPT_URL) return;
+  const statusEl = document.getElementById('cfgSyncStatus');
+  if (statusEl) statusEl.textContent = '⏳ Synchronisation...';
+  try {
+    // Exclure le logo (trop lourd) de la sync GAS
+    const { ticketLogo, ...configWithoutLogo } = shopConfig;
+    const r = await apiCall({ action: 'saveShopConfig', config: configWithoutLogo });
+    if (statusEl) {
+      if (r && r.ok) {
+        statusEl.textContent = '✅ Synchronisé — tous les postes';
+        statusEl.style.color = '#16a34a';
+      } else {
+        statusEl.textContent = '💾 Sauvegardé localement';
+        statusEl.style.color = '#78716c';
+      }
+      setTimeout(() => { if (statusEl) { statusEl.textContent = ''; } }, 4000);
+    }
+  } catch(e) {
+    if (statusEl) {
+      statusEl.textContent = '💾 Sauvegardé localement';
+      statusEl.style.color = '#78716c';
+      setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 4000);
+    }
+  }
+}
+
+function exportConfig() {
+  const { ticketLogo, ...rest } = shopConfig;
+  const data = { config: rest, categories, exportedAt: new Date().toISOString() };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `pos-config-${new Date().toLocaleDateString('fr-FR').replace(/\//g,'-')}.json`;
+  a.click();
+  showToast('Config exportée', 'success');
+}
+
+function importConfig() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json,application/json';
+  input.onchange = e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (!data.config) { showToast('Fichier invalide', 'error'); return; }
+        shopConfig = { ...shopConfig, ...data.config };
+        if (data.categories && Array.isArray(data.categories)) categories = data.categories;
+        _persistConfig();
+        try { localStorage.setItem('pos-categories', JSON.stringify(categories)); } catch(e) {}
+        renderConfigPage();
+        showToast('✅ Config importée et appliquée', 'success');
+      } catch(err) { showToast('Erreur lecture fichier', 'error'); }
+    };
+    reader.readAsText(file);
+  };
+  input.click();
 }
 
 function renderConfigPage() {
@@ -4495,7 +4600,9 @@ loadTachesLibres();
 loadCommentsLocal();
 loadNotifications();
 initPWA();
-_autoClearCache(); // Vide le cache automatiquement si nouvelle version déployée
+_autoClearCache();
+// Charger la config depuis GAS au démarrage (sync multi-postes)
+loadConfigFromGAS(); // Vide le cache automatiquement si nouvelle version déployée
 renderCart();
 renderHeldCarts();
 
