@@ -496,8 +496,42 @@ function openPayment(mode) {
   document.getElementById('mobileRef').value='';
   document.getElementById('clientName').value='';
   document.getElementById('clientContact').value='';
+  // Reset livraison
+  setDeliveryMode('retrait');
+  document.getElementById('deliveryAddress').value = '';
+  document.getElementById('deliveryFee').value = '';
+  document.getElementById('deliveryDate').value = '';
   switchPayTab(mode);
   openModal('paymentModal');
+}
+
+// ── Livraison / Retrait ──
+function setDeliveryMode(mode) {
+  const isLiv = mode === 'livraison';
+  // Boutons toggle
+  const btnR = document.getElementById('btnModeRetrait');
+  const btnL = document.getElementById('btnModeLivraison');
+  if (btnR) {
+    btnR.style.background  = isLiv ? '#fff'     : '#1a4a3a';
+    btnR.style.color       = isLiv ? '#78716c'  : '#fff';
+    btnR.style.borderColor = isLiv ? '#e5e3df'  : '#1a4a3a';
+  }
+  if (btnL) {
+    btnL.style.background  = isLiv ? '#e8834a'  : '#fff';
+    btnL.style.color       = isLiv ? '#fff'     : '#78716c';
+    btnL.style.borderColor = isLiv ? '#e8834a'  : '#e5e3df';
+  }
+  // Champs livraison
+  const fields = document.getElementById('deliveryFields');
+  if (fields) fields.style.display = isLiv ? 'block' : 'none';
+  if (isLiv) updateDeliveryTotal();
+}
+
+function updateDeliveryTotal() {
+  const fee = parseFloat(document.getElementById('deliveryFee')?.value) || 0;
+  const due = getDue();
+  const el  = document.getElementById('totalAvecLivraison');
+  if (el) el.textContent = fmt(due + fee);
 }
 function switchPayTab(mode) {
   paymentMode = mode;
@@ -524,19 +558,30 @@ function confirmPayment() {
   const net = getNetTotal();
   const rem = getRemise();
   const acc = getAccompte();
-  const due = getDue();
   const clientName    = document.getElementById('clientName').value.trim();
   const clientContact = document.getElementById('clientContact').value.trim();
+  // Livraison
+  const isLiv          = document.getElementById('btnModeLivraison')?.style.background === 'rgb(232, 131, 74)';
+  const deliveryMode   = isLiv ? 'livraison' : 'retrait';
+  const deliveryAddress= isLiv ? (document.getElementById('deliveryAddress')?.value.trim() || '') : '';
+  const deliveryFee    = isLiv ? (parseFloat(document.getElementById('deliveryFee')?.value) || 0) : 0;
+  const deliveryDate   = isLiv ? (document.getElementById('deliveryDate')?.value || '') : '';
+  if (isLiv && !deliveryAddress) {
+    showToast("Veuillez saisir l'adresse de livraison.", 'error');
+    return;
+  }
+  const totalWithDelivery = net + deliveryFee;
+  const due = getDue() + deliveryFee;
   if(paymentMode==='cash') {
     const given = parseFloat(document.getElementById('givenAmount').value)||0;
     if(given < due) { showToast('Montant insuffisant !','error'); return; }
-    recordSale(net, 'cash', given, given-due, null, null, rem, acc, clientName, clientContact);
+    recordSale(totalWithDelivery, 'cash', given, given-due, null, null, rem, acc, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate);
   } else {
     const ref = document.getElementById('mobileRef').value.trim();
-    recordSale(net, 'mobile', due, 0, selectedProvider, ref, rem, acc, clientName, clientContact);
+    recordSale(totalWithDelivery, 'mobile', due, 0, selectedProvider, ref, rem, acc, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate);
   }
 }
-function recordSale(total, method, given, change, provider, ref, remise=0, accompte=0, clientName='', clientContact='') {
+function recordSale(total, method, given, change, provider, ref, remise=0, accompte=0, clientName='', clientContact='', deliveryMode='retrait', deliveryAddress='', deliveryFee=0, deliveryDate='') {
   cart.forEach(item => {
     const p = products.find(pr=>pr.id===item.id);
     if(p) p.stock -= item.qty;
@@ -550,7 +595,8 @@ function recordSale(total, method, given, change, provider, ref, remise=0, accom
     items: cart.map(i=>({name:i.name,qty:i.qty,price:i.price})),
     subtotal, remise, total, accompte,
     due: Math.max(0, total - accompte),
-    method, given, change, provider, ref
+    method, given, change, provider, ref,
+    deliveryMode, deliveryAddress, deliveryFee, deliveryDate
   };
   sales.unshift(sale);
   printTicket(sale);
@@ -1116,6 +1162,15 @@ function printTicket(sale) {
     ${tc.ticketShowCaissier !== false ? `<div class="row"><span>Caissier</span><span>${sale.caissier||''}</span></div>` : ''}
     ${sale.clientName    ? `<div class="row"><span>Client</span><span>${sale.clientName}</span></div>` : ''}
     ${sale.clientContact ? `<div class="row"><span>Contact</span><span>${sale.clientContact}</span></div>` : ''}
+    ${sale.deliveryMode === 'livraison'
+      ? `<div class="row" style="background:#fdf0e8;border-radius:4px;padding:3px 6px;margin:3px 0">
+           <span style="color:#e8834a;font-weight:700">🚚 LIVRAISON</span>
+           <span style="color:#e8834a;font-weight:600">${sale.deliveryAddress||''}</span>
+         </div>
+         ${sale.deliveryFee > 0 ? `<div class="row"><span>Frais livraison</span><span>+${fmt(sale.deliveryFee)}</span></div>` : ''}
+         ${sale.deliveryDate ? `<div class="row"><span>Date livraison</span><span>${new Date(sale.deliveryDate).toLocaleDateString('fr-FR')}</span></div>` : ''}`
+      : `<div class="row"><span>Récupération</span><span>🏪 Retrait boutique</span></div>`
+    }
     <hr style="${st.sepLight}"/>
     <div class="items-section">
       ${(Array.isArray(sale.items)?sale.items:[]).map(i=>`<div class="row"><span>${i.name||'?'} <em style="color:#777">×${Number(i.qty)||1}</em></span><span>${((Number(i.price)||0)*(Number(i.qty)||1)).toLocaleString()} Ar</span></div>`).join('')}
