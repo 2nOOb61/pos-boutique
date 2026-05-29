@@ -67,6 +67,7 @@ function doPost(e) {
     else if (action === 'addComment')        result = handleAddComment(data);
     else if (action === 'saveNotif')         result = handleSaveNotif(data);
     else if (action === 'saveShopConfig')    result = handleSaveShopConfig(data);
+    else if (action === 'saveRythme')        result = handleSaveRythme(data);
     else result = { ok:false, error:'Action inconnue: ' + action };
 
     return jsonResp(result);
@@ -101,6 +102,7 @@ function doGet(e) {
       else if (action === 'addComment')        result = handleAddComment(data);
       else if (action === 'saveNotif')         result = handleSaveNotif(data);
       else if (action === 'saveShopConfig')    result = handleSaveShopConfig(data);
+      else if (action === 'saveRythme')        result = handleSaveRythme(data);
       else result = { ok:false, error:'Action payload inconnue: ' + action };
       return jsonResp(result);
     } catch(err) {
@@ -124,6 +126,7 @@ function doGet(e) {
     if (action === 'getComments')     return jsonResp(handleGetComments(e.parameter));
     if (action === 'getNotifs')       return jsonResp(handleGetNotifs(e.parameter));
     if (action === 'getShopConfig')   return jsonResp(handleGetShopConfig());
+    if (action === 'getRythme')       return jsonResp(handleGetRythme());
     if (action === 'initSheets')      return jsonResp(initSheets());
     return jsonResp({ ok:false, error:'Action GET inconnue: ' + action });
   } catch(err) {
@@ -892,4 +895,41 @@ function handleGetShopConfig() {
     }
   }
   return { ok: true, config };
+}
+
+// ============================================================
+// RYTHME DE PRODUCTION — sauvegarde / lecture
+// ============================================================
+
+function handleSaveRythme(data) {
+  const ss  = getSS();
+  const sh  = ensureSheet(ss, SHEET_CONFIG, ['Cle', 'Valeur', 'MiseAJour']);
+  const key = 'rythme_production';
+  const val = JSON.stringify(data.rythme || {});
+  const now = new Date();
+
+  const rows = sh.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0] || '').trim() === key) {
+      sh.getRange(i + 1, 2, 1, 2).setValues([[val, now]]);
+      return { ok: true };
+    }
+  }
+  sh.appendRow([key, val, now]);
+  return { ok: true };
+}
+
+function handleGetRythme() {
+  const ss = getSS();
+  const sh = ss.getSheetByName(SHEET_CONFIG);
+  if (!sh) return { ok: true, rythme: null };
+
+  const rows = sh.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0] || '').trim() === 'rythme_production') {
+      try   { return { ok: true, rythme: JSON.parse(rows[i][1]) }; }
+      catch (e) { return { ok: true, rythme: null }; }
+    }
+  }
+  return { ok: true, rythme: null };
 }

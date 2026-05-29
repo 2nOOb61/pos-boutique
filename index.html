@@ -957,6 +957,16 @@
       </div>
     </div>
 
+    <!-- Section Rythme de production -->
+    <div class="config-section" data-roles="admin,chef_atelier">
+      <div style="margin-bottom:14px">
+        <div class="config-section-title" style="margin-bottom:4px">Rythme de production</div>
+        <p style="font-size:12px;color:#78716c;margin:0">Délais cibles par étape — au-delà du seuil, la tâche est marquée <strong style="color:#dc2626">EN RETARD</strong>. Ajustez selon vos études de temps.</p>
+      </div>
+      <div id="rythmeConfigContainer"></div>
+      <p style="font-size:11px;color:#a8a29e;margin-top:10px">Les modifications sont appliquées immédiatement et sauvegardées localement.</p>
+    </div>
+
     <!-- Section Articles -->
     <div class="config-section">
       <div class="config-section-title" style="display:flex;align-items:center;justify-content:space-between">
@@ -1106,6 +1116,9 @@
       </button>
       <button class="prod-filter-btn" onclick="setProdFilter('TERMINE',this)">
         Terminées <span id="prodCountTermine" class="dossier-tab__count"></span>
+      </button>
+      <button class="prod-filter-btn" onclick="setProdFilter('EN_RETARD',this)" style="border-color:#fca5a5;color:#dc2626">
+        ⚠ En retard <span id="prodCountRetard" class="dossier-tab__count" style="background:#dc2626"></span>
       </button>
       <select id="opFilterSel" class="select-input" onchange="loadTaches()" style="min-width:160px;margin-left:auto">
         <option value="TOUS">Tous les opérateurs</option>
@@ -1868,7 +1881,7 @@
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=notif01"></script>
+<script src="./app.js?v=rythme07"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

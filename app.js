@@ -15,6 +15,30 @@ async function sha256(str) {
 const APP_VERSION = '2.1.0';
 
 // ============================================================
+// RYTHME DE PRODUCTION — déclaré ici pour être sûrement initialisé
+// avant tout appel de fonction (évite la TDZ dans le bloc init)
+// ============================================================
+var RYTHME_DEFAULTS = {
+  ACHAT:         24,
+  PAO:           8,
+  BAT:           4,
+  RETOUR_CLIENT: 48,
+  MODIFICATIONS: 4,
+  PRODUCTION:    8,
+  FINITION:      4,
+  LIVRE:         8,
+};
+var rythmeProduction = (function() {
+  try {
+    var raw   = localStorage.getItem('pos-rythme-production');
+    var saved = raw ? JSON.parse(raw) : {};
+    var res   = {};
+    for (var code in RYTHME_DEFAULTS) res[code] = (saved[code] != null ? saved[code] : RYTHME_DEFAULTS[code]);
+    return res;
+  } catch(e) { return {}; }
+}());
+
+// ============================================================
 // DATA & STATE
 // ============================================================
 // Utilisateurs locaux (persistés dans localStorage)
@@ -260,7 +284,7 @@ function showPage(id, btn, bnavBtn) {
     if (b.getAttribute('onclick') && b.getAttribute('onclick').includes("'"+id+"'")) b.classList.add('active');
   });
   if (id==='stats')        { renderStats(); _autoRefreshStats(); _loadProdStats(); }
-  if (id==='config')       renderConfigPage();
+  if (id==='config')       { renderConfigPage(); renderRythmeConfig(); }
   if (id==='users')        renderUsersPage();
   if (id==='reservations') { _ensureDossierLinks(); renderReservations(); _autoRefreshReservations(); _loadTachesQuietly().then(renderReservations); }
   if (id==='attribution')  {
@@ -3235,7 +3259,7 @@ async function apiCall(payload) {
   if (!APPS_SCRIPT_URL) return null;
 
   // ── LECTURES & LOGIN : requête GET avec params individuels ─
-  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getDossiers', 'getOperateurs', 'getTaches', 'getDashboard', 'getComments', 'getNotifs', 'getShopConfig'];
+  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getDossiers', 'getOperateurs', 'getTaches', 'getDashboard', 'getComments', 'getNotifs', 'getShopConfig', 'getRythme'];
   if (getActions.includes(payload.action)) {
     try {
       let url = APPS_SCRIPT_URL + '?action=' + payload.action;
@@ -4628,6 +4652,7 @@ initPWA();
 _autoClearCache();
 // Charger la config depuis GAS au démarrage (sync multi-postes)
 loadConfigFromGAS(); // Vide le cache automatiquement si nouvelle version déployée
+loadRythmeFromGAS(); // Sync rythme de production depuis Google Sheets
 renderCart();
 renderHeldCarts();
 
@@ -4663,6 +4688,78 @@ const ETAPES_CONFIG = [
   { code:'FINITION',      label:'Finition',           short:'Finition',color:'#1a4a3a', icon:'7' },
   { code:'LIVRE',         label:'Livraison',          short:'Livré',   color:'#16a34a', icon:'8' },
 ];
+
+// ============================================================
+// RYTHME DE PRODUCTION — DÉLAIS CIBLES PAR ÉTAPE
+// ============================================================
+
+// RYTHME_DEFAULTS et rythmeProduction sont déclarés en tête de fichier (ligne ~17)
+
+function saveRythmeProduction() {
+  localStorage.setItem('pos-rythme-production', JSON.stringify(rythmeProduction));
+  if (APPS_SCRIPT_URL) {
+    apiCall({ action: 'saveRythme', rythme: rythmeProduction }).catch(() => {});
+  }
+}
+
+async function loadRythmeFromGAS() {
+  if (!APPS_SCRIPT_URL) return;
+  try {
+    const r = await apiCall({ action: 'getRythme' });
+    if (r?.ok && r.rythme && typeof r.rythme === 'object') {
+      rythmeProduction = { ...rythmeProduction, ...r.rythme };
+      localStorage.setItem('pos-rythme-production', JSON.stringify(rythmeProduction));
+      if (document.getElementById('rythmeConfigContainer')?.children.length) renderRythmeConfig();
+    }
+  } catch(e) { /* silencieux */ }
+}
+
+function _parseFrDate(str) {
+  if (!str) return null;
+  const m = str.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:[,\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (m) return new Date(+m[3], +m[2]-1, +m[1], +(m[4]||0), +(m[5]||0), +(m[6]||0));
+  const d = new Date(str);
+  return isNaN(d) ? null : d;
+}
+
+function _getTacheRetardInfo(t) {
+  if (t.statut !== 'EN_COURS' || t.dossierId === 'LIBRE') return { isRetard: false };
+  const delai = rythmeProduction[t.etapeCode];
+  if (!delai) return { isRetard: false };
+  const debut = _parseFrDate(t.dateDebut);
+  if (!debut) return { isRetard: false };
+  const heuresEcoulees = (Date.now() - debut.getTime()) / 3600000;
+  const depassement    = Math.round(heuresEcoulees - delai);
+  return { isRetard: heuresEcoulees > delai, heuresEcoulees: Math.round(heuresEcoulees), delai, depassement };
+}
+
+function renderRythmeConfig() {
+  const container = document.getElementById('rythmeConfigContainer');
+  if (!container) return;
+  const steps = [
+    { code:'ACHAT',         label:'Achat (si besoin)',  color:'#d97706' },
+    { code:'PAO',           label:'PAO / Conception',   color:'#6c63ff' },
+    { code:'BAT',           label:'BAT physique',       color:'#2563eb' },
+    { code:'RETOUR_CLIENT', label:'Retour client',      color:'#0891b2' },
+    { code:'MODIFICATIONS', label:'Modifications',      color:'#7c3aed' },
+    { code:'PRODUCTION',    label:'Opérateur machine',  color:'#e8834a' },
+    { code:'FINITION',      label:'Finition',           color:'#1a4a3a' },
+    { code:'LIVRE',         label:'Livraison',          color:'#16a34a' },
+  ];
+  container.innerHTML = steps.map(e => {
+    const delai = rythmeProduction[e.code] ?? RYTHME_DEFAULTS[e.code] ?? 8;
+    return `<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #f0eeeb">
+      <div style="width:10px;height:10px;border-radius:50%;background:${e.color};flex-shrink:0"></div>
+      <span style="flex:1;font-size:13px;font-weight:500;color:#1c1917">${e.label}</span>
+      <div style="display:flex;align-items:center;gap:6px">
+        <input type="number" min="1" max="999" value="${delai}"
+          style="width:68px;padding:6px 10px;border-radius:8px;border:1px solid #e5e3df;font-size:13px;font-weight:600;text-align:center;background:#fff;color:#1c1917"
+          oninput="rythmeProduction['${e.code}']=Math.max(1,+this.value||1);saveRythmeProduction();showToast('Rythme mis à jour')" />
+        <span style="font-size:12px;color:#78716c;white-space:nowrap">h max</span>
+      </div>
+    </div>`;
+  }).join('');
+}
 
 // ============================================================
 // DOSSIERS — LIAISON COMMANDES & RÉSERVATIONS
@@ -6549,7 +6646,13 @@ function _tacheRow(t) {
     ? `${t.operateur}${t.echeance?' · Échéance : <strong>'+new Date(t.echeance+'T00:00:00').toLocaleDateString('fr-FR')+'</strong>':''}`
     : `${t.operateur} · ${isEC?'Démarré '+t.dateDebut:isDone?'Terminé '+t.dateFin:'Assigné '+t.dateAssignation}`;
 
-  return `<div class="tache-card ${isEC?'tache-card--encours':''} ${isDone?'tache-card--done':''}">
+  const retardInfo   = _getTacheRetardInfo(t);
+  const retardBadge  = retardInfo.isRetard
+    ? `<span style="font-size:10px;font-weight:700;color:#dc2626;background:#fee2e2;padding:3px 8px;border-radius:6px;white-space:nowrap;border:1px solid #fca5a5;flex-shrink:0" title="Délai dépassé de ${retardInfo.depassement}h">⚠ EN RETARD +${retardInfo.depassement}h</span>`
+    : '';
+  const retardStyle  = retardInfo.isRetard ? 'border-left:3px solid #dc2626;' : '';
+
+  return `<div class="tache-card ${isEC?'tache-card--encours':''} ${isDone?'tache-card--done':''}" style="${retardStyle}">
     <div class="tache-card__icon" style="background:${etape.color}15;border-color:${etape.color};color:${etape.color}">${etape.icon}</div>
     <div class="tache-card__body">
       <div class="tache-card__label" style="color:${etape.color}">${isLibre?t.titre:t.etapeLabel}${prioBadge}</div>
@@ -6557,7 +6660,7 @@ function _tacheRow(t) {
       ${isLibre&&t.photos?.length?`<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:3px;margin-bottom:2px">${t.photos.map(src=>`<img src="${src}" onclick="window.open(this.src,'_blank')" style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--color-border);cursor:pointer" />`).join('')}</div>`:''}
       <div class="tache-card__sub">${subLine}</div>
     </div>
-    <div class="tache-card__actions">${actions}${voirBtn}${deleteBtn}</div>
+    <div class="tache-card__actions">${retardBadge}${actions}${voirBtn}${deleteBtn}</div>
   </div>`;
 }
 
@@ -6812,20 +6915,23 @@ function renderTaches() {
   _populateYearSel('prodYearSel', [...taches, ...tachesLibres].map(t => t.dateAssignation));
 
   let dossierList = isAdminOrChef ? taches : taches.filter(t => t.operateur === myLabel);
-  if (prodFilter !== 'TOUS') dossierList = dossierList.filter(t => t.statut === prodFilter);
+  if (prodFilter === 'EN_RETARD') dossierList = dossierList.filter(t => _getTacheRetardInfo(t).isRetard);
+  else if (prodFilter !== 'TOUS') dossierList = dossierList.filter(t => t.statut === prodFilter);
   if (prodDateFilter.mois || prodDateFilter.annee)
     dossierList = dossierList.filter(t => _matchDateFilter(t.dateAssignation, prodDateFilter));
 
   let libreList = isAdminOrChef ? tachesLibres : tachesLibres.filter(t => t.operateur === myLabel);
-  if (prodFilter !== 'TOUS') libreList = libreList.filter(t => t.statut === prodFilter);
+  if (prodFilter === 'EN_RETARD') libreList = [];
+  else if (prodFilter !== 'TOUS') libreList = libreList.filter(t => t.statut === prodFilter);
   if (prodDateFilter.mois || prodDateFilter.annee)
     libreList = libreList.filter(t => _matchDateFilter(t.dateAssignation, prodDateFilter));
 
   // Mettre à jour les compteurs dans les boutons filtre (sur données non filtrées par date)
   const allVisible = [...taches, ...tachesLibres].filter(t => isAdminOrChef || t.operateur === myLabel);
-  const _cnt = s => allVisible.filter(t => s==='TOUS'||t.statut===s).length;
-  ['TOUS','A_FAIRE','EN_COURS','TERMINE'].forEach(s => {
-    const sfx = {'TOUS':'Tous','A_FAIRE':'AFaire','EN_COURS':'EnCours','TERMINE':'Termine'}[s];
+  const retardCount = taches.filter(t => (isAdminOrChef || t.operateur === myLabel) && _getTacheRetardInfo(t).isRetard).length;
+  const _cnt = s => s === 'EN_RETARD' ? retardCount : allVisible.filter(t => s==='TOUS'||t.statut===s).length;
+  ['TOUS','A_FAIRE','EN_COURS','TERMINE','EN_RETARD'].forEach(s => {
+    const sfx = {'TOUS':'Tous','A_FAIRE':'AFaire','EN_COURS':'EnCours','TERMINE':'Termine','EN_RETARD':'Retard'}[s];
     const el  = document.getElementById(`prodCount${sfx}`);
     if (el) { el.textContent = _cnt(s); el.style.display = _cnt(s)?'':'none'; }
   });
@@ -6914,7 +7020,7 @@ async function pointerStart(tacheId) {
   if (APPS_SCRIPT_URL && !isLibre) { r = await apiCall({ action:'pointerAction', tacheId, action_:'START' }); }
   else { r = { ok:true }; }
   if (r && r.ok) {
-    if (t) { t.statut = 'EN_COURS'; t.dateDebut = new Date().toLocaleDateString('fr-FR'); }
+    if (t) { t.statut = 'EN_COURS'; t.dateDebut = new Date().toLocaleString('fr-FR'); }
     if (isLibre) saveTachesLibres(); else saveTaches();
     // Notification de début de tâche visible par tous
     _addNotification({
