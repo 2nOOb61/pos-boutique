@@ -272,7 +272,7 @@ function showPage(id, btn, bnavBtn) {
     }
     loadDossiers(); initModulesProduction();
   }
-  if (id==='production')   { loadTaches();   initModulesProduction(); }
+  if (id==='production')   { loadTaches(); _autoRefreshProduction(); initModulesProduction(); }
   if (id==='commandes')    { _ensureDossierLinks(); renderCommandes(); _autoRefreshCommandes(); _loadTachesQuietly().then(renderCommandes); }
   // Garde d'accès par rôle
   if (currentUser) {
@@ -5813,6 +5813,33 @@ async function loadTaches() {
       taches = raw ? JSON.parse(raw) : [];
     } catch(e2) { taches = []; }
   }
+  renderTaches();
+}
+
+let _lastProdRefresh = 0;
+
+async function _autoRefreshProduction() {
+  if (!APPS_SCRIPT_URL) { renderTaches(); return; }
+  const now = Date.now();
+  if (now - _lastProdRefresh < 45000) return;
+  _lastProdRefresh = now;
+  try {
+    // Recharger tâches ET dossiers en parallèle pour garder la vue à jour
+    const [rT, rD] = await Promise.all([
+      apiCall({ action: 'getTaches' }),
+      apiCall({ action: 'getDossiers', statut: 'TOUS' }),
+    ]);
+    if (rT && rT.ok && Array.isArray(rT.taches) && rT.taches.length > 0) {
+      const backendIds = new Set(rT.taches.map(t => t.id));
+      const localOnly  = taches.filter(t => !backendIds.has(t.id));
+      taches = [...rT.taches, ...localOnly];
+      saveTaches();
+    }
+    if (rD && rD.ok && Array.isArray(rD.dossiers)) {
+      dossiers = rD.dossiers;
+      _ensureDossierLinks();
+    }
+  } catch(e) { /* silencieux — on garde les données locales */ }
   renderTaches();
 }
 
