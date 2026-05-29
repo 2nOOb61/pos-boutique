@@ -4410,6 +4410,8 @@ let pendingPointage = null;
 let prodFilter = 'TOUS';
 let opFilterVal = 'TOUS';
 let _prodView   = 'tasks'; // 'tasks' | 'charge'
+let attrDateFilter = { mois: '', annee: '' };
+let prodDateFilter = { mois: '', annee: '' };
 
 const ETAPES_CONFIG = [
   { code:'ACHAT',         label:'Achat (si besoin)',  short:'Achat',   color:'#d97706', icon:'1' },
@@ -4807,6 +4809,278 @@ function deleteTacheLibre(id) {
 }
 
 // --- INIT ---
+// ============================================================
+// FILTRE DATE — helpers communs
+// ============================================================
+function _parseFRDate(str) {
+  if (!str) return null;
+  // Formats: dd/MM/yyyy  ou  dd/MM/yyyy HH:mm  ou  ISO
+  const p = str.split(/[\s/]/);
+  if (p.length >= 3 && p[0].length <= 2) {
+    // dd/MM/yyyy
+    const d = new Date(+p[2], +p[1] - 1, +p[0]);
+    return isNaN(d) ? null : d;
+  }
+  const d = new Date(str);
+  return isNaN(d) ? null : d;
+}
+
+function _matchDateFilter(dateStr, filter) {
+  if (!filter.mois && !filter.annee) return true;
+  const d = _parseFRDate(dateStr);
+  if (!d) return true; // pas de date → on inclut
+  if (filter.annee && d.getFullYear() !== +filter.annee) return false;
+  if (filter.mois && (d.getMonth() + 1) !== +filter.mois) return false;
+  return true;
+}
+
+function _populateYearSel(selId, dates) {
+  const sel = document.getElementById(selId);
+  if (!sel) return;
+  const years = [...new Set(
+    dates.map(s => { const d = _parseFRDate(s); return d ? d.getFullYear() : null; })
+         .filter(Boolean)
+  )].sort((a, b) => b - a);
+  const cur = sel.value;
+  // Garder l'option vide, remplacer le reste
+  sel.innerHTML = '<option value="">Toutes années</option>'
+    + years.map(y => `<option value="${y}"${cur == y ? ' selected' : ''}>${y}</option>`).join('');
+}
+
+// ── Attribution ──
+function applyAttrDateFilter() {
+  attrDateFilter.mois  = document.getElementById('attrMonthSel')?.value  || '';
+  attrDateFilter.annee = document.getElementById('attrYearSel')?.value   || '';
+  const hasFilter = attrDateFilter.mois || attrDateFilter.annee;
+  const btn = document.getElementById('attrClearFilterBtn');
+  if (btn) btn.style.display = hasFilter ? '' : 'none';
+  renderDossiers();
+}
+
+function clearAttrDateFilter() {
+  attrDateFilter = { mois: '', annee: '' };
+  const ms = document.getElementById('attrMonthSel');  if (ms) ms.value = '';
+  const ys = document.getElementById('attrYearSel');   if (ys) ys.value = '';
+  const btn = document.getElementById('attrClearFilterBtn'); if (btn) btn.style.display = 'none';
+  renderDossiers();
+}
+
+// ── Production ──
+function applyProdDateFilter() {
+  prodDateFilter.mois  = document.getElementById('prodMonthSel')?.value  || '';
+  prodDateFilter.annee = document.getElementById('prodYearSel')?.value   || '';
+  const hasFilter = prodDateFilter.mois || prodDateFilter.annee;
+  const btn = document.getElementById('prodClearFilterBtn');
+  if (btn) btn.style.display = hasFilter ? '' : 'none';
+  renderTaches();
+}
+
+function clearProdDateFilter() {
+  prodDateFilter = { mois: '', annee: '' };
+  const ms = document.getElementById('prodMonthSel');  if (ms) ms.value = '';
+  const ys = document.getElementById('prodYearSel');   if (ys) ys.value = '';
+  const btn = document.getElementById('prodClearFilterBtn'); if (btn) btn.style.display = 'none';
+  renderTaches();
+}
+
+// ============================================================
+// IMPRESSION RAPPORTS
+// ============================================================
+const _MOIS_FR = ['','Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+
+function _printWindow(title, bodyHtml) {
+  const w = window.open('', '_blank', 'width=900,height=700');
+  if (!w) { showToast('Autorisez les popups pour imprimer', 'error'); return; }
+  w.document.write(`<!DOCTYPE html><html lang="fr"><head>
+  <meta charset="UTF-8">
+  <title>${title}</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'DM Sans',sans-serif;font-size:12px;color:#1c1917;background:#fff;padding:24px}
+    .rpt-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:14px;border-bottom:2px solid #1a4a3a}
+    .rpt-logo{font-size:18px;font-weight:700;color:#1a4a3a;letter-spacing:-.3px}
+    .rpt-logo span{color:#e8834a}
+    .rpt-meta{text-align:right;font-size:11px;color:#78716c}
+    .rpt-title{font-size:16px;font-weight:700;color:#1c1917;margin-bottom:4px}
+    .rpt-period{font-size:12px;color:#78716c;margin-bottom:16px}
+    .kpi-row{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+    .kpi-box{flex:1;min-width:100px;border:1px solid #e5e3df;border-radius:8px;padding:10px 14px}
+    .kpi-box .kv{font-size:22px;font-weight:700;color:#1a4a3a}
+    .kpi-box .kl{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#a8a29e;margin-bottom:2px}
+    table{width:100%;border-collapse:collapse;margin-bottom:20px}
+    th{text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#78716c;padding:6px 8px;border-bottom:2px solid #e5e3df;white-space:nowrap}
+    td{padding:6px 8px;border-bottom:1px solid #f5f4f2;font-size:11px;color:#1c1917;vertical-align:top}
+    tr:last-child td{border-bottom:none}
+    .badge{display:inline-block;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600}
+    .badge-green{background:#dcfce7;color:#16a34a}
+    .badge-amber{background:#fef3c7;color:#d97706}
+    .badge-blue{background:#dbeafe;color:#2563eb}
+    .badge-red{background:#fee2e2;color:#dc2626}
+    .badge-stone{background:#f5f5f4;color:#78716c}
+    .section-title{font-size:13px;font-weight:700;color:#1a4a3a;margin:16px 0 8px;padding-bottom:4px;border-bottom:1px solid #e5e3df}
+    .footer{margin-top:20px;padding-top:12px;border-top:1px solid #e5e3df;text-align:center;font-size:10px;color:#a8a29e}
+    @media print{body{padding:0} .no-print{display:none}}
+  </style>
+</head><body>
+  <div class="rpt-header">
+    <div class="rpt-logo">FOREVER<span>MG</span></div>
+    <div class="rpt-meta">Imprimé le ${new Date().toLocaleDateString('fr-FR',{day:'2-digit',month:'long',year:'numeric'})}<br>à ${new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</div>
+  </div>
+  ${bodyHtml}
+  <div class="footer">FOREVER MG — Document généré automatiquement</div>
+  <script>window.onload=()=>{window.print();}<\/script>
+</body></html>`);
+  w.document.close();
+}
+
+function printAttributionReport() {
+  const moisLabel  = attrDateFilter.mois  ? _MOIS_FR[+attrDateFilter.mois]  : '';
+  const anneeLabel = attrDateFilter.annee ? attrDateFilter.annee : '';
+  const periodStr  = moisLabel && anneeLabel ? `${moisLabel} ${anneeLabel}`
+                   : moisLabel ? moisLabel
+                   : anneeLabel ? anneeLabel
+                   : 'Tous les dossiers';
+
+  // Filtrer la liste visible
+  const list = dossiers.filter(d => _matchDateFilter(d.dateCreation, attrDateFilter));
+
+  // KPI
+  const total    = list.length;
+  const enCours  = list.filter(d => d.progression > 0 && d.progression < 100).length;
+  const termine  = list.filter(d => d.progression === 100 || d.statut === 'LIVRE').length;
+  const urgent   = list.filter(d => d.priorite === 'Urgente').length;
+
+  const kpis = `<div class="kpi-row">
+    <div class="kpi-box"><div class="kl">Total dossiers</div><div class="kv">${total}</div></div>
+    <div class="kpi-box"><div class="kl">En cours</div><div class="kv" style="color:#d97706">${enCours}</div></div>
+    <div class="kpi-box"><div class="kl">Terminés</div><div class="kv" style="color:#16a34a">${termine}</div></div>
+    <div class="kpi-box"><div class="kl">Urgents</div><div class="kv" style="color:#dc2626">${urgent}</div></div>
+  </div>`;
+
+  const rows = list.map(d => {
+    const pct    = d.progression || 0;
+    const etape  = ETAPES_CONFIG.find(e => e.code === d.statut);
+    const etapeLbl = etape?.label || d.statut || '—';
+    const prioBadge = d.priorite === 'Urgente' ? '<span class="badge badge-red">Urgente</span>'
+      : d.priorite === 'Haute' ? '<span class="badge badge-amber">Haute</span>'
+      : '<span class="badge badge-stone">Normale</span>';
+    const pctBadge = pct === 100
+      ? `<span class="badge badge-green">${pct}%</span>`
+      : pct > 0
+      ? `<span class="badge badge-amber">${pct}%</span>`
+      : `<span class="badge badge-blue">${pct}%</span>`;
+    // Tâches du dossier
+    const dTaches = taches.filter(t => t.dossierId === d.id);
+    const ops = [...new Set(dTaches.map(t => t.operateur).filter(Boolean))].join(', ') || '—';
+    return `<tr>
+      <td><strong>${d.numeroDossier}</strong></td>
+      <td>${d.client || '—'}</td>
+      <td>${d.produit || '—'}</td>
+      <td>${d.quantite || '—'}</td>
+      <td>${etapeLbl}</td>
+      <td>${prioBadge}</td>
+      <td>${pctBadge}</td>
+      <td>${ops}</td>
+      <td>${d.dateCreation || '—'}</td>
+    </tr>`;
+  }).join('');
+
+  const table = total ? `<table>
+    <thead><tr>
+      <th>N° Dossier</th><th>Client</th><th>Produit</th><th>Qté</th>
+      <th>Étape</th><th>Priorité</th><th>Avancement</th><th>Opérateurs</th><th>Date création</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>` : '<p style="color:#78716c;font-style:italic;text-align:center;padding:20px">Aucun dossier pour cette période</p>';
+
+  _printWindow('Rapport Attribution — FOREVER MG', `
+    <div class="rpt-title">Rapport d'Attribution des Dossiers</div>
+    <div class="rpt-period">Période : ${periodStr}</div>
+    ${kpis}
+    <div class="section-title">Détail des dossiers (${total})</div>
+    ${table}
+  `);
+}
+
+function printProductionReport() {
+  const moisLabel  = prodDateFilter.mois  ? _MOIS_FR[+prodDateFilter.mois]  : '';
+  const anneeLabel = prodDateFilter.annee ? prodDateFilter.annee : '';
+  const periodStr  = moisLabel && anneeLabel ? `${moisLabel} ${anneeLabel}`
+                   : moisLabel ? moisLabel
+                   : anneeLabel ? anneeLabel
+                   : 'Toutes les tâches';
+
+  const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
+  const myLabel       = currentUser?.label || currentUser?.username || '';
+
+  // Filtrer taches visibles + filtre date (par dateAssignation)
+  let list = isAdminOrChef ? [...taches, ...tachesLibres]
+           : [...taches, ...tachesLibres].filter(t => t.operateur === myLabel);
+  list = list.filter(t => _matchDateFilter(t.dateAssignation, prodDateFilter));
+  if (prodFilter !== 'TOUS') list = list.filter(t => t.statut === prodFilter);
+
+  const total   = list.length;
+  const aFaire  = list.filter(t => t.statut === 'A_FAIRE').length;
+  const enCours = list.filter(t => t.statut === 'EN_COURS').length;
+  const termine = list.filter(t => t.statut === 'TERMINE').length;
+
+  const kpis = `<div class="kpi-row">
+    <div class="kpi-box"><div class="kl">Total tâches</div><div class="kv">${total}</div></div>
+    <div class="kpi-box"><div class="kl">À faire</div><div class="kv" style="color:#2563eb">${aFaire}</div></div>
+    <div class="kpi-box"><div class="kl">En cours</div><div class="kv" style="color:#d97706">${enCours}</div></div>
+    <div class="kpi-box"><div class="kl">Terminées</div><div class="kv" style="color:#16a34a">${termine}</div></div>
+  </div>`;
+
+  // Grouper par opérateur si admin
+  let tableHtml = '';
+  if (isAdminOrChef) {
+    const byOp = {};
+    list.forEach(t => {
+      const op = t.operateur || 'Non assigné';
+      if (!byOp[op]) byOp[op] = [];
+      byOp[op].push(t);
+    });
+    tableHtml = Object.entries(byOp).sort(([a],[b])=>a.localeCompare(b)).map(([op, tlist]) => {
+      const rows = tlist.map(t => _prodTacheRow(t)).join('');
+      return `<div class="section-title">${op} (${tlist.length} tâche${tlist.length>1?'s':''})</div>
+        <table><thead><tr><th>Dossier</th><th>Étape</th><th>Statut</th><th>Assigné le</th><th>Démarré le</th><th>Terminé le</th><th>Commentaire</th></tr></thead>
+        <tbody>${rows}</tbody></table>`;
+    }).join('');
+  } else {
+    const rows = list.map(t => _prodTacheRow(t)).join('');
+    tableHtml = `<table><thead><tr><th>Dossier</th><th>Étape</th><th>Statut</th><th>Assigné le</th><th>Démarré le</th><th>Terminé le</th><th>Commentaire</th></tr></thead>
+      <tbody>${rows}</tbody></table>`;
+  }
+
+  if (!total) tableHtml = '<p style="color:#78716c;font-style:italic;text-align:center;padding:20px">Aucune tâche pour cette période</p>';
+
+  _printWindow('Rapport Production — FOREVER MG', `
+    <div class="rpt-title">Rapport de Suivi de Production</div>
+    <div class="rpt-period">Période : ${periodStr}${!isAdminOrChef ? ' · Opérateur : ' + myLabel : ''}</div>
+    ${kpis}
+    ${tableHtml}
+  `);
+}
+
+function _prodTacheRow(t) {
+  const statutBadge = t.statut === 'TERMINE'
+    ? '<span class="badge badge-green">Terminé</span>'
+    : t.statut === 'EN_COURS'
+    ? '<span class="badge badge-amber">En cours</span>'
+    : '<span class="badge badge-blue">À faire</span>';
+  const dossierRef = t.dossierId?.startsWith('TL_') ? '★ Libre' : (t.numeroDossier || t.dossierId || '—');
+  return `<tr>
+    <td>${dossierRef}</td>
+    <td>${t.etapeLabel || t.titre || '—'}</td>
+    <td>${statutBadge}</td>
+    <td>${t.dateAssignation || '—'}</td>
+    <td>${t.dateDebut || '—'}</td>
+    <td>${t.dateFin || '—'}</td>
+    <td style="color:#78716c">${t.commentaire || ''}</td>
+  </tr>`;
+}
+
 function initModulesProduction() {
   const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
   const sel = document.getElementById('opFilterSel');
@@ -5133,6 +5407,9 @@ function renderDossiers() {
   // Mettre à jour les tabs avec les compteurs
   _renderDossierTabs();
 
+  // Peupler le sélecteur d'années depuis les dossiers existants
+  _populateYearSel('attrYearSel', dossiers.map(d => d.dateCreation));
+
   // Filtre recherche client-side
   const search = (document.getElementById('dossierSearchInput')?.value || '').toLowerCase().trim();
   let list = dossiers;
@@ -5143,14 +5420,19 @@ function renderDossiers() {
       (d.produit || '').toLowerCase().includes(search)
     );
   }
+  // Filtre date
+  if (attrDateFilter.mois || attrDateFilter.annee) {
+    list = list.filter(d => _matchDateFilter(d.dateCreation, attrDateFilter));
+  }
 
+  const hasActiveFilter = search || attrDateFilter.mois || attrDateFilter.annee;
   if (!list.length) {
     container.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:56px 16px;text-align:center">
       <div style="width:44px;height:44px;background:var(--color-bg);border-radius:12px;display:flex;align-items:center;justify-content:center;margin-bottom:12px">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.4"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
       </div>
-      <p style="font-size:13px;font-weight:500;color:var(--color-text-secondary)">Aucun dossier${search?' trouvé':''}</p>
-      <p style="font-size:11px;color:var(--color-text-muted);margin-top:3px">${search?'Modifiez votre recherche':'Les dossiers sont créés automatiquement lors des ventes'}</p>
+      <p style="font-size:13px;font-weight:500;color:var(--color-text-secondary)">Aucun dossier${hasActiveFilter?' trouvé':''}</p>
+      <p style="font-size:11px;color:var(--color-text-muted);margin-top:3px">${hasActiveFilter?'Modifiez les filtres':'Les dossiers sont créés automatiquement lors des ventes'}</p>
     </div>`;
     return;
   }
@@ -6286,13 +6568,20 @@ function renderTaches() {
   const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
   const myLabel       = currentUser?.label || currentUser?.username || '';
 
+  // Peupler le sélecteur d'années depuis les tâches
+  _populateYearSel('prodYearSel', [...taches, ...tachesLibres].map(t => t.dateAssignation));
+
   let dossierList = isAdminOrChef ? taches : taches.filter(t => t.operateur === myLabel);
   if (prodFilter !== 'TOUS') dossierList = dossierList.filter(t => t.statut === prodFilter);
+  if (prodDateFilter.mois || prodDateFilter.annee)
+    dossierList = dossierList.filter(t => _matchDateFilter(t.dateAssignation, prodDateFilter));
 
   let libreList = isAdminOrChef ? tachesLibres : tachesLibres.filter(t => t.operateur === myLabel);
   if (prodFilter !== 'TOUS') libreList = libreList.filter(t => t.statut === prodFilter);
+  if (prodDateFilter.mois || prodDateFilter.annee)
+    libreList = libreList.filter(t => _matchDateFilter(t.dateAssignation, prodDateFilter));
 
-  // Mettre à jour les compteurs dans les boutons filtre
+  // Mettre à jour les compteurs dans les boutons filtre (sur données non filtrées par date)
   const allVisible = [...taches, ...tachesLibres].filter(t => isAdminOrChef || t.operateur === myLabel);
   const _cnt = s => allVisible.filter(t => s==='TOUS'||t.statut===s).length;
   ['TOUS','A_FAIRE','EN_COURS','TERMINE'].forEach(s => {
