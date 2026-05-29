@@ -1198,13 +1198,11 @@ function printTicket(sale) {
     ${sale.clientName    ? `<div class="row"><span>Client</span><span>${sale.clientName}</span></div>` : ''}
     ${sale.clientContact ? `<div class="row"><span>Contact</span><span>${sale.clientContact}</span></div>` : ''}
     ${sale.deliveryMode === 'livraison'
-      ? `<div class="row" style="background:#fdf0e8;border-radius:4px;padding:3px 6px;margin:3px 0">
-           <span style="color:#e8834a;font-weight:700">🚚 LIVRAISON</span>
-           <span style="color:#e8834a;font-weight:600">${sale.deliveryAddress||''}</span>
-         </div>
+      ? `<div class="row"><span>Mode</span><span>Livraison</span></div>
+         <div class="row"><span>Adresse</span><span>${sale.deliveryAddress||''}</span></div>
          ${sale.deliveryFee > 0 ? `<div class="row"><span>Frais livraison</span><span>+${fmt(sale.deliveryFee)}</span></div>` : ''}
          ${sale.deliveryDate ? `<div class="row"><span>Date livraison</span><span>${new Date(sale.deliveryDate).toLocaleDateString('fr-FR')}</span></div>` : ''}`
-      : `<div class="row"><span>Récupération</span><span>🏪 Retrait boutique</span></div>`
+      : `<div class="row"><span>Mode</span><span>Retrait boutique</span></div>`
     }
     <hr style="${st.sepLight}"/>
     <div class="items-section">
@@ -1239,48 +1237,47 @@ function printReservationTicket(res) {
 
   const html = `
     ${_ticketShopHeader(tc, st)}
-    <div style="background:#e8f7ee;border:2px solid #007a45;border-radius:4px;padding:5px;text-align:center;font-size:13pt;font-weight:bold;color:#007a45;margin:6px 0;font-family:${st.font}">📋 BON DE RÉSERVATION</div>
     <hr style="${st.sepSolid}"/>
-    <div class="row"><span>Réservation N°</span><span><b>#${res.id}</b></span></div>
+    <div style="text-align:center;font-size:11pt;font-weight:bold;letter-spacing:.08em;font-family:${st.font};margin:4px 0">BON DE RESERVATION</div>
+    <hr style="${st.sepSolid}"/>
+    ${tc.ticketShowNum !== false ? `<div class="row"><span>Reservation N°</span><span>#${res.id}</span></div>` : ''}
     <div class="row"><span>Date</span><span>${dateStr}</span></div>
     ${tc.ticketShowCaissier !== false ? `<div class="row"><span>Caissier</span><span>${res.caissier||''}</span></div>` : ''}
     ${res.clientName    ? `<div class="row"><span>Client</span><span>${res.clientName}</span></div>` : ''}
     ${res.clientContact ? `<div class="row"><span>Contact</span><span>${res.clientContact}</span></div>` : ''}
     ${res.deliveryMode === 'livraison'
-      ? `<div class="row" style="background:#fdf0e8;border-radius:4px;padding:3px 6px;margin:3px 0">
-           <span style="color:#e8834a;font-weight:700">🚚 LIVRAISON</span>
-           <span style="color:#e8834a;font-weight:600">${res.deliveryAddress||''}</span>
-         </div>
+      ? `<div class="row"><span>Mode</span><span>Livraison</span></div>
+         <div class="row"><span>Adresse</span><span>${res.deliveryAddress||''}</span></div>
          ${res.deliveryFee > 0 ? `<div class="row"><span>Frais livraison</span><span>+${fmt(res.deliveryFee)}</span></div>` : ''}
          ${res.deliveryDate ? `<div class="row"><span>Date livraison</span><span>${new Date(res.deliveryDate+'T00:00:00').toLocaleDateString('fr-FR')}</span></div>` : ''}`
-      : `<div class="row"><span>Récupération</span><span>🏪 Retrait boutique</span></div>`
+      : `<div class="row"><span>Mode</span><span>Retrait boutique</span></div>`
     }
     <hr style="${st.sepLight}"/>
     <div class="items-section">
-      ${(Array.isArray(res.items)?res.items:[]).map(i=>`<div class="row"><span>${i.name||'?'} <em style="color:#777">×${Number(i.qty)||1}</em></span><span>${((Number(i.price)||0)*(Number(i.qty)||1)).toLocaleString()} Ar</span></div>`).join('')}
+      ${(Array.isArray(res.items)?res.items:[]).map(i=>`<div class="row"><span>${i.name||'?'} <em style="color:#777">x${Number(i.qty)||1}</em></span><span>${((Number(i.price)||0)*(Number(i.qty)||1)).toLocaleString()} Ar</span></div>`).join('')}
     </div>
     <hr style="${st.sepLight}"/>
     ${tc.ticketShowSubtotal !== false ? `<div class="row"><span>Sous-total</span><span>${fmt(res.subtotal)}</span></div>` : ''}
-    ${res.remise>0 ? `<div class="row"><span>Remise</span><span style="color:#c00">-${fmt(res.remise)}</span></div>` : ''}
+    ${res.remise>0 ? `<div class="row"><span>Remise</span><span>-${fmt(res.remise)}</span></div>` : ''}
     <div style="background:${st.color}18;border:1px solid ${st.color};border-radius:4px;padding:4px 6px;margin:4px 0">
-      <div class="row bold" style="color:${st.color}"><span>TOTAL À PAYER</span><span>${fmt(res.total)}</span></div>
+      <div class="row bold" style="color:${st.color}"><span>TOTAL A PAYER</span><span>${fmt(res.total)}</span></div>
     </div>
-    <div style="background:#e8f7ee;border:1px solid #007a45;border-radius:4px;padding:5px 8px;margin:4px 0">
-      <div class="row bold" style="color:#007a45"><span>ACOMPTE VERSÉ</span><span>${fmt(res.accompte)}</span></div>
-      <div class="row bold" style="color:#c00"><span>RESTE DÛ</span><span>${fmt(res.restant)}</span></div>
+    <div style="border:1px solid #333;border-radius:4px;padding:5px 8px;margin:4px 0">
+      <div class="row bold"><span>ACOMPTE VERSE</span><span>${fmt(res.accompte)}</span></div>
+      <div class="row bold"><span>RESTE DU</span><span>${fmt(res.restant)}</span></div>
     </div>
     <hr style="${st.sepLight}"/>
     ${tc.ticketShowPayDetail !== false
       ? (res.depositMethod === 'cash'
-        ? `<div class="row"><span>Espèces reçus</span><span>${fmt(res.depositGiven)}</span></div>
+        ? `<div class="row"><span>Especes remis</span><span>${fmt(res.depositGiven)}</span></div>
            <div class="row"><span>Monnaie rendue</span><span>${fmt(res.depositChange)}</span></div>`
         : `<div class="row"><span>Paiement mobile (${res.depositProvider})</span><span>${res.depositRef||''}</span></div>`)
       : ''}
     <hr style="${st.sepSolid}"/>
-    <div class="footer">À récupérer sur présentation de ce bon</div>
+    <div class="footer">A recuperer sur presentation de ce bon</div>
     <div class="footer">${tc.footer||'Merci de votre confiance !'}</div>`;
 
-  _openTicketWindow(html, 'Réservation #' + res.id);
+  _openTicketWindow(html, 'Reservation #' + res.id);
 }
 
 // ============================================================
