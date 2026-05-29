@@ -26,21 +26,26 @@ var notifications      = (function() {
 }());
 
 var RYTHME_DEFAULTS = {
-  ACHAT:         24,
-  PAO:           8,
-  BAT:           4,
-  RETOUR_CLIENT: 48,
-  MODIFICATIONS: 4,
-  PRODUCTION:    8,
-  FINITION:      4,
-  LIVRE:         8,
+  ACHAT:         1440,  // 24h
+  PAO:           480,   // 8h
+  BAT:           240,   // 4h
+  RETOUR_CLIENT: 2880,  // 48h
+  MODIFICATIONS: 240,   // 4h
+  PRODUCTION:    480,   // 8h
+  FINITION:      240,   // 4h
+  LIVRE:         480,   // 8h
 };
 var rythmeProduction = (function() {
   try {
     var raw   = localStorage.getItem('pos-rythme-production');
     var saved = raw ? JSON.parse(raw) : {};
     var res   = {};
-    for (var code in RYTHME_DEFAULTS) res[code] = (saved[code] != null ? saved[code] : RYTHME_DEFAULTS[code]);
+    for (var code in RYTHME_DEFAULTS) {
+      var v = saved[code];
+      // Migration heures→minutes : si valeur <= 999 et défaut > 60, l'ancienne valeur était en heures
+      if (v != null && v <= 100 && RYTHME_DEFAULTS[code] >= 60) v = v * 60;
+      res[code] = (v != null ? v : RYTHME_DEFAULTS[code]);
+    }
     return res;
   } catch(e) { return {}; }
 }());
@@ -4737,9 +4742,9 @@ function _getTacheRetardInfo(t) {
   if (!delai) return { isRetard: false };
   const debut = _parseFrDate(t.dateDebut);
   if (!debut) return { isRetard: false };
-  const heuresEcoulees = (Date.now() - debut.getTime()) / 3600000;
-  const depassement    = Math.round(heuresEcoulees - delai);
-  return { isRetard: heuresEcoulees > delai, heuresEcoulees: Math.round(heuresEcoulees), delai, depassement };
+  const minutesEcoulees = (Date.now() - debut.getTime()) / 60000;
+  const depassement     = Math.round(minutesEcoulees - delai);
+  return { isRetard: minutesEcoulees > delai, minutesEcoulees: Math.round(minutesEcoulees), delai, depassement };
 }
 
 function renderRythmeConfig() {
@@ -4764,7 +4769,7 @@ function renderRythmeConfig() {
         <input type="number" min="1" max="999" value="${delai}"
           style="width:68px;padding:6px 10px;border-radius:8px;border:1px solid #e5e3df;font-size:13px;font-weight:600;text-align:center;background:#fff;color:#1c1917"
           oninput="rythmeProduction['${e.code}']=Math.max(1,+this.value||1);saveRythmeProduction();showToast('Rythme mis à jour')" />
-        <span style="font-size:12px;color:#78716c;white-space:nowrap">h max</span>
+        <span style="font-size:12px;color:#78716c;white-space:nowrap">mn max</span>
       </div>
     </div>`;
   }).join('');
@@ -6697,7 +6702,7 @@ function _tacheRow(t) {
 
   const retardInfo   = _getTacheRetardInfo(t);
   const retardBadge  = retardInfo.isRetard
-    ? `<span style="font-size:10px;font-weight:700;color:#dc2626;background:#fee2e2;padding:3px 8px;border-radius:6px;white-space:nowrap;border:1px solid #fca5a5;flex-shrink:0" title="Délai dépassé de ${retardInfo.depassement}h">⚠ EN RETARD +${retardInfo.depassement}h</span>`
+    ? `<span style="font-size:10px;font-weight:700;color:#dc2626;background:#fee2e2;padding:3px 8px;border-radius:6px;white-space:nowrap;border:1px solid #fca5a5;flex-shrink:0" title="Délai dépassé de ${retardInfo.depassement}mn">⚠ EN RETARD +${retardInfo.depassement}mn</span>`
     : '';
   const retardStyle  = retardInfo.isRetard ? 'border-left:3px solid #dc2626;' : '';
 
