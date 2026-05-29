@@ -66,6 +66,7 @@ function doPost(e) {
     else if (action === 'uploadFile')        result = handleUploadFile(data);
     else if (action === 'addComment')        result = handleAddComment(data);
     else if (action === 'saveNotif')         result = handleSaveNotif(data);
+    else if (action === 'saveShopConfig')    result = handleSaveShopConfig(data);
     else result = { ok:false, error:'Action inconnue: ' + action };
 
     return jsonResp(result);
@@ -99,6 +100,7 @@ function doGet(e) {
       else if (action === 'deleteTache')       result = handleDeleteTache(data);
       else if (action === 'addComment')        result = handleAddComment(data);
       else if (action === 'saveNotif')         result = handleSaveNotif(data);
+      else if (action === 'saveShopConfig')    result = handleSaveShopConfig(data);
       else result = { ok:false, error:'Action payload inconnue: ' + action };
       return jsonResp(result);
     } catch(err) {
@@ -121,6 +123,7 @@ function doGet(e) {
     if (action === 'getDashboard')    return jsonResp(handleGetDashboard());
     if (action === 'getComments')     return jsonResp(handleGetComments(e.parameter));
     if (action === 'getNotifs')       return jsonResp(handleGetNotifs(e.parameter));
+    if (action === 'getShopConfig')   return jsonResp(handleGetShopConfig());
     if (action === 'initSheets')      return jsonResp(initSheets());
     return jsonResp({ ok:false, error:'Action GET inconnue: ' + action });
   } catch(err) {
@@ -836,4 +839,57 @@ function handleSaveNotif(data) {
     data.message       || ''
   ]);
   return { ok: true };
+}
+
+// ============================================================
+// CONFIG BOUTIQUE — partagée entre tous les postes
+// ============================================================
+const SHEET_CONFIG = 'ConfigBoutique';
+
+function handleSaveShopConfig(data) {
+  const ss = getSS();
+  const sh = ensureSheet(ss, SHEET_CONFIG, ['Cle', 'Valeur', 'MiseAJour']);
+  const config = data.config || {};
+  const now = new Date();
+
+  // Lire les lignes existantes pour savoir quelles clés existent déjà
+  const rows = sh.getDataRange().getValues();
+  const keyMap = {}; // cle → numéro de ligne (1-based)
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][0]) keyMap[String(rows[i][0])] = i + 1;
+  }
+
+  // Sauvegarder chaque clé de la config (une ligne par clé)
+  Object.entries(config).forEach(([key, val]) => {
+    const strVal = typeof val === 'object' ? JSON.stringify(val) : String(val);
+    if (keyMap[key]) {
+      sh.getRange(keyMap[key], 2, 1, 2).setValues([[strVal, now]]);
+    } else {
+      sh.appendRow([key, strVal, now]);
+    }
+  });
+
+  return { ok: true };
+}
+
+function handleGetShopConfig() {
+  const ss = getSS();
+  const sh = ss.getSheetByName(SHEET_CONFIG);
+  if (!sh) return { ok: true, config: {} };
+
+  const rows = sh.getDataRange().getValues();
+  const config = {};
+  for (let i = 1; i < rows.length; i++) {
+    const key = String(rows[i][0] || '').trim();
+    const val = rows[i][1];
+    if (!key) continue;
+    // Tenter de parser les valeurs JSON (booléens, objets)
+    try {
+      const parsed = JSON.parse(val);
+      config[key] = parsed;
+    } catch(e) {
+      config[key] = val;
+    }
+  }
+  return { ok: true, config };
 }
