@@ -8,6 +8,21 @@ async function sha256(str) {
     .map(b => ('0' + b.toString(16)).slice(-2)).join('');
 }
 
+// Migration des mots de passe localUsers : passe du texte clair au hash SHA-256
+// Appelée une seule fois au démarrage ; après, tous les .pass sont des hex 64 chars
+async function _migrateLocalUserPasswords() {
+  let migrated = false;
+  for (const u of localUsers) {
+    if (u.pass && u.pass.length < 60) { // pas encore un hash
+      u.pass = await sha256(u.pass);
+      migrated = true;
+    }
+  }
+  if (migrated) {
+    try { localStorage.setItem('pos-users', JSON.stringify(localUsers)); } catch(e) {}
+  }
+}
+
 // ============================================================
 // VERSION APP — incrémenter à chaque déploiement pour déclencher
 // le vidage automatique du cache sur tous les navigateurs clients
@@ -142,6 +157,25 @@ let currentFinalizeResId = null;
 // ============================================================
 function fmt(n) { const v = Number(n); return (isNaN(v) ? 0 : v).toLocaleString('fr-MG') + ' Ar'; }
 function now() { return new Date().toLocaleString('fr-MG'); }
+
+// ── Sécurité : protection XSS pour les données utilisateur ──
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// ── Stockage local sécurisé (protection QuotaExceededError) ──
+function safeLocalSet(key, value) {
+  try {
+    localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
+  } catch(e) {
+    if (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
+      showToast('⚠️ Stockage local saturé — synchronisation forcée recommandée', 'error');
+      console.error('localStorage quota exceeded pour la clé:', key);
+    }
+  }
+}
 function showToast(msg, type='success') {
   const t = document.getElementById('toast-container');
   const el = document.createElement('div');
@@ -351,9 +385,9 @@ function renderProducts() {
   grid.innerHTML = filtered.map(p => `
     <div class="product-card ${p.stock===0?'out-of-stock':''}" onclick="addToCart(${p.id})">
       ${p.image
-        ? `<img class="product-img" src="${p.image}" alt="${p.name}" loading="lazy" />`
+        ? `<img class="product-img" src="${p.image}" alt="${escapeHtml(p.name)}" loading="lazy" />`
         : `<span class="product-emoji">${p.emoji||'📦'}</span>`}
-      <div class="product-name">${p.name}</div>
+      <div class="product-name">${escapeHtml(p.name)}</div>
       <div class="product-price">${fmt(p.price)}</div>
       <div class="product-stock ${p.stock===0?'stock-out':p.stock<=p.minStock?'stock-low':''}">
         ${p.stock===0?'⛔ Rupture':p.stock<=p.minStock?`⚠️ Stock: ${p.stock}`:`Stock: ${p.stock}`}
@@ -639,6 +673,14 @@ function confirmPayment() {
   }
 }
 function recordSale(total, method, given, change, provider, ref, remise=0, accompte=0, clientName='', clientContact='', deliveryMode='retrait', deliveryAddress='', deliveryFee=0, deliveryDate='', clientType='particulier', clientCompany='') {
+  // Vérification stock local avant de valider
+  for (const item of cart) {
+    const p = products.find(pr => pr.id === item.id);
+    if (p && p.stock < item.qty) {
+      showToast(`⛔ Stock insuffisant pour "${p.name}" : ${p.stock} dispo, ${item.qty} demandé(s)`, 'error');
+      return;
+    }
+  }
   cart.forEach(item => {
     const p = products.find(pr=>pr.id===item.id);
     if(p) p.stock -= item.qty;
@@ -659,6 +701,7 @@ function recordSale(total, method, given, change, provider, ref, remise=0, accom
   sales.unshift(sale);
   printTicket(sale);
   saveData();
+  if (window._posBroadcast) window._posBroadcast('sale-added', { id: sale.id });
   closeModal('paymentModal');
   const msg = method==='cash' ? 'Monnaie: '+fmt(change) : 'Ref: '+(ref||'—');
   showToast(`✅ Vente enregistrée ! ${msg}`);
@@ -985,8 +1028,8 @@ function renderReservations() {
     <div class="res-card">
       <div class="res-card-header">
         <div>
-          <div class="res-card-client">👤 ${r.clientName} <span style="font-size:12px;color:var(--muted);font-weight:400">#${r.id}</span></div>
-          ${r.clientContact ? `<div class="res-card-contact">📞 ${r.clientContact}</div>` : ''}
+          <div class="res-card-client">👤 ${escapeHtml(r.clientName)} <span style="font-size:12px;color:var(--muted);font-weight:400">#${r.id}</span></div>
+          ${r.clientContact ? `<div class="res-card-contact">📞 ${escapeHtml(r.clientContact)}</div>` : ''}
         </div>
         <div style="text-align:right">
           <span class="res-status ${statusClass}">${statusLabel}</span>
@@ -1471,9 +1514,9 @@ function renderStockTable() {
     return { p, badge, status, stockColor };
   });
   tbody.innerHTML = rows.map(({p,badge,status})=>`<tr>
-    <td><span style="margin-right:6px">${p.emoji||'📦'}</span>${p.name}</td>
-    <td>${p.cat}</td>
-    <td class="td-mono">${p.code}</td>
+    <td><span style="margin-right:6px">${p.emoji||'📦'}</span>${escapeHtml(p.name)}</td>
+    <td>${escapeHtml(p.cat)}</td>
+    <td class="td-mono">${escapeHtml(p.code)}</td>
     <td class="td-mono">${fmt(p.price)}</td>
     <td class="td-mono">${fmt(p.cost)}</td>
     <td class="td-mono" style="font-weight:600">${p.stock}</td>
@@ -1487,8 +1530,8 @@ function renderStockTable() {
     <div class="stock-card">
       <div class="stock-card-top">
         <div>
-          <div class="stock-card-name">${p.emoji||'📦'} ${p.name}</div>
-          <div class="stock-card-cat">${p.cat} · ${p.code}</div>
+          <div class="stock-card-name">${p.emoji||'📦'} ${escapeHtml(p.name)}</div>
+          <div class="stock-card-cat">${escapeHtml(p.cat)} · ${escapeHtml(p.code)}</div>
         </div>
         <span class="badge ${badge}">${status}</span>
       </div>
@@ -1618,16 +1661,19 @@ function deleteProduct(id) {
   showToast('Article supprimé');
 }
 function saveProduct() {
-  const name=document.getElementById('pName').value.trim();
-  if(!name) { showToast('Nom requis','error'); return; }
+  const name  = document.getElementById('pName').value.trim();
+  const price = parseFloat(document.getElementById('pPrice').value) || 0;
+  const stock = parseInt(document.getElementById('pStock').value) || 0;
+  if (!name)      { showToast('Nom requis', 'error'); return; }
+  if (name.length > 200) { showToast('Nom trop long (max 200 caractères)', 'error'); return; }
+  if (price < 0)  { showToast('Le prix ne peut pas être négatif', 'error'); return; }
+  if (stock < 0)  { showToast('Le stock ne peut pas être négatif', 'error'); return; }
   const data = {
     name, cat:document.getElementById('pCat').value,
     emoji:document.getElementById('pEmoji').value||'📦',
     code:document.getElementById('pCode').value.trim()||String(nextId),
-    price:parseFloat(document.getElementById('pPrice').value)||0,
-    cost:parseFloat(document.getElementById('pCost').value)||0,
-    stock:parseInt(document.getElementById('pStock').value)||0,
-    minStock:parseInt(document.getElementById('pMinStock').value)||5,
+    price, cost:parseFloat(document.getElementById('pCost').value)||0,
+    stock, minStock:parseInt(document.getElementById('pMinStock').value)||5,
     image:editingProductImage||null
   };
   if(editingProductId) {
@@ -1685,7 +1731,7 @@ function saveQuickAdd() {
 // ============================================================
 function openMouvement(productId=null) {
   const sel = document.getElementById('mouvProduct');
-  sel.innerHTML = products.map(p=>`<option value="${p.id}">${p.name} (stock: ${p.stock})</option>`).join('');
+  sel.innerHTML = products.map(p=>`<option value="${p.id}">${escapeHtml(p.name)} (stock: ${p.stock})</option>`).join('');
   if (productId) sel.value = productId;
   document.getElementById('mouvQty').value='';
   document.getElementById('mouvReason').value='';
@@ -1980,6 +2026,62 @@ async function manualRefreshStats() {
 
 // ============================================================
 // STATS
+// ── Export CSV des ventes ───────────────────────────────────
+function exportVentesCSV() {
+  if (!sales || sales.length === 0) { showToast('Aucune vente à exporter', 'error'); return; }
+  const BOM   = '﻿'; // UTF-8 BOM pour Excel
+  const lines = ['Date,Heure,Client,Article,Qté,Prix unitaire,Total vente,Mode,Référence,Caissier'];
+  sales.forEach(s => {
+    (s.items || []).forEach(item => {
+      lines.push([
+        s.date        || '',
+        s.time        || '',
+        '"' + (s.clientName || '').replace(/"/g, '""') + '"',
+        '"' + (item.name    || '').replace(/"/g, '""') + '"',
+        item.qty      || 1,
+        item.price    || 0,
+        s.total       || 0,
+        s.method === 'cash' ? 'Espèces' : 'Mobile Money',
+        '"' + (s.ref || s.provider || '').replace(/"/g, '""') + '"',
+        '"' + (s.caissier || '').replace(/"/g, '""') + '"'
+      ].join(','));
+    });
+  });
+  const blob = new Blob([BOM + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = 'ventes_' + new Date().toISOString().split('T')[0] + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast(`✅ Export CSV : ${sales.length} vente(s)`);
+}
+
+function exportStockCSV() {
+  if (!products || products.length === 0) { showToast('Aucun produit à exporter', 'error'); return; }
+  const BOM   = '﻿';
+  const lines = ['ID,Nom,Catégorie,Code,Prix vente,Prix achat,Stock actuel,Stock min'];
+  products.forEach(p => {
+    lines.push([
+      p.id, '"' + (p.name||'').replace(/"/g,'""') + '"',
+      '"' + (p.cat||'').replace(/"/g,'""') + '"',
+      p.code||'', p.price||0, p.cost||0, p.stock||0, p.minStock||0
+    ].join(','));
+  });
+  const blob = new Blob([BOM + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = 'stock_' + new Date().toISOString().split('T')[0] + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast(`✅ Export CSV : ${products.length} produit(s)`);
+}
+
 // ============================================================
 function renderStats() {
   try { _renderStatsInner(); } catch(e) { console.error('renderStats crash:', e); renderBestSales(_bsPeriod); }
@@ -2104,6 +2206,12 @@ function _renderStatsInner() {
         </tr>`;
       }).join('');
     }
+  }
+
+  // Bouton Export CSV ventes (affiché uniquement s'il y a des ventes)
+  const exportWrap = document.getElementById('statsExportWrap');
+  if (exportWrap) {
+    exportWrap.style.display = sales.length > 0 ? 'flex' : 'none';
   }
 
   // Meilleures ventes et panneau détail — après le tableau
@@ -2421,7 +2529,7 @@ function renderBestSales(period) {
     return `<tr>
       <td><span class="bs-rank ${rankClass(i)}">${rankEmoji(i)}</span></td>
       <td>
-        <div style="font-weight:600;color:var(--text)">${a.name || '?'}</div>
+        <div style="font-weight:600;color:var(--text)">${escapeHtml(a.name || '?')}</div>
         <div class="bs-bar-bg"><div class="bs-bar-fill" style="width:${pct}%"></div></div>
       </td>
       <td style="text-align:right;font-family:'DM Mono',monospace;white-space:nowrap">
@@ -2650,8 +2758,15 @@ function showUpdateBanner() {
   });
   document.body.appendChild(banner);
 
-  // Compte à rebours — auto-reload à 0
+  // Compte à rebours — auto-reload uniquement si panier vide
   window._swBannerTimer = setInterval(() => {
+    if (cart && cart.length > 0) {
+      // Panier en cours : stopper le décompte, informer l'utilisateur
+      clearInterval(window._swBannerTimer);
+      const msgSpan = banner.querySelector('#swBannerMsg');
+      if (msgSpan) msgSpan.textContent = 'Mise à jour prête — actualisez après votre vente';
+      return;
+    }
     countdown--;
     if (countdown <= 0) {
       clearInterval(window._swBannerTimer);
@@ -2722,10 +2837,16 @@ function initPWA() {
         const newWorker = reg.installing;
         newWorker.addEventListener('statechange', () => {
           if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-            // Nouveau SW prêt et un ancien SW existait : activer immédiatement
-            newWorker.postMessage({ type: 'SKIP_WAITING' });
+            // Nouveau SW prêt : ne pas activer si une transaction est en cours
+            if (cart && cart.length > 0) {
+              // Panier non vide — signaler sans forcer
+              showUpdateBanner();
+              window._pendingSWWorker = newWorker;
+            } else {
+              newWorker.postMessage({ type: 'SKIP_WAITING' });
+            }
           } else if (newWorker.state === 'installed') {
-            // Premier install, pas besoin de bannière
+            // Premier install
             newWorker.postMessage({ type: 'SKIP_WAITING' });
           }
         });
@@ -2823,15 +2944,15 @@ function saveData() {
       const maxResId = Math.max(...reservations.map(r => Number(r.id) || 0));
       if (maxResId >= nextReservationId) nextReservationId = maxResId + 1;
     }
-    localStorage.setItem('pos-heldCarts', JSON.stringify(heldCarts));
-    localStorage.setItem('pos-sales', JSON.stringify(sales));
+    safeLocalSet('pos-heldCarts', JSON.stringify(heldCarts));
+    safeLocalSet('pos-sales', JSON.stringify(sales));
     localStorage.setItem('pos-nextId', String(nextId));
     localStorage.setItem('pos-nextSaleId', String(nextSaleId));
-    localStorage.setItem('pos-reservations', JSON.stringify(reservations));
+    safeLocalSet('pos-reservations', JSON.stringify(reservations));
     localStorage.setItem('pos-nextResId', String(nextReservationId));
     // Photos séparées pour éviter de dépasser la limite localStorage
     const cmdWithoutPhotos = commandes.map(c => ({ ...c, photos: [] }));
-    localStorage.setItem('pos-commandes', JSON.stringify(cmdWithoutPhotos));
+    safeLocalSet('pos-commandes', JSON.stringify(cmdWithoutPhotos));
     localStorage.setItem('pos-nextCmdId', String(nextCommandeId));
     // Photos stockées séparément par commande ID
     commandes.forEach(c => {
@@ -2898,7 +3019,7 @@ function loadData() {
 }
 
 function saveUsers() {
-  try { localStorage.setItem('pos-users', JSON.stringify(localUsers)); } catch(e) {}
+  safeLocalSet('pos-users', JSON.stringify(localUsers));
 }
 
 function loadUsers() {
@@ -3099,19 +3220,34 @@ async function syncPendingOfflineSales() {
   if (pending.length === 0) return;
   showToast(`🔄 Synchronisation de ${pending.length} vente(s) en attente...`, 'info');
   const succeeded = [];
-  const failed = [];
+  const failed    = [];
+  const MAX_RETRIES = 3;
+
   for (const sale of pending) {
     sale.caissier = sale.caissier || (currentUser ? currentUser.username : 'caissier');
-    const r = await apiCall({ action: 'addSale', sale });
-    if (r && r.ok) {
-      succeeded.push(sale);
-    } else {
-      failed.push(sale);
+    let attempt = 0;
+    let ok = false;
+    while (attempt < MAX_RETRIES && !ok) {
+      try {
+        const r = await apiCall({ action: 'addSale', sale });
+        if (r && r.ok) { ok = true; }
+        else if (attempt < MAX_RETRIES - 1) {
+          await new Promise(res => setTimeout(res, Math.pow(2, attempt) * 1000)); // 1s, 2s, 4s
+        }
+      } catch(e) {
+        if (attempt < MAX_RETRIES - 1) {
+          await new Promise(res => setTimeout(res, Math.pow(2, attempt) * 1000));
+        }
+      }
+      attempt++;
     }
+    if (ok) succeeded.push(sale); else failed.push(sale);
   }
+
   if (failed.length > 0) {
-    localStorage.setItem('pos-pending-sales', JSON.stringify(failed));
+    safeLocalSet('pos-pending-sales', JSON.stringify(failed));
     showToast(`⚠️ ${succeeded.length} sync. — ${failed.length} encore en attente`, 'error');
+    if (failed.length >= 5) console.error('Ventes non synchronisées après', MAX_RETRIES, 'tentatives :', failed);
   } else {
     localStorage.removeItem('pos-pending-sales');
     showToast(`✅ ${succeeded.length} vente(s) synchronisée(s) dans Google Sheets`);
@@ -4659,6 +4795,7 @@ let tachesLibres = []; // doit être déclaré avant loadTachesLibres()
 loadConfig();
 loadData();
 loadUsers();
+_migrateLocalUserPasswords(); // hash les mots de passe en clair au premier démarrage
 loadTachesLibres();
 loadCommentsLocal();
 loadNotifications();
@@ -5001,6 +5138,7 @@ async function loadNotifsFromGAS() {
 function _startNotifPolling() {
   if (_notifPollInterval) clearInterval(_notifPollInterval);
   _notifPollInterval = setInterval(async () => {
+    if (document.hidden) return; // ne pas polluer quand l'onglet est en arrière-plan
     _flushNotifRetryQueue();
     const newCount = await loadNotifsFromGAS();
     if (newCount > 0 && document.getElementById('notifPanel')?.classList.contains('open')) {
@@ -5012,6 +5150,13 @@ function _startNotifPolling() {
 function _stopNotifPolling() {
   if (_notifPollInterval) { clearInterval(_notifPollInterval); _notifPollInterval = null; }
 }
+
+// Reprendre le polling quand l'onglet redevient visible après une absence
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && currentUser && _notifPollInterval) {
+    loadNotifsFromGAS(); // poll immédiat au retour de l'onglet
+  }
+});
 
 // Lu/non-lu par timestamp par utilisateur (plus léger que readBy[])
 function _getLastReadTs() {
@@ -7603,5 +7748,52 @@ function _pdbKpi(label, val, sub, color) {
     <div class="pdb-kpi-sub">${sub}</div>
   </div>`;
 }
+
+// ============================================================
+// GESTIONNAIRE D'ERREURS GLOBAL
+// Capture les erreurs non gérées sans planter silencieusement
+// ============================================================
+window.addEventListener('error', (e) => {
+  // Ignorer les erreurs de réseau (GAS fetch failed, CDN inaccessible)
+  if (e.message && (e.message.includes('fetch') || e.message.includes('network') || e.message.includes('Script error'))) return;
+  console.error('[POS] Erreur non gérée:', e.message, e.filename + ':' + e.lineno);
+  // Afficher un toast discret pour les erreurs inattendues (pas réseau)
+  if (typeof showToast === 'function') {
+    showToast('⚠️ Erreur inattendue — rechargez si l\'app se comporte anormalement', 'error');
+  }
+});
+
+window.addEventListener('unhandledrejection', (e) => {
+  const msg = String(e.reason?.message || e.reason || '');
+  // Ignorer les erreurs de réseau silencieuses
+  if (!msg || msg.toLowerCase().includes('fetch') || msg.toLowerCase().includes('failed to fetch')
+   || msg.toLowerCase().includes('networkerror') || msg.toLowerCase().includes('load failed')) {
+    e.preventDefault(); return;
+  }
+  console.error('[POS] Promise rejetée:', msg);
+  e.preventDefault(); // empêcher le log navigateur non formaté
+});
+
+// ============================================================
+// SYNC CROSS-ONGLETS — BroadcastChannel
+// Quand un onglet sauvegarde des données, les autres se mettent à jour
+// ============================================================
+(function() {
+  if (typeof BroadcastChannel === 'undefined') return;
+  const _posBus = new BroadcastChannel('pos-sync');
+
+  // Écouter les messages des autres onglets
+  _posBus.onmessage = function(e) {
+    const { type } = e.data || {};
+    if (type === 'sale-added')        { loadData(); renderStats(); }
+    if (type === 'product-changed')   { loadData(); renderProducts(); renderStockTable(); }
+    if (type === 'reservation-added') { loadData(); renderReservations(); }
+  };
+
+  // Exposer une fonction pour notifier les autres onglets
+  window._posBroadcast = function(type, payload) {
+    try { _posBus.postMessage({ type, payload }); } catch(e) {}
+  };
+})();
 
 // initModulesProduction est appelé lazily depuis showPage (attribution/production)

@@ -17,6 +17,20 @@ const SHEET_COMMANDES    = 'Commandes';
 const SHEET_DOSSIERS   = 'Dossiers';
 const SHEET_TACHES     = 'Taches';
 const SHEET_OPERATEURS = 'Operateurs';
+const SHEET_JOURNAL    = 'JournalAcces'; // audit log : qui fait quoi et quand
+
+// ── Audit : enregistrement des actions critiques ───────────
+function _logAction_(action, user, detail) {
+  try {
+    const ss = getSS();
+    const sh = ensureSheet(ss, SHEET_JOURNAL,
+      ['Timestamp','Utilisateur','Action','Detail','IP_Approx']);
+    sh.appendRow([new Date(), String(user||'anonyme'), String(action), String(detail||''), '']);
+    // Limiter à 5 000 entrées : supprimer les plus anciennes si besoin
+    const last = sh.getLastRow();
+    if (last > 5001) sh.deleteRows(2, last - 5001);
+  } catch(e) {} // ne jamais planter l'app pour un log
+}
 
 // Étapes de production
 const ETAPES_PROD = [
@@ -28,12 +42,36 @@ const ETAPES_PROD = [
   { code:'LIVRE',      label:'Livré',              progress:100 },
 ];
 
+// ── Sécurité : hashage SHA-256 des mots de passe ──────────
+function _hashPwd_(pwd) {
+  const SALT = PropertiesService.getScriptProperties().getProperty('PWD_SALT') || 'FMG_SALT_2024';
+  const bytes = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    pwd + SALT,
+    Utilities.Charset.UTF_8
+  );
+  return bytes.map(function(b) {
+    var h = (b < 0 ? b + 256 : b).toString(16);
+    return h.length === 1 ? '0' + h : h;
+  }).join('');
+}
+
+// ── Sécurité : rate limiting basé sur CacheService ────────
+function _rateLimitCheck_(identifier) {
+  var cache = CacheService.getScriptCache();
+  var key   = 'rl_' + String(identifier || 'anon').replace(/[^a-zA-Z0-9]/g,'_').substring(0, 40);
+  var count = Number(cache.get(key) || 0);
+  if (count >= 60) throw new Error('Trop de requêtes. Réessayez dans une minute.');
+  cache.put(key, String(count + 1), 60);
+}
+
 // ============================================================
 // ROUTEUR — POST
 // ============================================================
 function doPost(e) {
   try {
     const data = JSON.parse(e.postData.contents);
+    _rateLimitCheck_(data.username || data.caissier || data.operateur || 'anon');
     const action = data.action;
     let result;
 
@@ -128,6 +166,9 @@ function doGet(e) {
     if (action === 'getShopConfig')   return jsonResp(handleGetShopConfig());
     if (action === 'getRythme')       return jsonResp(handleGetRythme());
     if (action === 'initSheets')      return jsonResp(initSheets());
+    if (action === 'setupBackup')     return jsonResp(createDailyBackupTrigger());
+    if (action === 'runBackupNow')    return jsonResp(dailyBackup());
+    if (action === 'getJournal')      return jsonResp(handleGetJournal(e.parameter));
     return jsonResp({ ok:false, error:'Action GET inconnue: ' + action });
   } catch(err) {
     return jsonResp({ ok:false, error:'GET error: ' + err.message });
@@ -186,18 +227,36 @@ function ensureSheet(ss, name, headers) {
 // AUTH — identique à l'original
 // ============================================================
 function handleLogin(data) {
-  const ss   = getSS();
-  const sh   = ss.getSheetByName(SHEET_USERS);
+  const ss         = getSS();
+  const sh         = ss.getSheetByName(SHEET_USERS);
   if (!sh) return { ok:false, error:'Feuille Utilisateurs introuvable' };
-  const rows = sh.getDataRange().getValues();
+  const rows       = sh.getDataRange().getValues();
+  const inputUser  = String(data.username || '').trim().toLowerCase();
+  const inputPwd   = String(data.password  || '').trim();
+  const inputHash  = _hashPwd_(inputPwd);
+
   for (let i = 1; i < rows.length; i++) {
-    const r = rows[i];
-    if (String(r[0]).trim().toLowerCase() === String(data.username).trim().toLowerCase()
-     && String(r[1]).trim() === String(data.password).trim()
-     && String(r[4]||'oui').trim().toLowerCase() !== 'non') {
+    const r          = rows[i];
+    const storedUser = String(r[0] || '').trim().toLowerCase();
+    const storedPwd  = String(r[1] || '').trim();
+    const isActif    = String(r[4] || 'oui').trim().toLowerCase() !== 'non';
+
+    if (storedUser !== inputUser || !isActif) continue;
+
+    // Hash 64 hex → comparaison sécurisée ; sinon plaintext (migration progressive)
+    const isHashed = /^[0-9a-f]{64}$/i.test(storedPwd);
+    const matches  = isHashed ? (storedPwd === inputHash) : (storedPwd === inputPwd);
+
+    if (matches) {
+      if (!isHashed) {
+        // Migrer le mot de passe en clair vers le hash lors de la première connexion
+        try { sh.getRange(i + 1, 2).setValue(inputHash); } catch(e) {}
+      }
+      _logAction_('LOGIN_OK', r[0], 'Rôle: ' + r[2]);
       return { ok:true, user:{ username:r[0], role:r[2], nom:r[3]||r[0] } };
     }
   }
+  _logAction_('LOGIN_FAIL', inputUser, 'Tentative échouée');
   return { ok:false, error:'Identifiants incorrects' };
 }
 
@@ -205,8 +264,14 @@ function handleLogin(data) {
 // PRODUITS — identique à l'original
 // ============================================================
 function handleGetProducts() {
-  const sh   = getSS().getSheetByName(SHEET_PRODUCTS);
-  const rows = sh.getDataRange().getValues();
+  const cache    = CacheService.getScriptCache();
+  const cacheKey = 'products_v1';
+  const cached   = cache.get(cacheKey);
+  if (cached) {
+    try { return JSON.parse(cached); } catch(e) {}
+  }
+  const sh       = getSS().getSheetByName(SHEET_PRODUCTS);
+  const rows     = sh.getDataRange().getValues();
   const products = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
@@ -214,13 +279,21 @@ function handleGetProducts() {
     products.push({ id:r[0], name:r[1], cat:r[2], emoji:r[3], code:r[4],
       price:Number(r[5]), cost:Number(r[6]), stock:Number(r[7]), minStock:Number(r[8]) });
   }
-  return { ok:true, products };
+  const result = { ok:true, products };
+  try { cache.put(cacheKey, JSON.stringify(result), 300); } catch(e) {} // 5 min
+  return result;
 }
 
 function handleSaveProduct(data) {
-  const ss = getSS(); const sh = ss.getSheetByName(SHEET_PRODUCTS);
   const p = data.product;
+  if (!p || !String(p.name||'').trim()) return { ok:false, error:'Nom de produit requis' };
+  if (Number(p.price) < 0)             return { ok:false, error:'Le prix ne peut pas être négatif' };
+  if (p.stock !== undefined && Number(p.stock) < 0) return { ok:false, error:'Le stock ne peut pas être négatif' };
+  p.name = String(p.name).trim().substring(0, 200); // limiter la longueur
+
+  const ss = getSS(); const sh = ss.getSheetByName(SHEET_PRODUCTS);
   const rows = sh.getDataRange().getValues();
+  CacheService.getScriptCache().remove('products_v1'); // invalider le cache
   for (let i = 1; i < rows.length; i++) {
     if (rows[i][0] == p.id) {
       sh.getRange(i+1,1,1,10).setValues([[p.id,p.name,p.cat||p.category,p.emoji||'📦',p.code,p.price,p.cost||p.buyPrice||0,p.stock,p.minStock,new Date()]]);
@@ -235,8 +308,12 @@ function handleSaveProduct(data) {
 function handleDeleteProduct(data) {
   const sh = getSS().getSheetByName(SHEET_PRODUCTS);
   const rows = sh.getDataRange().getValues();
+  CacheService.getScriptCache().remove('products_v1'); // invalider le cache
   for (let i = 1; i < rows.length; i++) {
-    if (rows[i][0] == data.id) { sh.deleteRow(i+1); return { ok:true }; }
+    if (rows[i][0] == data.id) {
+      _logAction_('PRODUIT_DELETE', data.deletedBy||'admin', 'ID:' + data.id + ' Nom:' + rows[i][1]);
+      sh.deleteRow(i+1); return { ok:true };
+    }
   }
   return { ok:false, error:'Produit introuvable' };
 }
@@ -245,19 +322,37 @@ function handleDeleteProduct(data) {
 // VENTES — avec création automatique de dossier production
 // ============================================================
 function handleAddSale(data) {
-  const ss   = getSS();
-  const sh   = ss.getSheetByName(SHEET_SALES);
   const sale = data.sale;
-  const d    = new Date(sale.date);
+  if (!sale || !Array.isArray(sale.items) || sale.items.length === 0) {
+    return { ok:false, error:'Vente invalide : panier vide' };
+  }
+  for (const item of sale.items) {
+    if (!String(item.name||'').trim()) return { ok:false, error:'Article sans nom détecté' };
+    if (Number(item.qty) <= 0)         return { ok:false, error:'Quantité invalide pour : ' + item.name };
+    if (Number(item.price) < 0)        return { ok:false, error:'Prix invalide pour : ' + item.name };
+  }
+
+  const ss = getSS();
+  const sh = ss.getSheetByName(SHEET_SALES);
+  const d  = new Date(sale.date);
   const tz   = Session.getScriptTimeZone();
   const dateS = Utilities.formatDate(d, tz, 'dd/MM/yyyy');
   const timeS = Utilities.formatDate(d, tz, 'HH:mm:ss');
+  const modePaiement = sale.method === 'cash' ? 'Espèces' : 'Mobile Money';
 
+  // Écriture batch : une seule requête Sheets pour tous les articles (x5-10 plus rapide)
+  const batchRows = sale.items.map(item => [
+    sale.id, dateS, timeS, item.name, item.qty, item.price,
+    item.price * item.qty, sale.total,
+    modePaiement, sale.provider||'', sale.ref||'', sale.caissier||''
+  ]);
+  if (batchRows.length > 0) {
+    const lastRow = sh.getLastRow();
+    sh.getRange(lastRow + 1, 1, batchRows.length, 12).setValues(batchRows);
+  }
+
+  // Stock + log (gardés séquentiels pour le LockService)
   sale.items.forEach(item => {
-    sh.appendRow([sale.id, dateS, timeS, item.name, item.qty, item.price,
-      item.price*item.qty, sale.total,
-      sale.method==='cash' ? 'Espèces' : 'Mobile Money',
-      sale.provider||'', sale.ref||'', sale.caissier||'']);
     updateStock_(ss, item.name, -item.qty);
     logStock_(ss, item.name, 'Vente', -item.qty, 'Vente #'+sale.id, sale.caissier||'');
   });
@@ -265,35 +360,83 @@ function handleAddSale(data) {
   // 🔗 Création automatique des dossiers de production
   creerDossiersFromVente_(ss, sale);
 
+  _logAction_('VENTE', sale.caissier||'caissier',
+    'ID:' + sale.id + ' Total:' + sale.total + ' Articles:' + sale.items.length);
+  CacheService.getScriptCache().remove('dashboard_v1'); // invalider le dashboard
   return { ok:true, saleId:sale.id };
 }
 
 function creerDossiersFromVente_(ss, sale) {
-  const sh   = ss.getSheetByName(SHEET_DOSSIERS);
+  const sh = ss.getSheetByName(SHEET_DOSSIERS);
   if (!sh) return;
-  const now  = new Date();
-  const rows = sh.getDataRange().getValues();
-  const lastId = rows.length > 1 ? Math.max(...rows.slice(1).map(r=>Number(String(r[0]).replace('D',''))||0)) : 0;
-  let nextId = lastId + 1;
-  sale.items.forEach(item => {
-    const dossId = 'D' + String(nextId).padStart(4,'0');
-    sh.appendRow([dossId, 'POS-'+sale.id+'-'+nextId, sale.caissier||'Client',
-      item.name, item.qty, 'CREE', 0, now, '', 'Normale', 'Vente #'+sale.id, '']);
-    nextId++;
-  });
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(6000); // verrou pour éviter les IDs dupliqués en cas de ventes simultanées
+    const now    = new Date();
+    const rows   = sh.getDataRange().getValues();
+    const lastId = rows.length > 1
+      ? Math.max(...rows.slice(1).map(r => Number(String(r[0]).replace('D','')) || 0))
+      : 0;
+    let nextId = lastId + 1;
+
+    // Batch write : tous les dossiers en une seule requête
+    const batchRows = sale.items.map(item => {
+      const dossId = 'D' + String(nextId).padStart(4,'0');
+      const row = [dossId, 'POS-'+sale.id+'-'+nextId, sale.caissier||'Client',
+        item.name, item.qty, 'CREE', 0, now, '', 'Normale', 'Vente #'+sale.id, ''];
+      nextId++;
+      return row;
+    });
+    if (batchRows.length > 0) {
+      const lastRow = sh.getLastRow();
+      sh.getRange(lastRow + 1, 1, batchRows.length, 12).setValues(batchRows);
+    }
+  } finally {
+    try { lock.releaseLock(); } catch(e) {}
+  }
 }
 
 function handleGetSales(data) {
-  const sh   = getSS().getSheetByName(SHEET_SALES);
-  const rows = sh.getDataRange().getValues();
-  const map  = {};
-  for (let i = 1; i < rows.length; i++) {
-    const r = rows[i]; const id = String(r[0]);
-    if (!map[id]) map[id] = { id, date:r[1], time:r[2], total:Number(r[7]), method:r[8], caissier:r[11], items:[] };
+  const sh      = getSS().getSheetByName(SHEET_SALES);
+  const lastRow = sh.getLastRow();
+  if (lastRow <= 1) return { ok:true, sales:[] };
+
+  const PAGE   = Number(data.limit) || 200;
+  // Lire les N*3 dernières lignes (3x pour grouper les articles par ID de vente)
+  const start  = Math.max(2, lastRow - PAGE * 3 + 1);
+  const nRows  = lastRow - start + 1;
+  const rows   = sh.getRange(start, 1, nRows, 12).getValues();
+
+  const map   = {};
+  const order = [];
+  for (let i = 0; i < rows.length; i++) {
+    const r  = rows[i];
+    const id = String(r[0]);
+    if (!id) continue;
+    if (!map[id]) {
+      map[id] = { id, date:r[1], time:r[2], total:Number(r[7]),
+                  method:r[8], caissier:r[11], items:[] };
+      order.push(id);
+    }
     map[id].items.push({ name:r[3], qty:Number(r[4]), price:Number(r[5]) });
   }
-  let sales = Object.values(map).reverse().slice(0, Number(data.limit)||200);
-  return { ok:true, sales };
+
+  let sales = order.map(id => map[id]).reverse();
+
+  // Filtre optionnel par date de début
+  if (data.dateDebut) {
+    const debut = new Date(data.dateDebut);
+    sales = sales.filter(s => {
+      const parts = String(s.date).split('/');
+      if (parts.length === 3) {
+        const d = new Date(parts[2] + '-' + parts[1] + '-' + parts[0]);
+        return d >= debut;
+      }
+      return true;
+    });
+  }
+
+  return { ok:true, sales: sales.slice(0, PAGE) };
 }
 
 // ============================================================
@@ -308,15 +451,26 @@ function handleStockMove(data) {
 }
 
 function updateStock_(ss, name, delta) {
-  const sh = ss.getSheetByName(SHEET_PRODUCTS);
-  const rows = sh.getDataRange().getValues();
-  for (let i = 1; i < rows.length; i++) {
-    if (rows[i][1] === name) {
-      const ns = Number(rows[i][7]) + delta;
-      sh.getRange(i+1,8).setValue(ns);
-      sh.getRange(i+1,10).setValue(new Date());
-      return ns;
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(8000);
+    const sh   = ss.getSheetByName(SHEET_PRODUCTS);
+    const rows = sh.getDataRange().getValues();
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][1] === name) {
+        const currentStock = Number(rows[i][7]);
+        const newStock     = currentStock + delta;
+        // Bloquer uniquement les ventes (delta négatif) qui mettraient le stock < 0
+        if (newStock < 0 && delta < 0) {
+          throw new Error('Stock insuffisant pour "' + name + '" : ' + currentStock + ' disponible(s)');
+        }
+        sh.getRange(i + 1, 8).setValue(newStock);
+        sh.getRange(i + 1, 10).setValue(new Date());
+        return newStock;
+      }
     }
+  } finally {
+    try { lock.releaseLock(); } catch(e) {}
   }
 }
 
@@ -333,35 +487,57 @@ function logStock_(ss, name, type, delta, reason, caissier) {
 // UTILISATEURS
 // ============================================================
 function handleGetUsers() {
-  const sh = getSS().getSheetByName(SHEET_USERS);
-  const rows = sh.getDataRange().getValues();
+  const cache    = CacheService.getScriptCache();
+  const cacheKey = 'users_v1';
+  const cached   = cache.get(cacheKey);
+  if (cached) {
+    try { return JSON.parse(cached); } catch(e) {}
+  }
+  const sh    = getSS().getSheetByName(SHEET_USERS);
+  const rows  = sh.getDataRange().getValues();
   const users = [];
   for (let i = 1; i < rows.length; i++) {
-    const r = rows[i]; if(!r[0]) continue;
+    const r = rows[i]; if (!r[0]) continue;
     users.push({ username:r[0], role:r[2], nom:r[3], actif:String(r[4]||'oui').toLowerCase()!=='non' });
   }
-  return { ok:true, users };
+  const result = { ok:true, users };
+  try { cache.put(cacheKey, JSON.stringify(result), 300); } catch(e) {}
+  return result;
 }
 
 function handleSaveUser(data) {
-  const ss = getSS(); const sh = ss.getSheetByName(SHEET_USERS);
-  const u = data.user;
+  CacheService.getScriptCache().remove('users_v1'); // invalider le cache
+  const ss  = getSS();
+  const sh  = ss.getSheetByName(SHEET_USERS);
+  const u   = data.user;
+  // Hasher le mot de passe s'il est fourni en clair
+  let pwd = u.password || '';
+  if (pwd && !/^[0-9a-f]{64}$/i.test(pwd)) {
+    pwd = _hashPwd_(pwd);
+  }
   const rows = sh.getDataRange().getValues();
   for (let i = 1; i < rows.length; i++) {
-    if (String(rows[i][0]).toLowerCase()===String(u.username).toLowerCase()) {
-      sh.getRange(i+1,1,1,5).setValues([[u.username, u.password||rows[i][1], u.role, u.nom||u.username, u.actif!==false?'oui':'non']]);
+    if (String(rows[i][0]).toLowerCase() === String(u.username).toLowerCase()) {
+      const storedPwd = pwd || rows[i][1];
+      sh.getRange(i+1,1,1,5).setValues([[u.username, storedPwd, u.role, u.nom||u.username, u.actif!==false?'oui':'non']]);
+      _logAction_('USER_UPDATE', data.editedBy||'admin', 'Modifié: ' + u.username + ' rôle:' + u.role);
       return { ok:true };
     }
   }
-  sh.appendRow([u.username, u.password||'', u.role||'caissier', u.nom||u.username, 'oui']);
+  sh.appendRow([u.username, pwd, u.role||'caissier', u.nom||u.username, 'oui']);
+  _logAction_('USER_CREATE', data.editedBy||'admin', 'Créé: ' + u.username + ' rôle:' + (u.role||'caissier'));
   return { ok:true };
 }
 
 function handleDeleteUser(data) {
-  const sh = getSS().getSheetByName(SHEET_USERS);
+  CacheService.getScriptCache().remove('users_v1'); // invalider le cache
+  const sh   = getSS().getSheetByName(SHEET_USERS);
   const rows = sh.getDataRange().getValues();
   for (let i = 1; i < rows.length; i++) {
-    if (String(rows[i][0]).toLowerCase()===String(data.username).toLowerCase()) { sh.deleteRow(i+1); return {ok:true}; }
+    if (String(rows[i][0]).toLowerCase() === String(data.username).toLowerCase()) {
+      _logAction_('USER_DELETE', data.deletedBy||'admin', 'Supprimé: ' + data.username);
+      sh.deleteRow(i+1); return { ok:true };
+    }
   }
   return { ok:false, error:'Utilisateur introuvable' };
 }
@@ -539,18 +715,29 @@ function handleUpdateCommande(data) {
 function handleGetDossiers(data) {
   const sh = getSS().getSheetByName(SHEET_DOSSIERS);
   if (!sh) return { ok:true, dossiers:[] };
-  const rows = sh.getDataRange().getValues();
-  let list = [];
-  const tz = Session.getScriptTimeZone();
-  for (let i = 1; i < rows.length; i++) {
-    const r = rows[i]; if(!r[0]) continue;
+
+  const lastRow = sh.getLastRow();
+  if (lastRow <= 1) return { ok:true, dossiers:[] };
+
+  const LIMIT  = Number((data && data.limit)) || 300;
+  const start  = Math.max(2, lastRow - LIMIT + 1);
+  const nRows  = lastRow - start + 1;
+  const rows   = sh.getRange(start, 1, nRows, 12).getValues();
+
+  const tz   = Session.getScriptTimeZone();
+  let list   = [];
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i]; if (!r[0]) continue;
     const dc = r[7] ? Utilities.formatDate(new Date(r[7]), tz, 'dd/MM/yyyy') : '';
     const dl = r[8] ? Utilities.formatDate(new Date(r[8]), tz, 'dd/MM/yyyy') : '';
     list.push({ id:r[0], numeroDossier:r[1], client:r[2], produit:r[3],
       quantite:Number(r[4]), statut:r[5], progression:Number(r[6]),
       dateCreation:dc, dateLivraison:dl, priorite:r[9], sourceVente:r[10], notes:r[11] });
   }
-  if (data && data.statut && data.statut !== 'TOUS') list = list.filter(d=>d.statut===data.statut);
+
+  if (data && data.statut && data.statut !== 'TOUS') {
+    list = list.filter(d => d.statut === data.statut);
+  }
   return { ok:true, dossiers:list.reverse() };
 }
 
@@ -558,23 +745,32 @@ function handleGetDossiers(data) {
 // OPÉRATEURS
 // ============================================================
 function handleGetOperateurs() {
+  const cache    = CacheService.getScriptCache();
+  const cacheKey = 'operateurs_v1';
+  const cached   = cache.get(cacheKey);
+  if (cached) {
+    try { return JSON.parse(cached); } catch(e) {}
+  }
   const sh = getSS().getSheetByName(SHEET_OPERATEURS);
   if (!sh) return { ok:true, operateurs:[] };
   const rows = sh.getDataRange().getValues();
   const list = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
-    if (!r[0] || String(r[2]).toLowerCase()==='non') continue;
+    if (!r[0] || String(r[2]).toLowerCase() === 'non') continue;
     list.push({ nom:r[0], role:r[1]||'operateur' });
   }
-  return { ok:true, operateurs:list };
+  const result = { ok:true, operateurs:list };
+  try { cache.put(cacheKey, JSON.stringify(result), 300); } catch(e) {}
+  return result;
 }
 
 function handleSaveOperateur(data) {
-  const sh = getSS().getSheetByName(SHEET_OPERATEURS);
+  CacheService.getScriptCache().remove('operateurs_v1'); // invalider le cache
+  const sh   = getSS().getSheetByName(SHEET_OPERATEURS);
   const rows = sh.getDataRange().getValues();
   for (let i = 1; i < rows.length; i++) {
-    if (String(rows[i][0]).trim()===String(data.nom).trim()) {
+    if (String(rows[i][0]).trim() === String(data.nom).trim()) {
       sh.getRange(i+1,1,1,3).setValues([[data.nom, data.role||'operateur', 'oui']]);
       return { ok:true, message:'Opérateur mis à jour' };
     }
@@ -587,35 +783,71 @@ function handleSaveOperateur(data) {
 // TÂCHES — ATTRIBUTION
 // ============================================================
 function handleAttribuerTache(data) {
-  const ss = getSS(); const sh = ss.getSheetByName(SHEET_TACHES);
-  const now = new Date();
-  const rows = sh.getDataRange().getValues();
-  // Supprimer doublon même dossier+étape+opérateur
-  for (let i = rows.length-1; i >= 1; i--) {
-    if (rows[i][1]===data.dossierId && rows[i][3]===data.etapeCode && rows[i][5]===data.operateur) sh.deleteRow(i+1);
+  // Validation des entrées
+  if (!data.dossierId)  return { ok:false, error:'dossierId requis' };
+  if (!data.etapeCode)  return { ok:false, error:'etapeCode requis' };
+  if (!data.operateur)  return { ok:false, error:'operateur requis' };
+  const validEtapes = ETAPES_PROD.map(function(e) { return e.code; });
+  if (!validEtapes.includes(data.etapeCode)) {
+    return { ok:false, error:'etapeCode invalide : ' + data.etapeCode };
   }
-  const lastId = rows.length>1 ? Math.max(...rows.slice(1).map(r=>Number(String(r[0]).replace('T',''))||0)) : 0;
-  const tId = 'T'+String(lastId+1).padStart(4,'0');
-  const etape = ETAPES_PROD.find(e=>e.code===data.etapeCode)||{ label:data.etapeCode };
-  sh.appendRow([tId, data.dossierId, data.numeroDossier, data.etapeCode, etape.label,
-    data.operateur, 'A_FAIRE', now, '', '', data.commentaire||'', data.assignePar||'Admin']);
-  return { ok:true, tacheId:tId };
+
+  const ss   = getSS();
+  const sh   = ss.getSheetByName(SHEET_TACHES);
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(8000);
+    const now  = new Date();
+    const rows = sh.getDataRange().getValues();
+
+    // Supprimer les doublons (même dossier + étape + opérateur)
+    for (let i = rows.length - 1; i >= 1; i--) {
+      if (rows[i][1] === data.dossierId && rows[i][3] === data.etapeCode && rows[i][5] === data.operateur) {
+        sh.deleteRow(i + 1);
+      }
+    }
+    // Relire après suppression pour avoir le bon dernier ID
+    const rowsAfter = sh.getDataRange().getValues();
+    const lastId = rowsAfter.length > 1
+      ? Math.max(...rowsAfter.slice(1).map(function(r) { return Number(String(r[0]).replace('T','')) || 0; }))
+      : 0;
+    const tId   = 'T' + String(lastId + 1).padStart(4, '0');
+    const etape = ETAPES_PROD.find(function(e) { return e.code === data.etapeCode; }) || { label:data.etapeCode };
+    sh.appendRow([tId, data.dossierId, data.numeroDossier, data.etapeCode, etape.label,
+      data.operateur, 'A_FAIRE', now, '', '', data.commentaire||'', data.assignePar||'Admin']);
+
+    _logAction_('TACHE_ATTRIB', data.assignePar||'admin',
+      data.operateur + ' → ' + data.etapeCode + ' (dossier:' + data.dossierId + ')');
+    CacheService.getScriptCache().remove('dashboard_v1'); // invalider le dashboard
+    return { ok:true, tacheId:tId };
+  } finally {
+    try { lock.releaseLock(); } catch(e) {}
+  }
 }
 
 function handleGetTaches(data) {
   const sh = getSS().getSheetByName(SHEET_TACHES);
   if (!sh) return { ok:true, taches:[] };
-  const rows = sh.getDataRange().getValues();
-  const tz = Session.getScriptTimeZone();
-  const fmt = dt => dt ? Utilities.formatDate(new Date(dt),tz,'dd/MM/yyyy HH:mm') : '';
-  let list = [];
-  for (let i = 1; i < rows.length; i++) {
-    const r = rows[i]; if(!r[0]) continue;
+
+  const lastRow = sh.getLastRow();
+  if (lastRow <= 1) return { ok:true, taches:[] };
+
+  // Lecture paginée depuis la fin de la feuille
+  const LIMIT  = Number((data && data.limit)) || 500;
+  const start  = Math.max(2, lastRow - LIMIT + 1);
+  const nRows  = lastRow - start + 1;
+  const rows   = sh.getRange(start, 1, nRows, 12).getValues();
+
+  const tz  = Session.getScriptTimeZone();
+  const fmt = function(dt) { return dt ? Utilities.formatDate(new Date(dt), tz, 'dd/MM/yyyy HH:mm') : ''; };
+  let list  = [];
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i]; if (!r[0]) continue;
     const t = { id:r[0], dossierId:r[1], numeroDossier:r[2], etapeCode:r[3], etapeLabel:r[4],
       operateur:r[5], statut:r[6], dateAssignation:fmt(r[7]), dateDebut:fmt(r[8]),
       dateFin:fmt(r[9]), commentaire:r[10], assignePar:r[11] };
-    if (data && data.operateur && data.operateur!=='TOUS' && t.operateur!==data.operateur) continue;
-    if (data && data.dossierId && t.dossierId!==data.dossierId) continue;
+    if (data && data.operateur && data.operateur !== 'TOUS' && t.operateur !== data.operateur) continue;
+    if (data && data.dossierId && t.dossierId !== data.dossierId) continue;
     list.push(t);
   }
   return { ok:true, taches:list };
@@ -634,36 +866,63 @@ function handleDeleteTache(data) {
 // POINTAGE PRODUCTION
 // ============================================================
 function handlePointerAction(data) {
-  const ss = getSS(); const sh = ss.getSheetByName(SHEET_TACHES);
-  const now = new Date();
+  if (!data.tacheId) return { ok:false, error:'tacheId requis' };
+  if (!data.action_) return { ok:false, error:'action_ requise' };
+  const validActions = ['START','END','VALIDER'];
+  if (!validActions.includes(data.action_)) {
+    return { ok:false, error:'action_ invalide : ' + data.action_ };
+  }
+
+  const ss   = getSS();
+  const sh   = ss.getSheetByName(SHEET_TACHES);
+  const now  = new Date();
   const rows = sh.getDataRange().getValues();
+
   for (let i = 1; i < rows.length; i++) {
-    if (rows[i][0]===data.tacheId) {
-      if (data.action_==='START') {
-        sh.getRange(i+1,7).setValue('EN_COURS');
-        sh.getRange(i+1,9).setValue(now);
-      } else if (data.action_==='END'||data.action_==='VALIDER') {
-        sh.getRange(i+1,7).setValue('TERMINE');
-        sh.getRange(i+1,10).setValue(now);
-        if (data.commentaire) sh.getRange(i+1,11).setValue(data.commentaire);
-        majProgressionDossier_(ss, rows[i][1], data.etapeCode);
-      }
-      return { ok:true };
+    if (rows[i][0] !== data.tacheId) continue;
+
+    // Batch write : une seule requête getRange/setValues au lieu de 3 setValue séparés
+    const rowData = rows[i].slice();
+    if (data.action_ === 'START') {
+      rowData[6] = 'EN_COURS';
+      rowData[8] = now;
+      sh.getRange(i + 1, 1, 1, 12).setValues([rowData]);
+      _logAction_('TACHE_START', data.operateur||String(rows[i][5]),
+        'Tâche:' + data.tacheId + ' étape:' + rows[i][3]);
+    } else {
+      rowData[6]  = 'TERMINE';
+      rowData[9]  = now;
+      if (data.commentaire) rowData[10] = data.commentaire;
+      sh.getRange(i + 1, 1, 1, 12).setValues([rowData]);
+      _logAction_('TACHE_FIN', data.operateur||String(rows[i][5]),
+        'Tâche:' + data.tacheId + ' étape:' + rows[i][3]);
+      majProgressionDossier_(ss, rows[i][1], data.etapeCode || rows[i][3]);
     }
+    CacheService.getScriptCache().remove('dashboard_v1'); // invalider le dashboard
+    return { ok:true };
   }
   return { ok:false, error:'Tâche introuvable' };
 }
 
 function majProgressionDossier_(ss, dossierId, etapeCode) {
-  const sh = ss.getSheetByName(SHEET_DOSSIERS);
-  const rows = sh.getDataRange().getValues();
-  const idx = ETAPES_PROD.findIndex(e=>e.code===etapeCode);
-  if (idx<0) return;
-  const next = ETAPES_PROD[idx+1];
-  for (let i = 1; i < rows.length; i++) {
-    if (rows[i][0]===dossierId) {
-      sh.getRange(i+1,6).setValue(next ? next.code : 'LIVRE');
-      sh.getRange(i+1,7).setValue(ETAPES_PROD[idx].progress);
+  const sh  = ss.getSheetByName(SHEET_DOSSIERS);
+  if (!sh) return;
+  const idx = ETAPES_PROD.findIndex(function(e) { return e.code === etapeCode; });
+  if (idx < 0) return;
+  const next = ETAPES_PROD[idx + 1];
+
+  // Lire uniquement les 200 dernières lignes (les dossiers récents y sont)
+  const lastRow = sh.getLastRow();
+  if (lastRow <= 1) return;
+  const start = Math.max(2, lastRow - 199);
+  const nRows = lastRow - start + 1;
+  const rows  = sh.getRange(start, 1, nRows, 7).getValues();
+
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i][0] === dossierId) {
+      const rowNum = start + i;
+      // Batch write des 2 colonnes en une requête
+      sh.getRange(rowNum, 6, 1, 2).setValues([[next ? next.code : 'LIVRE', ETAPES_PROD[idx].progress]]);
       return;
     }
   }
@@ -673,43 +932,70 @@ function majProgressionDossier_(ss, dossierId, etapeCode) {
 // DASHBOARD UNIFIÉ
 // ============================================================
 function handleGetDashboard() {
-  const ss = getSS();
-  const dossRows  = (ss.getSheetByName(SHEET_DOSSIERS)||{getDataRange:()=>({getValues:()=>[[]]})}). getDataRange().getValues();
-  const tacheRows = (ss.getSheetByName(SHEET_TACHES)||{getDataRange:()=>({getValues:()=>[[]]})}). getDataRange().getValues();
-  const venteRows = (ss.getSheetByName(SHEET_SALES)||{getDataRange:()=>({getValues:()=>[[]]})}). getDataRange().getValues();
-
-  let totalVentes=0, nbVentes=0;
-  const seen = new Set();
-  for (let i=1;i<venteRows.length;i++) {
-    const id=String(venteRows[i][0]);
-    if(!seen.has(id)){seen.add(id);nbVentes++;totalVentes+=Number(venteRows[i][7])||0;}
+  const cache    = CacheService.getScriptCache();
+  const cacheKey = 'dashboard_v1';
+  const cached   = cache.get(cacheKey);
+  if (cached) {
+    try { return JSON.parse(cached); } catch(e) {}
   }
 
-  const kpi={total:0,cree:0,enCours:0,livre:0};
-  for(let i=1;i<dossRows.length;i++){
-    const r=dossRows[i]; if(!r[0]) continue; kpi.total++;
-    const s=String(r[5]);
-    if(s==='CREE') kpi.cree++;
-    else if(s==='LIVRE') kpi.livre++;
-    else kpi.enCours++;
+  const ss  = getSS();
+
+  // Ventes : lire les 2 000 dernières lignes seulement (KPI du mois courant)
+  let totalVentes = 0, nbVentes = 0;
+  const shVentes  = ss.getSheetByName(SHEET_SALES);
+  if (shVentes && shVentes.getLastRow() > 1) {
+    const vLast  = shVentes.getLastRow();
+    const vStart = Math.max(2, vLast - 1999);
+    const venteRows = shVentes.getRange(vStart, 1, vLast - vStart + 1, 8).getValues();
+    const seen = {};
+    for (let i = 0; i < venteRows.length; i++) {
+      const id = String(venteRows[i][0]);
+      if (!seen[id]) { seen[id] = true; nbVentes++; totalVentes += Number(venteRows[i][7]) || 0; }
+    }
   }
 
-  const opStats={};
-  for(let i=1;i<tacheRows.length;i++){
-    const r=tacheRows[i]; if(!r[0]) continue;
-    const op=String(r[5]);
-    if(!opStats[op]) opStats[op]={nom:op,aFaire:0,enCours:0,termine:0};
-    if(r[6]==='A_FAIRE')  opStats[op].aFaire++;
-    if(r[6]==='EN_COURS') opStats[op].enCours++;
-    if(r[6]==='TERMINE')  opStats[op].termine++;
+  // Dossiers : lire les 500 derniers
+  const kpi = { total:0, cree:0, enCours:0, livre:0 };
+  const shDoss = ss.getSheetByName(SHEET_DOSSIERS);
+  if (shDoss && shDoss.getLastRow() > 1) {
+    const dLast  = shDoss.getLastRow();
+    const dStart = Math.max(2, dLast - 499);
+    const dossRows = shDoss.getRange(dStart, 1, dLast - dStart + 1, 6).getValues();
+    for (let i = 0; i < dossRows.length; i++) {
+      const r = dossRows[i]; if (!r[0]) continue; kpi.total++;
+      const s = String(r[5]);
+      if (s === 'CREE') kpi.cree++;
+      else if (s === 'LIVRE') kpi.livre++;
+      else kpi.enCours++;
+    }
   }
 
-  return {
+  // Tâches : lire les 500 dernières
+  const opStats = {};
+  const shTaches = ss.getSheetByName(SHEET_TACHES);
+  if (shTaches && shTaches.getLastRow() > 1) {
+    const tLast  = shTaches.getLastRow();
+    const tStart = Math.max(2, tLast - 499);
+    const tacheRows = shTaches.getRange(tStart, 1, tLast - tStart + 1, 7).getValues();
+    for (let i = 0; i < tacheRows.length; i++) {
+      const r = tacheRows[i]; if (!r[0]) continue;
+      const op = String(r[5]);
+      if (!opStats[op]) opStats[op] = { nom:op, aFaire:0, enCours:0, termine:0 };
+      if (r[6] === 'A_FAIRE')   opStats[op].aFaire++;
+      if (r[6] === 'EN_COURS')  opStats[op].enCours++;
+      if (r[6] === 'TERMINE')   opStats[op].termine++;
+    }
+  }
+
+  const result = {
     ok:true,
-    ventes:{total:totalVentes, nb:nbVentes},
-    dossiers:kpi,
-    operateurs:Object.values(opStats)
+    ventes:     { total:totalVentes, nb:nbVentes },
+    dossiers:   kpi,
+    operateurs: Object.values(opStats)
   };
+  try { cache.put(cacheKey, JSON.stringify(result), 180); } catch(e) {} // cache 3 min
+  return result;
 }
 
 // ============================================================
@@ -765,6 +1051,9 @@ function _safeParse(val, fallback) {
 // ============================================================
 // UPLOAD FICHIERS → GOOGLE DRIVE
 // ============================================================
+const ALLOWED_MIMES_  = ['image/jpeg','image/png','image/webp','image/gif','application/pdf'];
+const MAX_FILE_BYTES_ = 5 * 1024 * 1024; // 5 Mo
+
 function _getPOSAttachmentsFolder() {
   const FOLDER_NAME = 'POS_PiecesJointes';
   const folders = DriveApp.getFoldersByName(FOLDER_NAME);
@@ -773,25 +1062,31 @@ function _getPOSAttachmentsFolder() {
 
 function handleUploadFile(data) {
   try {
-    const base64 = data.base64Data || '';
     const mimeType = data.mimeType || 'application/octet-stream';
     const fileName = data.fileName || ('fichier_' + Date.now());
 
-    // Extraire la partie base64 pure (après la virgule de "data:mime;base64,...")
-    const base64Pure = base64.includes(',') ? base64.split(',')[1] : base64;
-    const bytes = Utilities.base64Decode(base64Pure);
-    const blob  = Utilities.newBlob(bytes, mimeType, fileName);
+    // Validation du type MIME
+    if (!ALLOWED_MIMES_.includes(mimeType)) {
+      return { ok:false, error:'Type de fichier non autorisé. Formats acceptés : JPEG, PNG, WebP, GIF, PDF.' };
+    }
 
+    const base64     = data.base64Data || '';
+    const base64Pure = base64.includes(',') ? base64.split(',')[1] : base64;
+    const bytes      = Utilities.base64Decode(base64Pure);
+
+    // Validation de la taille (5 Mo max)
+    if (bytes.length > MAX_FILE_BYTES_) {
+      return { ok:false, error:'Fichier trop volumineux (max 5 Mo).' };
+    }
+
+    const blob   = Utilities.newBlob(bytes, mimeType, fileName);
     const folder = _getPOSAttachmentsFolder();
     const file   = folder.createFile(blob);
-
-    // Partage : quiconque a le lien peut voir
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
     const fileId  = file.getId();
     const viewUrl = 'https://drive.google.com/file/d/' + fileId + '/view';
     const dlUrl   = 'https://drive.google.com/uc?id=' + fileId + '&export=download';
-
     return { ok:true, fileId, viewUrl, dlUrl, fileName };
   } catch(err) {
     return { ok:false, error: err.message };
@@ -907,6 +1202,51 @@ function handleGetShopConfig() {
 }
 
 // ============================================================
+// BACKUP AUTOMATIQUE — copie quotidienne dans Google Drive
+// ============================================================
+
+function dailyBackup() {
+  try {
+    const now        = new Date();
+    const tz         = Session.getScriptTimeZone();
+    const dateStr    = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+    const backupName = 'Backup_POS_' + dateStr;
+    const folderName = 'POS_Backups';
+
+    const folders = DriveApp.getFoldersByName(folderName);
+    const folder  = folders.hasNext() ? folders.next() : DriveApp.createFolder(folderName);
+
+    // Supprimer les backups de plus de 30 jours
+    const files = folder.getFiles();
+    const limit = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    while (files.hasNext()) {
+      const f = files.next();
+      if (f.getDateCreated() < limit) f.setTrashed(true);
+    }
+
+    // Copier le fichier Sheets entier
+    const file = DriveApp.getFileById(SHEET_ID);
+    file.makeCopy(backupName, folder);
+
+    _logAction_('BACKUP_AUTO', 'système', backupName + ' créé dans ' + folderName);
+    return { ok:true, message:'Backup créé : ' + backupName };
+  } catch(err) {
+    _logAction_('BACKUP_ERREUR', 'système', err.message);
+    return { ok:false, error:err.message };
+  }
+}
+
+function createDailyBackupTrigger() {
+  const triggers = ScriptApp.getProjectTriggers();
+  const exists   = triggers.some(t => t.getHandlerFunction() === 'dailyBackup');
+  if (!exists) {
+    ScriptApp.newTrigger('dailyBackup')
+      .timeBased().atHour(2).everyDays(1).create();
+  }
+  return { ok:true, message:'Trigger backup quotidien ' + (exists ? 'déjà actif' : 'créé (2h du matin)') };
+}
+
+// ============================================================
 // RYTHME DE PRODUCTION — sauvegarde / lecture
 // ============================================================
 
@@ -926,6 +1266,30 @@ function handleSaveRythme(data) {
   }
   sh.appendRow([key, val, now]);
   return { ok: true };
+}
+
+// ── Lecture du journal d'audit (admin uniquement côté frontend) ──
+function handleGetJournal(params) {
+  const ss = getSS();
+  const sh = ss.getSheetByName(SHEET_JOURNAL);
+  if (!sh) return { ok:true, entries:[] };
+  const lastRow = sh.getLastRow();
+  if (lastRow <= 1) return { ok:true, entries:[] };
+  const limit   = Math.min(Number(params && params.limit) || 100, 500);
+  const start   = Math.max(2, lastRow - limit + 1);
+  const nRows   = lastRow - start + 1;
+  const rows    = sh.getRange(start, 1, nRows, 5).getValues();
+  const tz      = Session.getScriptTimeZone();
+  const entries = rows
+    .filter(r => r[0])
+    .map(r => ({
+      ts:      r[0] ? Utilities.formatDate(new Date(r[0]), tz, 'dd/MM/yyyy HH:mm:ss') : '',
+      user:    String(r[1]),
+      action:  String(r[2]),
+      detail:  String(r[3])
+    }))
+    .reverse(); // plus récent en premier
+  return { ok:true, entries };
 }
 
 function handleGetRythme() {

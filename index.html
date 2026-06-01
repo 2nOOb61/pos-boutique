@@ -13,6 +13,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://script.google.com https://api.airtable.com https://drive.google.com; img-src 'self' data: https: blob:; worker-src 'self';">
 <title>FOREVER MG POS</title>
 <!-- PWA Manifest -->
 <link rel="manifest" href="./manifest.json">
@@ -656,9 +657,21 @@
         </div>
       </div>
     </div>
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;margin-top:10px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;margin-top:10px;flex-wrap:wrap;gap:8px">
       <div style="font-family:'DM Sans',sans-serif;font-weight:700;font-size:16px">Historique des ventes</div>
-      <button id="statsRefreshBtn" onclick="manualRefreshStats()" style="padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--muted);cursor:pointer;font-size:13px">Actualiser depuis Sheets</button>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <div id="statsExportWrap" style="display:none;align-items:center;gap:8px">
+          <button onclick="exportVentesCSV()" style="padding:7px 14px;background:#1a4a3a;color:#fff;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Ventes CSV
+          </button>
+          <button onclick="exportStockCSV()" style="padding:7px 14px;background:#e8834a;color:#fff;border:none;border-radius:10px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Stock CSV
+          </button>
+        </div>
+        <button id="statsRefreshBtn" onclick="manualRefreshStats()" style="padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--muted);cursor:pointer;font-size:13px">Actualiser depuis Sheets</button>
+      </div>
     </div>
     <div class="history-table-wrap">
       <table>

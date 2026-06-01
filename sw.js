@@ -14,11 +14,14 @@ const STATIC_ASSETS = [
 ];
 
 // ── INSTALL ────────────────────────────────────────────────
+// skipWaiting() retiré de l'install : une mise à jour mid-session peut interrompre
+// une transaction en cours. L'activation est déclenchée via message SKIP_WAITING
+// depuis l'app (cf. listener 'message' en bas de fichier).
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache =>
       cache.addAll(STATIC_ASSETS.map(url => new Request(url, { mode: 'no-cors' })))
-    ).then(() => self.skipWaiting())
+    )
   );
 });
 
