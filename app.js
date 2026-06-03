@@ -82,22 +82,23 @@ let localUsers = [
 ];
 
 const ROLE_LABELS = {
-  admin:        'Administrateur',
-  caissier:     'Caissier',
-  commerciale:  'Commerciale',
-  utilisateur:  'Utilisateur',
-  gestionnaire: 'Gestionnaire Stock',
-  comptable:    'Comptable',
-  chef_atelier: 'Chef Atelier',
+  admin:         'Administrateur',
+  caissier:      'Caissier',
+  commerciale:   'Commerciale',
+  utilisateur:   'Utilisateur',
+  gestionnaire:  'Gestionnaire Stock',
+  comptable:     'Comptable',
+  chef_atelier:  'Chef Atelier',
   operateur_prod:'Opérateur Prod',
-  pao:          'Graphiste PAO',
-  finition:     'Finisheur',
-  livreur:      'Livreur',
+  machiniste:    'Machiniste',
+  pao:           'Graphiste PAO',
+  finition:      'Finisheur',
+  livreur:       'Livreur',
 };
 
 const ROLE_ICONS = {
   admin: '', caissier: '', commerciale: '', utilisateur: '', gestionnaire: '', comptable: '',
-  chef_atelier: '', operateur_prod: '', pao: '', finition: '', livreur: ''
+  chef_atelier: '', operateur_prod: '', machiniste: '', pao: '', finition: '', livreur: ''
 };
 
 const PAGE_ACCESS = {
@@ -108,8 +109,8 @@ const PAGE_ACCESS = {
   stats:        ['admin','comptable'],
   config:       ['admin'],
   users:        ['admin'],
-  attribution:  ['admin','chef_atelier','operateur_prod','pao','finition','livreur'],
-  production:   ['admin','chef_atelier','operateur_prod','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
+  attribution:  ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur'],
+  production:   ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
 };
 let editingUserId = null; // index dans localUsers
 
@@ -6561,7 +6562,7 @@ function renderAttrPanel(tachesD, commentsD = []) {
       const etapeComplete = tachesEtape.length > 0 && tachesEtape.every(t => t.statut === 'TERMINE');
       const alreadySelfAssigned = tachesEtape.some(t => t.operateur === currentUser?.label);
       // Seul le rôle correspondant à l'étape peut s'auto-assigner
-      const ROLE_ETAPE_MAP = { pao:'PAO', operateur_prod:'PRODUCTION', finition:'FINITION', livreur:'LIVRE' };
+      const ROLE_ETAPE_MAP = { pao:'PAO', operateur_prod:'PRODUCTION', machiniste:'PRODUCTION', finition:'FINITION', livreur:'LIVRE' };
       const userEtape = ROLE_ETAPE_MAP[currentUser_role];
       const canSelfAssign = !canAssign && !etapeComplete && !alreadySelfAssigned && userEtape === e.code;
       const operateursHtml = tachesEtape.length
@@ -7359,7 +7360,7 @@ function _renderChargeView() {
   // Grille des cartes opérateurs
   const maxActif = Math.max(...opKeys.map(op => opMap[op].filter(t => t.statut !== 'TERMINE').length), 1);
 
-  const ROLE_LABELS_LOCAL = { admin:'Admin', chef_atelier:'Chef atelier', operateur_prod:'Opérateur', pao:'PAO', finition:'Finition', livreur:'Livreur', caissier:'Caissier', commerciale:'Commercial', comptable:'Comptable', gestionnaire:'Gestionnaire', utilisateur:'Utilisateur' };
+  const ROLE_LABELS_LOCAL = { admin:'Admin', chef_atelier:'Chef atelier', operateur_prod:'Opérateur', machiniste:'Machiniste', pao:'PAO', finition:'Finition', livreur:'Livreur', caissier:'Caissier', commerciale:'Commercial', comptable:'Comptable', gestionnaire:'Gestionnaire', utilisateur:'Utilisateur' };
 
   const cards = opKeys.map(op => {
     const opTaches   = opMap[op];

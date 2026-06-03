@@ -366,10 +366,10 @@
     <button class="bnav-btn" id="bnav-users" data-roles="admin" onclick="showPage('users',null,this)">
       <span class="bnav-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>Comptes
     </button>
-    <button class="bnav-btn" id="bnav-attribution" data-roles="admin,chef_atelier,operateur_prod,pao,finition,livreur" onclick="showPage('attribution',null,this)">
+    <button class="bnav-btn" id="bnav-attribution" data-roles="admin,chef_atelier,operateur_prod,machiniste,pao,finition,livreur" onclick="showPage('attribution',null,this)">
       <span class="bnav-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>Attribution
     </button>
-    <button class="bnav-btn" id="bnav-production" data-roles="admin,chef_atelier,operateur_prod,pao,finition,livreur,caissier,commerciale,utilisateur,gestionnaire,comptable" onclick="showPage('production',null,this)">
+    <button class="bnav-btn" id="bnav-production" data-roles="admin,chef_atelier,operateur_prod,machiniste,pao,finition,livreur,caissier,commerciale,utilisateur,gestionnaire,comptable" onclick="showPage('production',null,this)">
       <span class="bnav-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg></span>Production
     </button>
   </div>
@@ -456,11 +456,11 @@
           <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
           <span class="sidebar-label">Utilisateurs</span>
         </button>
-        <button class="nav-btn sidebar-btn" data-roles="admin,chef_atelier,operateur_prod,pao,finition,livreur" onclick="showPage('attribution',this)" aria-label="Attribution">
+        <button class="nav-btn sidebar-btn" data-roles="admin,chef_atelier,operateur_prod,machiniste,pao,finition,livreur" onclick="showPage('attribution',this)" aria-label="Attribution">
           <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg></span>
           <span class="sidebar-label">Attribution</span>
         </button>
-        <button class="nav-btn sidebar-btn" data-roles="admin,chef_atelier,operateur_prod,pao,finition,livreur,caissier,commerciale,utilisateur,gestionnaire,comptable" onclick="showPage('production',this)" aria-label="Production">
+        <button class="nav-btn sidebar-btn" data-roles="admin,chef_atelier,operateur_prod,machiniste,pao,finition,livreur,caissier,commerciale,utilisateur,gestionnaire,comptable" onclick="showPage('production',this)" aria-label="Production">
           <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg></span>
           <span class="sidebar-label">Production</span>
         </button>
@@ -997,7 +997,7 @@
   <!-- ═══════════════════════════════════════════
        PAGE ATTRIBUTION
        ═══════════════════════════════════════════ -->
-  <div class="page" id="page-attribution" data-roles="admin,chef_atelier,operateur_prod,pao,finition,livreur">
+  <div class="page" id="page-attribution" data-roles="admin,chef_atelier,operateur_prod,machiniste,pao,finition,livreur">
     <div class="page-topbar">
       <div>
         <h1 class="page-title">Attribution des tâches</h1>
@@ -1403,6 +1403,8 @@
         <option value="gestionnaire">Gestionnaire Stock — caisse + stock + commandes</option>
         <option value="comptable">Comptable — statistiques + commandes + réservations</option>
         <option value="chef_atelier">Chef Atelier — attribution + production</option>
+        <option value="operateur_prod">Opérateur Prod — suivi production</option>
+        <option value="machiniste">Machiniste — suivi production</option>
         <option value="pao">Graphiste PAO — suivi production</option>
         <option value="finition">Finisheur — suivi production</option>
         <option value="livreur">Livreur — commandes + production</option>
