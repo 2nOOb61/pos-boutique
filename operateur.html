@@ -672,6 +672,12 @@ function enterMain() {
   document.getElementById('topRole').textContent   = ROLE_LABELS[currentUser.role] || currentUser.role;
   document.getElementById('progressDate').textContent =
     new Date().toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long' });
+
+  // Réinitialiser les états "Chargement..." avec des vides propres
+  tasks = [];
+  renderDashboard();
+  renderTaskList();
+
   startClock();
   loadTasks();
 }
@@ -682,24 +688,42 @@ function enterMain() {
 async function loadTasks() {
   const icon = document.getElementById('refreshIcon');
   icon.style.animation = 'spin .8s linear infinite';
+  showLoader();
 
-  const r = await apiGet('getTaches');
+  let r = null;
+  try { r = await apiGet('getTaches'); } catch(e) {}
+
   icon.style.animation = '';
+  hideLoader();
 
-  if (!r || !r.ok) { showToast('Impossible de charger les tâches', 'error'); return; }
+  if (!r) {
+    showToast('Connexion impossible — vérifiez le réseau', 'error');
+    renderDashboard(); renderTaskList(); return;
+  }
+  if (!r.ok) {
+    showToast('Erreur GAS : ' + (r.error || 'inconnue'), 'error');
+    renderDashboard(); renderTaskList(); return;
+  }
 
-  const myLabel     = currentUser.label || currentUser.username;
+  const all         = r.taches || [];
+  const myLabel     = (currentUser.label || currentUser.username || '').trim();
   const isAdminChef = ['admin','chef_atelier'].includes(currentUser.role);
 
+  // Filtre insensible à la casse + trim pour éviter les faux négatifs
   tasks = isAdminChef
-    ? (r.taches || [])
-    : (r.taches || []).filter(t => t.operateur === myLabel);
+    ? all
+    : all.filter(t => (t.operateur || '').trim().toLowerCase() === myLabel.toLowerCase());
 
   const orderMap = { EN_COURS:0, A_FAIRE:1, TERMINE:2 };
   tasks.sort((a,b) => (orderMap[a.statut]??3) - (orderMap[b.statut]??3));
 
-  renderDashboard();
-  renderTaskList();
+  // Info debug en console
+  console.log('[Opérateur] GAS taches total:', all.length, '| filtrées pour "'+myLabel+'":', tasks.length);
+
+  renderDashboard(); renderTaskList();
+  if (tasks.length === 0 && all.length > 0) {
+    showToast('Aucune tâche assignée à "' + myLabel + '"', 'warning');
+  }
 }
 
 // ════════════════════════════════════════
