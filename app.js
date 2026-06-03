@@ -4811,8 +4811,33 @@ function cancelCommande(id) {
 // ============================================================
 async function syncCommandeToSheets(cmd) {
   if (!APPS_SCRIPT_URL) return;
-  const r = await apiCall({ action: 'addCommande', commande: cmd });
-  if (!r || !r.ok) console.warn('Sync commande échouée:', r?.error || 'Connexion impossible');
+  // Exclure les photos base64 du payload GAS
+  const payload = {
+    id:              cmd.id,
+    date:            cmd.date,
+    caissier:        cmd.caissier,
+    clientName:      cmd.clientName,
+    clientContact:   cmd.clientContact,
+    items:           cmd.items,
+    deliveryMode:    cmd.deliveryMode,
+    adresseLivraison:cmd.adresseLivraison,
+    fraisLivraison:  cmd.fraisLivraison,
+    dateLivraison:   cmd.dateLivraison,
+    subtotal:        cmd.subtotal,
+    remise:          cmd.remise,
+    total:           cmd.total,
+    accompte:        cmd.accompte,
+    restant:         cmd.restant,
+    depositMethod:   cmd.depositMethod,
+    depositProvider: cmd.depositProvider,
+    depositRef:      cmd.depositRef,
+    notes:           cmd.notes,
+  };
+  const r = await apiCall({ action: 'addCommande', commande: payload });
+  if (!r || !r.ok) {
+    console.warn('Sync commande échouée:', r?.error || 'Connexion impossible');
+    showToast('Commande enregistrée localement — sync GAS échouée', 'warning');
+  }
 }
 
 async function syncCmdUpdateToSheets(cmd) {

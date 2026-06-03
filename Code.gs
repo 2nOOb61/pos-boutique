@@ -194,7 +194,9 @@ function initSheets() {
   ensureSheet(ss, SHEET_STOCK_LOG,  ['Date','Article','Type','Quantite','Stock_Avant','Stock_Apres','Motif','Caissier']);
   ensureSheet(ss, SHEET_USERS,      ['Username','MotDePasse','Role','Nom','Actif']);
   ensureSheet(ss, SHEET_RESERVATIONS,['ID','Date','Heure','Client_Nom','Client_Contact','Article','Quantite','Prix_Unitaire','Sous_Total_Article','Sous_Total_Vente','Remise','Net_A_Payer','Accompte','Restant','Mode_Depot','Fournisseur_Mobile','Reference','Caissier','Statut','Date_Finalisation','Vente_ID']);
-  ensureSheet(ss, SHEET_COMMANDES,  ['ID','Date','Fournisseur','Produit','Quantite','PrixUnit','Total','Statut','Notes','Admin']);
+  // Commandes client — mise à jour de l'en-tête si besoin
+  const cmdSh = ss.getSheetByName(SHEET_COMMANDES) || ss.insertSheet(SHEET_COMMANDES);
+  cmdSh.getRange(1, 1, 1, 22).setValues([['ID','Date','Caissier','Client_Nom','Client_Contact','Articles','Mode_Livraison','Adresse_Livraison','Frais_Livraison','Date_Livraison','Sous_Total','Remise','Total','Accompte','Restant','Mode_Depot','Fournisseur_Mobile','Reference','Notes','Statut','Date_Finalisation','Vente_ID']]);
 
   // Nouvelles feuilles production
   ensureSheet(ss, SHEET_DOSSIERS,   ['ID','NumeroDossier','Client','Produit','Quantite','Statut','Progression','DateCreation','DateLivraison','Priorite','SourceVente','Notes']);
@@ -671,41 +673,90 @@ function handleGetCommandes() {
   const sh = getSS().getSheetByName(SHEET_COMMANDES);
   if (!sh) return { ok:true, commandes:[] };
   const rows = sh.getDataRange().getValues();
-  const list = [];
+  // Détecter l'ancien format (colonne 3 = Fournisseur) vs nouveau (colonne 3 = Caissier)
+  const isOldFormat = rows.length > 0 && String(rows[0][2] || '').toLowerCase() === 'fournisseur';
+  if (isOldFormat) return { ok:true, commandes:[] };
+  const map = {}, order = [];
   for (let i = 1; i < rows.length; i++) {
-    const r = rows[i]; if(!r[0]) continue;
-    list.push({ id:r[0], date:r[1], fournisseur:r[2], produit:r[3],
-      quantite:Number(r[4]), prixUnit:Number(r[5]), total:Number(r[6]),
-      statut:r[7], notes:r[8], admin:r[9] });
+    const r = rows[i];
+    if (!r[0]) continue;
+    const id = String(r[0]);
+    const rawStatut = String(r[19] || '');
+    const status = (rawStatut === 'Terminée' || rawStatut === 'completed') ? 'completed'
+                 : (rawStatut === 'Annulée'  || rawStatut === 'cancelled')  ? 'cancelled'
+                 : 'pending';
+    if (!map[id]) {
+      map[id] = {
+        id, date: r[1], caissier: String(r[2]||''),
+        clientName: String(r[3]||''), clientContact: String(r[4]||''),
+        items: [],
+        deliveryMode: String(r[6]||'retrait'), adresseLivraison: String(r[7]||''),
+        fraisLivraison: Number(r[8])||0, dateLivraison: String(r[9]||''),
+        subtotal: Number(r[10])||0, remise: Number(r[11])||0,
+        total: Number(r[12])||0, accompte: Number(r[13])||0, restant: Number(r[14])||0,
+        depositMethod: String(r[15]||''), depositProvider: String(r[16]||''), depositRef: String(r[17]||''),
+        notes: String(r[18]||''),
+        status, statut: rawStatut,
+        dateFinalisation: r[20] || null, saleId: r[21] || null,
+        photos: []
+      };
+      order.push(id);
+    }
+    // Reconstruire items depuis la colonne Articles (format "nom×qty@prix")
+    const articlesStr = String(r[5]||'');
+    if (articlesStr && map[id].items.length === 0) {
+      map[id].items = articlesStr.split('|').map(s => {
+        const m = s.match(/^(.+)×(\d+)@(\d+)$/);
+        return m ? { name:m[1], qty:Number(m[2]), price:Number(m[3]) } : { name:s, qty:1, price:0 };
+      }).filter(i => i.name);
+    }
   }
-  return { ok:true, commandes:list.reverse() };
+  return { ok:true, commandes: order.map(id => map[id]).reverse() };
 }
 
 function handleAddCommande(data) {
   const sh = getSS().getSheetByName(SHEET_COMMANDES);
-  const c = data.commande; const now = new Date();
-  const id = 'C'+now.getTime();
-  const total = (c.quantite||0)*(c.prixUnit||0);
-  sh.appendRow([id, Utilities.formatDate(now,Session.getScriptTimeZone(),'dd/MM/yyyy'),
-    c.fournisseur, c.produit, c.quantite||0, c.prixUnit||0, total, 'En cours', c.notes||'', c.admin||'']);
+  if (!sh) return { ok:false, error:'Feuille Commandes introuvable' };
+  const c = data.commande;
+  const now = new Date();
+  const tz  = Session.getScriptTimeZone();
+  const id  = c.id ? String(c.id) : ('CMD' + now.getTime());
+  const dateStr = Utilities.formatDate(now, tz, 'dd/MM/yyyy HH:mm');
+  const items   = Array.isArray(c.items) ? c.items : [];
+  // Sérialiser les articles en une seule cellule : "nom×qty@prix|..."
+  const articlesStr = items.map(i => `${i.name||'?'}×${i.qty||1}@${i.price||0}`).join('|');
+  sh.appendRow([
+    id, dateStr, c.caissier||'',
+    c.clientName||'', c.clientContact||'',
+    articlesStr,
+    c.deliveryMode||'retrait', c.adresseLivraison||'',
+    Number(c.fraisLivraison)||0, c.dateLivraison||'',
+    Number(c.subtotal)||0, Number(c.remise)||0,
+    Number(c.total)||0, Number(c.accompte)||0, Number(c.restant)||0,
+    c.depositMethod||'', c.depositProvider||'', c.depositRef||'',
+    c.notes||'',
+    'En attente', '', ''
+  ]);
   return { ok:true, id };
 }
 
 function handleUpdateCommande(data) {
   const sh = getSS().getSheetByName(SHEET_COMMANDES);
+  if (!sh) return { ok:false, error:'Feuille Commandes introuvable' };
   const rows = sh.getDataRange().getValues();
+  const rawStatus = data.statut || data.status;
+  const sheetStatut = rawStatus === 'completed' ? 'Terminée'
+                    : rawStatus === 'cancelled'  ? 'Annulée'
+                    : (rawStatus || '');
+  let updated = false;
   for (let i = 1; i < rows.length; i++) {
-    if (rows[i][0]===data.id) {
-      if (data.statut) sh.getRange(i+1,8).setValue(data.statut);
-      if (data.notes)  sh.getRange(i+1,9).setValue(data.notes);
-      if (data.statut==='Reçue') {
-        updateStock_(getSS(), rows[i][3], Number(rows[i][4]));
-        logStock_(getSS(), rows[i][3], 'Entrée', Number(rows[i][4]), 'Commande '+data.id, data.admin||'');
-      }
-      return { ok:true };
-    }
+    if (String(rows[i][0]) !== String(data.id)) continue;
+    if (sheetStatut)          sh.getRange(i+1, 20).setValue(sheetStatut);
+    if (data.dateFinalisation) sh.getRange(i+1, 21).setValue(data.dateFinalisation);
+    if (data.saleId)           sh.getRange(i+1, 22).setValue(String(data.saleId));
+    updated = true;
   }
-  return { ok:false, error:'Commande introuvable' };
+  return updated ? { ok:true } : { ok:false, error:'Commande introuvable' };
 }
 
 // ============================================================
