@@ -4,7 +4,7 @@
 //             (HTML, JS, CSS) — toujours à jour quand connecté
 //             Cache First uniquement pour icônes/manifest
 // ============================================================
-const CACHE_NAME = 'boutique-pos-v8';
+const CACHE_NAME = 'boutique-pos-v9';
 const OFFLINE_URL = './index.html';
 
 const STATIC_ASSETS = [
