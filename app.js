@@ -3711,7 +3711,8 @@ function openScriptSettings() {
     '1 → Changer l\'URL du script\n' +
     '2 → Tester la connexion\n' +
     '3 → Initialiser les feuilles (1ère utilisation)\n' +
-    '4 → Synchroniser les ventes en attente\n\n' +
+    '4 → Synchroniser les ventes en attente\n' +
+    '5 → RESTAURER toutes les données depuis le Sheet\n\n' +
     'Tapez le numéro :',
     '2'
   );
@@ -3730,6 +3731,30 @@ function openScriptSettings() {
     initSheetsFromApp();
   } else if (choice.trim() === '4') {
     syncPendingOfflineSales();
+  } else if (choice.trim() === '5') {
+    forceRestoreFromSheet();
+  }
+}
+
+async function forceRestoreFromSheet() {
+  if (!APPS_SCRIPT_URL) { showToast('URL Apps Script non configurée', 'error'); return; }
+  if (!confirm('Restaurer toutes les données depuis Google Sheets ?\nLes données locales seront remplacées par celles du Sheet.')) return;
+  showLoader('Restauration en cours...');
+  try {
+    await loadProductsFromScript();
+    await loadSalesFromScript();
+    await loadUsersFromScript();
+    await loadReservationsFromScript();
+    await loadCommandesFromScript();
+    saveData();
+    hideLoader();
+    renderProducts();
+    renderStockTable();
+    renderStats();
+    showToast('Données restaurées depuis Google Sheets', 'success');
+  } catch(e) {
+    hideLoader();
+    showToast('Erreur lors de la restauration : ' + e.message, 'error');
   }
 }
 
