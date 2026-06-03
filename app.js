@@ -741,6 +741,8 @@ async function _uploadReservationAttachments(reservationId, attachments) {
   saveData();
   renderReservations();
   showToast(` ${uploaded.length} pièce(s) jointe(s) uploadée(s) sur Drive`);
+  // Re-syncer vers GAS avec les metadata Drive (fileId/viewUrl) maintenant disponibles
+  syncReservationAttachmentsToGAS(res);
 }
 
 // ============================================================
@@ -3561,6 +3563,16 @@ async function syncReservationToSheets(res) {
 async function syncReservationCompleteToSheets(res) {
   if (!APPS_SCRIPT_URL) return;
   await apiCall({ action: 'updateReservation', id: res.id, status: res.status, dateFinalisation: res.dateFinalisation || '', saleId: res.saleId || '' });
+}
+
+// Met à jour uniquement la colonne Attachments_JSON dans le Sheet
+async function syncReservationAttachmentsToGAS(res) {
+  if (!APPS_SCRIPT_URL) return;
+  const meta = (res.attachments || [])
+    .map(a => ({ name:a.name||'', type:a.type||'', fileId:a.fileId||'', viewUrl:a.viewUrl||'', dlUrl:a.dlUrl||'' }))
+    .filter(a => a.fileId || a.viewUrl);
+  if (!meta.length) return;
+  await apiCall({ action: 'updateReservationAttachments', id: res.id, attachments: meta });
 }
 
 // ── Mouvement de stock vers Sheet ────────────────────────

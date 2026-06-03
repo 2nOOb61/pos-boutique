@@ -129,8 +129,9 @@ function doGet(e) {
       else if (action === 'stockMove')         result = handleStockMove(data);
       else if (action === 'saveUser')          result = handleSaveUser(data);
       else if (action === 'deleteUser')        result = handleDeleteUser(data);
-      else if (action === 'addReservation')    result = handleAddReservation(data);
-      else if (action === 'updateReservation') result = handleUpdateReservation(data);
+      else if (action === 'addReservation')             result = handleAddReservation(data);
+      else if (action === 'updateReservation')          result = handleUpdateReservation(data);
+      else if (action === 'updateReservationAttachments') result = handleUpdateReservationAttachments(data);
       else if (action === 'addCommande')       result = handleAddCommande(data);
       else if (action === 'updateCommande')    result = handleUpdateCommande(data);
       else if (action === 'attribuerTache')    result = handleAttribuerTache(data);
@@ -680,6 +681,24 @@ function handleUpdateReservation(data) {
     if (data.dateFinalisation) sh.getRange(i+1, 20).setValue(data.dateFinalisation);
     if (data.saleId)     sh.getRange(i+1, 21).setValue(String(data.saleId));
     updated = true;
+  }
+  return updated ? { ok:true } : { ok:false, error:'Réservation introuvable' };
+}
+
+// Met à jour uniquement la colonne Attachments_JSON (col 22) pour une réservation
+function handleUpdateReservationAttachments(data) {
+  if (!data.id || !Array.isArray(data.attachments)) return { ok:false, error:'Paramètres manquants' };
+  var sh   = getSS().getSheetByName(SHEET_RESERVATIONS);
+  if (!sh) return { ok:false, error:'Feuille introuvable' };
+  var rows = sh.getDataRange().getValues();
+  var meta = JSON.stringify(data.attachments);
+  var updated = false;
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) !== String(data.id)) continue;
+    // Écrire Attachments_JSON uniquement sur la première ligne de la réservation
+    if (!updated) sh.getRange(i+1, 22).setValue(meta);
+    updated = true;
+    break; // une seule ligne suffit
   }
   return updated ? { ok:true } : { ok:false, error:'Réservation introuvable' };
 }
