@@ -3519,10 +3519,33 @@ async function syncToAppsScript(sale) {
 // ── Envoyer une réservation vers Sheet ───────────────────
 async function syncReservationToSheets(res) {
   if (!APPS_SCRIPT_URL) return;
-  res.caissier = currentUser ? currentUser.username : 'caissier';
-  const r = await apiCall({ action: 'addReservation', reservation: res });
+  // Envoyer uniquement les champs nécessaires — exclure base64 et champs inutiles pour GAS
+  const payload = {
+    id:              res.id,
+    date:            res.date,
+    caissier:        currentUser ? currentUser.username : (res.caissier || 'caissier'),
+    clientName:      res.clientName,
+    clientContact:   res.clientContact,
+    items:           res.items,
+    subtotal:        res.subtotal,
+    remise:          res.remise,
+    total:           res.total,
+    accompte:        res.accompte,
+    restant:         res.restant,
+    depositMethod:   res.depositMethod,
+    depositProvider: res.depositProvider,
+    depositRef:      res.depositRef,
+    deliveryMode:    res.deliveryMode,
+    deliveryAddress: res.deliveryAddress,
+    deliveryFee:     res.deliveryFee,
+    deliveryDate:    res.deliveryDate,
+    clientType:      res.clientType,
+    clientCompany:   res.clientCompany,
+  };
+  const r = await apiCall({ action: 'addReservation', reservation: payload });
   if (!r || !r.ok) {
     console.warn('Sync réservation échouée:', r?.error || 'Connexion impossible');
+    showToast('Réservation enregistrée localement — sync GAS échouée', 'warning');
   }
 }
 
