@@ -21,6 +21,8 @@
       --warning-bg:     #fef3c7;
       --danger:         #dc2626;
       --danger-bg:      #fee2e2;
+      --info:           #2563eb;
+      --info-bg:        #dbeafe;
       --bg:             #f8f7f4;
       --surface:        #ffffff;
       --border:         #e5e3df;
@@ -29,316 +31,330 @@
       --text-muted:     #a8a29e;
     }
 
-    body {
-      font-family: 'DM Sans', sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-    }
+    body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
 
-    /* ── LOGIN ── */
+    /* ══ LOGIN ══ */
     #loginScreen {
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-      background: var(--primary);
+      min-height:100vh; display:flex; align-items:center; justify-content:center;
+      padding:24px; background:var(--primary);
     }
     .login-card {
-      background: white;
-      border-radius: 20px;
-      padding: 40px 36px;
-      width: 100%;
-      max-width: 380px;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+      background:white; border-radius:20px; padding:40px 36px;
+      width:100%; max-width:380px; box-shadow:0 20px 60px rgba(0,0,0,.25);
     }
-    .login-logo {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 28px;
-    }
+    .login-logo { display:flex; align-items:center; gap:10px; margin-bottom:28px; }
     .login-logo-icon {
-      width: 44px; height: 44px;
-      background: var(--primary);
-      border-radius: 12px;
-      display: flex; align-items: center; justify-content: center;
+      width:44px; height:44px; background:var(--primary); border-radius:12px;
+      display:flex; align-items:center; justify-content:center;
     }
-    .login-logo-icon svg { color: white; }
-    .login-title { font-size: 20px; font-weight: 700; color: var(--primary); }
-    .login-sub   { font-size: 12px; color: var(--text-muted); margin-top: 1px; }
-
+    .login-logo-icon svg { color:white; }
+    .login-title { font-size:20px; font-weight:700; color:var(--primary); }
+    .login-sub   { font-size:12px; color:var(--text-muted); margin-top:1px; }
     .login-label {
-      display: block;
-      font-size: 12px; font-weight: 600;
-      text-transform: uppercase; letter-spacing: .06em;
-      color: var(--text-secondary);
-      margin-bottom: 6px; margin-top: 16px;
+      display:block; font-size:12px; font-weight:600;
+      text-transform:uppercase; letter-spacing:.06em;
+      color:var(--text-secondary); margin-bottom:6px; margin-top:16px;
     }
     .login-input {
-      width: 100%;
-      padding: 11px 14px;
-      border: 1.5px solid var(--border);
-      border-radius: 10px;
-      font-family: inherit;
-      font-size: 15px;
-      color: var(--text);
-      background: var(--bg);
-      outline: none;
-      transition: border-color .15s;
+      width:100%; padding:11px 14px; border:1.5px solid var(--border);
+      border-radius:10px; font-family:inherit; font-size:15px; color:var(--text);
+      background:var(--bg); outline:none; transition:border-color .15s;
     }
-    .login-input:focus { border-color: var(--primary); background: white; }
-
+    .login-input:focus { border-color:var(--primary); background:white; }
     .btn-login {
-      width: 100%; margin-top: 24px;
-      padding: 13px;
-      background: var(--primary);
-      color: white;
-      border: none; border-radius: 12px;
-      font-family: inherit; font-size: 15px; font-weight: 600;
-      cursor: pointer; transition: background .15s;
+      width:100%; margin-top:24px; padding:13px;
+      background:var(--primary); color:white; border:none; border-radius:12px;
+      font-family:inherit; font-size:15px; font-weight:600;
+      cursor:pointer; transition:background .15s;
     }
-    .btn-login:hover { background: var(--primary-hover); }
-    .btn-login:active { transform: scale(.98); }
-
+    .btn-login:hover  { background:var(--primary-hover); }
+    .btn-login:active { transform:scale(.98); }
     .login-error {
-      margin-top: 12px;
-      padding: 10px 14px;
-      background: var(--danger-bg);
-      color: var(--danger);
-      border-radius: 8px;
-      font-size: 13px; font-weight: 500;
-      display: none;
+      margin-top:12px; padding:10px 14px;
+      background:var(--danger-bg); color:var(--danger);
+      border-radius:8px; font-size:13px; font-weight:500; display:none;
     }
 
-    /* ── MAIN ── */
-    #mainScreen { display: none; min-height: 100vh; flex-direction: column; }
+    /* ══ MAIN ══ */
+    #mainScreen { display:none; min-height:100vh; flex-direction:column; }
 
+    /* Top bar */
     .top-bar {
-      background: var(--primary);
-      padding: 14px 20px;
-      display: flex; align-items: center; justify-content: space-between;
-      position: sticky; top: 0; z-index: 10;
+      background:var(--primary); padding:14px 20px;
+      display:flex; align-items:center; justify-content:space-between;
+      position:sticky; top:0; z-index:10;
     }
-    .top-bar-user { display: flex; align-items: center; gap: 10px; }
+    .top-bar-user { display:flex; align-items:center; gap:10px; }
     .top-bar-avatar {
-      width: 38px; height: 38px;
-      background: rgba(255,255,255,0.2);
-      border-radius: 50%;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 15px; font-weight: 700; color: white;
+      width:38px; height:38px; background:rgba(255,255,255,.2);
+      border-radius:50%; display:flex; align-items:center; justify-content:center;
+      font-size:15px; font-weight:700; color:white;
     }
-    .top-bar-name  { font-size: 15px; font-weight: 600; color: white; }
-    .top-bar-role  { font-size: 11px; color: rgba(255,255,255,.6); margin-top: 1px; }
-    .top-bar-right { display: flex; align-items: center; gap: 10px; }
-    .top-bar-time  { font-size: 22px; font-weight: 700; color: white; letter-spacing: .02em; }
-
+    .top-bar-name { font-size:15px; font-weight:600; color:white; }
+    .top-bar-role { font-size:11px; color:rgba(255,255,255,.6); margin-top:1px; }
+    .top-bar-right { display:flex; align-items:center; gap:10px; }
+    .top-bar-time  { font-size:20px; font-weight:700; color:white; letter-spacing:.02em; }
     .btn-logout {
-      display: flex; align-items: center; gap: 6px;
-      padding: 8px 14px;
-      background: rgba(255,255,255,0.15);
-      color: white; border: none; border-radius: 8px;
-      font-family: inherit; font-size: 13px; font-weight: 500;
-      cursor: pointer; transition: background .15s;
+      display:flex; align-items:center; gap:6px; padding:8px 14px;
+      background:rgba(255,255,255,.15); color:white; border:none; border-radius:8px;
+      font-family:inherit; font-size:13px; font-weight:500;
+      cursor:pointer; transition:background .15s;
     }
-    .btn-logout:hover { background: rgba(255,255,255,0.25); }
+    .btn-logout:hover { background:rgba(255,255,255,.25); }
 
-    .content { padding: 20px 16px; max-width: 640px; margin: 0 auto; width: 100%; }
+    /* Tabs */
+    .tabs {
+      display:flex; gap:0; background:var(--primary);
+      padding:0 20px; border-top:1px solid rgba(255,255,255,.1);
+    }
+    .tab-btn {
+      padding:10px 18px; border:none; background:none;
+      font-family:inherit; font-size:13px; font-weight:500;
+      color:rgba(255,255,255,.55); cursor:pointer; transition:all .15s;
+      border-bottom:2px solid transparent;
+      display:flex; align-items:center; gap:6px;
+    }
+    .tab-btn.active { color:white; border-bottom-color:var(--secondary); font-weight:600; }
+    .tab-btn:hover:not(.active) { color:rgba(255,255,255,.8); }
 
-    /* Refresh */
+    /* Content */
+    .content { padding:20px 16px; max-width:680px; margin:0 auto; width:100%; }
+
+    /* Refresh bar */
     .refresh-bar {
-      display: flex; align-items: center; justify-content: space-between;
-      margin-bottom: 16px;
+      display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;
     }
-    .refresh-title { font-size: 16px; font-weight: 600; color: var(--text); }
+    .refresh-title { font-size:16px; font-weight:600; color:var(--text); }
     .btn-refresh {
-      display: flex; align-items: center; gap: 6px;
-      padding: 7px 14px;
-      background: var(--primary-light); color: var(--primary);
-      border: none; border-radius: 8px;
-      font-family: inherit; font-size: 13px; font-weight: 600;
-      cursor: pointer; transition: background .15s;
+      display:flex; align-items:center; gap:6px; padding:7px 14px;
+      background:var(--primary-light); color:var(--primary);
+      border:none; border-radius:8px;
+      font-family:inherit; font-size:13px; font-weight:600; cursor:pointer;
     }
-    .btn-refresh:hover { background: #d4ece5; }
-    .btn-refresh.loading svg { animation: spin .8s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
+    .btn-refresh:hover { background:#d4ece5; }
+    .btn-refresh.loading svg { animation:spin .8s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
 
-    /* Task card */
+    /* ══ DASHBOARD ══ */
+    #dashView  { display:block; }
+    #tasksView { display:none; }
+
+    /* KPI grid */
+    .kpi-grid {
+      display:grid; grid-template-columns:repeat(2,1fr); gap:10px;
+      margin-bottom:16px;
+    }
+    @media(min-width:480px) { .kpi-grid { grid-template-columns:repeat(4,1fr); } }
+
+    .kpi-card {
+      background:white; border-radius:14px;
+      border:1.5px solid var(--border);
+      padding:14px 16px;
+    }
+    .kpi-label {
+      font-size:10px; font-weight:700; text-transform:uppercase;
+      letter-spacing:.08em; color:var(--text-muted); margin-bottom:6px;
+    }
+    .kpi-value { font-size:28px; font-weight:700; line-height:1; }
+    .kpi-sub   { font-size:11px; color:var(--text-muted); margin-top:4px; }
+    .kpi-card.total    .kpi-value { color:var(--primary); }
+    .kpi-card.todo     .kpi-value { color:var(--info); }
+    .kpi-card.running  .kpi-value { color:var(--warning); }
+    .kpi-card.done     .kpi-value { color:var(--success); }
+
+    /* Progress card */
+    .dash-card {
+      background:white; border-radius:14px;
+      border:1.5px solid var(--border);
+      margin-bottom:12px; overflow:hidden;
+    }
+    .dash-card-header {
+      padding:14px 18px 12px;
+      border-bottom:1px solid var(--border);
+      display:flex; align-items:center; justify-content:space-between;
+    }
+    .dash-card-title { font-size:14px; font-weight:600; color:var(--text); }
+    .dash-card-body  { padding:16px 18px; }
+
+    /* Global progress */
+    .progress-wrap { margin-bottom:6px; }
+    .progress-row  {
+      display:flex; align-items:center; justify-content:space-between;
+      margin-bottom:6px;
+    }
+    .progress-label { font-size:13px; color:var(--text-secondary); }
+    .progress-pct   { font-size:14px; font-weight:700; color:var(--primary); }
+    .progress-bar-bg {
+      width:100%; height:10px; background:var(--bg);
+      border-radius:99px; overflow:hidden;
+    }
+    .progress-bar-fill {
+      height:100%; border-radius:99px;
+      background:linear-gradient(90deg, var(--primary), #2d7a5e);
+      transition:width .6s ease;
+    }
+
+    /* Étape breakdown */
+    .etape-row {
+      display:flex; align-items:center; gap:10px;
+      padding:8px 0; border-bottom:1px solid var(--border);
+    }
+    .etape-row:last-child { border-bottom:none; }
+    .etape-dot  { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+    .etape-name { font-size:13px; color:var(--text); flex:1; }
+    .etape-counts { display:flex; gap:6px; align-items:center; }
+    .etape-pill {
+      font-size:11px; font-weight:600; padding:2px 8px;
+      border-radius:20px;
+    }
+    .pill-todo    { background:var(--info-bg);    color:var(--info); }
+    .pill-running { background:var(--warning-bg); color:var(--warning); }
+    .pill-done    { background:var(--success-bg); color:var(--success); }
+
+    /* Recent activity */
+    .activity-row {
+      display:flex; align-items:flex-start; gap:12px;
+      padding:10px 0; border-bottom:1px solid var(--border);
+    }
+    .activity-row:last-child { border-bottom:none; }
+    .activity-dot {
+      width:8px; height:8px; border-radius:50%;
+      margin-top:5px; flex-shrink:0;
+    }
+    .activity-main { flex:1; }
+    .activity-title { font-size:13px; font-weight:600; color:var(--text); }
+    .activity-meta  { font-size:11px; color:var(--text-muted); margin-top:2px; }
+    .activity-time  { font-size:11px; color:var(--text-muted); white-space:nowrap; }
+
+    /* ══ TASK LIST ══ */
     .task-card {
-      background: white;
-      border: 1.5px solid var(--border);
-      border-radius: 14px;
-      padding: 16px 18px;
-      margin-bottom: 12px;
-      transition: box-shadow .15s;
+      background:white; border:1.5px solid var(--border);
+      border-radius:14px; padding:16px 18px; margin-bottom:12px;
+      transition:box-shadow .15s;
     }
-    .task-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.08); }
-    .task-card.en-cours { border-left: 4px solid var(--warning); }
-    .task-card.a-faire  { border-left: 4px solid var(--primary); }
-    .task-card.termine  { border-left: 4px solid var(--success); opacity: .7; }
+    .task-card:hover    { box-shadow:0 4px 16px rgba(0,0,0,.08); }
+    .task-card.en-cours { border-left:4px solid var(--warning); }
+    .task-card.a-faire  { border-left:4px solid var(--primary); }
+    .task-card.termine  { border-left:4px solid var(--success); opacity:.7; }
 
-    .task-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
-    .task-dossier { font-size: 13px; font-weight: 700; color: var(--primary); }
-    .task-etape   { font-size: 15px; font-weight: 600; color: var(--text); margin-top: 3px; }
-    .task-client  { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .task-header  { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+    .task-dossier { font-size:13px; font-weight:700; color:var(--primary); }
+    .task-etape   { font-size:15px; font-weight:600; color:var(--text); margin-top:3px; }
+    .task-client  { font-size:12px; color:var(--text-muted); margin-top:2px; }
 
-    .badge {
-      padding: 3px 10px; border-radius: 20px;
-      font-size: 11px; font-weight: 600; white-space: nowrap; flex-shrink: 0;
-    }
-    .badge-pending  { background: var(--primary-light); color: var(--primary); }
-    .badge-running  { background: var(--warning-bg);    color: var(--warning); }
-    .badge-done     { background: var(--success-bg);    color: var(--success); }
+    .badge { padding:3px 10px; border-radius:20px; font-size:11px; font-weight:600; white-space:nowrap; flex-shrink:0; }
+    .badge-pending { background:var(--primary-light); color:var(--primary); }
+    .badge-running { background:var(--warning-bg);    color:var(--warning); }
+    .badge-done    { background:var(--success-bg);    color:var(--success); }
 
-    .task-meta {
-      display: flex; gap: 16px; margin-top: 10px;
-      font-size: 12px; color: var(--text-muted);
-    }
-    .task-meta span { display: flex; align-items: center; gap: 4px; }
-
-    .task-actions { display: flex; gap: 8px; margin-top: 14px; }
+    .task-meta { display:flex; gap:16px; margin-top:10px; flex-wrap:wrap; font-size:12px; color:var(--text-muted); }
+    .task-meta span { display:flex; align-items:center; gap:4px; }
+    .task-actions { display:flex; gap:8px; margin-top:14px; }
 
     .btn-start {
-      flex: 1; padding: 11px;
-      background: var(--primary); color: white;
-      border: none; border-radius: 10px;
-      font-family: inherit; font-size: 14px; font-weight: 600;
-      cursor: pointer; transition: background .15s;
-      display: flex; align-items: center; justify-content: center; gap: 6px;
+      flex:1; padding:11px; background:var(--primary); color:white;
+      border:none; border-radius:10px; font-family:inherit; font-size:14px; font-weight:600;
+      cursor:pointer; transition:background .15s;
+      display:flex; align-items:center; justify-content:center; gap:6px;
     }
-    .btn-start:hover { background: var(--primary-hover); }
-
+    .btn-start:hover { background:var(--primary-hover); }
     .btn-stop {
-      flex: 1; padding: 11px;
-      background: var(--secondary); color: white;
-      border: none; border-radius: 10px;
-      font-family: inherit; font-size: 14px; font-weight: 600;
-      cursor: pointer; transition: background .15s;
-      display: flex; align-items: center; justify-content: center; gap: 6px;
+      flex:1; padding:11px; background:var(--secondary); color:white;
+      border:none; border-radius:10px; font-family:inherit; font-size:14px; font-weight:600;
+      cursor:pointer; transition:background .15s;
+      display:flex; align-items:center; justify-content:center; gap:6px;
     }
-    .btn-stop:hover { background: var(--secondary-hover); }
-
+    .btn-stop:hover { background:var(--secondary-hover); }
     .btn-disabled {
-      flex: 1; padding: 11px;
-      background: #f5f4f2; color: var(--text-muted);
-      border: none; border-radius: 10px;
-      font-family: inherit; font-size: 14px; font-weight: 500;
-      cursor: not-allowed;
+      flex:1; padding:11px; background:#f5f4f2; color:var(--text-muted);
+      border:none; border-radius:10px; font-family:inherit; font-size:14px; font-weight:500; cursor:not-allowed;
     }
 
-    /* Empty state */
+    /* Empty */
     .empty-state {
-      display: flex; flex-direction: column; align-items: center;
-      justify-content: center; padding: 48px 24px; text-align: center;
+      display:flex; flex-direction:column; align-items:center;
+      justify-content:center; padding:48px 24px; text-align:center;
     }
     .empty-icon {
-      width: 56px; height: 56px;
-      background: var(--primary-light);
-      border-radius: 16px;
-      display: flex; align-items: center; justify-content: center;
-      margin-bottom: 14px;
+      width:56px; height:56px; background:var(--primary-light);
+      border-radius:16px; display:flex; align-items:center; justify-content:center; margin-bottom:14px;
     }
-    .empty-title { font-size: 15px; font-weight: 600; color: var(--text-secondary); }
-    .empty-sub   { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+    .empty-title { font-size:15px; font-weight:600; color:var(--text-secondary); }
+    .empty-sub   { font-size:13px; color:var(--text-muted); margin-top:4px; }
 
     /* Toast */
     #toast {
-      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
-      background: #1c1917; color: white;
-      padding: 12px 20px; border-radius: 10px;
-      font-size: 14px; font-weight: 500;
-      opacity: 0; transition: opacity .2s;
-      z-index: 100; white-space: nowrap;
-      pointer-events: none;
+      position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+      background:#1c1917; color:white; padding:12px 20px; border-radius:10px;
+      font-size:14px; font-weight:500; opacity:0; transition:opacity .2s;
+      z-index:100; white-space:nowrap; pointer-events:none;
     }
-    #toast.show { opacity: 1; }
-    #toast.success { background: var(--success); }
-    #toast.error   { background: var(--danger); }
-    #toast.warning { background: var(--warning); }
+    #toast.show    { opacity:1; }
+    #toast.success { background:var(--success); }
+    #toast.error   { background:var(--danger); }
+    #toast.warning { background:var(--warning); }
 
-    /* Modal commentaire */
+    /* Modal */
     .modal-overlay {
-      position: fixed; inset: 0;
-      background: rgba(0,0,0,.45);
-      backdrop-filter: blur(4px);
-      z-index: 50;
-      display: none; align-items: center; justify-content: center; padding: 20px;
+      position:fixed; inset:0; background:rgba(0,0,0,.45); backdrop-filter:blur(4px);
+      z-index:50; display:none; align-items:center; justify-content:center; padding:20px;
     }
-    .modal-overlay.open { display: flex; }
+    .modal-overlay.open { display:flex; }
     .modal-box {
-      background: white; border-radius: 18px;
-      width: 100%; max-width: 420px;
-      box-shadow: 0 20px 60px rgba(0,0,0,.2);
+      background:white; border-radius:18px; width:100%; max-width:420px;
+      box-shadow:0 20px 60px rgba(0,0,0,.2);
     }
     .modal-header {
-      padding: 18px 20px 14px;
-      border-bottom: 1px solid var(--border);
-      display: flex; align-items: center; justify-content: space-between;
+      padding:18px 20px 14px; border-bottom:1px solid var(--border);
+      display:flex; align-items:center; justify-content:space-between;
     }
-    .modal-title { font-size: 15px; font-weight: 700; color: var(--text); }
+    .modal-title { font-size:15px; font-weight:700; color:var(--text); }
     .modal-close {
-      width: 30px; height: 30px;
-      display: flex; align-items: center; justify-content: center;
-      border: none; background: none; border-radius: 8px;
-      color: var(--text-muted); cursor: pointer; font-size: 18px;
-      transition: background .15s;
+      width:30px; height:30px; display:flex; align-items:center; justify-content:center;
+      border:none; background:none; border-radius:8px;
+      color:var(--text-muted); cursor:pointer; transition:background .15s;
     }
-    .modal-close:hover { background: var(--bg); }
-    .modal-body { padding: 18px 20px; }
-    .modal-label { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px; }
-    .modal-ctx { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; }
+    .modal-close:hover { background:var(--bg); }
+    .modal-body   { padding:18px 20px; }
+    .modal-label  { font-size:13px; font-weight:600; color:var(--text-secondary); margin-bottom:8px; }
+    .modal-ctx    { font-size:13px; color:var(--text-muted); margin-bottom:16px; }
     .modal-textarea {
-      width: 100%;
-      padding: 10px 12px;
-      border: 1.5px solid var(--border);
-      border-radius: 10px;
-      font-family: inherit; font-size: 14px;
-      resize: none; height: 80px; outline: none;
-      transition: border-color .15s;
+      width:100%; padding:10px 12px; border:1.5px solid var(--border);
+      border-radius:10px; font-family:inherit; font-size:14px;
+      resize:none; height:80px; outline:none; transition:border-color .15s;
     }
-    .modal-textarea:focus { border-color: var(--primary); }
-    .modal-footer {
-      padding: 14px 20px 18px;
-      display: flex; gap: 10px; justify-content: flex-end;
-    }
+    .modal-textarea:focus { border-color:var(--primary); }
+    .modal-footer { padding:14px 20px 18px; display:flex; gap:10px; justify-content:flex-end; }
     .btn-cancel-modal {
-      padding: 10px 18px;
-      border: 1.5px solid var(--border); background: none;
-      border-radius: 10px; font-family: inherit; font-size: 14px; font-weight: 500;
-      color: var(--text-secondary); cursor: pointer;
+      padding:10px 18px; border:1.5px solid var(--border); background:none;
+      border-radius:10px; font-family:inherit; font-size:14px; font-weight:500;
+      color:var(--text-secondary); cursor:pointer;
     }
     .btn-confirm-modal {
-      padding: 10px 20px;
-      background: var(--secondary); color: white; border: none;
-      border-radius: 10px; font-family: inherit; font-size: 14px; font-weight: 600;
-      cursor: pointer; transition: background .15s;
+      padding:10px 20px; background:var(--secondary); color:white; border:none;
+      border-radius:10px; font-family:inherit; font-size:14px; font-weight:600;
+      cursor:pointer; transition:background .15s;
     }
-    .btn-confirm-modal:hover { background: var(--secondary-hover); }
+    .btn-confirm-modal:hover { background:var(--secondary-hover); }
 
     /* Loader */
     #loader {
-      position: fixed; inset: 0;
-      background: rgba(255,255,255,.75);
-      display: none; align-items: center; justify-content: center;
-      z-index: 200;
+      position:fixed; inset:0; background:rgba(255,255,255,.75);
+      display:none; align-items:center; justify-content:center; z-index:200;
     }
-    #loader.show { display: flex; }
+    #loader.show { display:flex; }
     .spinner {
-      width: 36px; height: 36px;
-      border: 3px solid var(--border);
-      border-top-color: var(--primary);
-      border-radius: 50%;
-      animation: spin .7s linear infinite;
+      width:36px; height:36px; border:3px solid var(--border);
+      border-top-color:var(--primary); border-radius:50%;
+      animation:spin .7s linear infinite;
     }
   </style>
 </head>
 <body>
 
-<!-- ── LOADER ── -->
 <div id="loader"><div class="spinner"></div></div>
 
-<!-- ── LOGIN ── -->
+<!-- ══ LOGIN ══ -->
 <div id="loginScreen">
   <div class="login-card">
     <div class="login-logo">
@@ -352,22 +368,20 @@
         <div class="login-sub">FOREVER MG — Atelier</div>
       </div>
     </div>
-
     <label class="login-label">Identifiant</label>
-    <input class="login-input" id="loginUser" type="text" placeholder="Votre identifiant" autocomplete="username" />
-
+    <input class="login-input" id="loginUser" type="text" placeholder="Votre identifiant" autocomplete="username"/>
     <label class="login-label">Mot de passe</label>
     <input class="login-input" id="loginPass" type="password" placeholder="••••••" autocomplete="current-password"
-           onkeydown="if(event.key==='Enter') doLogin()" />
-
+           onkeydown="if(event.key==='Enter') doLogin()"/>
     <button class="btn-login" onclick="doLogin()">Se connecter</button>
-    <div class="login-error" id="loginError">Identifiant ou mot de passe incorrect</div>
+    <div class="login-error" id="loginError"></div>
   </div>
 </div>
 
-<!-- ── MAIN ── -->
+<!-- ══ MAIN ══ -->
 <div id="mainScreen">
 
+  <!-- Top bar -->
   <div class="top-bar">
     <div class="top-bar-user">
       <div class="top-bar-avatar" id="topAvatar">?</div>
@@ -380,28 +394,121 @@
       <div class="top-bar-time" id="topClock">--:--</div>
       <button class="btn-logout" onclick="doLogout()">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+          <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
         </svg>
         Déconnexion
       </button>
     </div>
   </div>
 
-  <div class="content">
-    <div class="refresh-bar">
-      <div class="refresh-title" id="taskCountLabel">Mes tâches</div>
-      <button class="btn-refresh" id="refreshBtn" onclick="loadTasks()">
-        <svg id="refreshIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-        </svg>
-        Actualiser
-      </button>
-    </div>
-    <div id="taskList"></div>
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab-btn active" id="tabDash" onclick="switchTab('dash')">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+        <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+      </svg>
+      Dashboard
+    </button>
+    <button class="tab-btn" id="tabTasks" onclick="switchTab('tasks')">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/>
+        <line x1="8" y1="18" x2="21" y2="18"/>
+        <polyline points="3 6 4 7 6 5"/><polyline points="3 12 4 13 6 11"/><polyline points="3 18 4 19 6 17"/>
+      </svg>
+      Mes tâches <span id="taskBadge" style="display:none;background:var(--secondary);color:white;font-size:10px;font-weight:700;padding:1px 6px;border-radius:20px;margin-left:4px"></span>
+    </button>
+    <button class="tab-btn" id="tabRefresh" onclick="loadTasks()" style="margin-left:auto">
+      <svg id="refreshIcon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+      </svg>
+      Actualiser
+    </button>
   </div>
-</div>
 
-<!-- ── MODAL TERMINER ── -->
+  <div class="content">
+
+    <!-- ══ DASHBOARD VIEW ══ -->
+    <div id="dashView">
+
+      <!-- KPI row -->
+      <div class="kpi-grid" id="kpiGrid">
+        <div class="kpi-card total">
+          <div class="kpi-label">Total</div>
+          <div class="kpi-value" id="kpiTotal">—</div>
+          <div class="kpi-sub">tâches assignées</div>
+        </div>
+        <div class="kpi-card todo">
+          <div class="kpi-label">À faire</div>
+          <div class="kpi-value" id="kpiTodo">—</div>
+          <div class="kpi-sub">en attente</div>
+        </div>
+        <div class="kpi-card running">
+          <div class="kpi-label">En cours</div>
+          <div class="kpi-value" id="kpiRunning">—</div>
+          <div class="kpi-sub">démarrées</div>
+        </div>
+        <div class="kpi-card done">
+          <div class="kpi-label">Terminées</div>
+          <div class="kpi-value" id="kpiDone">—</div>
+          <div class="kpi-sub">aujourd'hui</div>
+        </div>
+      </div>
+
+      <!-- Progression globale -->
+      <div class="dash-card">
+        <div class="dash-card-header">
+          <div class="dash-card-title">Progression globale</div>
+          <span id="progressPctLabel" style="font-size:13px;font-weight:700;color:var(--primary)">0%</span>
+        </div>
+        <div class="dash-card-body">
+          <div class="progress-wrap">
+            <div class="progress-bar-bg">
+              <div class="progress-bar-fill" id="progressBar" style="width:0%"></div>
+            </div>
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--text-muted)">
+            <span id="progressSub">Chargement...</span>
+            <span id="progressDate" style="font-weight:500;color:var(--text-secondary)"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Répartition par étape -->
+      <div class="dash-card">
+        <div class="dash-card-header">
+          <div class="dash-card-title">Répartition par étape</div>
+        </div>
+        <div class="dash-card-body" id="etapeBreakdown">
+          <div style="color:var(--text-muted);font-size:13px">Chargement...</div>
+        </div>
+      </div>
+
+      <!-- Activité récente -->
+      <div class="dash-card">
+        <div class="dash-card-header">
+          <div class="dash-card-title">Activité récente</div>
+        </div>
+        <div class="dash-card-body" id="recentActivity">
+          <div style="color:var(--text-muted);font-size:13px">Chargement...</div>
+        </div>
+      </div>
+
+    </div><!-- /dashView -->
+
+    <!-- ══ TASKS VIEW ══ -->
+    <div id="tasksView">
+      <div class="refresh-bar">
+        <div class="refresh-title" id="taskCountLabel">Mes tâches</div>
+      </div>
+      <div id="taskList"></div>
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /mainScreen -->
+
+<!-- ══ MODAL TERMINER ══ -->
 <div class="modal-overlay" id="stopModal">
   <div class="modal-box">
     <div class="modal-header">
@@ -424,13 +531,12 @@
   </div>
 </div>
 
-<!-- ── TOAST ── -->
 <div id="toast"></div>
 
 <script>
-// ============================================================
+// ════════════════════════════════════════
 // CONFIG
-// ============================================================
+// ════════════════════════════════════════
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbx94vamSaYqKyD3CNbdvy3Ue7wl4DJkANdRWBmkt483NKzp1Wk1aEkTazS_Dtc8YekIug/exec';
 
 const ROLE_LABELS = {
@@ -439,8 +545,6 @@ const ROLE_LABELS = {
   chef_atelier:'Chef Atelier', operateur_prod:'Opérateur Prod', machiniste:'Machiniste',
   pao:'Graphiste PAO', finition:'Finisheur', livreur:'Livreur'
 };
-
-// Rôles autorisés sur cette interface
 const ALLOWED_ROLES = ['chef_atelier','operateur_prod','machiniste','pao','finition','livreur','admin'];
 
 const ETAPE_LABELS = {
@@ -448,24 +552,24 @@ const ETAPE_LABELS = {
   RETOUR_CLIENT:'Retour client', MODIFICATIONS:'Modifications',
   PRODUCTION:'Opérateur machine', FINITION:'Finition', LIVRE:'Livraison'
 };
-
 const ETAPE_COLORS = {
   ACHAT:'#d97706', PAO:'#6c63ff', BAT:'#2563eb', RETOUR_CLIENT:'#0891b2',
   MODIFICATIONS:'#7c3aed', PRODUCTION:'#e8834a', FINITION:'#1a4a3a', LIVRE:'#16a34a'
 };
 
-// ============================================================
+// ════════════════════════════════════════
 // STATE
-// ============================================================
+// ════════════════════════════════════════
 let currentUser = null;
 let tasks = [];
 let pendingStop = null;
+let currentTab = 'dash';
 
-// ============================================================
+// ════════════════════════════════════════
 // UTILS
-// ============================================================
-function showLoader()  { document.getElementById('loader').classList.add('show'); }
-function hideLoader()  { document.getElementById('loader').classList.remove('show'); }
+// ════════════════════════════════════════
+function showLoader() { document.getElementById('loader').classList.add('show'); }
+function hideLoader() { document.getElementById('loader').classList.remove('show'); }
 
 let _toastTimer;
 function showToast(msg, type = 'default') {
@@ -473,75 +577,75 @@ function showToast(msg, type = 'default') {
   el.textContent = msg;
   el.className = 'show' + (type !== 'default' ? ' ' + type : '');
   clearTimeout(_toastTimer);
-  _toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
+  _toastTimer = setTimeout(() => el.classList.remove('show'), 3200);
 }
 
-function fmt(n) {
-  return new Intl.NumberFormat('fr-MG').format(n || 0) + ' Ar';
-}
-
-// ============================================================
-// CLOCK
-// ============================================================
 function startClock() {
   function tick() {
     const now = new Date();
     document.getElementById('topClock').textContent =
       now.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
   }
-  tick();
-  setInterval(tick, 1000);
+  tick(); setInterval(tick, 1000);
 }
 
-// ============================================================
+// ════════════════════════════════════════
 // API
-// ============================================================
+// ════════════════════════════════════════
 async function apiGet(action, params = {}) {
   let url = GAS_URL + '?action=' + action;
   Object.entries(params).forEach(([k,v]) => url += '&' + k + '=' + encodeURIComponent(v));
   try {
-    const res  = await fetch(url);
-    const text = await res.text();
-    return JSON.parse(text);
+    const res = await fetch(url);
+    return JSON.parse(await res.text());
   } catch(e) { return null; }
 }
 
 async function apiWrite(payload) {
   try {
     const url = GAS_URL + '?payload=' + encodeURIComponent(JSON.stringify(payload));
-    const res  = await fetch(url);
+    const res = await fetch(url);
     const text = await res.text();
-    try { return JSON.parse(text); } catch(e) { return { ok: true }; }
+    try { return JSON.parse(text); } catch(e) { return { ok:true }; }
   } catch(e) { return null; }
 }
 
-// ============================================================
+// ════════════════════════════════════════
+// TABS
+// ════════════════════════════════════════
+function switchTab(tab) {
+  currentTab = tab;
+  document.getElementById('tabDash').classList.toggle('active',  tab === 'dash');
+  document.getElementById('tabTasks').classList.toggle('active', tab === 'tasks');
+  document.getElementById('dashView').style.display  = tab === 'dash'  ? 'block' : 'none';
+  document.getElementById('tasksView').style.display = tab === 'tasks' ? 'block' : 'none';
+}
+
+// ════════════════════════════════════════
 // LOGIN
-// ============================================================
+// ════════════════════════════════════════
 async function doLogin() {
   const username = document.getElementById('loginUser').value.trim();
   const password = document.getElementById('loginPass').value;
-  const errEl = document.getElementById('loginError');
+  const errEl    = document.getElementById('loginError');
   errEl.style.display = 'none';
 
-  if (!username || !password) { errEl.textContent = 'Remplissez tous les champs.'; errEl.style.display = 'block'; return; }
-
+  if (!username || !password) {
+    errEl.textContent = 'Remplissez tous les champs.';
+    errEl.style.display = 'block'; return;
+  }
   showLoader();
   const r = await apiGet('login', { username, password });
   hideLoader();
 
   if (!r || !r.ok) {
     errEl.textContent = 'Identifiant ou mot de passe incorrect.';
-    errEl.style.display = 'block';
-    return;
+    errEl.style.display = 'block'; return;
   }
-
   if (!ALLOWED_ROLES.includes(r.user?.role)) {
-    errEl.textContent = 'Ce compte n\'a pas accès à cette interface.';
-    errEl.style.display = 'block';
-    return;
+    errEl.textContent = "Ce compte n'a pas accès à cette interface.";
+    errEl.style.display = 'block'; return;
   }
-
   currentUser = r.user;
   sessionStorage.setItem('op-user', JSON.stringify(currentUser));
   enterMain();
@@ -549,8 +653,7 @@ async function doLogin() {
 
 function doLogout() {
   sessionStorage.removeItem('op-user');
-  currentUser = null;
-  tasks = [];
+  currentUser = null; tasks = [];
   document.getElementById('loginUser').value = '';
   document.getElementById('loginPass').value = '';
   document.getElementById('loginError').style.display = 'none';
@@ -558,66 +661,142 @@ function doLogout() {
   document.getElementById('mainScreen').style.display  = 'none';
 }
 
-// ============================================================
+// ════════════════════════════════════════
 // MAIN
-// ============================================================
+// ════════════════════════════════════════
 function enterMain() {
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('mainScreen').style.display  = 'flex';
-
-  const initials = (currentUser.label || currentUser.username || '?')[0].toUpperCase();
-  document.getElementById('topAvatar').textContent = initials;
+  document.getElementById('topAvatar').textContent = (currentUser.label || currentUser.username || '?')[0].toUpperCase();
   document.getElementById('topName').textContent   = currentUser.label || currentUser.username;
   document.getElementById('topRole').textContent   = ROLE_LABELS[currentUser.role] || currentUser.role;
-
+  document.getElementById('progressDate').textContent =
+    new Date().toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long' });
   startClock();
   loadTasks();
 }
 
-// ============================================================
-// TASKS
-// ============================================================
+// ════════════════════════════════════════
+// LOAD & RENDER
+// ════════════════════════════════════════
 async function loadTasks() {
-  const btn = document.getElementById('refreshBtn');
   const icon = document.getElementById('refreshIcon');
-  btn.disabled = true;
   icon.style.animation = 'spin .8s linear infinite';
 
   const r = await apiGet('getTaches');
-
-  btn.disabled = false;
   icon.style.animation = '';
 
-  if (!r || !r.ok) {
-    showToast('Impossible de charger les tâches', 'error');
-    renderTasks([]);
-    return;
-  }
+  if (!r || !r.ok) { showToast('Impossible de charger les tâches', 'error'); return; }
 
-  const myLabel = currentUser.label || currentUser.username;
+  const myLabel     = currentUser.label || currentUser.username;
   const isAdminChef = ['admin','chef_atelier'].includes(currentUser.role);
 
-  // Filtrer : admin/chef voient tout, les autres voient leurs tâches
   tasks = isAdminChef
     ? (r.taches || [])
     : (r.taches || []).filter(t => t.operateur === myLabel);
 
-  // Trier : EN_COURS en premier, puis A_FAIRE, puis TERMINE
-  const order = { EN_COURS: 0, A_FAIRE: 1, TERMINE: 2 };
-  tasks.sort((a, b) => (order[a.statut] ?? 3) - (order[b.statut] ?? 3));
+  const orderMap = { EN_COURS:0, A_FAIRE:1, TERMINE:2 };
+  tasks.sort((a,b) => (orderMap[a.statut]??3) - (orderMap[b.statut]??3));
 
-  renderTasks(tasks);
+  renderDashboard();
+  renderTaskList();
 }
 
-function renderTasks(list) {
-  const container = document.getElementById('taskList');
-  const active = list.filter(t => t.statut !== 'TERMINE');
-  const done   = list.filter(t => t.statut === 'TERMINE');
+// ════════════════════════════════════════
+// DASHBOARD
+// ════════════════════════════════════════
+function renderDashboard() {
+  const total   = tasks.length;
+  const todo    = tasks.filter(t => t.statut === 'A_FAIRE').length;
+  const running = tasks.filter(t => t.statut === 'EN_COURS').length;
+  const todayStr = new Date().toLocaleDateString('fr-FR');
+  const done    = tasks.filter(t => t.statut === 'TERMINE' &&
+    (t.dateFin === todayStr || (t.dateFin||'').includes(todayStr.split('/')[0]))).length;
+  const allDone = tasks.filter(t => t.statut === 'TERMINE').length;
+
+  // KPIs
+  document.getElementById('kpiTotal').textContent   = total;
+  document.getElementById('kpiTodo').textContent     = todo;
+  document.getElementById('kpiRunning').textContent  = running;
+  document.getElementById('kpiDone').textContent     = done;
+
+  // Badge tâches actives
+  const activeCnt = todo + running;
+  const badge = document.getElementById('taskBadge');
+  if (activeCnt > 0) { badge.textContent = activeCnt; badge.style.display = 'inline'; }
+  else badge.style.display = 'none';
+
+  // Progress bar
+  const pct = total > 0 ? Math.round((allDone / total) * 100) : 0;
+  document.getElementById('progressBar').style.width = pct + '%';
+  document.getElementById('progressPctLabel').textContent = pct + '%';
+  document.getElementById('progressSub').textContent =
+    allDone + ' terminée' + (allDone > 1 ? 's' : '') + ' sur ' + total + ' tâche' + (total > 1 ? 's' : '');
+
+  // Étape breakdown
+  const byEtape = {};
+  tasks.forEach(t => {
+    const k = t.etapeCode || 'AUTRE';
+    if (!byEtape[k]) byEtape[k] = { todo:0, running:0, done:0 };
+    if (t.statut === 'A_FAIRE')  byEtape[k].todo++;
+    if (t.statut === 'EN_COURS') byEtape[k].running++;
+    if (t.statut === 'TERMINE')  byEtape[k].done++;
+  });
+  const etapeHtml = Object.entries(byEtape).map(([code, cnt]) => {
+    const label = ETAPE_LABELS[code] || code;
+    const color = ETAPE_COLORS[code] || '#a8a29e';
+    const pills = [
+      cnt.running > 0 ? `<span class="etape-pill pill-running">${cnt.running} en cours</span>` : '',
+      cnt.todo    > 0 ? `<span class="etape-pill pill-todo">${cnt.todo} à faire</span>`       : '',
+      cnt.done    > 0 ? `<span class="etape-pill pill-done">${cnt.done} terminée${cnt.done>1?'s':''}</span>` : '',
+    ].filter(Boolean).join('');
+    return `
+      <div class="etape-row">
+        <div class="etape-dot" style="background:${color}"></div>
+        <div class="etape-name">${label}</div>
+        <div class="etape-counts">${pills}</div>
+      </div>`;
+  }).join('');
+  document.getElementById('etapeBreakdown').innerHTML =
+    etapeHtml || '<div style="color:var(--text-muted);font-size:13px">Aucune tâche</div>';
+
+  // Activité récente — tâches EN_COURS ou terminées récemment
+  const recent = tasks
+    .filter(t => t.statut === 'EN_COURS' || t.statut === 'TERMINE')
+    .slice(0, 6);
+  const actHtml = recent.length ? recent.map(t => {
+    const isRunning = t.statut === 'EN_COURS';
+    const color     = isRunning ? 'var(--warning)' : 'var(--success)';
+    const label     = ETAPE_LABELS[t.etapeCode] || t.etapeLabel || t.etapeCode;
+    const time      = isRunning
+      ? (t.dateDebut ? 'Débuté ' + t.dateDebut : 'En cours')
+      : (t.dateFin   ? 'Terminé ' + t.dateFin  : 'Terminé');
+    return `
+      <div class="activity-row">
+        <div class="activity-dot" style="background:${color}"></div>
+        <div class="activity-main">
+          <div class="activity-title">${t.numeroDossier || '—'} — ${label}</div>
+          <div class="activity-meta">${t.operateur || ''}${t.commentaire ? ' · ' + t.commentaire : ''}</div>
+        </div>
+        <div class="activity-time">${time}</div>
+      </div>`;
+  }).join('')
+  : '<div style="color:var(--text-muted);font-size:13px">Aucune activité récente</div>';
+  document.getElementById('recentActivity').innerHTML = actHtml;
+}
+
+// ════════════════════════════════════════
+// TASK LIST
+// ════════════════════════════════════════
+function renderTaskList() {
+  const active = tasks.filter(t => t.statut !== 'TERMINE');
+  const done   = tasks.filter(t => t.statut === 'TERMINE');
 
   document.getElementById('taskCountLabel').textContent =
     active.length + ' tâche' + (active.length !== 1 ? 's' : '') + ' active' + (active.length !== 1 ? 's' : '');
 
-  if (list.length === 0) {
+  const container = document.getElementById('taskList');
+  if (tasks.length === 0) {
     container.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">
@@ -631,46 +810,39 @@ function renderTasks(list) {
       </div>`;
     return;
   }
-
-  container.innerHTML = [...active, ...done].map(t => renderTaskCard(t)).join('');
+  container.innerHTML = [...active, ...done].map(renderTaskCard).join('');
 }
 
 function renderTaskCard(t) {
-  const statut = t.statut || 'A_FAIRE';
-  const cardClass = statut === 'EN_COURS' ? 'en-cours' : statut === 'TERMINE' ? 'termine' : 'a-faire';
+  const statut     = t.statut || 'A_FAIRE';
+  const cardClass  = statut === 'EN_COURS' ? 'en-cours' : statut === 'TERMINE' ? 'termine' : 'a-faire';
   const badgeClass = statut === 'EN_COURS' ? 'badge-running' : statut === 'TERMINE' ? 'badge-done' : 'badge-pending';
   const badgeLabel = statut === 'EN_COURS' ? 'En cours' : statut === 'TERMINE' ? 'Terminé' : 'À faire';
-  const color = ETAPE_COLORS[t.etapeCode] || '#78716c';
+  const color      = ETAPE_COLORS[t.etapeCode] || '#78716c';
   const etapeLabel = ETAPE_LABELS[t.etapeCode] || t.etapeLabel || t.etapeCode;
 
   let actionsHtml = '';
   if (statut === 'A_FAIRE') {
-    actionsHtml = `
-      <div class="task-actions">
-        <button class="btn-start" onclick="startTask('${t.id}')">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-          Démarrer
-        </button>
-      </div>`;
+    actionsHtml = `<div class="task-actions">
+      <button class="btn-start" onclick="startTask('${t.id}')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        Démarrer
+      </button></div>`;
   } else if (statut === 'EN_COURS') {
-    actionsHtml = `
-      <div class="task-actions">
-        <button class="btn-stop" onclick="openStopModal('${t.id}')">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
-          Terminer
-        </button>
-      </div>`;
+    actionsHtml = `<div class="task-actions">
+      <button class="btn-stop" onclick="openStopModal('${t.id}')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+        Terminer
+      </button></div>`;
   } else {
-    actionsHtml = `
-      <div class="task-actions">
-        <button class="btn-disabled" disabled>Terminé</button>
-      </div>`;
+    actionsHtml = `<div class="task-actions"><button class="btn-disabled" disabled>Terminé</button></div>`;
   }
 
-  const metaItems = [];
-  if (t.operateur)       metaItems.push(`<span><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>${t.operateur}</span>`);
-  if (t.dateAssignation) metaItems.push(`<span><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>${t.dateAssignation}</span>`);
-  if (t.dateDebut && statut === 'EN_COURS') metaItems.push(`<span style="color:var(--warning)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Débuté ${t.dateDebut}</span>`);
+  const meta = [];
+  if (t.operateur)       meta.push(`<span><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>${t.operateur}</span>`);
+  if (t.dateAssignation) meta.push(`<span><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>${t.dateAssignation}</span>`);
+  if (t.dateDebut && statut === 'EN_COURS') meta.push(`<span style="color:var(--warning)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Débuté ${t.dateDebut}</span>`);
+  if (t.dateFin  && statut === 'TERMINE')  meta.push(`<span style="color:var(--success)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>Terminé ${t.dateFin}</span>`);
 
   return `
     <div class="task-card ${cardClass}">
@@ -682,23 +854,22 @@ function renderTaskCard(t) {
         </div>
         <span class="badge ${badgeClass}">${badgeLabel}</span>
       </div>
-      ${metaItems.length ? `<div class="task-meta">${metaItems.join('')}</div>` : ''}
+      ${meta.length ? `<div class="task-meta">${meta.join('')}</div>` : ''}
       ${actionsHtml}
     </div>`;
 }
 
-// ============================================================
+// ════════════════════════════════════════
 // POINTAGE
-// ============================================================
+// ════════════════════════════════════════
 async function startTask(tacheId) {
   showLoader();
-  const r = await apiWrite({ action: 'pointerAction', tacheId, action_: 'START' });
+  const r = await apiWrite({ action:'pointerAction', tacheId, action_:'START' });
   hideLoader();
-
   if (r && r.ok) {
     const t = tasks.find(x => x.id === tacheId);
     if (t) { t.statut = 'EN_COURS'; t.dateDebut = new Date().toLocaleString('fr-FR'); }
-    renderTasks(tasks);
+    renderDashboard(); renderTaskList();
     showToast('Tâche démarrée', 'success');
   } else {
     showToast('Erreur lors du démarrage', 'error');
@@ -725,45 +896,35 @@ async function confirmStop() {
   const t = tasks.find(x => x.id === pendingStop);
   if (!t) return;
   const comment = document.getElementById('stopComment').value.trim();
-
   closeStopModal();
   showLoader();
   const r = await apiWrite({
-    action: 'pointerAction',
-    tacheId: pendingStop,
-    action_: 'END',
-    etapeCode: t.etapeCode,
-    commentaire: comment
+    action:'pointerAction', tacheId:pendingStop,
+    action_:'END', etapeCode:t.etapeCode, commentaire:comment
   });
   hideLoader();
-
   if (r && r.ok) {
     t.statut = 'TERMINE';
     t.dateFin = new Date().toLocaleDateString('fr-FR');
     if (comment) t.commentaire = comment;
-    // Retrier : les terminées passent en bas
-    const order = { EN_COURS: 0, A_FAIRE: 1, TERMINE: 2 };
-    tasks.sort((a, b) => (order[a.statut] ?? 3) - (order[b.statut] ?? 3));
-    renderTasks(tasks);
+    const orderMap = { EN_COURS:0, A_FAIRE:1, TERMINE:2 };
+    tasks.sort((a,b) => (orderMap[a.statut]??3) - (orderMap[b.statut]??3));
+    renderDashboard(); renderTaskList();
     showToast('Tâche terminée', 'success');
   } else {
     showToast('Erreur lors de la finalisation', 'error');
   }
 }
 
-// ============================================================
+// ════════════════════════════════════════
 // INIT
-// ============================================================
+// ════════════════════════════════════════
 (function init() {
-  // Restaurer session si disponible
   const saved = sessionStorage.getItem('op-user');
   if (saved) {
     try {
       currentUser = JSON.parse(saved);
-      if (currentUser && ALLOWED_ROLES.includes(currentUser.role)) {
-        enterMain();
-        return;
-      }
+      if (currentUser && ALLOWED_ROLES.includes(currentUser.role)) { enterMain(); return; }
     } catch(e) {}
   }
   document.getElementById('loginScreen').style.display = 'flex';
