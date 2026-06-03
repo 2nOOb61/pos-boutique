@@ -144,6 +144,8 @@ let currentFinalizeResId = null;
 // UTILS
 // ============================================================
 function fmt(n) { const v = Number(n); return (isNaN(v) ? 0 : v).toLocaleString('fr-MG') + ' Ar'; }
+// Comparaison insensible à la casse et aux espaces — utilisée pour matcher les opérateurs
+function _sameOp(a, b) { return (a||'').trim().toLowerCase() === (b||'').trim().toLowerCase(); }
 function now() { return new Date().toLocaleString('fr-MG'); }
 
 // ── Sécurité : protection XSS pour les données utilisateur ──
@@ -5741,7 +5743,7 @@ function printProductionReport() {
 
   // Filtrer taches visibles + filtre date (par dateAssignation)
   let list = isAdminOrChef ? [...taches, ...tachesLibres]
-           : [...taches, ...tachesLibres].filter(t => t.operateur === myLabel);
+           : [...taches, ...tachesLibres].filter(t => _sameOp(t.operateur, myLabel));
   list = list.filter(t => _matchDateFilter(t.dateAssignation, prodDateFilter));
   if (prodFilter !== 'TOUS') list = list.filter(t => t.statut === prodFilter);
 
@@ -6560,7 +6562,7 @@ function renderAttrPanel(tachesD, commentsD = []) {
       const currentUser_role = currentUser?.role||'';
       const canAssign = ['admin','chef_atelier'].includes(currentUser_role);
       const etapeComplete = tachesEtape.length > 0 && tachesEtape.every(t => t.statut === 'TERMINE');
-      const alreadySelfAssigned = tachesEtape.some(t => t.operateur === currentUser?.label);
+      const alreadySelfAssigned = tachesEtape.some(t => _sameOp(t.operateur, currentUser?.label));
       // Seul le rôle correspondant à l'étape peut s'auto-assigner
       const ROLE_ETAPE_MAP = { pao:'PAO', operateur_prod:'PRODUCTION', machiniste:'PRODUCTION', finition:'FINITION', livreur:'LIVRE' };
       const userEtape = ROLE_ETAPE_MAP[currentUser_role];
@@ -6847,7 +6849,17 @@ function openAttrib(etapeCode, etapeLabel) {
   if (!selectedDossier) return;
   pendingAttrib = { etapeCode, etapeLabel };
   document.getElementById('attribContextText').textContent = `${selectedDossier.numeroDossier} — ${etapeLabel}`;
-  const list = document.getElementById('attribOpList');
+  document.getElementById('attribComment').value = '';
+  _renderAttribUserList();
+  openModal('attribModal');
+  // Recharger les utilisateurs depuis GAS en arrière-plan pour avoir la liste complète
+  if (APPS_SCRIPT_URL) {
+    loadUsersFromScript().then(() => _renderAttribUserList()).catch(() => {});
+  }
+}
+
+function _renderAttribUserList() {
+  const list  = document.getElementById('attribOpList');
   const users = localUsers.filter(u => u.actif !== false);
   list.innerHTML = users.length ? users.map(u => {
     const displayName = u.label || u.username;
@@ -6858,8 +6870,6 @@ function openAttrib(etapeCode, etapeLabel) {
     </label>`;
   }).join('')
   : '<div style="color:var(--color-text-muted);font-size:13px;padding:12px">Aucun utilisateur actif</div>';
-  document.getElementById('attribComment').value = '';
-  openModal('attribModal');
 }
 
 async function confirmAttribution() {
@@ -7136,7 +7146,7 @@ function _buildProgressBar(dossierId) {
 function _buildMonDashboard() {
   if (!currentUser) return '';
   const myLabel  = currentUser.label || currentUser.username || '';
-  const myTaches = [...taches, ...tachesLibres].filter(t => t.operateur === myLabel);
+  const myTaches = [...taches, ...tachesLibres].filter(t => _sameOp(t.operateur, myLabel));
   if (!myTaches.length) return '';
 
   const blocking = myTaches.filter(t => {
@@ -7214,7 +7224,7 @@ function _tacheRow(t) {
   const isEC   = t.statut === 'EN_COURS';
   const isDone = t.statut === 'TERMINE';
   const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
-  const canInteract   = isAdminOrChef || t.operateur === currentUser?.label;
+  const canInteract   = isAdminOrChef || _sameOp(t.operateur, currentUser?.label);
 
   let isStepBlocked = false; let blockedByStep = '';
   if (!isLibre && !isEC && !isDone) {
@@ -7388,9 +7398,9 @@ function _renderChargeView() {
       const dotBg  = isEC ? '#d97706' : isDone ? '#16a34a' : '#2563eb';
       const d = dossiers.find(x => x.id === t.dossierId);
       const isUrgent = d?.priorite === 'Urgente';
-      const btn = isEC && (isAdminOrChef || op === myLabel)
+      const btn = isEC && (isAdminOrChef || _sameOp(op, myLabel))
         ? `<button class="charge-task-btn" onclick="openPointage('${t.id}','${t.etapeCode||''}','${(t.numeroDossier||t.titre||'').replace(/'/g,"\\'")}'); event.stopPropagation();" style="background:var(--color-success-bg);color:var(--color-success)"></button>`
-        : t.statut === 'A_FAIRE' && (isAdminOrChef || op === myLabel)
+        : t.statut === 'A_FAIRE' && (isAdminOrChef || _sameOp(op, myLabel))
           ? `<button class="charge-task-btn" onclick="pointerStart('${t.id}'); event.stopPropagation();" style="background:var(--color-primary-light);color:var(--color-primary)">▶</button>`
           : '';
       return `<div class="charge-task-row ${isEC?'charge-task-row--encours':''} ${isDone?'charge-task-row--done':''}" onclick="openAttribForDossier('${t.dossierId}')">
@@ -7521,21 +7531,21 @@ function renderTaches() {
   // Peupler le sélecteur d'années depuis les tâches
   _populateYearSel('prodYearSel', [...taches, ...tachesLibres].map(t => t.dateAssignation));
 
-  let dossierList = isAdminOrChef ? taches : taches.filter(t => t.operateur === myLabel);
+  let dossierList = isAdminOrChef ? taches : taches.filter(t => _sameOp(t.operateur, myLabel));
   if (prodFilter === 'EN_RETARD') dossierList = dossierList.filter(t => _getTacheRetardInfo(t).isRetard);
   else if (prodFilter !== 'TOUS') dossierList = dossierList.filter(t => t.statut === prodFilter);
   if (prodDateFilter.mois || prodDateFilter.annee)
     dossierList = dossierList.filter(t => _matchDateFilter(t.dateAssignation, prodDateFilter));
 
-  let libreList = isAdminOrChef ? tachesLibres : tachesLibres.filter(t => t.operateur === myLabel);
+  let libreList = isAdminOrChef ? tachesLibres : tachesLibres.filter(t => _sameOp(t.operateur, myLabel));
   if (prodFilter === 'EN_RETARD') libreList = [];
   else if (prodFilter !== 'TOUS') libreList = libreList.filter(t => t.statut === prodFilter);
   if (prodDateFilter.mois || prodDateFilter.annee)
     libreList = libreList.filter(t => _matchDateFilter(t.dateAssignation, prodDateFilter));
 
   // Mettre à jour les compteurs dans les boutons filtre (sur données non filtrées par date)
-  const allVisible = [...taches, ...tachesLibres].filter(t => isAdminOrChef || t.operateur === myLabel);
-  const retardCount = taches.filter(t => (isAdminOrChef || t.operateur === myLabel) && _getTacheRetardInfo(t).isRetard).length;
+  const allVisible = [...taches, ...tachesLibres].filter(t => isAdminOrChef || _sameOp(t.operateur, myLabel));
+  const retardCount = taches.filter(t => (isAdminOrChef || _sameOp(t.operateur, myLabel)) && _getTacheRetardInfo(t).isRetard).length;
   const _cnt = s => s === 'EN_RETARD' ? retardCount : allVisible.filter(t => s==='TOUS'||t.statut===s).length;
   ['TOUS','A_FAIRE','EN_COURS','TERMINE','EN_RETARD'].forEach(s => {
     const sfx = {'TOUS':'Tous','A_FAIRE':'AFaire','EN_COURS':'EnCours','TERMINE':'Termine','EN_RETARD':'Retard'}[s];
@@ -7607,7 +7617,7 @@ async function pointerStart(tacheId) {
   const t = isLibre ? tachesLibres.find(x => x.id === tacheId) : taches.find(x => x.id === tacheId);
   if (!t) return;
   // Guard 1 : seul l'opérateur assigné (ou admin/chef) peut démarrer la tâche
-  if (!isAdminOrChef && t.operateur !== currentUser?.label) {
+  if (!isAdminOrChef && !_sameOp(t.operateur, currentUser?.label)) {
     showToast('Vous ne pouvez pas démarrer une tâche qui ne vous est pas assignée.', 'error');
     return;
   }
