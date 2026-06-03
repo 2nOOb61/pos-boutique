@@ -4982,18 +4982,30 @@ function _createDossierFromSource(type, source) {
   return dossier;
 }
 
+// Génère un dossierId stable et unique basé sur l'ID + date de création.
+// Déterministe : se recalcule identiquement depuis les données GAS après restauration.
+// Unique : deux réservations avec le même ID mais des dates différentes ont des dossierId distincts.
+function _stableDossierId(type, source) {
+  const prefix = type === 'commande' ? 'CMD' : 'RES';
+  const datePart = source.date
+    ? String(new Date(source.date).getTime()).slice(-9)
+    : String(source.id).padStart(9, '0');
+  return `D_${prefix}_${source.id}_${datePart}`;
+}
+
 function _ensureDossierLinks() {
-  // Toujours reconstruire — dossiers[] n'est pas persisté, donc on recrée depuis la source à chaque fois
-  // Seules les commandes/réservations "pending" génèrent un dossier d'attribution ;
-  // les autres reçoivent leur dossierId (pour les liens internes) sans créer de dossier dans la liste.
+  let needsSave = false;
   commandes.forEach(c => {
-    c.dossierId = `D_COMMANDE_${c.id}`;
+    const stable = _stableDossierId('commande', c);
+    if (c.dossierId !== stable) { c.dossierId = stable; needsSave = true; }
     if (c.status === 'pending') _createDossierFromSource('commande', c);
   });
   reservations.forEach(r => {
-    r.dossierId = `D_RESERVATION_${r.id}`;
+    const stable = _stableDossierId('reservation', r);
+    if (r.dossierId !== stable) { r.dossierId = stable; needsSave = true; }
     if (r.status === 'pending') _createDossierFromSource('reservation', r);
   });
+  if (needsSave) saveData(); // persiste les nouveaux dossierId migrés
 }
 
 async function _loadTachesQuietly() {
