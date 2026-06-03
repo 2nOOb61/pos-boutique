@@ -3770,6 +3770,18 @@ async function resetCompletPOS() {
   if (scriptUrl)  localStorage.setItem('pos-script-url', scriptUrl);
   if (appVersion) localStorage.setItem('pos-app-version', appVersion);
 
+  // Écraser les données demo codées en dur avec des tableaux vides
+  localStorage.setItem('pos-products',      JSON.stringify([]));
+  localStorage.setItem('pos-sales',         JSON.stringify([]));
+  localStorage.setItem('pos-reservations',  JSON.stringify([]));
+  localStorage.setItem('pos-commandes',     JSON.stringify([]));
+  localStorage.setItem('pos-taches',        JSON.stringify([]));
+  localStorage.setItem('pos-notifications', JSON.stringify([]));
+  localStorage.setItem('pos-nextId',        '1');
+  localStorage.setItem('pos-nextSaleId',    '1');
+  localStorage.setItem('pos-nextResId',     '1');
+  localStorage.setItem('pos-nextCmdId',     '1');
+
   hideLoader();
   showToast('✅ Données effacées — rechargement...', 'info');
   setTimeout(() => window.location.reload(true), 1500);
