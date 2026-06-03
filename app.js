@@ -6362,10 +6362,17 @@ function renderAttrPanel(tachesD, commentsD = []) {
       <button class="btn-back-dossier" onclick="backToDossierList()" style="display:none;align-items:center;gap:4px;padding:5px 10px;border-radius:7px;background:var(--color-primary-light);color:var(--color-primary);border:1px solid rgba(26,74,58,.2);cursor:pointer;font-size:12px;font-weight:600;margin-bottom:10px">
         ← Retour
       </button>
-      <div class="attr-panel-dossier-meta">
-        <span>${d.numeroDossier}</span>
-        ${d.sourceVente?`<span>·</span><span>${d.sourceVente}</span>`:''}
-        ${d.dateCreation?`<span>·</span><span>${d.dateCreation}</span>`:''}
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div class="attr-panel-dossier-meta">
+          <span>${d.numeroDossier}</span>
+          ${d.sourceVente?`<span>·</span><span>${d.sourceVente}</span>`:''}
+          ${d.dateCreation?`<span>·</span><span>${d.dateCreation}</span>`:''}
+        </div>
+        <button onclick="printDossier('${d.id}')" title="Imprimer le dossier"
+          style="display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:7px;background:var(--color-primary);color:#fff;border:none;cursor:pointer;font-size:11px;font-weight:600;flex-shrink:0">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+          Imprimer
+        </button>
       </div>
       <div class="attr-panel-title">${d.produit}</div>
       <div class="attr-panel-sub">
@@ -6453,6 +6460,210 @@ function renderAttrPanel(tachesD, commentsD = []) {
   // Initialiser la section commentaires
   commentAttachments = [];
   renderCommentsSection(d.id, commentsD);
+}
+
+function printDossier(dossierId) {
+  _ensureDossierLinks();
+  const d = dossiers.find(x => x.id === dossierId) || selectedDossier;
+  if (!d) { showToast('Dossier introuvable', 'error'); return; }
+
+  // Source (réservation ou commande)
+  let src = null;
+  if (d.sourceType && d.sourceId) {
+    src = d.sourceType === 'reservation'
+      ? reservations.find(r => String(r.id) === String(d.sourceId))
+      : commandes.find(c => String(c.id) === String(d.sourceId));
+  }
+
+  const tachesD = taches.filter(t => t.dossierId === d.id);
+  const tc = shopConfig || {};
+  const shopName = tc.name || 'FOREVER MG';
+  const shopPhone = tc.phone || '';
+  const shopAddress = tc.address || '';
+
+  // ── Articles
+  const items = src?.items || [];
+  const itemsHtml = items.length
+    ? items.map(i => `
+        <tr>
+          <td style="padding:7px 10px;border-bottom:1px solid #e5e3df;font-size:12pt;color:#1c1917;font-weight:500">${i.name || '?'}</td>
+          <td style="padding:7px 10px;border-bottom:1px solid #e5e3df;text-align:center;font-size:12pt;font-weight:700;color:#1a4a3a">${i.qty || 1}</td>
+          ${i.custom ? `<td style="padding:7px 10px;border-bottom:1px solid #e5e3df;font-size:10pt;color:#78716c;font-style:italic">Personnalisé</td>` : '<td></td>'}
+        </tr>`).join('')
+    : `<tr><td colspan="3" style="padding:10px;color:#a8a29e;font-style:italic;font-size:11pt">Aucun article</td></tr>`;
+
+  // ── Pipeline de production
+  const pipelineHtml = ETAPES_CONFIG.map(e => {
+    const te = tachesD.filter(t => t.etapeCode === e.code);
+    const done = te.length > 0 && te.every(t => t.statut === 'TERMINE');
+    const inProgress = te.some(t => t.statut === 'EN_COURS');
+    const assigned = te.length > 0;
+    const statusColor = done ? '#16a34a' : inProgress ? '#d97706' : assigned ? '#2563eb' : '#a8a29e';
+    const statusBg    = done ? '#dcfce7'  : inProgress ? '#fef3c7'  : assigned ? '#dbeafe'  : '#f5f5f4';
+    const statusLabel = done ? 'Terminé'  : inProgress ? 'En cours' : assigned ? 'Assigné'  : 'Non assigné';
+    const ops = te.map(t => t.operateur).join(', ') || '—';
+    return `
+      <tr>
+        <td style="padding:7px 10px;border-bottom:1px solid #e5e3df;font-size:11pt;font-weight:600;color:#1c1917">${e.label}</td>
+        <td style="padding:7px 10px;border-bottom:1px solid #e5e3df;font-size:10pt;color:#78716c">${ops}</td>
+        <td style="padding:7px 10px;border-bottom:1px solid #e5e3df;text-align:center">
+          <span style="background:${statusBg};color:${statusColor};font-size:9pt;font-weight:700;padding:2px 8px;border-radius:10px;white-space:nowrap">${statusLabel}</span>
+        </td>
+      </tr>`;
+  }).join('');
+
+  // ── Images et pièces jointes
+  const attachments = src?.attachments || [];
+  const photos = src?.photos || [];
+  const allImages = [
+    ...attachments.filter(a => (a.type || '').startsWith('image/')).map(a => ({ src: _driveImgSrc(a) || a.data || '', name: a.name })),
+    ...photos.filter(p => p.data || p.url).map(p => ({ src: p.data || p.url || '', name: p.name || 'Photo' }))
+  ].filter(img => img.src);
+  const nonImageAttach = attachments.filter(a => !(a.type || '').startsWith('image/'));
+
+  const imagesHtml = allImages.length
+    ? `<div style="margin-bottom:28px">
+        <h2 style="font-size:12pt;font-weight:700;color:#1a4a3a;border-left:3px solid #e8834a;padding-left:10px;margin-bottom:12px;text-transform:uppercase;letter-spacing:.05em">Images & Photos</h2>
+        <div style="display:flex;flex-wrap:wrap;gap:10px">
+          ${allImages.map(img => `
+            <div style="text-align:center">
+              <img src="${img.src}" style="width:160px;height:120px;object-fit:cover;border-radius:8px;border:1px solid #e5e3df;display:block" />
+              <div style="font-size:8pt;color:#78716c;margin-top:4px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${img.name}</div>
+            </div>`).join('')}
+        </div>
+      </div>`
+    : '';
+
+  const nonImageHtml = nonImageAttach.length
+    ? `<div style="margin-bottom:28px">
+        <h2 style="font-size:12pt;font-weight:700;color:#1a4a3a;border-left:3px solid #e8834a;padding-left:10px;margin-bottom:12px;text-transform:uppercase;letter-spacing:.05em">Fichiers joints</h2>
+        ${nonImageAttach.map(a => `<div style="padding:6px 10px;background:#f8f7f4;border:1px solid #e5e3df;border-radius:6px;font-size:10pt;color:#1c1917;margin-bottom:6px">📎 ${a.name}</div>`).join('')}
+      </div>`
+    : '';
+
+  // ── Infos livraison/retrait
+  const deliveryHtml = src?.deliveryMode === 'livraison'
+    ? `<div style="padding:10px 14px;background:#fdf0e8;border:1px solid rgba(232,131,74,.3);border-radius:8px;margin-bottom:14px">
+        <div style="font-size:10pt;font-weight:700;color:#e8834a;margin-bottom:4px">LIVRAISON À DOMICILE</div>
+        ${src.deliveryAddress ? `<div style="font-size:11pt;color:#1c1917">${src.deliveryAddress}</div>` : ''}
+        ${src.deliveryDate ? `<div style="font-size:10pt;color:#78716c;margin-top:3px">Date prévue : <strong>${new Date(src.deliveryDate+'T00:00:00').toLocaleDateString('fr-FR')}</strong></div>` : ''}
+      </div>`
+    : src
+    ? `<div style="padding:8px 14px;background:#e8f4f0;border:1px solid rgba(26,74,58,.2);border-radius:8px;margin-bottom:14px;font-size:10pt;color:#1a4a3a;font-weight:600">RETRAIT EN BOUTIQUE</div>`
+    : '';
+
+  // ── Notes
+  const notesHtml = src?.notes
+    ? `<div style="padding:10px 14px;background:#fef3c7;border-left:3px solid #d97706;border-radius:6px;margin-bottom:14px;font-size:11pt;color:#1c1917"><strong>Notes :</strong> ${src.notes}</div>`
+    : '';
+
+  // ── Priorité / statut
+  const prioColor = d.priorite==='Urgente'?'#dc2626':d.priorite==='Haute'?'#d97706':'#16a34a';
+  const prioBg    = d.priorite==='Urgente'?'#fee2e2':d.priorite==='Haute'?'#fef3c7':'#dcfce7';
+  const etapeCur  = ETAPES_CONFIG.find(e => e.code === d.statut);
+  const pct       = d.progression || 0;
+
+  const html = `
+    <!DOCTYPE html><html lang="fr"><head>
+    <meta charset="UTF-8">
+    <title>Dossier ${d.numeroDossier}</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: 'DM Sans', Arial, sans-serif; background: #fff; color: #1c1917; padding: 30px; font-size: 12pt; }
+      @media print {
+        body { padding: 15px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .no-print { display: none !important; }
+      }
+    </style>
+    </head><body>
+
+    <!-- EN-TÊTE BOUTIQUE -->
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1a4a3a;padding-bottom:14px;margin-bottom:22px">
+      <div>
+        <div style="font-size:18pt;font-weight:800;color:#1a4a3a;letter-spacing:-.02em">${shopName}</div>
+        ${shopPhone ? `<div style="font-size:10pt;color:#78716c;margin-top:2px">${shopPhone}</div>` : ''}
+        ${shopAddress ? `<div style="font-size:10pt;color:#78716c">${shopAddress}</div>` : ''}
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:20pt;font-weight:900;color:#1a4a3a;letter-spacing:-.03em">${d.numeroDossier}</div>
+        <div style="font-size:9pt;color:#78716c;margin-top:2px">Créé le ${d.dateCreation || '—'}</div>
+        <div style="font-size:9pt;color:#78716c">Imprimé le ${new Date().toLocaleDateString('fr-FR', {day:'2-digit',month:'long',year:'numeric'})}</div>
+      </div>
+    </div>
+
+    <!-- FICHE CLIENT & STATUT -->
+    <div style="display:flex;gap:16px;margin-bottom:22px">
+      <div style="flex:1;padding:14px 16px;background:#f8f7f4;border-radius:10px;border:1px solid #e5e3df">
+        <div style="font-size:9pt;font-weight:700;color:#78716c;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Client</div>
+        <div style="font-size:14pt;font-weight:700;color:#1c1917">${src?.clientName || d.client || '—'}</div>
+        ${src?.clientContact ? `<div style="font-size:11pt;color:#78716c;margin-top:4px">📞 ${src.clientContact}</div>` : ''}
+        ${src?.clientType ? `<div style="font-size:10pt;color:#78716c;margin-top:2px">${src.clientType}</div>` : ''}
+      </div>
+      <div style="padding:14px 16px;background:#f8f7f4;border-radius:10px;border:1px solid #e5e3df;min-width:180px">
+        <div style="font-size:9pt;font-weight:700;color:#78716c;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Statut dossier</div>
+        <div style="font-size:11pt;font-weight:700;color:${etapeCur?.color||'#1a4a3a'};margin-bottom:6px">${etapeCur?.label || d.statut || 'Créé'}</div>
+        <div style="height:6px;background:#e5e3df;border-radius:6px;overflow:hidden;margin-bottom:6px">
+          <div style="height:100%;width:${pct}%;background:${pct===100?'#16a34a':pct>0?'#e8834a':'#e5e3df'};border-radius:6px"></div>
+        </div>
+        <div style="font-size:10pt;color:#78716c">Progression : <strong>${pct}%</strong></div>
+        <div style="margin-top:8px">
+          <span style="background:${prioBg};color:${prioColor};font-size:9pt;font-weight:700;padding:2px 10px;border-radius:10px">${d.priorite || 'Normale'}</span>
+        </div>
+      </div>
+    </div>
+
+    ${deliveryHtml}
+    ${notesHtml}
+
+    <!-- ARTICLES -->
+    <div style="margin-bottom:28px">
+      <h2 style="font-size:12pt;font-weight:700;color:#1a4a3a;border-left:3px solid #e8834a;padding-left:10px;margin-bottom:12px;text-transform:uppercase;letter-spacing:.05em">
+        Articles commandés — Qté totale : ${d.quantite}
+      </h2>
+      <table style="width:100%;border-collapse:collapse;border:1px solid #e5e3df;border-radius:8px;overflow:hidden">
+        <thead>
+          <tr style="background:#1a4a3a;color:#fff">
+            <th style="padding:8px 10px;text-align:left;font-size:10pt;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Article</th>
+            <th style="padding:8px 10px;text-align:center;font-size:10pt;font-weight:700;text-transform:uppercase;letter-spacing:.06em;width:80px">Qté</th>
+            <th style="padding:8px 10px;text-align:left;font-size:10pt;font-weight:700;text-transform:uppercase;letter-spacing:.06em;width:120px">Note</th>
+          </tr>
+        </thead>
+        <tbody>${itemsHtml}</tbody>
+      </table>
+    </div>
+
+    ${imagesHtml}
+    ${nonImageHtml}
+
+    <!-- PIPELINE PRODUCTION -->
+    <div style="margin-bottom:28px">
+      <h2 style="font-size:12pt;font-weight:700;color:#1a4a3a;border-left:3px solid #e8834a;padding-left:10px;margin-bottom:12px;text-transform:uppercase;letter-spacing:.05em">Suivi de production</h2>
+      <table style="width:100%;border-collapse:collapse;border:1px solid #e5e3df;border-radius:8px;overflow:hidden">
+        <thead>
+          <tr style="background:#f8f7f4">
+            <th style="padding:8px 10px;text-align:left;font-size:10pt;font-weight:700;color:#78716c;text-transform:uppercase;letter-spacing:.06em">Étape</th>
+            <th style="padding:8px 10px;text-align:left;font-size:10pt;font-weight:700;color:#78716c;text-transform:uppercase;letter-spacing:.06em">Opérateur(s)</th>
+            <th style="padding:8px 10px;text-align:center;font-size:10pt;font-weight:700;color:#78716c;text-transform:uppercase;letter-spacing:.06em;width:100px">Statut</th>
+          </tr>
+        </thead>
+        <tbody>${pipelineHtml}</tbody>
+      </table>
+    </div>
+
+    <!-- PIED DE PAGE -->
+    <div style="border-top:1px solid #e5e3df;padding-top:12px;margin-top:20px;display:flex;justify-content:space-between;align-items:center">
+      <div style="font-size:9pt;color:#a8a29e">${shopName} — Document interne</div>
+      <div style="font-size:9pt;color:#a8a29e">${d.numeroDossier} · ${d.sourceVente || ''}</div>
+    </div>
+
+    </body></html>`;
+
+  const w = window.open('', '_blank', 'width=900,height=700');
+  if (!w) { showToast('Popup bloqué — autorisez les popups pour ce site', 'error'); return; }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  setTimeout(() => w.print(), 400);
 }
 
 async function refreshComments(dossierId) {
