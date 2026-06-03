@@ -5010,6 +5010,24 @@ async function _loadTachesQuietly() {
       try { const raw = localStorage.getItem('pos-taches'); taches = raw ? JSON.parse(raw) : []; } catch(e2) { taches = []; }
     }
   }
+  // Purger les taches orphelines : dont le dossier source n'est plus en cours (pending)
+  // Évite qu'une nouvelle réservation hérite des taches d'une ancienne avec le même ID
+  _purgeOrphanTaches();
+}
+
+function _purgeOrphanTaches() {
+  // Construire l'ensemble des dossierId valides (réservations + commandes encore pending)
+  const validIds = new Set([
+    ...reservations.filter(r => r.status === 'pending').map(r => `D_RESERVATION_${r.id}`),
+    ...commandes.filter(c => c.status === 'pending').map(c => `D_COMMANDE_${c.id}`),
+    'LIBRE' // taches libres toujours valides
+  ]);
+  const before = taches.length;
+  taches = taches.filter(t => t.dossierId === 'LIBRE' || validIds.has(t.dossierId));
+  if (taches.length < before) {
+    saveTaches();
+    console.log(`[Taches] ${before - taches.length} tache(s) orpheline(s) purgée(s)`);
+  }
 }
 
 function openAttribForDossier(dossierId) {
@@ -5964,6 +5982,7 @@ async function loadDossiers() {
   }
   // Toujours fusionner les dossiers issus des commandes/réservations (non persistés)
   _ensureDossierLinks();
+  _purgeOrphanTaches();
   renderDossiers();
   // Sélection différée depuis openAttribForDossier
   if (_pendingSelectDossierId) {
