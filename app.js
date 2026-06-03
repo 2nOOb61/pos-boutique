@@ -1173,6 +1173,7 @@ function _doFinalize(r, method, given, change, provider, ref) {
   showToast(`✅ Vente #${sale.id} enregistrée — Réservation #${r.id} finalisée !`);
   renderReservations();
   updateResBadge();
+  _deleteTachesForDossier(r.dossierId);
 }
 
 // ============================================================
@@ -1205,6 +1206,8 @@ function cancelReservation(id) {
   });
   showToast(`Réservation #${r.id} annulée — stock restitué`, 'info');
   syncReservationCompleteToSheets(r);
+  // Supprimer les taches du dossier pour éviter contamination si l'ID est réutilisé
+  _deleteTachesForDossier(r.dossierId);
 }
 
 // ============================================================
@@ -4743,6 +4746,7 @@ function cancelCommande(id) {
     message:       `Commande #${c.id} annulée — ${c.clientName}`
   });
   showToast(`Commande #${c.id} annulée`, 'info');
+  _deleteTachesForDossier(c.dossierId);
 }
 
 // ============================================================
@@ -5013,6 +5017,25 @@ async function _loadTachesQuietly() {
   // Purger les taches orphelines : dont le dossier source n'est plus en cours (pending)
   // Évite qu'une nouvelle réservation hérite des taches d'une ancienne avec le même ID
   _purgeOrphanTaches();
+}
+
+function _deleteTachesForDossier(dossierId) {
+  if (!dossierId) return;
+  // Retirer de la mémoire locale
+  taches = taches.filter(t => t.dossierId !== dossierId);
+  saveTaches();
+  // Supprimer dans GAS
+  if (APPS_SCRIPT_URL) apiCall({ action: 'deleteTachesDossier', dossierId }).catch(() => {});
+}
+
+async function resetTachesDossier(dossierId) {
+  if (!dossierId) return;
+  if (!confirm('Réinitialiser toutes les tâches de ce dossier ?\nLes assignations et statuts seront effacés.')) return;
+  _deleteTachesForDossier(dossierId);
+  showToast('Tâches réinitialisées', 'info');
+  // Re-rendre le panel avec taches vides
+  const emptyTaches = [];
+  renderAttrPanel(emptyTaches, dossierComments.filter(c => c.dossierId === dossierId));
 }
 
 function _purgeOrphanTaches() {
@@ -6387,11 +6410,18 @@ function renderAttrPanel(tachesD, commentsD = []) {
           ${d.sourceVente?`<span>·</span><span>${d.sourceVente}</span>`:''}
           ${d.dateCreation?`<span>·</span><span>${d.dateCreation}</span>`:''}
         </div>
-        <button onclick="printDossier('${d.id}')" title="Imprimer le dossier"
-          style="display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:7px;background:var(--color-primary);color:#fff;border:none;cursor:pointer;font-size:11px;font-weight:600;flex-shrink:0">
-          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
-          Imprimer
-        </button>
+        <div style="display:flex;gap:6px">
+          <button onclick="resetTachesDossier('${d.id}')" title="Réinitialiser les tâches"
+            style="display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:7px;background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;cursor:pointer;font-size:11px;font-weight:600;flex-shrink:0">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.2"/></svg>
+            Reset tâches
+          </button>
+          <button onclick="printDossier('${d.id}')" title="Imprimer le dossier"
+            style="display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:7px;background:var(--color-primary);color:#fff;border:none;cursor:pointer;font-size:11px;font-weight:600;flex-shrink:0">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+            Imprimer
+          </button>
+        </div>
       </div>
       <div class="attr-panel-title">${d.produit}</div>
       <div class="attr-panel-sub">
