@@ -193,7 +193,14 @@ function initSheets() {
   ensureSheet(ss, SHEET_SALES,      ['ID','Date','Heure','Article','Quantite','Prix_Unitaire','Sous_Total','Total_Vente','Paiement','Fournisseur','Reference','Caissier']);
   ensureSheet(ss, SHEET_STOCK_LOG,  ['Date','Article','Type','Quantite','Stock_Avant','Stock_Apres','Motif','Caissier']);
   ensureSheet(ss, SHEET_USERS,      ['Username','MotDePasse','Role','Nom','Actif']);
-  ensureSheet(ss, SHEET_RESERVATIONS,['ID','Date','Heure','Client_Nom','Client_Contact','Article','Quantite','Prix_Unitaire','Sous_Total_Article','Sous_Total_Vente','Remise','Net_A_Payer','Accompte','Restant','Mode_Depot','Fournisseur_Mobile','Reference','Caissier','Statut','Date_Finalisation','Vente_ID']);
+  // Réservations — ajouter col 22 Attachments_JSON si absente
+  const resSh = ss.getSheetByName(SHEET_RESERVATIONS) || ss.insertSheet(SHEET_RESERVATIONS);
+  const resHeaders = resSh.getLastColumn() > 0 ? resSh.getRange(1,1,1,resSh.getLastColumn()).getValues()[0] : [];
+  if (!resHeaders.includes('Attachments_JSON')) {
+    const col = Math.max(resHeaders.length, 21) + 1;
+    resSh.getRange(1, col).setValue('Attachments_JSON');
+  }
+  ensureSheet(ss, SHEET_RESERVATIONS,['ID','Date','Heure','Client_Nom','Client_Contact','Article','Quantite','Prix_Unitaire','Sous_Total_Article','Sous_Total_Vente','Remise','Net_A_Payer','Accompte','Restant','Mode_Depot','Fournisseur_Mobile','Reference','Caissier','Statut','Date_Finalisation','Vente_ID','Attachments_JSON']);
   // Commandes client — mise à jour de l'en-tête si besoin
   const cmdSh = ss.getSheetByName(SHEET_COMMANDES) || ss.insertSheet(SHEET_COMMANDES);
   cmdSh.getRange(1, 1, 1, 22).setValues([['ID','Date','Caissier','Client_Nom','Client_Contact','Articles','Mode_Livraison','Adresse_Livraison','Frais_Livraison','Date_Livraison','Sous_Total','Remise','Total','Accompte','Restant','Mode_Depot','Fournisseur_Mobile','Reference','Notes','Statut','Date_Finalisation','Vente_ID']]);
@@ -590,6 +597,9 @@ function handleGetReservations() {
         statut:         sheetStatut,
         dateFinalisation: r[19] || null,
         saleId:         r[20] || null,
+        attachments:    (function() {
+          try { return r[21] ? JSON.parse(String(r[21])) : []; } catch(e) { return []; }
+        })(),
       };
       order.push(id);
     }
@@ -629,19 +639,27 @@ function handleAddReservation(data) {
   const caissier     = r.caissier        || '';
   const items        = Array.isArray(r.items) ? r.items : [];
 
+  // Métadonnées pièces jointes (fileId/URL Drive uniquement, pas de base64)
+  var attachMeta = JSON.stringify(
+    (Array.isArray(r.attachments) ? r.attachments : []).map(function(a) {
+      return { name:a.name||'', type:a.type||'', fileId:a.fileId||'', viewUrl:a.viewUrl||'', dlUrl:a.dlUrl||'' };
+    }).filter(function(a) { return a.fileId || a.viewUrl; })
+  );
+
   if (items.length === 0) {
     // Aucun article — une ligne de repli
     sh.appendRow([id, dateStr, heureStr, clientNom, clientTel,
       '', 0, 0, 0, total, remise, total, accompte, restant,
-      modeDepot, fournisseur, reference, caissier, 'En attente', '', '']);
+      modeDepot, fournisseur, reference, caissier, 'En attente', '', '', attachMeta]);
   } else {
-    // Une ligne par article
-    items.forEach(item => {
-      const sousTotal = (Number(item.price) || 0) * (Number(item.qty) || 0);
+    // Une ligne par article — Attachments_JSON uniquement sur la première ligne
+    items.forEach(function(item, idx) {
+      var sousTotal = (Number(item.price) || 0) * (Number(item.qty) || 0);
       sh.appendRow([id, dateStr, heureStr, clientNom, clientTel,
         item.name || '', Number(item.qty) || 1, Number(item.price) || 0,
         sousTotal, total, remise, total, accompte, restant,
-        modeDepot, fournisseur, reference, caissier, 'En attente', '', '']);
+        modeDepot, fournisseur, reference, caissier, 'En attente', '', '',
+        idx === 0 ? attachMeta : '']);
     });
   }
   return { ok:true, id };

@@ -3544,6 +3544,11 @@ async function syncReservationToSheets(res) {
     deliveryDate:    res.deliveryDate,
     clientType:      res.clientType,
     clientCompany:   res.clientCompany,
+    // Métadonnées pièces jointes (fileId/URL Drive uniquement, jamais le base64)
+    attachments:     (res.attachments || []).map(a => ({
+      name: a.name || '', type: a.type || '',
+      fileId: a.fileId || '', viewUrl: a.viewUrl || '', dlUrl: a.dlUrl || ''
+    })).filter(a => a.fileId || a.viewUrl),
   };
   const r = await apiCall({ action: 'addReservation', reservation: payload });
   if (!r || !r.ok) {
@@ -4869,7 +4874,7 @@ async function loadCommandesFromScript() {
       const local = commandes.find(lc => String(lc.id) === String(c.id));
       return {
         ...c,
-        photos:    (local?.photos?.length    ? local.photos    : c.photos)    || [],
+        photos:      (local?.photos?.length      ? local.photos      : c.photos)      || [],
         dossierId: local?.dossierId || c.dossierId || '',
       };
     });
