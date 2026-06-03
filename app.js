@@ -5000,7 +5000,7 @@ async function _loadTachesQuietly() {
   try {
     if (APPS_SCRIPT_URL) {
       const r = await apiCall({ action: 'getTaches' });
-      if (r && r.ok) taches = r.taches;
+      if (r && r.ok) taches = _applyTacheBlocklist(r.taches);
       else if (!taches.length) {
         const raw = localStorage.getItem('pos-taches');
         taches = raw ? JSON.parse(raw) : [];
@@ -5019,12 +5019,30 @@ async function _loadTachesQuietly() {
   _purgeOrphanTaches();
 }
 
+// ── Blocklist des taches supprimées (persiste contre le re-fetch GAS) ──
+function _getTacheBlocklist() {
+  try { return new Set(JSON.parse(localStorage.getItem('pos-tache-blocklist') || '[]')); } catch(e) { return new Set(); }
+}
+function _addToTacheBlocklist(ids) {
+  if (!ids.length) return;
+  const bl = _getTacheBlocklist();
+  ids.forEach(id => bl.add(id));
+  try { localStorage.setItem('pos-tache-blocklist', JSON.stringify([...bl])); } catch(e) {}
+}
+function _applyTacheBlocklist(list) {
+  const bl = _getTacheBlocklist();
+  return bl.size ? list.filter(t => !bl.has(t.id)) : list;
+}
+
 function _deleteTachesForDossier(dossierId) {
   if (!dossierId) return;
+  // Mettre les IDs en blocklist pour bloquer le re-fetch GAS
+  const idsToBlock = taches.filter(t => t.dossierId === dossierId).map(t => t.id);
+  _addToTacheBlocklist(idsToBlock);
   // Retirer de la mémoire locale
   taches = taches.filter(t => t.dossierId !== dossierId);
   saveTaches();
-  // Supprimer dans GAS
+  // Tenter la suppression dans GAS (best-effort)
   if (APPS_SCRIPT_URL) apiCall({ action: 'deleteTachesDossier', dossierId }).catch(() => {});
 }
 
@@ -5033,9 +5051,7 @@ async function resetTachesDossier(dossierId) {
   if (!confirm('Réinitialiser toutes les tâches de ce dossier ?\nLes assignations et statuts seront effacés.')) return;
   _deleteTachesForDossier(dossierId);
   showToast('Tâches réinitialisées', 'info');
-  // Re-rendre le panel avec taches vides
-  const emptyTaches = [];
-  renderAttrPanel(emptyTaches, dossierComments.filter(c => c.dossierId === dossierId));
+  renderAttrPanel([], dossierComments.filter(c => c.dossierId === dossierId));
 }
 
 function _purgeOrphanTaches() {
@@ -6297,7 +6313,7 @@ async function selectDossier(id) {
     loadCommentsForDossier(id)
   ]).then(([r1, c1]) => {
     if (selectedDossier?.id !== id) return; // l'opérateur a changé de dossier entre-temps
-    const freshTaches   = r1?.ok ? r1.taches.filter(t => t.dossierId === id) : localTaches;
+    const freshTaches   = r1?.ok ? _applyTacheBlocklist(r1.taches.filter(t => t.dossierId === id)) : localTaches;
     const freshComments = c1 || localComments;
     // Ne re-rendre que si quelque chose a changé
     const sameT = JSON.stringify(freshTaches)   === JSON.stringify(localTaches);
