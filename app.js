@@ -214,6 +214,18 @@ async function doLogin() {
       if (!userInfo.label || userInfo.label === 'undefined') {
         userInfo.label = userInfo.username || u;
       }
+      // Mettre à jour / créer le compte local avec le hash du mot de passe
+      // → permet le login offline même après effacement du localStorage
+      const luIdx = localUsers.findIndex(x => x.username.toLowerCase() === u);
+      if (luIdx >= 0) {
+        localUsers[luIdx].pass  = pHashed;
+        localUsers[luIdx].label = userInfo.label;
+        localUsers[luIdx].role  = userInfo.role;
+        if (userInfo.actif !== undefined) localUsers[luIdx].actif = userInfo.actif;
+      } else {
+        localUsers.push({ username: u, pass: pHashed, role: userInfo.role, label: userInfo.label, actif: true });
+      }
+      try { localStorage.setItem('pos-users', JSON.stringify(localUsers)); } catch(e) {}
     } else if (r && !r.ok) {
       const errMsg = r.error || '';
       const isCredError = errMsg.toLowerCase().includes('identifiant') ||
