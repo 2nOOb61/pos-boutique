@@ -1074,7 +1074,7 @@ function updateResBadge() {
 // RÉSERVATIONS — FINALISER
 // ============================================================
 function openFinalizeModal(id) {
-  const r = reservations.find(x => x.id === id);
+  const r = reservations.find(x => String(x.id) === String(id));
   if (!r) return;
   currentFinalizeResId = id;
   document.getElementById('finalizeClientInfo').textContent = `👤 ${r.clientName}${r.clientContact ? ' — ' + r.clientContact : ''}`;
@@ -1099,7 +1099,7 @@ function switchFinPayTab(mode) {
 }
 
 function calcFinChange() {
-  const r = reservations.find(x => x.id === currentFinalizeResId);
+  const r = reservations.find(x => String(x.id) === String(currentFinalizeResId));
   if (!r) return;
   const given  = parseFloat(document.getElementById('finGiven').value) || 0;
   const change = given - r.restant;
@@ -1116,7 +1116,7 @@ function selectFinProvider(p) {
 }
 
 function confirmFinalize() {
-  const r = reservations.find(x => x.id === currentFinalizeResId);
+  const r = reservations.find(x => String(x.id) === String(currentFinalizeResId));
   if (!r) return;
 
   if (finPaymentMode === 'cash') {
@@ -1180,7 +1180,7 @@ function _doFinalize(r, method, given, change, provider, ref) {
 // RÉSERVATIONS — ANNULER
 // ============================================================
 function cancelReservation(id) {
-  const r = reservations.find(x => x.id === id);
+  const r = reservations.find(x => String(x.id) === String(id));
   if (!r || r.status !== 'pending') return;
   if (!confirm(`Annuler la réservation #${r.id} de ${r.clientName} ?\nLe stock sera restitué.`)) return;
 
@@ -4620,7 +4620,7 @@ function updateCmdBadge() {
 // COMMANDES — FINALISER
 // ============================================================
 function openCmdFinalizeModal(id) {
-  const c = commandes.find(x => x.id === id);
+  const c = commandes.find(x => String(x.id) === String(id));
   if (!c) return;
   currentCmdFinalizeId = id;
   document.getElementById('cmdFinalClientInfo').textContent = `👤 ${c.clientName}${c.clientContact?' — '+c.clientContact:''}`;
@@ -4645,7 +4645,7 @@ function switchCmdFinPayTab(mode) {
 }
 
 function calcCmdFinChange() {
-  const c = commandes.find(x => x.id === currentCmdFinalizeId);
+  const c = commandes.find(x => String(x.id) === String(currentCmdFinalizeId));
   if (!c) return;
   const given  = parseFloat(document.getElementById('cmdFinGiven').value) || 0;
   const change = given - c.restant;
@@ -4662,7 +4662,7 @@ function selectCmdFinProvider(p) {
 }
 
 function confirmCmdFinalize() {
-  const c = commandes.find(x => x.id === currentCmdFinalizeId);
+  const c = commandes.find(x => String(x.id) === String(currentCmdFinalizeId));
   if (!c) return;
   if (cmdFinalPayMode === 'cash') {
     const given = parseFloat(document.getElementById('cmdFinGiven').value) || 0;
@@ -4728,7 +4728,7 @@ function _doCmdFinalize(c, method, given, change, provider, ref) {
 // COMMANDES — ANNULER
 // ============================================================
 function cancelCommande(id) {
-  const c = commandes.find(x => x.id === id);
+  const c = commandes.find(x => String(x.id) === String(id));
   if (!c || c.status !== 'pending') return;
   if (!confirm(`Annuler la commande #${c.id} de ${c.clientName} ?`)) return;
   c.status = 'cancelled';
