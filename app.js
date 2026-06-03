@@ -1018,10 +1018,10 @@ function renderReservations() {
     const statusClass = { pending: 'res-status-pending', completed: 'res-status-completed', cancelled: 'res-status-cancelled' }[r.status] || '';
     const itemsStr = (Array.isArray(r.items) ? r.items : []).map(i => `${String(i.name||'?')} ×${Number(i.qty)||1} — ${fmt(Number(i.price)||0)}`).join('<br>') || '—';
     const actions = r.status === 'pending' ? `
-      <button class="btn-finalize" onclick="openFinalizeModal(${r.id})"> Finaliser</button>
-      <button class="btn-cancel-res" onclick="cancelReservation(${r.id})"> Annuler</button>
-      <button class="btn-reprint-res" onclick="printReservationTicket(reservations.find(x=>x.id===${r.id}))" title="Réimprimer"></button>
-    ` : `<button class="btn-reprint-res" onclick="printReservationTicket(reservations.find(x=>x.id===${r.id}))" title="Réimprimer"></button>`;
+      <button class="btn-finalize" onclick="openFinalizeModal('${r.id}')"> Finaliser</button>
+      <button class="btn-cancel-res" onclick="cancelReservation('${r.id}')"> Annuler</button>
+      <button class="btn-reprint-res" onclick="printReservationTicket(reservations.find(x=>String(x.id)==='${r.id}'))" title="Réimprimer"></button>
+    ` : `<button class="btn-reprint-res" onclick="printReservationTicket(reservations.find(x=>String(x.id)==='${r.id}'))" title="Réimprimer"></button>`;
 
     return `
     <div class="res-card">
@@ -4610,8 +4610,8 @@ function renderCommandes() {
         ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${(c.photos||[]).map(src=>`<img src="${src}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:pointer" onclick="window.open(this.src,'_blank')" />`).join('')}</div>` : '';
 
       const actions = c.status === 'pending'
-        ? `<button class="btn-finalize" onclick="openCmdFinalizeModal(${c.id})"> Finaliser</button>
-           <button class="btn-cancel-res" onclick="cancelCommande(${c.id})"> Annuler</button>`
+        ? `<button class="btn-finalize" onclick="openCmdFinalizeModal('${c.id}')"> Finaliser</button>
+           <button class="btn-cancel-res" onclick="cancelCommande('${c.id}')"> Annuler</button>`
         : '';
 
       return `
