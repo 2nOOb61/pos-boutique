@@ -917,13 +917,14 @@ function closeStopModal() {
 
 async function confirmStop() {
   if (!pendingStop) return;
-  const t = tasks.find(x => x.id === pendingStop);
+  const tacheId = pendingStop;  // sauvegarder AVANT closeStopModal qui remet pendingStop=null
+  const t = tasks.find(x => x.id === tacheId);
   if (!t) return;
   const comment = document.getElementById('stopComment').value.trim();
   closeStopModal();
   showLoader();
   const r = await apiWrite({
-    action:'pointerAction', tacheId:pendingStop,
+    action:'pointerAction', tacheId,
     action_:'END', etapeCode:t.etapeCode, commentaire:comment
   });
   hideLoader();
