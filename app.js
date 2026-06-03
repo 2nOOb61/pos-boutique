@@ -3670,9 +3670,19 @@ async function loadReservationsFromScript() {
   });
 
   // Merger : Sheets fait autorité — conserver les réservations locales absentes du Sheet
-  const sheetIds = new Set(deduped.map(res => String(res.id)));
+  // ET réinjecter les pièces jointes locales (GAS ne les stocke pas dans la feuille)
+  const sheetIds  = new Set(deduped.map(res => String(res.id)));
   const localOnly = reservations.filter(res => !sheetIds.has(String(res.id)));
-  reservations = [...deduped, ...localOnly];
+  const mergedFromSheet = deduped.map(res => {
+    const local = reservations.find(lr => String(lr.id) === String(res.id));
+    // Préserver les attachments et dossierId locaux que GAS ne connaît pas
+    return {
+      ...res,
+      attachments: (local?.attachments?.length ? local.attachments : res.attachments) || [],
+      dossierId:   local?.dossierId || res.dossierId || '',
+    };
+  });
+  reservations = [...mergedFromSheet, ...localOnly];
 
   // Trier par date décroissante
   reservations.sort((a, b) => {
@@ -4852,9 +4862,18 @@ async function loadCommandesFromScript() {
   if (!APPS_SCRIPT_URL) return;
   const r = await apiCall({ action: 'getCommandes' });
   if (r && r.ok && Array.isArray(r.commandes) && r.commandes.length > 0) {
-    const sheetIds = new Set(r.commandes.map(c => String(c.id)));
+    const sheetIds  = new Set(r.commandes.map(c => String(c.id)));
     const localOnly = commandes.filter(c => !sheetIds.has(String(c.id)));
-    commandes = [...r.commandes, ...localOnly];
+    // Réinjecter photos et dossierId locaux (GAS ne les stocke pas)
+    const merged = r.commandes.map(c => {
+      const local = commandes.find(lc => String(lc.id) === String(c.id));
+      return {
+        ...c,
+        photos:    (local?.photos?.length    ? local.photos    : c.photos)    || [],
+        dossierId: local?.dossierId || c.dossierId || '',
+      };
+    });
+    commandes = [...merged, ...localOnly];
     commandes.sort((a, b) => (parseSaleDate(b.date)||0) - (parseSaleDate(a.date)||0));
     if (commandes.length > 0) nextCommandeId = Math.max(...commandes.map(c => Number(c.id))) + 1;
   }
