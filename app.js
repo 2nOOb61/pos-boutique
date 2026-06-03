@@ -3715,7 +3715,8 @@ function openScriptSettings() {
     '2 → Tester la connexion\n' +
     '3 → Initialiser les feuilles (1ère utilisation)\n' +
     '4 → Synchroniser les ventes en attente\n' +
-    '5 → RESTAURER toutes les données depuis le Sheet\n\n' +
+    '5 → RESTAURER toutes les données depuis le Sheet\n' +
+    '6 → ⚠️ RESET COMPLET — Effacer toutes les données locales\n\n' +
     'Tapez le numéro :',
     '2'
   );
@@ -3736,7 +3737,42 @@ function openScriptSettings() {
     syncPendingOfflineSales();
   } else if (choice.trim() === '5') {
     forceRestoreFromSheet();
+  } else if (choice.trim() === '6') {
+    resetCompletPOS();
   }
+}
+
+async function resetCompletPOS() {
+  const step1 = confirm(
+    '⚠️ RESET COMPLET DU POS ⚠️\n\n' +
+    'Cela va effacer TOUTES les données locales :\n' +
+    '• Produits, ventes, réservations, commandes\n' +
+    '• Tâches, notifications, panier en cours\n' +
+    '• Comptes utilisateurs (sauf admin/1234)\n\n' +
+    'Les données Google Sheets ne sont PAS effacées.\n\n' +
+    'Continuer ?'
+  );
+  if (!step1) return;
+
+  const step2 = confirm('Dernière confirmation — Effacer toutes les données locales du POS ?');
+  if (!step2) return;
+
+  showLoader('Réinitialisation en cours...');
+
+  // Sauvegarder l'URL du script et la config boutique avant de tout effacer
+  const scriptUrl  = localStorage.getItem('pos-script-url');
+  const appVersion = localStorage.getItem('pos-app-version');
+
+  // Effacer tout le localStorage
+  localStorage.clear();
+
+  // Restaurer uniquement les éléments essentiels pour que l'app redémarre
+  if (scriptUrl)  localStorage.setItem('pos-script-url', scriptUrl);
+  if (appVersion) localStorage.setItem('pos-app-version', appVersion);
+
+  hideLoader();
+  showToast('✅ Données effacées — rechargement...', 'info');
+  setTimeout(() => window.location.reload(true), 1500);
 }
 
 async function forceRestoreFromSheet() {
