@@ -96,8 +96,8 @@ const ROLE_LABELS = {
 };
 
 const ROLE_ICONS = {
-  admin: '👑', caissier: '🛒', commerciale: '💼', utilisateur: '👤', gestionnaire: '📦', comptable: '📊',
-  chef_atelier: '🏭', operateur_prod: '⚙️', pao: '🎨', finition: '✨', livreur: '🚚'
+  admin: '', caissier: '', commerciale: '', utilisateur: '', gestionnaire: '', comptable: '',
+  chef_atelier: '', operateur_prod: '', pao: '', finition: '', livreur: ''
 };
 
 const PAGE_ACCESS = {
@@ -121,25 +121,12 @@ let selectedProvider = 'MVola';
 let editingProductId = null;
 let editingProductImage = null;
 
-// Demo products
-let products = [
-  { id:1, name:'Riz 1kg', cat:'Alimentation', emoji:'🍚', code:'001', price:2500, cost:1800, stock:50, minStock:10 },
-  { id:2, name:'Huile 1L', cat:'Alimentation', emoji:'🫙', code:'002', price:4500, cost:3200, stock:24, minStock:5 },
-  { id:3, name:'Sucre 1kg', cat:'Alimentation', emoji:'🧂', code:'003', price:2000, cost:1500, stock:3, minStock:5 },
-  { id:4, name:'Coca-Cola 1.5L', cat:'Boissons', emoji:'🥤', code:'004', price:3500, cost:2500, stock:0, minStock:6 },
-  { id:5, name:'Eau minérale', cat:'Boissons', emoji:'💧', code:'005', price:1500, cost:900, stock:36, minStock:12 },
-  { id:6, name:'Savon Protex', cat:'Hygiène', emoji:'🧼', code:'006', price:1800, cost:1200, stock:18, minStock:5 },
-  { id:7, name:'Lait concentré', cat:'Alimentation', emoji:'🥛', code:'007', price:2200, cost:1600, stock:8, minStock:10 },
-  { id:8, name:'Bougie x10', cat:'Autres', emoji:'🕯️', code:'008', price:1200, cost:700, stock:30, minStock:5 },
-];
+let products = [];
 
-let sales = [
-  { id:1, date:new Date(Date.now()-86400000).toISOString(), items:[{name:'Riz 1kg',qty:2,price:2500},{name:'Huile 1L',qty:1,price:4500}], total:9500, method:'cash', given:10000, change:500 },
-  { id:2, date:new Date(Date.now()-3600000).toISOString(), items:[{name:'Savon Protex',qty:3,price:1800}], total:5400, method:'mobile', provider:'MVola', ref:'TX9876' },
-];
+let sales = [];
 
-let nextId = 9;
-let nextSaleId = 3;
+let nextId = 1;
+let nextSaleId = 1;
 
 let reservations = [];
 let resAttachments   = []; // { name, type, data (base64) }
@@ -171,7 +158,7 @@ function safeLocalSet(key, value) {
     localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
   } catch(e) {
     if (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
-      showToast('⚠️ Stockage local saturé — synchronisation forcée recommandée', 'error');
+      showToast(' Stockage local saturé — synchronisation forcée recommandée', 'error');
       console.error('localStorage quota exceeded pour la clé:', key);
     }
   }
@@ -204,7 +191,7 @@ async function doLogin() {
   const pHashed = await sha256(p);
 
   // Essayer Apps Script en premier si URL configurée
-  // ⚠️ Envoyer le mot de passe en CLAIR au backend (le serveur se charge du hashage)
+  //  Envoyer le mot de passe en CLAIR au backend (le serveur se charge du hashage)
   if (APPS_SCRIPT_URL) {
     const r = await loginViaScript(u, p);
     if (r && r.ok) {
@@ -233,7 +220,7 @@ async function doLogin() {
                           errMsg.toLowerCase().includes('incorrect') ||
                           errMsg.toLowerCase().includes('password');
       if (!isCredError) {
-        showToast('⚠️ Google Sheets inaccessible — connexion locale. ' + errMsg, 'info');
+        showToast(' Google Sheets inaccessible — connexion locale. ' + errMsg, 'info');
       }
       // isCredError : ne pas retourner ici — tenter le fallback local d'abord
       // (les utilisateurs créés localement non encore synchronisés au Sheet)
@@ -263,7 +250,7 @@ async function doLogin() {
     document.getElementById('bottomNav').style.display='block';
     err.style.display='none';
     _renderNotifBell();
-    showToast(`Bonjour, ${currentUser.label} ! 👋`);
+    showToast(`Bonjour, ${currentUser.label} ! `);
     // Charger les notifications des collègues en arrière-plan + démarrer le polling
     loadNotifsFromGAS();
     _startNotifPolling();
@@ -288,7 +275,7 @@ async function doLogin() {
     showPage(startPage, null, null);
     if (window.innerWidth <= 768) switchCaisseTab('products');
   } else {
-    err.textContent = '❌ Identifiant ou mot de passe incorrect';
+    err.textContent = ' Identifiant ou mot de passe incorrect';
     err.style.display='block';
   }
 }
@@ -365,7 +352,7 @@ function showPage(id, btn, bnavBtn) {
     if (allowed && !allowed.includes(currentUser.role)) {
       const fallback = Object.keys(PAGE_ACCESS).find(p => PAGE_ACCESS[p].includes(currentUser.role)) || 'caisse';
       showPage(fallback, null, null);
-      showToast('⛔ Accès non autorisé pour votre rôle', 'error');
+      showToast(' Accès non autorisé pour votre rôle', 'error');
       return;
     }
   }
@@ -398,11 +385,11 @@ function renderProducts() {
     <div class="product-card ${p.stock===0?'out-of-stock':''}" onclick="addToCart(${p.id})">
       ${p.image
         ? `<img class="product-img" src="${p.image}" alt="${escapeHtml(p.name)}" loading="lazy" />`
-        : `<span class="product-emoji">${p.emoji||'📦'}</span>`}
+        : `<span class="product-emoji">${p.emoji||''}</span>`}
       <div class="product-name">${escapeHtml(p.name)}</div>
       <div class="product-price">${fmt(p.price)}</div>
       <div class="product-stock ${p.stock===0?'stock-out':p.stock<=p.minStock?'stock-low':''}">
-        ${p.stock===0?'⛔ Rupture':p.stock<=p.minStock?`⚠️ Stock: ${p.stock}`:`Stock: ${p.stock}`}
+        ${p.stock===0?' Rupture':p.stock<=p.minStock?` Stock: ${p.stock}`:`Stock: ${p.stock}`}
       </div>
     </div>`).join('');
 }
@@ -538,10 +525,10 @@ function renderCart() {
   const totalQty = cart.reduce((s,i)=>s+i.qty,0);
   document.getElementById('cartCount').textContent = totalQty;
   updateCartTotals();
-  if(cart.length===0) { el.innerHTML='<div class="cart-empty"><span class="icon">🛍️</span>Le panier est vide</div>'; return; }
+  if(cart.length===0) { el.innerHTML='<div class="cart-empty"><span class="icon"></span>Le panier est vide</div>'; return; }
   el.innerHTML = cart.map(i=>`
     <div class="cart-item">
-      <span style="font-size:20px">${i.emoji||'📦'}</span>
+      <span style="font-size:20px">${i.emoji||''}</span>
       <div class="cart-item-info">
         <div class="cart-item-name">${i.name}</div>
         <div class="cart-item-price">${fmt(i.price)} / unité</div>
@@ -552,7 +539,7 @@ function renderCart() {
         <button class="qty-btn" onclick="changeQty(${i.id},1)">+</button>
       </div>
       <div class="cart-item-total">${fmt(i.price*i.qty)}</div>
-      <button class="btn-remove" onclick="removeFromCart(${i.id})">🗑</button>
+      <button class="btn-remove" onclick="removeFromCart(${i.id})"></button>
     </div>`).join('');
 }
 
@@ -689,7 +676,7 @@ function recordSale(total, method, given, change, provider, ref, remise=0, accom
   for (const item of cart) {
     const p = products.find(pr => pr.id === item.id);
     if (p && p.stock < item.qty) {
-      showToast(`⛔ Stock insuffisant pour "${p.name}" : ${p.stock} dispo, ${item.qty} demandé(s)`, 'error');
+      showToast(` Stock insuffisant pour "${p.name}" : ${p.stock} dispo, ${item.qty} demandé(s)`, 'error');
       return;
     }
   }
@@ -716,7 +703,7 @@ function recordSale(total, method, given, change, provider, ref, remise=0, accom
   if (window._posBroadcast) window._posBroadcast('sale-added', { id: sale.id });
   closeModal('paymentModal');
   const msg = method==='cash' ? 'Monnaie: '+fmt(change) : 'Ref: '+(ref||'—');
-  showToast(`✅ Vente enregistrée ! ${msg}`);
+  showToast(` Vente enregistrée ! ${msg}`);
   clearCart();
   renderProducts();
   renderStockTable();
@@ -750,7 +737,7 @@ async function _uploadReservationAttachments(reservationId, attachments) {
   res.attachments = uploaded;
   saveData();
   renderReservations();
-  showToast(`✅ ${uploaded.length} pièce(s) jointe(s) uploadée(s) sur Drive`);
+  showToast(` ${uploaded.length} pièce(s) jointe(s) uploadée(s) sur Drive`);
 }
 
 // ============================================================
@@ -961,7 +948,7 @@ function saveReservation(accompte, depositMethod, given, change, provider, ref, 
     operateur:     currentUser?.label || 'Caissier',
     message:       `Nouvelle réservation ${_resDossier.numeroDossier} — ${clientName} — ${reservation.items.map(i=>i.name).join(', ')}`
   });
-  showToast(`📋 Réservation #${reservation.id} créée — Acompte ${fmt(accompte)}`);
+  showToast(` Réservation #${reservation.id} créée — Acompte ${fmt(accompte)}`);
   // Upload des pièces jointes vers Drive (après fermeture du modal)
   if (resAttachments.length && APPS_SCRIPT_URL) {
     _uploadReservationAttachments(reservation.id, [...resAttachments]);
@@ -989,19 +976,19 @@ async function _autoRefreshReservations() {
     await loadReservationsFromScript();
   } catch(e) {
     console.warn('loadReservationsFromScript error:', e);
-    showToast('⚠️ Erreur chargement réservations — données locales affichées', 'error');
+    showToast(' Erreur chargement réservations — données locales affichées', 'error');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '🔄 Actualiser'; }
+    if (btn) { btn.disabled = false; btn.textContent = ' Actualiser'; }
     renderReservations();
     updateResBadge();
   }
 }
 
 async function manualRefreshReservations() {
-  if (!APPS_SCRIPT_URL) { showToast('⚠️ URL Apps Script non configurée', 'error'); return; }
+  if (!APPS_SCRIPT_URL) { showToast(' URL Apps Script non configurée', 'error'); return; }
   _lastResRefresh = 0;
   await _autoRefreshReservations();
-  showToast('✅ Réservations actualisées');
+  showToast(' Réservations actualisées');
 }
 
 function renderReservations() {
@@ -1019,7 +1006,7 @@ function renderReservations() {
   if (!container) return;
 
   if (list.length === 0) {
-    container.innerHTML = `<div class="res-empty">📋 Aucune réservation ${filter === 'pending' ? 'en attente' : ''}</div>`;
+    container.innerHTML = `<div class="res-empty"> Aucune réservation ${filter === 'pending' ? 'en attente' : ''}</div>`;
     return;
   }
 
@@ -1031,24 +1018,24 @@ function renderReservations() {
     const statusClass = { pending: 'res-status-pending', completed: 'res-status-completed', cancelled: 'res-status-cancelled' }[r.status] || '';
     const itemsStr = (Array.isArray(r.items) ? r.items : []).map(i => `${String(i.name||'?')} ×${Number(i.qty)||1} — ${fmt(Number(i.price)||0)}`).join('<br>') || '—';
     const actions = r.status === 'pending' ? `
-      <button class="btn-finalize" onclick="openFinalizeModal(${r.id})">✅ Finaliser</button>
-      <button class="btn-cancel-res" onclick="cancelReservation(${r.id})">❌ Annuler</button>
-      <button class="btn-reprint-res" onclick="printReservationTicket(reservations.find(x=>x.id===${r.id}))" title="Réimprimer">🖨️</button>
-    ` : `<button class="btn-reprint-res" onclick="printReservationTicket(reservations.find(x=>x.id===${r.id}))" title="Réimprimer">🖨️</button>`;
+      <button class="btn-finalize" onclick="openFinalizeModal(${r.id})"> Finaliser</button>
+      <button class="btn-cancel-res" onclick="cancelReservation(${r.id})"> Annuler</button>
+      <button class="btn-reprint-res" onclick="printReservationTicket(reservations.find(x=>x.id===${r.id}))" title="Réimprimer"></button>
+    ` : `<button class="btn-reprint-res" onclick="printReservationTicket(reservations.find(x=>x.id===${r.id}))" title="Réimprimer"></button>`;
 
     return `
     <div class="res-card">
       <div class="res-card-header">
         <div>
-          <div class="res-card-client">👤 ${escapeHtml(r.clientName)} <span style="font-size:12px;color:var(--muted);font-weight:400">#${r.id}</span></div>
-          ${r.clientContact ? `<div class="res-card-contact">📞 ${escapeHtml(r.clientContact)}</div>` : ''}
+          <div class="res-card-client"> ${escapeHtml(r.clientName)} <span style="font-size:12px;color:var(--muted);font-weight:400">#${r.id}</span></div>
+          ${r.clientContact ? `<div class="res-card-contact"> ${escapeHtml(r.clientContact)}</div>` : ''}
         </div>
         <div style="text-align:right">
           <span class="res-status ${statusClass}">${statusLabel}</span>
           <div class="res-card-date">${dateStr}</div>
         </div>
       </div>
-      <div class="res-items" style="line-height:1.8">📦 ${itemsStr}</div>
+      <div class="res-items" style="line-height:1.8"> ${itemsStr}</div>
       <div class="res-amounts">
         <div class="res-amount-item"><span class="lbl">Total</span><span class="val">${fmt(r.total)}</span></div>
         <div class="res-amount-item"><span class="lbl">Acompte versé</span><span class="val" style="color:var(--green)">${fmt(r.accompte)}</span></div>
@@ -1059,7 +1046,7 @@ function renderReservations() {
     </div>`;
     } catch(e) {
       console.error('renderReservations card #' + r.id + ':', e);
-      return `<div class="res-card" style="color:var(--muted);font-size:13px;padding:12px">⚠️ Réservation #${r.id} — erreur affichage: ${e.message}</div>`;
+      return `<div class="res-card" style="color:var(--muted);font-size:13px;padding:12px"> Réservation #${r.id} — erreur affichage: ${e.message}</div>`;
     }
   }).join('');
 }
@@ -1077,7 +1064,7 @@ function openFinalizeModal(id) {
   const r = reservations.find(x => String(x.id) === String(id));
   if (!r) return;
   currentFinalizeResId = id;
-  document.getElementById('finalizeClientInfo').textContent = `👤 ${r.clientName}${r.clientContact ? ' — ' + r.clientContact : ''}`;
+  document.getElementById('finalizeClientInfo').textContent = ` ${r.clientName}${r.clientContact ? ' — ' + r.clientContact : ''}`;
   document.getElementById('finalTotal').textContent   = fmt(r.total);
   document.getElementById('finalAcc').textContent     = fmt(r.accompte);
   document.getElementById('finalRestant').textContent = fmt(r.restant);
@@ -1170,7 +1157,7 @@ function _doFinalize(r, method, given, change, provider, ref) {
   });
   closeModal('finalizeModal');
   printTicket(sale);
-  showToast(`✅ Vente #${sale.id} enregistrée — Réservation #${r.id} finalisée !`);
+  showToast(` Vente #${sale.id} enregistrée — Réservation #${r.id} finalisée !`);
   renderReservations();
   updateResBadge();
   _deleteTachesForDossier(r.dossierId);
@@ -1302,12 +1289,12 @@ function printTicket(sale) {
     document.getElementById('tDueRow').style.display = 'none';
   }
   if (sale.method === 'cash') {
-    document.getElementById('tPayMethod').textContent    = '💵 Espèces remis';
+    document.getElementById('tPayMethod').textContent    = ' Espèces remis';
     document.getElementById('tGiven').textContent        = fmt(sale.given);
     document.getElementById('tChangeRow').style.display = 'flex';
     document.getElementById('tChange').textContent       = fmt(sale.change);
   } else {
-    document.getElementById('tPayMethod').textContent    = `📱 ${sale.provider}`;
+    document.getElementById('tPayMethod').textContent    = ` ${sale.provider}`;
     document.getElementById('tGiven').textContent        = sale.ref || '';
     document.getElementById('tChangeRow').style.display = 'none';
   }
@@ -1414,7 +1401,7 @@ let scannerMode = 'caisse'; // 'caisse' | 'stock'
 function openScanner(mode='caisse') {
   scannerMode = mode;
   document.getElementById('scannerLabel').textContent =
-    mode === 'stock' ? '📦 Scanner pour ajouter ou créer un article' : '🛒 Scanner un article (caisse)';
+    mode === 'stock' ? ' Scanner pour ajouter ou créer un article' : ' Scanner un article (caisse)';
   document.getElementById('scannerResult').style.display = 'none';
   document.getElementById('scanActionBtn').style.display = 'none';
   document.getElementById('manualCode').value = '';
@@ -1432,7 +1419,7 @@ async function startCamera() {
     }
     const cameras = await Html5Qrcode.getCameras();
     if (!cameras || cameras.length === 0) {
-      showToast('❌ Aucune caméra détectée', 'error');
+      showToast(' Aucune caméra détectée', 'error');
       return;
     }
     // Préférer la caméra arrière
@@ -1446,7 +1433,7 @@ async function startCamera() {
     scannerRunning = true;
   } catch (err) {
     console.warn('Caméra error:', err);
-    showToast('⚠️ Impossible d\'accéder à la caméra — utilisez la saisie manuelle', 'info');
+    showToast(' Impossible d\'accéder à la caméra — utilisez la saisie manuelle', 'info');
   }
 }
 
@@ -1469,29 +1456,29 @@ function onScanSuccess(code) {
 
   if (scannerMode === 'caisse') {
     if (p) {
-      resultBox.textContent = '✅ ' + p.name;
+      resultBox.textContent = ' ' + p.name;
       addToCart(p.id);
-      showToast('✅ ' + p.name + ' ajouté au panier');
+      showToast(' ' + p.name + ' ajouté au panier');
       closeScanner();
     } else {
-      resultBox.textContent = '❌ Article introuvable : ' + code;
+      resultBox.textContent = ' Article introuvable : ' + code;
       resultBox.style.color = 'var(--red)';
-      actionBtn.textContent = '➕ Créer cet article';
+      actionBtn.textContent = ' Créer cet article';
       actionBtn.style.display = 'block';
       actionBtn.style.background = 'var(--accent)';
       actionBtn.onclick = () => { closeScanner(); openProductModal(null, code); };
     }
   } else { // mode stock
     if (p) {
-      resultBox.textContent = '📦 ' + p.name + ' — Stock : ' + p.stock;
-      actionBtn.textContent = '📥 Ajuster le stock';
+      resultBox.textContent = ' ' + p.name + ' — Stock : ' + p.stock;
+      actionBtn.textContent = ' Ajuster le stock';
       actionBtn.style.display = 'block';
       actionBtn.style.background = 'var(--accent3)';
       actionBtn.onclick = () => { closeScanner(); openMouvement(p.id); };
     } else {
       resultBox.textContent = '🆕 Code inconnu : ' + code;
       resultBox.style.color = 'var(--yellow)';
-      actionBtn.textContent = '➕ Créer cet article avec ce code';
+      actionBtn.textContent = ' Créer cet article avec ce code';
       actionBtn.style.display = 'block';
       actionBtn.style.background = 'var(--accent)';
       actionBtn.onclick = () => { closeScanner(); openProductModal(null, code); };
@@ -1529,7 +1516,7 @@ function renderStockTable() {
     return { p, badge, status, stockColor };
   });
   tbody.innerHTML = rows.map(({p,badge,status})=>`<tr>
-    <td><span style="margin-right:6px">${p.emoji||'📦'}</span>${escapeHtml(p.name)}</td>
+    <td><span style="margin-right:6px">${p.emoji||''}</span>${escapeHtml(p.name)}</td>
     <td>${escapeHtml(p.cat)}</td>
     <td class="td-mono">${escapeHtml(p.code)}</td>
     <td class="td-mono">${fmt(p.price)}</td>
@@ -1537,15 +1524,15 @@ function renderStockTable() {
     <td class="td-mono" style="font-weight:600">${p.stock}</td>
     <td><span class="badge ${badge}">${status}</span></td>
     <td>
-      <button class="btn-icon btn-edit" onclick="editProduct(${p.id})" title="Modifier">✏️</button>
-      <button class="btn-icon btn-delete" onclick="deleteProduct(${p.id})" title="Supprimer">🗑</button>
+      <button class="btn-icon btn-edit" onclick="editProduct(${p.id})" title="Modifier"></button>
+      <button class="btn-icon btn-delete" onclick="deleteProduct(${p.id})" title="Supprimer"></button>
     </td>
   </tr>`).join('');
   if (cardsEl) cardsEl.innerHTML = rows.map(({p,badge,status,stockColor})=>`
     <div class="stock-card">
       <div class="stock-card-top">
         <div>
-          <div class="stock-card-name">${p.emoji||'📦'} ${escapeHtml(p.name)}</div>
+          <div class="stock-card-name">${p.emoji||''} ${escapeHtml(p.name)}</div>
           <div class="stock-card-cat">${escapeHtml(p.cat)} · ${escapeHtml(p.code)}</div>
         </div>
         <span class="badge ${badge}">${status}</span>
@@ -1557,14 +1544,14 @@ function renderStockTable() {
         <div class="stock-card-field"><span class="stock-card-field-label">Min</span><span class="stock-card-field-val">${p.minStock}</span></div>
       </div>
       <div class="stock-card-actions">
-        <button style="background:rgba(7,61,55,0.10);color:var(--accent)" onclick="editProduct(${p.id})">✏️ Modifier</button>
-        <button style="background:rgba(255,71,87,0.12);color:var(--red)" onclick="deleteProduct(${p.id})">🗑 Supprimer</button>
+        <button style="background:rgba(7,61,55,0.10);color:var(--accent)" onclick="editProduct(${p.id})"> Modifier</button>
+        <button style="background:rgba(255,71,87,0.12);color:var(--red)" onclick="deleteProduct(${p.id})"> Supprimer</button>
       </div>
     </div>`).join('');
 }
 function openProductModal(id=null, prefillCode=null) {
   editingProductId = id;
-  document.getElementById('productModalTitle').textContent = id ? '✏️ Modifier l\'article' : '➕ Nouvel article';
+  document.getElementById('productModalTitle').textContent = id ? ' Modifier l\'article' : ' Nouvel article';
   syncCategorySelect();
   if(id) {
     const p = products.find(pr=>pr.id===id);
@@ -1614,10 +1601,10 @@ function previewProductImage(input) {
       if (driveUrl) {
         editingProductImage = driveUrl;
         prev.src = driveUrl;
-        showToast('✅ Image sauvegardée sur Google Drive');
+        showToast(' Image sauvegardée sur Google Drive');
       } else {
         editingProductImage = e.target.result; // fallback base64 local
-        showToast('⚠️ Upload Drive échoué — image visible sur ce poste uniquement', 'error');
+        showToast(' Upload Drive échoué — image visible sur ce poste uniquement', 'error');
       }
     } else {
       editingProductImage = e.target.result;
@@ -1685,7 +1672,7 @@ function saveProduct() {
   if (stock < 0)  { showToast('Le stock ne peut pas être négatif', 'error'); return; }
   const data = {
     name, cat:document.getElementById('pCat').value,
-    emoji:document.getElementById('pEmoji').value||'📦',
+    emoji:document.getElementById('pEmoji').value||'',
     code:document.getElementById('pCode').value.trim()||String(nextId),
     price, cost:parseFloat(document.getElementById('pCost').value)||0,
     stock, minStock:parseInt(document.getElementById('pMinStock').value)||5,
@@ -1693,10 +1680,10 @@ function saveProduct() {
   };
   if(editingProductId) {
     Object.assign(products.find(p=>p.id===editingProductId), data);
-    showToast('Article mis à jour ✅');
+    showToast('Article mis à jour ');
   } else {
     products.push({ id:nextId++, ...data });
-    showToast('Article ajouté ✅');
+    showToast('Article ajouté ');
   }
   closeModal('productModal');
   saveData();
@@ -1725,7 +1712,7 @@ function saveQuickAdd() {
   if (!price) { showToast('Prix de vente requis', 'error'); return; }
   const qty = Math.max(parseInt(document.getElementById('qaQty').value) || 1, 1);
   const stock = Math.max(parseInt(document.getElementById('qaStock').value) || qty, qty);
-  const emoji = document.getElementById('qaEmoji').value || '📦';
+  const emoji = document.getElementById('qaEmoji').value || '';
   const cat = document.getElementById('qaCat').value;
 
   const newProduct = { id: nextId++, name, cat, emoji, code: String(nextId - 1), price, cost: 0, stock, minStock: 5 };
@@ -1738,7 +1725,7 @@ function saveQuickAdd() {
   cart.push({ id: newProduct.id, name: newProduct.name, price: newProduct.price, qty, emoji: newProduct.emoji });
   renderCart();
   closeModal('quickAddModal');
-  showToast(`${emoji} ${name} ajouté au panier ✅`);
+  showToast(`${emoji} ${name} ajouté au panier `);
 }
 
 // ============================================================
@@ -1762,7 +1749,7 @@ function saveMouvement() {
   if(!p) return;
   if(type==='in') p.stock+=qty;
   else { if(p.stock<qty){showToast('Stock insuffisant','error');return;} p.stock-=qty; }
-  showToast(`${type==='in'?'📥 Entrée':'📤 Sortie'} : ${qty} x ${p.name}`);
+  showToast(`${type==='in'?' Entrée':' Sortie'} : ${qty} x ${p.name}`);
   closeModal('mouvModal');
   saveData();
   renderStockTable(); renderProducts();
@@ -1807,9 +1794,9 @@ function openStatDetail(type) {
     if (c) c.classList.toggle('active', t.toLowerCase() === type);
   });
   const titles = {
-    day:   '💰 Ventes du jour — ' + new Date().toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long', year:'numeric'}),
-    month: '📅 Ventes du mois — ' + new Date().toLocaleDateString('fr-FR', {month:'long', year:'numeric'}),
-    stock: '📦 Détail du stock',
+    day:   ' Ventes du jour — ' + new Date().toLocaleDateString('fr-FR', {weekday:'long', day:'numeric', month:'long', year:'numeric'}),
+    month: ' Ventes du mois — ' + new Date().toLocaleDateString('fr-FR', {month:'long', year:'numeric'}),
+    stock: ' Détail du stock',
     due:   '⏳ Créances — reste à percevoir'
   };
   document.getElementById('statDetailTitle').textContent = titles[type];
@@ -1856,12 +1843,12 @@ function _saleRow(s) {
   const total   = Number(s.total)   || 0;
   const due     = Number(s.due)     || 0;
   const client  = s.clientName
-    ? `<div style="font-size:11px;color:var(--muted)">👤 ${s.clientName}${s.clientContact ? ' · ' + s.clientContact : ''}</div>`
+    ? `<div style="font-size:11px;color:var(--muted)"> ${s.clientName}${s.clientContact ? ' · ' + s.clientContact : ''}</div>`
     : '';
   return `<tr>
     <td><div>${dateStr}</div>${client}</td>
     <td style="font-size:12px;max-width:200px">${items}</td>
-    <td style="white-space:nowrap">${s.method==='cash'?'💵 Espèces':'📱 '+(s.provider||'Mobile')}</td>
+    <td style="white-space:nowrap">${s.method==='cash'?' Espèces':' '+(s.provider||'Mobile')}</td>
     <td class="td-mono" style="text-align:right;font-weight:700;color:var(--accent)">${fmt(total)}</td>
     <td class="td-mono" style="text-align:right;font-weight:${due>0?700:400};color:${due>0?'var(--red)':'var(--muted)'}">${due>0?fmt(due):'—'}</td>
   </tr>`;
@@ -1891,8 +1878,8 @@ function _detailDay() {
   return `<div class="detail-kpi-row">
     ${_kpi('CA du jour',     fmt(ca),          'var(--accent)', 'rgba(7,61,55,0.07)')}
     ${_kpi('Transactions',   list.length,       'var(--blue)',   'rgba(237,111,44,0.07)')}
-    ${_kpi('💵 Espèces',     fmt(cash),         'var(--text)',   'var(--surface2)')}
-    ${_kpi('📱 Mobile',      fmt(mob),          'var(--text)',   'var(--surface2)')}
+    ${_kpi(' Espèces',     fmt(cash),         'var(--text)',   'var(--surface2)')}
+    ${_kpi(' Mobile',      fmt(mob),          'var(--text)',   'var(--surface2)')}
     ${due > 0 ? _kpi('Reste à percevoir', fmt(due), 'var(--red)', 'rgba(255,71,87,.07)') : ''}
   </div>${_salesTableWrap(list)}`;
 }
@@ -1908,8 +1895,8 @@ function _detailMonth() {
   return `<div class="detail-kpi-row">
     ${_kpi('CA du mois',     fmt(ca),           'var(--accent)', 'rgba(7,61,55,0.07)')}
     ${_kpi('Transactions',   list.length,        'var(--blue)',   'rgba(237,111,44,0.07)')}
-    ${_kpi('💵 Espèces',     fmt(cash),          'var(--text)',   'var(--surface2)')}
-    ${_kpi('📱 Mobile',      fmt(mob),           'var(--text)',   'var(--surface2)')}
+    ${_kpi(' Espèces',     fmt(cash),          'var(--text)',   'var(--surface2)')}
+    ${_kpi(' Mobile',      fmt(mob),           'var(--text)',   'var(--surface2)')}
     ${due > 0 ? _kpi('Reste à percevoir', fmt(due), 'var(--red)', 'rgba(255,71,87,.07)') : ''}
   </div>${_salesTableWrap(list)}`;
 }
@@ -1929,13 +1916,13 @@ function _detailStock() {
   });
   const rows = sorted.map(p => {
     const badge = p.stock <= 0
-      ? `<span class="badge badge-out">⛔ Épuisé</span>`
+      ? `<span class="badge badge-out"> Épuisé</span>`
       : p.stock <= p.minStock
-        ? `<span class="badge badge-low">⚠️ Faible</span>`
-        : `<span class="badge badge-ok">✅ OK</span>`;
+        ? `<span class="badge badge-low"> Faible</span>`
+        : `<span class="badge badge-ok"> OK</span>`;
     const stockColor = p.stock<=0?'var(--red)':p.stock<=p.minStock?'var(--yellow)':'var(--green)';
     return `<tr>
-      <td><div style="font-weight:600">${p.emoji||'📦'} ${p.name}</div><div style="font-size:11px;color:var(--muted)">${p.cat||''} · ${p.code||''}</div></td>
+      <td><div style="font-weight:600">${p.emoji||''} ${p.name}</div><div style="font-size:11px;color:var(--muted)">${p.cat||''} · ${p.code||''}</div></td>
       <td class="td-mono" style="text-align:right">${fmt(p.price||0)}</td>
       <td class="td-mono" style="text-align:right;color:var(--muted)">${fmt(p.cost||0)}</td>
       <td style="text-align:right">
@@ -1970,14 +1957,14 @@ function _detailStock() {
 function _detailDue() {
   const list  = sales.filter(s => (Number(s.due)||0) > 0);
   if (list.length === 0)
-    return '<div style="text-align:center;color:var(--green);padding:24px;font-weight:600">✅ Aucune créance en cours.</div>';
+    return '<div style="text-align:center;color:var(--green);padding:24px;font-weight:600"> Aucune créance en cours.</div>';
   const total = list.reduce((s,v) => s + (Number(v.due)||0), 0);
   const rows  = list.map(s => {
     const d      = parseSaleDate(s.date);
     const dateStr = d ? d.toLocaleString('fr-FR') : '—';
     const items  = (s.items||[]).map(i => `${i.name||'?'} ×${i.qty||1}`).join(', ');
     const client = s.clientName
-      ? `<div style="font-size:11px;color:var(--muted)">👤 ${s.clientName}${s.clientContact?' · '+s.clientContact:''}</div>` : '';
+      ? `<div style="font-size:11px;color:var(--muted)"> ${s.clientName}${s.clientContact?' · '+s.clientContact:''}</div>` : '';
     return `<tr>
       <td><div>${dateStr}</div>${client}</td>
       <td style="font-size:12px;max-width:180px">${items}</td>
@@ -2021,9 +2008,9 @@ async function _autoRefreshStats() {
     await loadSalesFromScript();
   } catch(e) {
     console.warn('loadSalesFromScript error:', e);
-    showToast('⚠️ Erreur de chargement — données locales affichées', 'error');
+    showToast(' Erreur de chargement — données locales affichées', 'error');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '🔄 Actualiser depuis Sheets'; }
+    if (btn) { btn.disabled = false; btn.textContent = ' Actualiser depuis Sheets'; }
     renderStats();   // toujours afficher, même en cas d'erreur réseau
   }
 }
@@ -2031,12 +2018,12 @@ async function _autoRefreshStats() {
 // Bouton manuel — ignore le cooldown
 async function manualRefreshStats() {
   if (!APPS_SCRIPT_URL) {
-    showToast('⚠️ URL Apps Script non configurée', 'error');
+    showToast(' URL Apps Script non configurée', 'error');
     return;
   }
   _lastStatsRefresh = 0;
   await _autoRefreshStats();
-  if (sales.length > 0) showToast(`✅ ${sales.length} vente(s) chargée(s)`);
+  if (sales.length > 0) showToast(` ${sales.length} vente(s) chargée(s)`);
 }
 
 // ============================================================
@@ -2071,7 +2058,7 @@ function exportVentesCSV() {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  showToast(`✅ Export CSV : ${sales.length} vente(s)`);
+  showToast(` Export CSV : ${sales.length} vente(s)`);
 }
 
 function exportStockCSV() {
@@ -2094,7 +2081,7 @@ function exportStockCSV() {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  showToast(`✅ Export CSV : ${products.length} produit(s)`);
+  showToast(` Export CSV : ${products.length} produit(s)`);
 }
 
 // ============================================================
@@ -2131,7 +2118,7 @@ function _renderStatsInner() {
     resList.innerHTML = pendingRes.map(r => `
       <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:var(--surface);border-radius:10px;margin-bottom:6px;font-size:13px">
         <div>
-          <span style="font-weight:700">👤 ${r.clientName}</span>
+          <span style="font-weight:700"> ${r.clientName}</span>
           <span style="color:var(--muted);margin-left:8px">${(r.items||[]).map(i=>(i.name||'?')+' ×'+(i.qty||1)).join(', ')}</span>
         </div>
         <div style="text-align:right">
@@ -2193,7 +2180,7 @@ function _renderStatsInner() {
     if (sales.length === 0) {
       tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:28px">
         <div style="margin-bottom:10px">Aucune vente enregistrée</div>
-        <button onclick="manualRefreshStats()" style="padding:8px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--muted);cursor:pointer;font-size:13px">🔄 Recharger depuis Sheets</button>
+        <button onclick="manualRefreshStats()" style="padding:8px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--muted);cursor:pointer;font-size:13px"> Recharger depuis Sheets</button>
       </td></tr>`;
     } else {
       const isAdmin = currentUser && currentUser.role === 'admin';
@@ -2207,16 +2194,16 @@ function _renderStatsInner() {
           ? `<td class="td-mono" style="font-weight:700;color:var(--red)">${fmt(due)}</td>`
           : `<td class="td-mono" style="color:var(--muted)">—</td>`;
         const adminActions = isAdmin
-          ? `<button class="btn-icon" onclick="openEditSaleModal(${s.id})" title="Modifier" style="margin-left:4px">✏️</button>
-             <button class="btn-icon" onclick="openDeleteSaleModal(${s.id})" title="Supprimer" style="margin-left:2px;color:var(--red)">🗑️</button>`
+          ? `<button class="btn-icon" onclick="openEditSaleModal(${s.id})" title="Modifier" style="margin-left:4px"></button>
+             <button class="btn-icon" onclick="openDeleteSaleModal(${s.id})" title="Supprimer" style="margin-left:2px;color:var(--red)"></button>`
           : '';
         return `<tr>
           <td>${dateStr}</td>
           <td>${items.map(i=>`${i.name||'?'} x${i.qty||1}`).join(', ')}</td>
-          <td>${s.method==='cash'?'💵 Espèces':`📱 ${s.provider||'Mobile'}`}</td>
+          <td>${s.method==='cash'?' Espèces':` ${s.provider||'Mobile'}`}</td>
           <td class="td-mono" style="font-weight:600;color:var(--accent)">${fmt(total)}</td>
           ${dueCell}
-          <td><button class="btn-icon" onclick="reprintTicket(${s.id})" title="Réimprimer">🖨️</button></td>
+          <td><button class="btn-icon" onclick="reprintTicket(${s.id})" title="Réimprimer"></button></td>
           <td style="white-space:nowrap">${adminActions}</td>
         </tr>`;
       }).join('');
@@ -2320,18 +2307,18 @@ function _buildReportHtml(period, customRange) {
   <hr style="border:none;border-top:2px solid #000;margin:10px 0"/>`;
 
   // --- RÉSUMÉ KPI ---
-  html += `<div class="section-title">📊 Résumé</div>
+  html += `<div class="section-title"> Résumé</div>
   <div class="kpi-row">
     <div class="kpi"><div class="kpi-label">Chiffre d'affaires</div><div class="kpi-val" style="color:#007a45">${fmt(ca)}</div></div>
     <div class="kpi"><div class="kpi-label">Transactions</div><div class="kpi-val" style="color:#1a6ec7">${list.length}</div></div>
-    <div class="kpi"><div class="kpi-label">💵 Espèces</div><div class="kpi-val">${fmt(cash)}</div></div>
-    <div class="kpi"><div class="kpi-label">📱 Mobile Money</div><div class="kpi-val">${fmt(mob)}</div></div>
+    <div class="kpi"><div class="kpi-label"> Espèces</div><div class="kpi-val">${fmt(cash)}</div></div>
+    <div class="kpi"><div class="kpi-label"> Mobile Money</div><div class="kpi-val">${fmt(mob)}</div></div>
     ${due > 0 ? `<div class="kpi"><div class="kpi-label">Reste à percevoir</div><div class="kpi-val" style="color:#c00">${fmt(due)}</div></div>` : ''}
   </div>`;
 
   // --- ARTICLES ---
   if (articles.length > 0) {
-    html += `<div class="section-title">📦 Détail par article</div>
+    html += `<div class="section-title"> Détail par article</div>
     <table>
       <thead><tr>
         <th class="center">#</th><th>Article</th>
@@ -2359,7 +2346,7 @@ function _buildReportHtml(period, customRange) {
 
   // --- DÉTAIL DES VENTES ---
   if (list.length > 0) {
-    html += `<div class="section-title">🧾 Détail des ventes (${list.length})</div>
+    html += `<div class="section-title"> Détail des ventes (${list.length})</div>
     <table>
       <thead><tr>
         <th>Date / Heure</th><th>Client</th><th>Articles</th>
@@ -2373,8 +2360,8 @@ function _buildReportHtml(period, customRange) {
         .map(i => `${i.name||'?'} ×${Number(i.qty)||1} <em style="color:#666">(${fmt((Number(i.price)||0)*(Number(i.qty)||1))})</em>`)
         .join('<br>');
       const payDetail = s.method === 'cash'
-        ? `💵 Espèces${s.given>0 ? `<br><small>Reçu: ${fmt(s.given)} · Rendu: ${fmt(s.change)}</small>` : ''}`
-        : `📱 ${s.provider||'Mobile'}${s.ref ? `<br><small>Réf: ${s.ref}</small>` : ''}`;
+        ? ` Espèces${s.given>0 ? `<br><small>Reçu: ${fmt(s.given)} · Rendu: ${fmt(s.change)}</small>` : ''}`
+        : ` ${s.provider||'Mobile'}${s.ref ? `<br><small>Réf: ${s.ref}</small>` : ''}`;
       const dueVal = Number(s.due)||0;
       const accVal = Number(s.accompte)||0;
       html += `<tr>
@@ -2397,12 +2384,12 @@ function _buildReportHtml(period, customRange) {
       <td class="right mono" style="${due>0?'color:#c00':''}">${due>0?fmt(due):'—'}</td>
     </tr></tbody></table>`;
   } else {
-    html += `<div class="section-title">🧾 Détail des ventes</div><p style="color:#888;text-align:center">Aucune vente sur cette période.</p>`;
+    html += `<div class="section-title"> Détail des ventes</div><p style="color:#888;text-align:center">Aucune vente sur cette période.</p>`;
   }
 
   // --- RÉSERVATIONS EN ATTENTE ---
   if (pendingRes.length > 0) {
-    html += `<div class="section-title">📋 Réservations en attente (${pendingRes.length})</div>
+    html += `<div class="section-title"> Réservations en attente (${pendingRes.length})</div>
     <table>
       <thead><tr>
         <th>N°</th><th>Date</th><th>Client</th><th>Articles</th>
@@ -2414,8 +2401,8 @@ function _buildReportHtml(period, customRange) {
       const dateStr = d ? d.toLocaleDateString('fr-FR') : '—';
       const items   = (Array.isArray(r.items)?r.items:[]).map(i=>`${i.name||'?'} ×${Number(i.qty)||1}`).join('<br>');
       const payAcc  = r.depositMethod==='cash'
-        ? '💵 Espèces'
-        : `📱 ${r.depositProvider||'Mobile'}${r.depositRef?`<br><small>Réf: ${r.depositRef}</small>`:''}`;
+        ? ' Espèces'
+        : ` ${r.depositProvider||'Mobile'}${r.depositRef?`<br><small>Réf: ${r.depositRef}</small>`:''}`;
       html += `<tr>
         <td class="center">#${r.id}</td>
         <td style="white-space:nowrap">${dateStr}</td>
@@ -2462,8 +2449,8 @@ function printReportMonth() {
 function printReportCustom() {
   const from = document.getElementById('reportDateFrom').value;
   const to   = document.getElementById('reportDateTo').value;
-  if (!from || !to) { showToast('⚠️ Veuillez sélectionner une date de début et de fin.', 'error'); return; }
-  if (from > to)    { showToast('⚠️ La date de début doit être avant la date de fin.', 'error'); return; }
+  if (!from || !to) { showToast(' Veuillez sélectionner une date de début et de fin.', 'error'); return; }
+  if (from > to)    { showToast(' La date de début doit être avant la date de fin.', 'error'); return; }
   const label = new Date(from+'T00:00:00').toLocaleDateString('fr-FR') + ' → ' + new Date(to+'T00:00:00').toLocaleDateString('fr-FR');
   _openReportWindow(_buildReportHtml(null, {from, to}), 'Rapport — ' + label);
 }
@@ -2533,7 +2520,7 @@ function renderBestSales(period) {
   const grandQty   = articles.reduce((s, a) => s + (Number(a.qty)   || 0), 0);
 
   const rankClass = i => i === 0 ? 'bs-rank-1' : i === 1 ? 'bs-rank-2' : i === 2 ? 'bs-rank-3' : 'bs-rank-n';
-  const rankEmoji = i => i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : String(i + 1);
+  const rankEmoji = i => i === 0 ? '' : i === 1 ? '' : i === 2 ? '' : String(i + 1);
 
   const rows = articles.map((a, i) => {
     const qty   = Number(a.qty)   || 0;
@@ -2585,7 +2572,7 @@ function renderBestSales(period) {
       </table>
     </div>`;
   } catch(e) {
-    container.innerHTML = `<div style="color:var(--muted);font-size:13px;padding:16px;text-align:center">⚠️ Erreur: ${e.message}</div>`;
+    container.innerHTML = `<div style="color:var(--muted);font-size:13px;padding:16px;text-align:center"> Erreur: ${e.message}</div>`;
     console.error('renderBestSales:', e);
   }
 }
@@ -2598,7 +2585,7 @@ let _deletingSaleId = null;
 
 function openEditSaleModal(id) {
   if (!currentUser || currentUser.role !== 'admin') {
-    showToast('⛔ Réservé aux administrateurs');
+    showToast(' Réservé aux administrateurs');
     return;
   }
   const s = sales.find(s => s.id === id);
@@ -2690,13 +2677,13 @@ function saveEditSale() {
   saveData();
   closeModal('editSaleModal');
   renderStats();
-  showToast('✅ Vente #' + _editingSaleId + ' modifiée localement');
+  showToast(' Vente #' + _editingSaleId + ' modifiée localement');
   _editingSaleId = null;
 }
 
 function openDeleteSaleModal(id) {
   if (!currentUser || currentUser.role !== 'admin') {
-    showToast('⛔ Réservé aux administrateurs');
+    showToast(' Réservé aux administrateurs');
     return;
   }
   _deletingSaleId = id;
@@ -2712,7 +2699,7 @@ function confirmDeleteSale() {
   saveData();
   closeModal('deleteSaleModal');
   renderStats();
-  showToast('🗑️ Vente #' + deletedId + ' supprimée localement');
+  showToast(' Vente #' + deletedId + ' supprimée localement');
 }
 
 // ============================================================
@@ -2799,7 +2786,7 @@ async function _autoClearCache() {
 
   console.log(`[Cache] v${stored || '?'} → v${APP_VERSION} — Nettoyage automatique`);
 
-  // ⚠️ Sauvegarder les données critiques AVANT tout nettoyage
+  //  Sauvegarder les données critiques AVANT tout nettoyage
   const _savedConfig     = localStorage.getItem('pos-config');
   const _savedConfigBak  = localStorage.getItem('pos-config-backup');
   const _savedCategories = localStorage.getItem('pos-categories');
@@ -2822,7 +2809,7 @@ async function _autoClearCache() {
     }
   } catch(e) { console.warn('[Cache] Erreur nettoyage:', e); }
 
-  // ✅ Restaurer les données critiques après nettoyage (au cas où le navigateur les aurait effacées)
+  //  Restaurer les données critiques après nettoyage (au cas où le navigateur les aurait effacées)
   try {
     if (_savedConfig)     localStorage.setItem('pos-config', _savedConfig);
     if (_savedConfigBak)  localStorage.setItem('pos-config-backup', _savedConfigBak);
@@ -2835,7 +2822,7 @@ async function _autoClearCache() {
 
   // Recharger seulement si ce n'est pas la toute première installation
   if (stored) {
-    showToast('⚡ Nouvelle version — cache vidé, rechargement...', 'info');
+    showToast(' Nouvelle version — cache vidé, rechargement...', 'info');
     setTimeout(() => window.location.reload(true), 1800);
   }
 }
@@ -2893,7 +2880,7 @@ function initPWA() {
 
   window.addEventListener('appinstalled', () => {
     document.getElementById('installBanner').classList.remove('show');
-    showToast('✅ Application installée avec succès !');
+    showToast(' Application installée avec succès !');
     deferredPrompt = null;
   });
 
@@ -2901,7 +2888,7 @@ function initPWA() {
   window.addEventListener('offline', () => document.getElementById('offlineBadge').classList.add('show'));
   window.addEventListener('online', () => {
     document.getElementById('offlineBadge').classList.remove('show');
-    showToast('🌐 Connexion rétablie — synchronisation...');
+    showToast(' Connexion rétablie — synchronisation...');
     syncPendingOfflineSales();
   });
   if (!navigator.onLine) document.getElementById('offlineBadge').classList.add('show');
@@ -2909,12 +2896,12 @@ function initPWA() {
 
 function installPWA() {
   if (!deferredPrompt) {
-    showToast('📱 Pour iOS: Safari → Partager → Sur l\'écran d\'accueil', 'info');
+    showToast(' Pour iOS: Safari → Partager → Sur l\'écran d\'accueil', 'info');
     return;
   }
   deferredPrompt.prompt();
   deferredPrompt.userChoice.then(choice => {
-    if (choice.outcome === 'accepted') showToast('✅ Installation en cours...');
+    if (choice.outcome === 'accepted') showToast(' Installation en cours...');
     deferredPrompt = null;
     document.getElementById('installBanner').classList.remove('show');
   });
@@ -3085,7 +3072,7 @@ function renderUsersPage() {
   count.textContent = `${localUsers.length} compte(s)`;
   grid.innerHTML = localUsers.map((u, idx) => {
     const roleLabel = ROLE_LABELS[u.role] || u.role;
-    const roleIcon  = ROLE_ICONS[u.role]  || '👤';
+    const roleIcon  = ROLE_ICONS[u.role]  || '';
     const isMe = currentUser && u.username === currentUser.username;
     const isLastAdmin = u.role === 'admin' && localUsers.filter(x => x.role === 'admin' && x.actif !== false).length === 1;
     return `
@@ -3104,9 +3091,9 @@ function renderUsersPage() {
           : '<span class="badge badge-inactive">Inactif</span>'}
       </div>
       <div class="user-card-actions">
-        <button class="btn-edit-user" onclick="openUserModal(${idx})">✏️ Modifier</button>
+        <button class="btn-edit-user" onclick="openUserModal(${idx})"> Modifier</button>
         ${!isMe && !isLastAdmin
-          ? `<button class="btn-del-user" onclick="deleteUser(${idx})">🗑 Supprimer</button>`
+          ? `<button class="btn-del-user" onclick="deleteUser(${idx})"> Supprimer</button>`
           : `<button class="btn-toggle-user" onclick="toggleUserActive(${idx})" ${isMe?'disabled':''}>
                ${u.actif!==false?'⏸ Désactiver':'▶ Activer'}</button>`}
       </div>
@@ -3117,11 +3104,11 @@ function renderUsersPage() {
 function openUserModal(idx=null) {
   editingUserId = idx;
   const isNew = idx === null;
-  document.getElementById('userModalTitle').textContent = isNew ? '➕ Nouvel utilisateur' : '✏️ Modifier l\'utilisateur';
+  document.getElementById('userModalTitle').textContent = isNew ? ' Nouvel utilisateur' : ' Modifier l\'utilisateur';
   document.getElementById('uPassLabel').textContent = isNew ? 'Mot de passe' : 'Nouveau mot de passe (laisser vide = inchangé)';
   document.getElementById('uPass').placeholder = isNew ? '••••••' : '(inchangé)';
   document.getElementById('uPass').type = 'password';
-  document.getElementById('passVisBtn').textContent = '👁';
+  document.getElementById('passVisBtn').textContent = '';
   if (isNew) {
     document.getElementById('uUsername').value = '';
     document.getElementById('uUsername').disabled = false;
@@ -3145,7 +3132,7 @@ function togglePassVis() {
   const inp = document.getElementById('uPass');
   const btn = document.getElementById('passVisBtn');
   inp.type = inp.type === 'password' ? 'text' : 'password';
-  btn.textContent = inp.type === 'password' ? '👁' : '🙈';
+  btn.textContent = inp.type === 'password' ? '' : '';
 }
 
 async function saveUser() {
@@ -3179,14 +3166,14 @@ async function saveUser() {
 
   if (isNew) {
     localUsers.push({ username, pass: passHashed, role, label, actif });
-    showToast(`✅ Utilisateur ${label} créé`);
+    showToast(` Utilisateur ${label} créé`);
   } else {
     const u = localUsers[editingUserId];
     u.label = label;
     u.role  = role;
     u.actif = actif;
     if (passHashed) u.pass = passHashed;
-    showToast(`✅ ${label} mis à jour`);
+    showToast(` ${label} mis à jour`);
   }
 
   saveUsers();
@@ -3218,7 +3205,7 @@ function toggleUserActive(idx) {
   u.actif = u.actif === false ? true : false;
   saveUsers();
   renderUsersPage();
-  showToast(u.actif ? `✅ ${u.label} activé` : `⏸ ${u.label} désactivé`);
+  showToast(u.actif ? ` ${u.label} activé` : `⏸ ${u.label} désactivé`);
   saveUserToScript(u);
 }
 
@@ -3233,7 +3220,7 @@ async function syncPendingOfflineSales() {
   if (!APPS_SCRIPT_URL) return;
   const pending = JSON.parse(localStorage.getItem('pos-pending-sales') || '[]');
   if (pending.length === 0) return;
-  showToast(`🔄 Synchronisation de ${pending.length} vente(s) en attente...`, 'info');
+  showToast(` Synchronisation de ${pending.length} vente(s) en attente...`, 'info');
   const succeeded = [];
   const failed    = [];
   const MAX_RETRIES = 3;
@@ -3261,11 +3248,11 @@ async function syncPendingOfflineSales() {
 
   if (failed.length > 0) {
     safeLocalSet('pos-pending-sales', JSON.stringify(failed));
-    showToast(`⚠️ ${succeeded.length} sync. — ${failed.length} encore en attente`, 'error');
+    showToast(` ${succeeded.length} sync. — ${failed.length} encore en attente`, 'error');
     if (failed.length >= 5) console.error('Ventes non synchronisées après', MAX_RETRIES, 'tentatives :', failed);
   } else {
     localStorage.removeItem('pos-pending-sales');
-    showToast(`✅ ${succeeded.length} vente(s) synchronisée(s) dans Google Sheets`);
+    showToast(` ${succeeded.length} vente(s) synchronisée(s) dans Google Sheets`);
   }
   updatePendingBadge();
 }
@@ -3380,7 +3367,7 @@ function _updateAirtableBtn() {
   const connected = !!(AIRTABLE_API_KEY && AIRTABLE_BASE_ID);
   btn.style.borderColor = connected ? 'rgba(26,74,58,0.4)'    : 'rgba(232,131,74,0.4)';
   btn.style.color       = connected ? 'var(--accent)'          : 'var(--accent2)';
-  btn.title             = connected ? 'Airtable connecté ✅'   : 'Configurer Airtable';
+  btn.title             = connected ? 'Airtable connecté '   : 'Configurer Airtable';
 }
 
 function _loadAirtableConfigFields() {
@@ -3389,7 +3376,7 @@ function _loadAirtableConfigFields() {
   if (k) k.value = AIRTABLE_API_KEY;
   if (b) b.value = AIRTABLE_BASE_ID;
   const status = document.getElementById('airtableStatus');
-  if (status) status.textContent = (AIRTABLE_API_KEY && AIRTABLE_BASE_ID) ? '✅ Configuré' : 'Non configuré';
+  if (status) status.textContent = (AIRTABLE_API_KEY && AIRTABLE_BASE_ID) ? ' Configuré' : 'Non configuré';
 }
 
 async function testAirtableConnection() {
@@ -3401,19 +3388,19 @@ async function testAirtableConnection() {
     const res = await fetch(url, { headers: { 'Authorization': `Bearer ${AIRTABLE_API_KEY}` } });
     hideLoader();
     if (res.ok) {
-      showToast('✅ Airtable connecté !');
-      if (statusEl) statusEl.textContent = '✅ Connexion OK';
+      showToast(' Airtable connecté !');
+      if (statusEl) statusEl.textContent = ' Connexion OK';
       _updateAirtableBtn();
     } else {
       const err = await res.json();
       const msg = err?.error?.message || 'Erreur ' + res.status;
-      showToast('❌ Airtable : ' + msg, 'error');
-      if (statusEl) statusEl.textContent = '❌ ' + msg;
+      showToast(' Airtable : ' + msg, 'error');
+      if (statusEl) statusEl.textContent = ' ' + msg;
     }
   } catch(e) {
     hideLoader();
-    showToast('❌ Airtable inaccessible : ' + e.message, 'error');
-    if (statusEl) statusEl.textContent = '❌ ' + e.message;
+    showToast(' Airtable inaccessible : ' + e.message, 'error');
+    if (statusEl) statusEl.textContent = ' ' + e.message;
   }
 }
 
@@ -3481,7 +3468,7 @@ async function loadProductsFromScript() {
     });
     nextId = Math.max(...products.map(p => p.id)) + 1;
     saveData();
-    showToast('✅ ' + products.length + ' articles chargés depuis Google Sheets');
+    showToast(' ' + products.length + ' articles chargés depuis Google Sheets');
     return true;
   }
   return false;
@@ -3513,19 +3500,19 @@ async function syncToAppsScript(sale) {
   if (!navigator.onLine) {
     savePendingSale(sale);
     updatePendingBadge();
-    showToast('📡 Hors ligne — vente mise en file d\'attente', 'info');
+    showToast(' Hors ligne — vente mise en file d\'attente', 'info');
     return;
   }
   sale.caissier = currentUser ? currentUser.username : 'caissier';
   const r = await apiCall({ action: 'addSale', sale });
   if (r && r.ok) {
-    showToast('☁️ Vente enregistrée dans Google Sheets ✅');
+    showToast(' Vente enregistrée dans Google Sheets ');
   } else {
     const errMsg = r ? (r.error || 'Erreur inconnue') : 'Connexion impossible';
     console.error('Sync vente échouée:', errMsg);
     savePendingSale(sale);
     updatePendingBadge();
-    showToast('⚠️ Google Sheets inaccessible — vente mise en file. ' + errMsg, 'error');
+    showToast(' Google Sheets inaccessible — vente mise en file. ' + errMsg, 'error');
   }
 }
 
@@ -3693,7 +3680,7 @@ function showLoader(msg) {
     el = document.createElement('div');
     el.id = 'syncLoader';
     el.style.cssText = 'position:fixed;top:70px;left:50%;transform:translateX(-50%);background:#073D37;border:1px solid rgba(255,255,255,0.20);color:#FFFFFF;padding:10px 20px;border-radius:20px;font-size:13px;z-index:1600;display:flex;gap:8px;align-items:center;';
-    el.innerHTML = '<span style="animation:spin 1s linear infinite;display:inline-block">⚙️</span><span id="syncLoaderMsg"></span>';
+    el.innerHTML = '<span style="animation:spin 1s linear infinite;display:inline-block"></span><span id="syncLoaderMsg"></span>';
     document.body.appendChild(el);
     const style = document.createElement('style');
     style.textContent = '@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}';
@@ -3710,25 +3697,25 @@ function hideLoader() {
 // ── Paramètres Apps Script (modal) ──────────────────────
 function openScriptSettings() {
   const choice = prompt(
-    '⚙️ Google Sheets — Que voulez-vous faire ?\n\n' +
+    ' Google Sheets — Que voulez-vous faire ?\n\n' +
     '1 → Changer l\'URL du script\n' +
     '2 → Tester la connexion\n' +
     '3 → Initialiser les feuilles (1ère utilisation)\n' +
     '4 → Synchroniser les ventes en attente\n' +
     '5 → RESTAURER toutes les données depuis le Sheet\n' +
-    '6 → ⚠️ RESET COMPLET — Effacer toutes les données locales\n\n' +
+    '6 →  RESET COMPLET — Effacer toutes les données locales\n\n' +
     'Tapez le numéro :',
     '2'
   );
   if (!choice) return;
   if (choice.trim() === '1') {
-    const url = prompt('🔗 Nouvelle URL Apps Script Web App :', APPS_SCRIPT_URL);
+    const url = prompt(' Nouvelle URL Apps Script Web App :', APPS_SCRIPT_URL);
     if (url === null) return;
     APPS_SCRIPT_URL = url.trim();
     localStorage.setItem('pos-script-url', APPS_SCRIPT_URL);
     syncEnabled = !!APPS_SCRIPT_URL;
-    if (APPS_SCRIPT_URL) { showToast('✅ URL enregistrée !'); testScriptConnection(); }
-    else showToast('⚠️ Sync désactivée', 'info');
+    if (APPS_SCRIPT_URL) { showToast(' URL enregistrée !'); testScriptConnection(); }
+    else showToast(' Sync désactivée', 'info');
   } else if (choice.trim() === '2') {
     testScriptConnection();
   } else if (choice.trim() === '3') {
@@ -3744,7 +3731,7 @@ function openScriptSettings() {
 
 async function resetCompletPOS() {
   const step1 = confirm(
-    '⚠️ RESET COMPLET DU POS ⚠️\n\n' +
+    ' RESET COMPLET DU POS \n\n' +
     'Cela va effacer TOUTES les données locales :\n' +
     '• Produits, ventes, réservations, commandes\n' +
     '• Tâches, notifications, panier en cours\n' +
@@ -3770,7 +3757,6 @@ async function resetCompletPOS() {
   if (scriptUrl)  localStorage.setItem('pos-script-url', scriptUrl);
   if (appVersion) localStorage.setItem('pos-app-version', appVersion);
 
-  // Écraser les données demo codées en dur avec des tableaux vides
   localStorage.setItem('pos-products',      JSON.stringify([]));
   localStorage.setItem('pos-sales',         JSON.stringify([]));
   localStorage.setItem('pos-reservations',  JSON.stringify([]));
@@ -3783,7 +3769,7 @@ async function resetCompletPOS() {
   localStorage.setItem('pos-nextCmdId',     '1');
 
   hideLoader();
-  showToast('✅ Données effacées — rechargement...', 'info');
+  showToast(' Données effacées — rechargement...', 'info');
   setTimeout(() => window.location.reload(true), 1500);
 }
 
@@ -3817,16 +3803,16 @@ async function testScriptConnection() {
   try {
     const res  = await fetch(APPS_SCRIPT_URL + '?action=ping');
     const data = JSON.parse(await res.text());
-    log.push(data.ok ? '✅ Script accessible' : '❌ Script KO: ' + data.error);
-  } catch(e) { log.push('❌ Script inaccessible: ' + e.message); }
+    log.push(data.ok ? ' Script accessible' : ' Script KO: ' + data.error);
+  } catch(e) { log.push(' Script inaccessible: ' + e.message); }
 
   // 2. Lecture produits
   try {
     const res  = await fetch(APPS_SCRIPT_URL + '?action=getProducts');
     const data = JSON.parse(await res.text());
-    if (data.ok)    log.push('✅ Produits: ' + data.products.length + ' articles lus');
-    else            log.push('⚠️ Produits: ' + data.error + ' → lancez option 3');
-  } catch(e) { log.push('❌ Lecture produits: ' + e.message); }
+    if (data.ok)    log.push(' Produits: ' + data.products.length + ' articles lus');
+    else            log.push(' Produits: ' + data.error + ' → lancez option 3');
+  } catch(e) { log.push(' Lecture produits: ' + e.message); }
 
   // 3. Test écriture no-cors (ne peut pas lire la réponse → on vérifie via lecture)
   try {
@@ -3835,15 +3821,15 @@ async function testScriptConnection() {
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: 'ping' })
     });
-    log.push('✅ Écriture POST envoyée (no-cors OK)');
-  } catch(e) { log.push('❌ Écriture POST: ' + e.message); }
+    log.push(' Écriture POST envoyée (no-cors OK)');
+  } catch(e) { log.push(' Écriture POST: ' + e.message); }
 
   hideLoader();
-  alert('🔍 Diagnostic Google Sheets\n\n' + log.join('\n') +
+  alert(' Diagnostic Google Sheets\n\n' + log.join('\n') +
     '\n\n━━━━━━━━━━━━━━━━━━━━━\n' +
     '→ Si "Script inaccessible" : vérifiez l\'URL\n' +
     '→ Si "Feuille introuvable" : faites option 3 (Initialiser)\n' +
-    '→ Si tout est ✅ mais ventes absentes : vérifiez les logs Apps Script');
+    '→ Si tout est  mais ventes absentes : vérifiez les logs Apps Script');
 }
 
 async function initSheetsFromApp() {
@@ -3854,16 +3840,16 @@ async function initSheetsFromApp() {
     const data = JSON.parse(text);
     hideLoader();
     if (data.ok) {
-      showToast('✅ Feuilles initialisées ! Chargement des données...');
+      showToast(' Feuilles initialisées ! Chargement des données...');
       await loadProductsFromScript();
       await loadSalesFromScript();
       renderProducts(); renderStockTable(); renderStats();
     } else {
-      showToast('❌ Erreur init : ' + (data.error || ''), 'error');
+      showToast(' Erreur init : ' + (data.error || ''), 'error');
     }
   } catch (e) {
     hideLoader();
-    showToast('❌ Erreur : ' + e.message, 'error');
+    showToast(' Erreur : ' + e.message, 'error');
   }
 }
 
@@ -3923,7 +3909,7 @@ function saveConfig() {
   shopConfig.footer  = document.getElementById('cfgFooter').value   || 'Merci de votre visite !';
   _persistConfig();
   syncConfigToGAS();
-  showToast('✅ Boutique enregistrée', 'success');
+  showToast(' Boutique enregistrée', 'success');
 }
 
 function saveTicketConfig() {
@@ -3958,17 +3944,17 @@ async function syncConfigToGAS() {
     const r = await apiCall({ action: 'saveShopConfig', config: configWithoutLogo });
     if (statusEl) {
       if (r && r.ok) {
-        statusEl.textContent = '✅ Synchronisé — tous les postes';
+        statusEl.textContent = ' Synchronisé — tous les postes';
         statusEl.style.color = '#16a34a';
       } else {
-        statusEl.textContent = '💾 Sauvegardé localement';
+        statusEl.textContent = ' Sauvegardé localement';
         statusEl.style.color = '#78716c';
       }
       setTimeout(() => { if (statusEl) { statusEl.textContent = ''; } }, 4000);
     }
   } catch(e) {
     if (statusEl) {
-      statusEl.textContent = '💾 Sauvegardé localement';
+      statusEl.textContent = ' Sauvegardé localement';
       statusEl.style.color = '#78716c';
       setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 4000);
     }
@@ -4003,7 +3989,7 @@ function importConfig() {
         _persistConfig();
         try { localStorage.setItem('pos-categories', JSON.stringify(categories)); } catch(e) {}
         renderConfigPage();
-        showToast('✅ Config importée et appliquée', 'success');
+        showToast(' Config importée et appliquée', 'success');
       } catch(err) { showToast('Erreur lecture fichier', 'error'); }
     };
     reader.readAsText(file);
@@ -4161,7 +4147,7 @@ function renderCategories() {
   el.innerHTML = categories.map(c => `
     <span class="cat-tag">
       ${c}
-      <button onclick="removeCategory('${c}')" title="Supprimer">✕</button>
+      <button onclick="removeCategory('${c}')" title="Supprimer"></button>
     </span>`).join('');
 }
 
@@ -4175,7 +4161,7 @@ function addCategory() {
   input.value = '';
   renderCategories();
   syncCategorySelect();
-  showToast('✅ Catégorie ajoutée');
+  showToast(' Catégorie ajoutée');
 }
 
 function removeCategory(cat) {
@@ -4207,7 +4193,7 @@ function renderConfigArticles() {
   grid.innerHTML = filtered.map(p => `
     <div class="article-config-card">
       <div class="article-config-card-header">
-        <span class="article-config-card-emoji">${p.emoji||'📦'}</span>
+        <span class="article-config-card-emoji">${p.emoji||''}</span>
         <div class="article-config-card-info">
           <div class="article-config-card-name">${p.name}</div>
           <div class="article-config-card-cat">${p.cat} · Code: ${p.code}</div>
@@ -4232,9 +4218,9 @@ function renderConfigArticles() {
         </div>
       </div>
       <div class="article-config-actions">
-        <button class="btn-save-article" onclick="saveArticleConfig(${p.id})">💾 Enregistrer</button>
-        <button class="btn-icon btn-edit" onclick="editProduct(${p.id})" title="Édition complète" style="border:1px solid var(--border);border-radius:8px;padding:8px 10px">✏️</button>
-        <button class="btn-del-article" onclick="deleteProduct(${p.id})">🗑</button>
+        <button class="btn-save-article" onclick="saveArticleConfig(${p.id})"> Enregistrer</button>
+        <button class="btn-icon btn-edit" onclick="editProduct(${p.id})" title="Édition complète" style="border:1px solid var(--border);border-radius:8px;padding:8px 10px"></button>
+        <button class="btn-del-article" onclick="deleteProduct(${p.id})"></button>
       </div>
     </div>`).join('');
 }
@@ -4250,7 +4236,7 @@ function saveArticleConfig(id) {
   renderProducts();
   renderStockTable();
   saveProductToScript(p);
-  showToast(`✅ ${p.name} mis à jour`);
+  showToast(` ${p.name} mis à jour`);
 }
 
 // ============================================================
@@ -4374,7 +4360,7 @@ function filterCmdStock() {
   dd.style.display = 'block';
   dd.innerHTML = filtered.slice(0, 8).map(p => `
     <div class="cmd-stock-item" onclick="addCmdItemFromStock(${p.id})">
-      <span>${p.emoji || '📦'} ${p.name}</span>
+      <span>${p.emoji || ''} ${p.name}</span>
       <span style="font-family:'DM Mono',monospace;color:var(--muted);font-size:12px">${fmt(p.price)}</span>
     </div>`).join('');
 }
@@ -4553,7 +4539,7 @@ function saveCommande() {
     message:       `Nouvelle commande ${_cmdDossier.numeroDossier} — ${clientName} — ${commande.items.map(i=>i.name).join(', ')}`
   });
   closeModal('commandeModal');
-  showToast(`🧾 Commande #${commande.id} créée — ${clientName}`);
+  showToast(` Commande #${commande.id} créée — ${clientName}`);
   updateCmdBadge();
 
   if (cart.length > 0 && commande.items.some(ci => cart.find(c2 => c2.name === ci.name))) {
@@ -4572,19 +4558,19 @@ async function _autoRefreshCommandes() {
   const btn = document.getElementById('cmdRefreshBtn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Actualisation...'; }
   try { await loadCommandesFromScript(); }
-  catch(e) { showToast('⚠️ Erreur chargement commandes', 'error'); }
+  catch(e) { showToast(' Erreur chargement commandes', 'error'); }
   finally {
-    if (btn) { btn.disabled = false; btn.textContent = '🔄 Actualiser'; }
+    if (btn) { btn.disabled = false; btn.textContent = ' Actualiser'; }
     renderCommandes();
     updateCmdBadge();
   }
 }
 
 async function manualRefreshCommandes() {
-  if (!APPS_SCRIPT_URL) { showToast('⚠️ URL Apps Script non configurée', 'error'); return; }
+  if (!APPS_SCRIPT_URL) { showToast(' URL Apps Script non configurée', 'error'); return; }
   _lastCmdRefresh = 0;
   await _autoRefreshCommandes();
-  showToast('✅ Commandes actualisées');
+  showToast(' Commandes actualisées');
 }
 
 function renderCommandes() {
@@ -4600,7 +4586,7 @@ function renderCommandes() {
   const container = document.getElementById('commandesList');
   if (!container) return;
   if (list.length === 0) {
-    container.innerHTML = `<div style="text-align:center;color:var(--muted);padding:48px 20px;font-size:15px">🧾 Aucune commande ${filter==='pending'?'en cours':''}</div>`;
+    container.innerHTML = `<div style="text-align:center;color:var(--muted);padding:48px 20px;font-size:15px"> Aucune commande ${filter==='pending'?'en cours':''}</div>`;
     return;
   }
 
@@ -4614,26 +4600,26 @@ function renderCommandes() {
 
       const deliveryHtml = (c.adresseLivraison || c.dateLivraison) ? `
         <div class="cmd-card-delivery">
-          ${c.adresseLivraison ? `📍 ${c.adresseLivraison}` : ''}
-          ${c.dateLivraison ? ` &nbsp;🗓️ Livraison : <strong>${new Date(c.dateLivraison+'T00:00:00').toLocaleDateString('fr-FR')}</strong>` : ''}
+          ${c.adresseLivraison ? ` ${c.adresseLivraison}` : ''}
+          ${c.dateLivraison ? ` &nbsp; Livraison : <strong>${new Date(c.dateLivraison+'T00:00:00').toLocaleDateString('fr-FR')}</strong>` : ''}
         </div>` : '';
 
-      const notesHtml = c.notes ? `<div class="cmd-notes">📝 ${c.notes}</div>` : '';
+      const notesHtml = c.notes ? `<div class="cmd-notes"> ${c.notes}</div>` : '';
 
       const photosHtml = (c.photos||[]).length > 0
         ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${(c.photos||[]).map(src=>`<img src="${src}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:pointer" onclick="window.open(this.src,'_blank')" />`).join('')}</div>` : '';
 
       const actions = c.status === 'pending'
-        ? `<button class="btn-finalize" onclick="openCmdFinalizeModal(${c.id})">✅ Finaliser</button>
-           <button class="btn-cancel-res" onclick="cancelCommande(${c.id})">❌ Annuler</button>`
+        ? `<button class="btn-finalize" onclick="openCmdFinalizeModal(${c.id})"> Finaliser</button>
+           <button class="btn-cancel-res" onclick="cancelCommande(${c.id})"> Annuler</button>`
         : '';
 
       return `
       <div class="cmd-card">
         <div class="cmd-card-header">
           <div>
-            <div class="cmd-card-client">👤 ${c.clientName} <span style="font-size:12px;color:var(--muted);font-weight:400">#${c.id}</span></div>
-            ${c.clientContact ? `<div style="font-size:13px;color:var(--muted)">📞 ${c.clientContact}</div>` : ''}
+            <div class="cmd-card-client"> ${c.clientName} <span style="font-size:12px;color:var(--muted);font-weight:400">#${c.id}</span></div>
+            ${c.clientContact ? `<div style="font-size:13px;color:var(--muted)"> ${c.clientContact}</div>` : ''}
           </div>
           <div style="text-align:right">
             <span class="cmd-status ${statusClass}">${statusLabel}</span>
@@ -4641,7 +4627,7 @@ function renderCommandes() {
           </div>
         </div>
         ${deliveryHtml}
-        <div class="cmd-items">📦 ${itemsStr}</div>
+        <div class="cmd-items"> ${itemsStr}</div>
         ${notesHtml}
         ${photosHtml}
         <div class="res-amounts" style="margin-top:12px">
@@ -4653,7 +4639,7 @@ function renderCommandes() {
         ${c.status === 'pending' && c.dossierId ? _buildCardProductionSection(c.dossierId) : ''}
       </div>`;
     } catch(e) {
-      return `<div class="cmd-card" style="color:var(--muted);font-size:13px;padding:12px">⚠️ Commande #${c.id} — erreur: ${e.message}</div>`;
+      return `<div class="cmd-card" style="color:var(--muted);font-size:13px;padding:12px"> Commande #${c.id} — erreur: ${e.message}</div>`;
     }
   }).join('');
 }
@@ -4671,7 +4657,7 @@ function openCmdFinalizeModal(id) {
   const c = commandes.find(x => String(x.id) === String(id));
   if (!c) return;
   currentCmdFinalizeId = id;
-  document.getElementById('cmdFinalClientInfo').textContent = `👤 ${c.clientName}${c.clientContact?' — '+c.clientContact:''}`;
+  document.getElementById('cmdFinalClientInfo').textContent = ` ${c.clientName}${c.clientContact?' — '+c.clientContact:''}`;
   document.getElementById('cmdFinalTotal').textContent   = fmt(c.total);
   document.getElementById('cmdFinalAcc').textContent     = fmt(c.accompte);
   document.getElementById('cmdFinalRestant').textContent = fmt(c.restant);
@@ -4767,7 +4753,7 @@ function _doCmdFinalize(c, method, given, change, provider, ref) {
   });
   closeModal('cmdFinalizeModal');
   printTicket(sale);
-  showToast(`✅ Vente #${sale.id} enregistrée — Commande #${c.id} livrée !`);
+  showToast(` Vente #${sale.id} enregistrée — Commande #${c.id} livrée !`);
   renderCommandes();
   updateCmdBadge();
 }
@@ -4874,7 +4860,7 @@ function exportSalesCSV() {
   document.body.appendChild(a);
   a.click();
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
-  showToast(`✅ Export CSV — ${list.length} vente(s)`);
+  showToast(` Export CSV — ${list.length} vente(s)`);
 }
 
 // ============================================================
@@ -5157,7 +5143,7 @@ function _buildCardProductionSection(dossierId) {
   const bc  = s => s==='VIDE'?'#d6d3d1':bg(s);
   const tc  = s => s==='VIDE'?'#a8a29e':'#fff';
   const lc  = s => s==='TERMINE'?'#16a34a':'#e5e3df';
-  const ic  = s => s==='TERMINE'?'✓':s==='EN_COURS'?'▶':s==='A_FAIRE'?'●':'';
+  const ic  = s => s==='TERMINE'?'':s==='EN_COURS'?'▶':s==='A_FAIRE'?'●':'';
 
   const progressBar = `<div style="display:flex;align-items:flex-start;overflow-x:auto;padding-bottom:2px">
     ${steps.map((s, i) => `<div style="display:flex;flex-direction:column;align-items:center;flex:1;min-width:38px;position:relative">
@@ -5176,7 +5162,7 @@ function _buildCardProductionSection(dossierId) {
         assigned.flatMap(s => s.tachesEtape.map(t => {
           const col = t.statut==='TERMINE'?'#16a34a':t.statut==='EN_COURS'?'#d97706':'#2563eb';
           const bg2 = t.statut==='TERMINE'?'#dcfce7':t.statut==='EN_COURS'?'#fef3c7':'#dbeafe';
-          const ic2 = t.statut==='TERMINE'?'✓':t.statut==='EN_COURS'?'▶':'●';
+          const ic2 = t.statut==='TERMINE'?'':t.statut==='EN_COURS'?'▶':'●';
           return `<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:600;background:${bg2};color:${col};padding:2px 7px;border-radius:10px">${ic2} ${s.short} · ${t.operateur}</span>`;
         })).join('')
       }</div>`
@@ -5378,12 +5364,12 @@ function _renderNotifPanelList() {
   const lastRead = _getLastReadTs();
   // Icônes et couleurs pour chaque type d'événement
   const _ntMap = {
-    RESERVE:     { icon:'📋', color:'#2563eb' },
-    PAYE:        { icon:'✅', color:'#16a34a' },
-    ANNULE:      { icon:'✗',  color:'#dc2626' },
-    COMMENT:     { icon:'💬', color:'#7c3aed' },
-    ATTRIBUTION: { icon:'👤', color:'#e8834a' },
-    SELF_ASSIGN: { icon:'✋', color:'#e8834a' },
+    RESERVE:     { icon:'', color:'#2563eb' },
+    PAYE:        { icon:'', color:'#16a34a' },
+    ANNULE:      { icon:'',  color:'#dc2626' },
+    COMMENT:     { icon:'', color:'#7c3aed' },
+    ATTRIBUTION: { icon:'', color:'#e8834a' },
+    SELF_ASSIGN: { icon:'', color:'#e8834a' },
   };
   list.innerHTML = notifications.map(n => {
     const isUnread = new Date(n.timestamp).getTime() > lastRead;
@@ -5392,7 +5378,7 @@ function _renderNotifPanelList() {
     const timeStr = dt.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
     const typeConf  = _ntMap[n.etapeCode];
     const etapeConf = ETAPES_CONFIG.find(e => e.code === n.etapeCode);
-    const icon  = n.dossierId === 'LIBRE' ? '★' : (typeConf ? typeConf.icon : (etapeConf ? etapeConf.icon : '✓'));
+    const icon  = n.dossierId === 'LIBRE' ? '' : (typeConf ? typeConf.icon : (etapeConf ? etapeConf.icon : ''));
     const color = n.dossierId === 'LIBRE' ? '#7c3aed' : (typeConf ? typeConf.color : (etapeConf ? etapeConf.color : '#16a34a'));
     return `<div class="notif-item ${isUnread ? 'notif-item--unread' : ''}">
       <div style="display:flex;gap:10px;align-items:flex-start">
@@ -5759,7 +5745,7 @@ function _prodTacheRow(t) {
     : t.statut === 'EN_COURS'
     ? '<span class="badge badge-amber">En cours</span>'
     : '<span class="badge badge-blue">À faire</span>';
-  const dossierRef = t.dossierId?.startsWith('TL_') ? '★ Libre' : (t.numeroDossier || t.dossierId || '—');
+  const dossierRef = t.dossierId?.startsWith('TL_') ? ' Libre' : (t.numeroDossier || t.dossierId || '—');
   return `<tr>
     <td>${dossierRef}</td>
     <td>${t.etapeLabel || t.titre || '—'}</td>
@@ -6071,13 +6057,13 @@ async function loadDossiers() {
       const r = await apiCall({ action:'getDossiers', statut:filter });
       hideLoader();
       if (r && r.ok) dossiers = r.dossiers;
-      else dossiers = demoDossiers();
+      else dossiers = [];
     } else {
-      dossiers = demoDossiers();
+      dossiers = [];
     }
   } catch(e) {
     hideLoader();
-    dossiers = demoDossiers();
+    dossiers = [];
   }
   // Toujours fusionner les dossiers issus des commandes/réservations (non persistés)
   _ensureDossierLinks();
@@ -6265,7 +6251,7 @@ function _renderDossierCardGrid(list) {
       const dotBg     = s==='done'?'#16a34a':s==='encours'?'#d97706':s==='todo'?'#2563eb':'#f5f5f4';
       const dotBorder = s==='done'?'#16a34a':s==='encours'?'#d97706':s==='todo'?'#2563eb':'#d6d3d1';
       const dotColor  = s==='vide'?'#a8a29e':'#fff';
-      const ic        = s==='done'?'✓':s==='encours'?'▶':s==='todo'?'●':'';
+      const ic        = s==='done'?'':s==='encours'?'▶':s==='todo'?'●':'';
       const lineColor = s==='done'?'#16a34a30':'#e5e3df';
       const labelColor = s==='done'?'#16a34a':s==='encours'?'#d97706':s==='todo'?'#2563eb':'#c2bdb8';
       const ops = te.map(t => t.operateur).join(',');
@@ -6541,10 +6527,10 @@ function renderAttrPanel(tachesD, commentsD = []) {
           }).join('')
         : '<em style="color:var(--color-text-muted)">Non assigné</em>';
       const etapeIcon = etapeComplete
-        ? `<span style="font-size:10px;font-weight:700;color:var(--color-success);background:var(--color-success-bg);padding:2px 8px;border-radius:20px;margin-left:6px">✓ Étape complète</span>`
+        ? `<span style="font-size:10px;font-weight:700;color:var(--color-success);background:var(--color-success-bg);padding:2px 8px;border-radius:20px;margin-left:6px"> Étape complète</span>`
         : '';
       return `<div class="etape-row-attr">
-        <div style="width:28px;height:28px;border-radius:50%;background:${etapeComplete?'#16a34a':e.color}18;border:1.5px solid ${etapeComplete?'#16a34a':e.color};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;font-weight:700;color:${etapeComplete?'#16a34a':e.color}">${etapeComplete?'✓':e.icon}</div>
+        <div style="width:28px;height:28px;border-radius:50%;background:${etapeComplete?'#16a34a':e.color}18;border:1.5px solid ${etapeComplete?'#16a34a':e.color};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;font-weight:700;color:${etapeComplete?'#16a34a':e.color}">${etapeComplete?'':e.icon}</div>
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">
             <span style="font-size:13px;font-weight:600;color:var(--color-text-primary)">${e.label}</span>
@@ -6559,7 +6545,7 @@ function renderAttrPanel(tachesD, commentsD = []) {
           : canSelfAssign
           ? `<button class="btn-attr-assign" style="background:var(--color-secondary);border-color:var(--color-secondary)" onclick="selfAssign('${e.code}','${e.label}')">Je m'assigne</button>`
           : alreadySelfAssigned && !etapeComplete
-          ? `<span style="font-size:11px;font-weight:600;color:var(--color-secondary);padding:4px 10px;background:var(--color-secondary-light);border-radius:6px">✓ Assigné</span>`
+          ? `<span style="font-size:11px;font-weight:600;color:var(--color-secondary);padding:4px 10px;background:var(--color-secondary-light);border-radius:6px"> Assigné</span>`
           : ''}
       </div>`;
     }).join('')}
@@ -6662,7 +6648,7 @@ function printDossier(dossierId) {
   const nonImageHtml = nonImageAttach.length
     ? `<div style="margin-bottom:28px">
         <h2 style="font-size:12pt;font-weight:700;color:#1a4a3a;border-left:3px solid #e8834a;padding-left:10px;margin-bottom:12px;text-transform:uppercase;letter-spacing:.05em">Fichiers joints</h2>
-        ${nonImageAttach.map(a => `<div style="padding:6px 10px;background:#f8f7f4;border:1px solid #e5e3df;border-radius:6px;font-size:10pt;color:#1c1917;margin-bottom:6px">📎 ${a.name}</div>`).join('')}
+        ${nonImageAttach.map(a => `<div style="padding:6px 10px;background:#f8f7f4;border:1px solid #e5e3df;border-radius:6px;font-size:10pt;color:#1c1917;margin-bottom:6px"> ${a.name}</div>`).join('')}
       </div>`
     : '';
 
@@ -6721,7 +6707,7 @@ function printDossier(dossierId) {
       <div style="flex:1;padding:14px 16px;background:#f8f7f4;border-radius:10px;border:1px solid #e5e3df">
         <div style="font-size:9pt;font-weight:700;color:#78716c;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Client</div>
         <div style="font-size:14pt;font-weight:700;color:#1c1917">${src?.clientName || d.client || '—'}</div>
-        ${src?.clientContact ? `<div style="font-size:11pt;color:#78716c;margin-top:4px">📞 ${src.clientContact}</div>` : ''}
+        ${src?.clientContact ? `<div style="font-size:11pt;color:#78716c;margin-top:4px"> ${src.clientContact}</div>` : ''}
         ${src?.clientType ? `<div style="font-size:10pt;color:#78716c;margin-top:2px">${src.clientType}</div>` : ''}
       </div>
       <div style="padding:14px 16px;background:#f8f7f4;border-radius:10px;border:1px solid #e5e3df;min-width:180px">
@@ -6939,7 +6925,7 @@ async function selfAssign(etapeCode, etapeLabel) {
       operateur,
       message:       `${operateur} s'est assigné à "${etapeLabel}" — ${selectedDossier.numeroDossier}`
     });
-    showToast(`✅ Vous êtes assigné à "${etapeLabel}"`);
+    showToast(` Vous êtes assigné à "${etapeLabel}"`);
     selectDossier(selectedDossier.id);
   } else {
     showToast(`Erreur : ${r?.error || 'inconnu'}`, 'error');
@@ -7073,7 +7059,7 @@ function _buildProgressBar(dossierId) {
   const bc  = s => s==='VIDE'?'#e5e3df':bg(s);
   const tc  = s => s==='VIDE'?'#a8a29e':'#fff';
   const lc  = s => s==='TERMINE'?'#16a34a30':'#e5e3df';
-  const ic  = s => s==='TERMINE'?'✓':s==='EN_COURS'?'▶':s==='A_FAIRE'?'●':'';
+  const ic  = s => s==='TERMINE'?'':s==='EN_COURS'?'▶':s==='A_FAIRE'?'●':'';
   const ops = s => {
     const t0 = dt.filter(t => t.etapeCode === s.code);
     if (!t0.length) return '';
@@ -7146,7 +7132,7 @@ function _buildMonDashboard() {
     const btn = canStart
       ? `<button onclick="pointerStart('${t.id}')" class="mon-task-card__btn" style="background:var(--color-primary);color:#fff">▶ Démarrer</button>`
       : isEC
-        ? `<button onclick="openPointage('${t.id}','${t.etapeCode||''}','${t.numeroDossier||t.titre||''}')" class="mon-task-card__btn" style="background:var(--color-success);color:#fff">✓ Terminer</button>`
+        ? `<button onclick="openPointage('${t.id}','${t.etapeCode||''}','${t.numeroDossier||t.titre||''}')" class="mon-task-card__btn" style="background:var(--color-success);color:#fff"> Terminer</button>`
         : '';
     return `<div class="mon-task-card" style="background:${bg};border-color:${border}">
       <div class="mon-task-card__num">${t.dossierId==='LIBRE'?'Tâche libre':(t.numeroDossier||'')}</div>
@@ -7174,7 +7160,7 @@ function _buildMonDashboard() {
 function _tacheRow(t) {
   const isLibre = t.dossierId === 'LIBRE';
   const etape   = isLibre
-    ? { color:'#7c3aed', icon:'★', label:t.titre||'Tâche libre', short:'Libre' }
+    ? { color:'#7c3aed', icon:'', label:t.titre||'Tâche libre', short:'Libre' }
     : (ETAPES_CONFIG.find(e => e.code === t.etapeCode) || { color:'#888', icon:'?', label:t.etapeLabel, short:'?' });
   const isEC   = t.statut === 'EN_COURS';
   const isDone = t.statut === 'TERMINE';
@@ -7192,10 +7178,10 @@ function _tacheRow(t) {
   }
 
   const actions = isDone
-    ? `<span class="prod-badge" style="background:var(--color-success-bg);color:var(--color-success);padding:5px 10px;font-size:11px">✓ Terminé</span>`
+    ? `<span class="prod-badge" style="background:var(--color-success-bg);color:var(--color-success);padding:5px 10px;font-size:11px"> Terminé</span>`
     : isEC
       ? (canInteract
-          ? `<button class="btn-prod-done" onclick="openPointage('${t.id}','${t.etapeCode||''}','${(t.titre||t.numeroDossier||'').replace(/'/g,"\\'")}')">✓ Terminer</button>`
+          ? `<button class="btn-prod-done" onclick="openPointage('${t.id}','${t.etapeCode||''}','${(t.titre||t.numeroDossier||'').replace(/'/g,"\\'")}')"> Terminer</button>`
           : `<span style="font-size:10px;font-weight:600;color:var(--color-warning);padding:4px 8px;background:var(--color-warning-bg);border-radius:6px;white-space:nowrap">En cours</span>`)
       : isStepBlocked
         ? `<span style="font-size:10px;font-weight:600;color:var(--color-text-muted);padding:4px 8px;background:#f5f5f4;border:1px solid #e5e3df;border-radius:6px;white-space:nowrap" title="Attend l'étape : ${blockedByStep}">⏸ ${blockedByStep}</span>`
@@ -7220,7 +7206,7 @@ function _tacheRow(t) {
 
   const retardInfo   = _getTacheRetardInfo(t);
   const retardBadge  = retardInfo.isRetard
-    ? `<span style="font-size:10px;font-weight:700;color:#dc2626;background:#fee2e2;padding:3px 8px;border-radius:6px;white-space:nowrap;border:1px solid #fca5a5;flex-shrink:0" title="Délai dépassé de ${retardInfo.depassement}mn">⚠ EN RETARD +${retardInfo.depassement}mn</span>`
+    ? `<span style="font-size:10px;font-weight:700;color:#dc2626;background:#fee2e2;padding:3px 8px;border-radius:6px;white-space:nowrap;border:1px solid #fca5a5;flex-shrink:0" title="Délai dépassé de ${retardInfo.depassement}mn"> EN RETARD +${retardInfo.depassement}mn</span>`
     : '';
   const retardStyle  = retardInfo.isRetard ? 'border-left:3px solid #dc2626;' : '';
 
@@ -7354,7 +7340,7 @@ function _renderChargeView() {
       const d = dossiers.find(x => x.id === t.dossierId);
       const isUrgent = d?.priorite === 'Urgente';
       const btn = isEC && (isAdminOrChef || op === myLabel)
-        ? `<button class="charge-task-btn" onclick="openPointage('${t.id}','${t.etapeCode||''}','${(t.numeroDossier||t.titre||'').replace(/'/g,"\\'")}'); event.stopPropagation();" style="background:var(--color-success-bg);color:var(--color-success)">✓</button>`
+        ? `<button class="charge-task-btn" onclick="openPointage('${t.id}','${t.etapeCode||''}','${(t.numeroDossier||t.titre||'').replace(/'/g,"\\'")}'); event.stopPropagation();" style="background:var(--color-success-bg);color:var(--color-success)"></button>`
         : t.statut === 'A_FAIRE' && (isAdminOrChef || op === myLabel)
           ? `<button class="charge-task-btn" onclick="pointerStart('${t.id}'); event.stopPropagation();" style="background:var(--color-primary-light);color:var(--color-primary)">▶</button>`
           : '';
@@ -7523,7 +7509,7 @@ function renderTaches() {
     <div class="prod-group" style="border-color:#e9d5ff">
       <div class="prod-group-header" style="background:#faf5ff">
         <div class="prod-group-left">
-          <span style="font-size:14px;color:#7c3aed">★</span>
+          <span style="font-size:14px;color:#7c3aed"></span>
           <span class="prod-group-info" style="color:#7c3aed">Tâches indépendantes</span>
         </div>
         <span style="background:#f3e8ff;color:#7c3aed;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px">${libreList.length}</span>
@@ -7675,7 +7661,7 @@ async function confirmPointage() {
     }
     renderTaches();
     closeModal('pointageModal');
-    showToast(dossierComplet ? 'Dossier complet à 100% — prêt à livrer !' : 'Tâche terminée ✅');
+    showToast(dossierComplet ? 'Dossier complet à 100% — prêt à livrer !' : 'Tâche terminée ');
   }
 }
 
@@ -7731,31 +7717,6 @@ function renderProdKpis(data) {
         </div>
       </div>` : ''}
     </div>`;
-}
-
-// ============================================================
-// DONNÉES DÉMO (sans backend)
-// ============================================================
-function demoDossiers() {
-  return [];
-}
-
-function demoTaches(filters) {
-  const all = [
-    {id:'T0001',dossierId:'D0001',numeroDossier:'POS-101-1',etapeCode:'PAO',          etapeLabel:'PAO / Conception', operateur:'Marie',statut:'TERMINE', dateAssignation:'14/05/2026 09:00',dateDebut:'14/05/2026 10:00',dateFin:'14/05/2026 16:00',commentaire:'OK'},
-    {id:'T0002',dossierId:'D0001',numeroDossier:'POS-101-1',etapeCode:'BAT',          etapeLabel:'BAT physique',     operateur:'Marie',statut:'TERMINE', dateAssignation:'15/05/2026 08:00',dateDebut:'15/05/2026 09:00',dateFin:'15/05/2026 14:00',commentaire:'Validé'},
-    {id:'T0003',dossierId:'D0001',numeroDossier:'POS-101-1',etapeCode:'RETOUR_CLIENT',etapeLabel:'Retour client',    operateur:'Jean', statut:'EN_COURS',dateAssignation:'16/05/2026 08:00',dateDebut:'16/05/2026 09:00',dateFin:'',commentaire:''},
-    {id:'T0004',dossierId:'D0002',numeroDossier:'POS-102-1',etapeCode:'PAO',          etapeLabel:'PAO / Conception', operateur:'Marie',statut:'TERMINE', dateAssignation:'15/05/2026 08:00',dateDebut:'15/05/2026 09:00',dateFin:'15/05/2026 17:00',commentaire:'RAS'},
-    {id:'T0005',dossierId:'D0002',numeroDossier:'POS-102-1',etapeCode:'BAT',          etapeLabel:'BAT physique',     operateur:'Jean', statut:'TERMINE', dateAssignation:'16/05/2026 08:00',dateDebut:'16/05/2026 09:00',dateFin:'16/05/2026 12:00',commentaire:''},
-    {id:'T0006',dossierId:'D0002',numeroDossier:'POS-102-1',etapeCode:'RETOUR_CLIENT',etapeLabel:'Retour client',    operateur:'Jean', statut:'TERMINE', dateAssignation:'16/05/2026 13:00',dateDebut:'16/05/2026 14:00',dateFin:'16/05/2026 15:00',commentaire:''},
-    {id:'T0007',dossierId:'D0002',numeroDossier:'POS-102-1',etapeCode:'ACHAT',        etapeLabel:'Achat (si besoin)',operateur:'Jean', statut:'EN_COURS',dateAssignation:'17/05/2026 08:00',dateDebut:'17/05/2026 09:00',dateFin:'',commentaire:''},
-    {id:'T0008',dossierId:'D0003',numeroDossier:'POS-103-1',etapeCode:'PAO',          etapeLabel:'PAO / Conception', operateur:'Marie',statut:'A_FAIRE', dateAssignation:'16/05/2026 08:00',dateDebut:'',dateFin:'',commentaire:''},
-    {id:'T0009',dossierId:'D0004',numeroDossier:'POS-104-1',etapeCode:'PRODUCTION',   etapeLabel:'Opérateur machine',operateur:'Paul', statut:'EN_COURS',dateAssignation:'16/05/2026 10:00',dateDebut:'16/05/2026 11:00',dateFin:'',commentaire:''},
-  ];
-  let res = all;
-  if (filters?.operateur && filters.operateur !== 'TOUS') res = res.filter(t => t.operateur === filters.operateur);
-  if (filters?.dossierId) res = res.filter(t => t.dossierId === filters.dossierId);
-  return res;
 }
 
 // ============================================================
@@ -8132,7 +8093,7 @@ window.addEventListener('error', (e) => {
   console.error('[POS] Erreur non gérée:', e.message, e.filename + ':' + e.lineno);
   // Afficher un toast discret pour les erreurs inattendues (pas réseau)
   if (typeof showToast === 'function') {
-    showToast('⚠️ Erreur inattendue — rechargez si l\'app se comporte anormalement', 'error');
+    showToast(' Erreur inattendue — rechargez si l\'app se comporte anormalement', 'error');
   }
 });
 

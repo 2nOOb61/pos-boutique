@@ -319,23 +319,23 @@
 
 <!-- PWA: Install Banner -->
 <div id="installBanner">
-  <div class="install-icon">🏪</div>
+  <div class="install-icon"></div>
   <div class="install-text">
     <strong>Installer l'application</strong>
     <span>Accès rapide, fonctionne hors ligne</span>
   </div>
-  <button class="btn-install" onclick="installPWA()">📲 Installer</button>
-  <button class="btn-install-dismiss" onclick="dismissInstall()">✕</button>
+  <button class="btn-install" onclick="installPWA()"> Installer</button>
+  <button class="btn-install-dismiss" onclick="dismissInstall()"></button>
 </div>
 
 <!-- PWA: Offline Badge -->
 <div id="offlineBadge">
-  <span>⚡</span><span>Mode hors ligne — données locales</span>
+  <span></span><span>Mode hors ligne — données locales</span>
 </div>
 
 <!-- PWA: Update Banner -->
 <div id="updateBanner">
-  <span>🔄 Mise à jour disponible</span>
+  <span> Mise à jour disponible</span>
   <button class="btn-update" onclick="applyUpdate()">Mettre à jour</button>
 </div>
 
@@ -392,7 +392,7 @@
     </div>
     <button class="btn-login" onclick="doLogin()">Se connecter</button>
     <div class="login-error" id="loginError">Identifiant ou mot de passe incorrect</div>
-    <div class="login-hint">Demo: admin / 1234 &nbsp;|&nbsp; caissier / 0000</div>
+
   </div>
 </div>
 
@@ -603,7 +603,7 @@
     <div id="statDetailPanel">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
         <div style="font-family:'DM Sans',sans-serif;font-weight:700;font-size:15px" id="statDetailTitle"></div>
-        <button onclick="closeStatDetail()" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:20px;padding:2px 8px;border-radius:8px;line-height:1" title="Fermer">✕</button>
+        <button onclick="closeStatDetail()" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:20px;padding:2px 8px;border-radius:8px;line-height:1" title="Fermer"></button>
       </div>
       <div id="statDetailBody" style="max-height:480px;overflow-y:auto;overflow-x:hidden"></div>
     </div>
@@ -929,7 +929,7 @@
 
         <!-- Prévisualisation live -->
         <div class="ticket-cfg-preview-wrap">
-          <div class="ticket-cfg-preview-label">👁 Aperçu du ticket</div>
+          <div class="ticket-cfg-preview-label"> Aperçu du ticket</div>
           <div class="ticket-preview-frame" id="ticketPreviewFrame">
             <!-- généré par renderTicketPreview() -->
           </div>
@@ -948,7 +948,7 @@
       <p style="font-size:12px;color:var(--muted);margin-bottom:12px">
         Si l'application n'affiche pas les dernières modifications, forcez manuellement.
       </p>
-      <button class="btn-add-product" style="background:var(--accent2)" onclick="forceAppUpdate()">🔄 Forcer le vidage du cache</button>
+      <button class="btn-add-product" style="background:var(--accent2)" onclick="forceAppUpdate()"> Forcer le vidage du cache</button>
     </div>
 
     <!-- Section Airtable -->
@@ -1131,7 +1131,7 @@
         Terminées <span id="prodCountTermine" class="dossier-tab__count"></span>
       </button>
       <button class="prod-filter-btn" onclick="setProdFilter('EN_RETARD',this)" style="border-color:#fca5a5;color:#dc2626">
-        ⚠ En retard <span id="prodCountRetard" class="dossier-tab__count" style="background:#dc2626"></span>
+         En retard <span id="prodCountRetard" class="dossier-tab__count" style="background:#dc2626"></span>
       </button>
       <select id="opFilterSel" class="select-input" onchange="loadTaches()" style="min-width:160px;margin-left:auto">
         <option value="TOUS">Tous les opérateurs</option>
@@ -1168,7 +1168,7 @@
   <div class="modal cmd-modal">
     <div class="modal-title">
       <span>Nouvelle commande</span>
-      <button class="modal-close" onclick="closeModal('commandeModal')">✕</button>
+      <button class="modal-close" onclick="closeModal('commandeModal')"></button>
     </div>
 
     <!-- Client -->
@@ -1323,7 +1323,7 @@
   <div class="modal">
     <div class="modal-title">
       <span>Finaliser la commande</span>
-      <button class="modal-close" onclick="closeModal('cmdFinalizeModal')">✕</button>
+      <button class="modal-close" onclick="closeModal('cmdFinalizeModal')"></button>
     </div>
     <div id="cmdFinalClientInfo" style="background:rgba(237,111,44,0.10);border-radius:12px;padding:10px 14px;margin-bottom:14px;font-size:14px;color:var(--accent2);font-weight:600"></div>
     <div class="final-amounts">
@@ -1368,7 +1368,7 @@
     <input type="text" id="manualCode" placeholder="Saisir le code manuellement..." onkeydown="if(event.key==='Enter')scanManual()" />
     <button onclick="scanManual()">OK</button>
   </div>
-  <button class="btn-close-scanner" onclick="closeScanner()">✖ Fermer</button>
+  <button class="btn-close-scanner" onclick="closeScanner()"> Fermer</button>
 </div>
 
 <!-- MODAL UTILISATEUR -->
@@ -1376,7 +1376,7 @@
   <div class="modal">
     <div class="modal-title">
       <span id="userModalTitle">Nouvel utilisateur</span>
-      <button class="modal-close" onclick="closeModal('userModal')">✕</button>
+      <button class="modal-close" onclick="closeModal('userModal')"></button>
     </div>
     <div class="form-group">
       <label>Identifiant (login)</label>
@@ -1417,7 +1417,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeModal('userModal')">Annuler</button>
-      <button class="btn-primary" onclick="saveUser()">💾 Enregistrer</button>
+      <button class="btn-primary" onclick="saveUser()"> Enregistrer</button>
     </div>
   </div>
 </div>
@@ -1427,13 +1427,13 @@
   <div class="modal">
     <div class="modal-title">
       <span id="productModalTitle">Nouvel article</span>
-      <button class="modal-close" onclick="closeModal('productModal')">✕</button>
+      <button class="modal-close" onclick="closeModal('productModal')"></button>
     </div>
     <div class="form-group"><label>Nom de l'article</label><input id="pName" placeholder="Ex: Riz 1kg" /></div>
     <div class="form-group"><label>Catégorie</label>
       <select id="pCat"></select>
     </div>
-    <div class="form-group"><label>Emoji (icône)</label><input id="pEmoji" placeholder="🍚" maxlength="2" /></div>
+    <div class="form-group"><label>Emoji (icône)</label><input id="pEmoji" placeholder="" maxlength="2" /></div>
     <div class="form-group"><label>Code-barres / Référence</label><input id="pCode" placeholder="Ex: 1234567890123" /></div>
     <div class="form-group"><label>Prix de vente (Ar)</label><input id="pPrice" type="number" placeholder="0" /></div>
     <div class="form-group"><label>Prix d'achat (Ar)</label><input id="pCost" type="number" placeholder="0" /></div>
@@ -1452,7 +1452,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeModal('productModal')">Annuler</button>
-      <button class="btn-primary" onclick="saveProduct()">💾 Enregistrer</button>
+      <button class="btn-primary" onclick="saveProduct()"> Enregistrer</button>
     </div>
   </div>
 </div>
@@ -1462,10 +1462,10 @@
   <div class="modal">
     <div class="modal-title">
       <span>Nouvel article → Panier</span>
-      <button class="modal-close" onclick="closeModal('quickAddModal')">✕</button>
+      <button class="modal-close" onclick="closeModal('quickAddModal')"></button>
     </div>
     <div class="form-group"><label>Nom de l'article</label><input id="qaName" placeholder="Ex: Sucre 1kg" /></div>
-    <div class="form-group"><label>Emoji (icône)</label><input id="qaEmoji" placeholder="📦" maxlength="2" /></div>
+    <div class="form-group"><label>Emoji (icône)</label><input id="qaEmoji" placeholder="" maxlength="2" /></div>
     <div class="form-group"><label>Catégorie</label><select id="qaCat"></select></div>
     <div class="form-group"><label>Prix de vente (Ar)</label><input id="qaPrice" type="number" placeholder="0" min="0" /></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
@@ -1487,7 +1487,7 @@
   <div class="modal">
     <div class="modal-title">
       <span>Paiement</span>
-      <button class="modal-close" onclick="closeModal('paymentModal')">✕</button>
+      <button class="modal-close" onclick="closeModal('paymentModal')"></button>
     </div>
     <div class="payment-amount">
       <div class="label" id="payAmountLabel">Montant à régler</div>
@@ -1597,7 +1597,7 @@
   <div class="modal">
     <div class="modal-title">
       <span>Nouvelle réservation</span>
-      <button class="modal-close" onclick="closeModal('reservationModal')">✕</button>
+      <button class="modal-close" onclick="closeModal('reservationModal')"></button>
     </div>
     <div class="payment-amount">
       <div class="label">Total de la réservation</div>
@@ -1719,7 +1719,7 @@
   <div class="modal">
     <div class="modal-title">
       <span>Finaliser la réservation</span>
-      <button class="modal-close" onclick="closeModal('finalizeModal')">✕</button>
+      <button class="modal-close" onclick="closeModal('finalizeModal')"></button>
     </div>
     <div id="finalizeClientInfo" style="background:rgba(108,63,197,0.08);border-radius:12px;padding:10px 14px;margin-bottom:14px;font-size:14px;color:var(--accent3);font-weight:600"></div>
     <div class="final-amounts" id="finalAmountsBlock">
@@ -1759,7 +1759,7 @@
   <div class="modal">
     <div class="modal-title">
       <span>Mouvement de stock</span>
-      <button class="modal-close" onclick="closeModal('mouvModal')">✕</button>
+      <button class="modal-close" onclick="closeModal('mouvModal')"></button>
     </div>
     <div class="form-group"><label>Article</label>
       <select id="mouvProduct"></select>
@@ -1784,7 +1784,7 @@
   <div class="modal" style="max-width:520px">
     <div class="modal-title">
       <span>Modifier la vente <span id="editSaleIdLabel"></span></span>
-      <button class="modal-close" onclick="closeModal('editSaleModal')">✕</button>
+      <button class="modal-close" onclick="closeModal('editSaleModal')"></button>
     </div>
     <div class="form-group">
       <label>Nom client</label>
@@ -1888,7 +1888,7 @@
   <div class="ticket-row" id="tChangeRow"><span>Monnaie</span><span id="tChange"></span></div>
   <div class="ticket-divider"></div>
   <div class="ticket-center" id="tFooter">Merci de votre visite !</div>
-  <div class="ticket-center" style="font-size:10px;margin-top:4px">Revenez bientôt 😊</div>
+  <div class="ticket-center" style="font-size:10px;margin-top:4px">Revenez bientôt </div>
 </div>
 
 
@@ -1903,7 +1903,7 @@
     <div class="modal">
       <div class="modal-title">
         Attribuer une tâche
-        <button class="modal-close" onclick="closeModal('attribModal')">✕</button>
+        <button class="modal-close" onclick="closeModal('attribModal')"></button>
       </div>
       <div id="attribContextText" style="padding:10px 12px;background:var(--color-primary-light);border-radius:8px;margin-bottom:16px;font-size:13px;color:var(--color-primary);font-weight:500"></div>
       <div class="form-group">
@@ -1926,7 +1926,7 @@
     <div class="modal">
       <div class="modal-title">
         Opérateurs — Utilisateurs actifs
-        <button class="modal-close" onclick="closeModal('operateurModal')">✕</button>
+        <button class="modal-close" onclick="closeModal('operateurModal')"></button>
       </div>
       <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Les opérateurs sont les comptes utilisateurs actifs. Gérez leurs noms et rôles depuis la page Utilisateurs.</p>
       <div id="opListEl" style="margin-bottom:16px;max-height:360px;overflow-y:auto"></div>
@@ -1942,7 +1942,7 @@
     <div class="modal" style="max-width:520px">
       <div class="modal-title">
         Nouvelle tâche indépendante
-        <button class="modal-close" onclick="closeModal('tacheLibreModal')">✕</button>
+        <button class="modal-close" onclick="closeModal('tacheLibreModal')"></button>
       </div>
       <div style="display:flex;flex-direction:column;gap:14px;padding-top:4px">
         <div class="form-group">
@@ -1998,7 +1998,7 @@
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         <button onclick="markAllNotifRead()" style="font-size:12px;color:var(--accent);background:var(--color-primary-light);border:none;border-radius:6px;padding:5px 10px;cursor:pointer;font-weight:600;font-family:'DM Sans',sans-serif">Tout lire</button>
-        <button onclick="closeNotifPanel()" style="width:30px;height:30px;border-radius:7px;border:1px solid var(--color-border);background:var(--color-surface);color:var(--color-text-muted);cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center">✕</button>
+        <button onclick="closeNotifPanel()" style="width:30px;height:30px;border-radius:7px;border:1px solid var(--color-border);background:var(--color-surface);color:var(--color-text-muted);cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center"></button>
       </div>
     </div>
     <div class="notif-panel-list" id="notifPanelList"></div>
@@ -2009,7 +2009,7 @@
     <div class="modal">
       <div class="modal-title">
         Terminer la tâche
-        <button class="modal-close" onclick="closeModal('pointageModal')">✕</button>
+        <button class="modal-close" onclick="closeModal('pointageModal')"></button>
       </div>
       <div id="pointageContextText" style="padding:10px 12px;background:var(--color-primary-light);border-radius:8px;margin-bottom:16px;font-size:13px;color:var(--color-primary);font-weight:500"></div>
       <div class="form-group">
@@ -2018,7 +2018,7 @@
       </div>
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
         <button class="btn-logout" onclick="closeModal('pointageModal')">Annuler</button>
-        <button class="btn-login" style="width:auto;padding:12px 20px;margin-top:0;background:var(--green)" onclick="confirmPointage()">✓ Marquer terminé</button>
+        <button class="btn-login" style="width:auto;padding:12px 20px;margin-top:0;background:var(--green)" onclick="confirmPointage()"> Marquer terminé</button>
       </div>
     </div>
   </div>

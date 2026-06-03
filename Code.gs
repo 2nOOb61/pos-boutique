@@ -150,7 +150,7 @@ function doGet(e) {
 
   try {
     const action = e.parameter.action || 'ping';
-    if (action === 'ping')            return jsonResp({ ok:true, message:'FOREVER MG POS actif ✅' });
+    if (action === 'ping')            return jsonResp({ ok:true, message:'FOREVER MG POS actif ' });
     if (action === 'login')           return jsonResp(handleLogin({ username:e.parameter.username||'', password:e.parameter.password||'' }));
     if (action === 'getProducts')     return jsonResp(handleGetProducts());
     if (action === 'getSales')        return jsonResp(handleGetSales(e.parameter));
@@ -201,7 +201,6 @@ function initSheets() {
   ensureSheet(ss, SHEET_TACHES,     ['ID','DossierID','NumeroDossier','Etape','EtapeLabel','Operateur','Statut','DateAssignation','DateDebut','DateFin','Commentaire','AssignePar']);
   ensureSheet(ss, SHEET_OPERATEURS, ['Nom','Role','Actif']);
 
-  // Opérateurs de démonstration si vide
   const osh = ss.getSheetByName(SHEET_OPERATEURS);
   if (osh.getLastRow() < 2) {
     osh.appendRow(['Marie', 'operateur', 'oui']);
@@ -209,7 +208,7 @@ function initSheets() {
     osh.appendRow(['Paul',  'operateur', 'oui']);
   }
 
-  return { ok:true, message:'Feuilles initialisées ✅' };
+  return { ok:true, message:'Feuilles initialisées ' };
 }
 
 function ensureSheet(ss, name, headers) {
@@ -296,12 +295,12 @@ function handleSaveProduct(data) {
   CacheService.getScriptCache().remove('products_v1'); // invalider le cache
   for (let i = 1; i < rows.length; i++) {
     if (rows[i][0] == p.id) {
-      sh.getRange(i+1,1,1,10).setValues([[p.id,p.name,p.cat||p.category,p.emoji||'📦',p.code,p.price,p.cost||p.buyPrice||0,p.stock,p.minStock,new Date()]]);
+      sh.getRange(i+1,1,1,10).setValues([[p.id,p.name,p.cat||p.category,p.emoji||'',p.code,p.price,p.cost||p.buyPrice||0,p.stock,p.minStock,new Date()]]);
       return { ok:true };
     }
   }
   const newId = rows.length > 1 ? Math.max(...rows.slice(1).map(r=>Number(r[0])||0))+1 : 1;
-  sh.appendRow([newId,p.name,p.cat||p.category||'',p.emoji||'📦',p.code||'',p.price,p.cost||0,p.stock||0,p.minStock||5,new Date()]);
+  sh.appendRow([newId,p.name,p.cat||p.category||'',p.emoji||'',p.code||'',p.price,p.cost||0,p.stock||0,p.minStock||5,new Date()]);
   return { ok:true, id:newId };
 }
 
@@ -357,7 +356,7 @@ function handleAddSale(data) {
     logStock_(ss, item.name, 'Vente', -item.qty, 'Vente #'+sale.id, sale.caissier||'');
   });
 
-  // 🔗 Création automatique des dossiers de production
+  //  Création automatique des dossiers de production
   creerDossiersFromVente_(ss, sale);
 
   _logAction_('VENTE', sale.caissier||'caissier',
