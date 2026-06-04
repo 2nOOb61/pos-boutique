@@ -7222,14 +7222,25 @@ function printDossier(dossierId) {
       </tr>`;
   }).join('');
 
-  // ── Images et pièces jointes
+  // ── Images et pièces jointes (formulaire + commentaires du dossier)
   const attachments = src?.attachments || [];
   const photos = src?.photos || [];
+  // Pièces jointes du fil de discussion du dossier
+  const commentAtts = dossierComments
+    .filter(c => c.dossierId === d.id)
+    .flatMap(c => (c.attachments || []).map(a => ({ ...a, _author: c.author })));
+  const commentImgs    = commentAtts.filter(a => (a.type || '').startsWith('image/'));
+  const commentNonImgs = commentAtts.filter(a => !(a.type || '').startsWith('image/'));
+
   const allImages = [
     ...attachments.filter(a => (a.type || '').startsWith('image/')).map(a => ({ src: _driveImgSrc(a) || a.data || '', name: a.name })),
-    ...photos.filter(p => p.data || p.url).map(p => ({ src: p.data || p.url || '', name: p.name || 'Photo' }))
+    ...photos.filter(p => p.data || p.url).map(p => ({ src: p.data || p.url || '', name: p.name || 'Photo' })),
+    ...commentImgs.map(a => ({ src: _driveImgSrc(a) || a.data || '', name: (a._author ? a._author + ' — ' : '') + (a.name || 'Image') }))
   ].filter(img => img.src);
-  const nonImageAttach = attachments.filter(a => !(a.type || '').startsWith('image/'));
+  const nonImageAttach = [
+    ...attachments.filter(a => !(a.type || '').startsWith('image/')),
+    ...commentNonImgs.map(a => ({ ...a, name: (a._author ? a._author + ' — ' : '') + (a.name || 'Fichier') }))
+  ];
 
   const imagesHtml = allImages.length
     ? `<div style="margin-bottom:28px">
@@ -7373,7 +7384,23 @@ function printDossier(dossierId) {
   w.document.open();
   w.document.write(html);
   w.document.close();
-  setTimeout(() => w.print(), 400);
+  // Attendre le chargement de TOUTES les images (Drive) avant d'imprimer
+  const _doPrint = () => { try { w.focus(); w.print(); } catch(e) {} };
+  if (allImages.length) {
+    const imgs = Array.from(w.document.images || []);
+    let pending = imgs.length;
+    if (!pending) { setTimeout(_doPrint, 300); return; }
+    let printed = false;
+    const done = () => { if (printed) return; if (--pending <= 0) { printed = true; _doPrint(); } };
+    imgs.forEach(im => {
+      if (im.complete) { done(); }
+      else { im.addEventListener('load', done); im.addEventListener('error', done); }
+    });
+    // Sécurité : imprimer quand même après 5s max si une image bloque
+    setTimeout(() => { if (!printed) { printed = true; _doPrint(); } }, 5000);
+  } else {
+    setTimeout(_doPrint, 400);
+  }
 }
 
 async function refreshComments(dossierId) {
