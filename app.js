@@ -145,6 +145,14 @@ let currentFinalizeResId = null;
 // UTILS
 // ============================================================
 function fmt(n) { const v = Number(n); return (isNaN(v) ? 0 : v).toLocaleString('fr-MG') + ' Ar'; }
+
+// Libellé du mode de paiement d'une vente (Espèces / Mobile / Chèque)
+function _payLabel(s) {
+  if (!s) return '';
+  if (s.method === 'cash')   return 'Espèces';
+  if (s.method === 'cheque') return 'Chèque' + (s.provider ? ' ' + s.provider : '') + (s.ref ? ' · N°' + s.ref : '');
+  return s.provider || 'Mobile Money';
+}
 // Comparaison insensible à la casse et aux espaces — utilisée pour matcher les opérateurs
 function _sameOp(a, b) { return (a||'').trim().toLowerCase() === (b||'').trim().toLowerCase(); }
 function now() { return new Date().toLocaleString('fr-MG'); }
@@ -575,6 +583,8 @@ function openPayment(mode) {
   document.getElementById('changeVal').textContent='0 Ar';
   document.getElementById('changeVal').className='val';
   document.getElementById('mobileRef').value='';
+  const _cb = document.getElementById('chequeBank');   if (_cb) _cb.value = '';
+  const _cn = document.getElementById('chequeNumber'); if (_cn) _cn.value = '';
   document.getElementById('clientName').value='';
   document.getElementById('clientContact').value='';
   // Reset type client
@@ -633,8 +643,12 @@ function switchPayTab(mode) {
   paymentMode = mode;
   document.getElementById('cashSection').style.display = mode==='cash'?'block':'none';
   document.getElementById('mobileSection').style.display = mode==='mobile'?'block':'none';
+  const chequeSec = document.getElementById('chequeSection');
+  if (chequeSec) chequeSec.style.display = mode==='cheque'?'block':'none';
   document.getElementById('tabCash').classList.toggle('active', mode==='cash');
   document.getElementById('tabMobile').classList.toggle('active', mode==='mobile');
+  const tabCheque = document.getElementById('tabCheque');
+  if (tabCheque) tabCheque.classList.toggle('active', mode==='cheque');
 }
 function calcChange() {
   const given = parseFloat(document.getElementById('givenAmount').value)||0;
@@ -675,6 +689,13 @@ function confirmPayment() {
     const given = parseFloat(document.getElementById('givenAmount').value)||0;
     if(given < due) { showToast('Montant insuffisant !','error'); return; }
     recordSale(totalWithDelivery, 'cash', given, given-due, null, null, rem, acc, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate, clientType, clientCompany);
+  } else if(paymentMode==='cheque') {
+    const bank   = document.getElementById('chequeBank').value.trim();
+    const number = document.getElementById('chequeNumber').value.trim();
+    if(!bank)   { showToast('Veuillez saisir la banque du chèque.', 'error'); return; }
+    if(!number) { showToast('Veuillez saisir le numéro du chèque.', 'error'); return; }
+    // provider = banque, ref = numéro du chèque (réutilise le schéma de vente)
+    recordSale(totalWithDelivery, 'cheque', due, 0, bank, number, rem, acc, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate, clientType, clientCompany);
   } else {
     const ref = document.getElementById('mobileRef').value.trim();
     recordSale(totalWithDelivery, 'mobile', due, 0, selectedProvider, ref, rem, acc, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate, clientType, clientCompany);
@@ -1304,6 +1325,10 @@ function printTicket(sale) {
     document.getElementById('tGiven').textContent        = fmt(sale.given);
     document.getElementById('tChangeRow').style.display = 'flex';
     document.getElementById('tChange').textContent       = fmt(sale.change);
+  } else if (sale.method === 'cheque') {
+    document.getElementById('tPayMethod').textContent    = `Chèque ${sale.provider||''}`.trim();
+    document.getElementById('tGiven').textContent        = sale.ref ? 'N° ' + sale.ref : '';
+    document.getElementById('tChangeRow').style.display = 'none';
   } else {
     document.getElementById('tPayMethod').textContent    = ` ${sale.provider}`;
     document.getElementById('tGiven').textContent        = sale.ref || '';
@@ -1859,7 +1884,7 @@ function _saleRow(s) {
   return `<tr>
     <td><div>${dateStr}</div>${client}</td>
     <td style="font-size:12px;max-width:200px">${items}</td>
-    <td style="white-space:nowrap">${s.method==='cash'?' Espèces':' '+(s.provider||'Mobile')}</td>
+    <td style="white-space:nowrap">${_payLabel(s)}</td>
     <td class="td-mono" style="text-align:right;font-weight:700;color:var(--accent)">${fmt(total)}</td>
     <td class="td-mono" style="text-align:right;font-weight:${due>0?700:400};color:${due>0?'var(--red)':'var(--muted)'}">${due>0?fmt(due):'—'}</td>
   </tr>`;
@@ -1884,13 +1909,15 @@ function _detailDay() {
   const list  = sales.filter(s => { const d = parseSaleDate(s.date); return d && d.toDateString() === today; });
   const ca    = list.reduce((s,v) => s + (Number(v.total)||0), 0);
   const due   = list.reduce((s,v) => s + (Number(v.due)||0),   0);
-  const cash  = list.filter(s => s.method==='cash').reduce((s,v) => s + (Number(v.total)||0), 0);
-  const mob   = list.filter(s => s.method!=='cash').reduce((s,v) => s + (Number(v.total)||0), 0);
+  const cash   = list.filter(s => s.method==='cash').reduce((s,v) => s + (Number(v.total)||0), 0);
+  const cheque = list.filter(s => s.method==='cheque').reduce((s,v) => s + (Number(v.total)||0), 0);
+  const mob    = list.filter(s => s.method!=='cash' && s.method!=='cheque').reduce((s,v) => s + (Number(v.total)||0), 0);
   return `<div class="detail-kpi-row">
     ${_kpi('CA du jour',     fmt(ca),          'var(--accent)', 'rgba(7,61,55,0.07)')}
     ${_kpi('Transactions',   list.length,       'var(--blue)',   'rgba(237,111,44,0.07)')}
     ${_kpi(' Espèces',     fmt(cash),         'var(--text)',   'var(--surface2)')}
     ${_kpi(' Mobile',      fmt(mob),          'var(--text)',   'var(--surface2)')}
+    ${cheque > 0 ? _kpi(' Chèque', fmt(cheque), 'var(--text)', 'var(--surface2)') : ''}
     ${due > 0 ? _kpi('Reste à percevoir', fmt(due), 'var(--red)', 'rgba(255,71,87,.07)') : ''}
   </div>${_salesTableWrap(list)}`;
 }
@@ -1901,13 +1928,15 @@ function _detailMonth() {
   const list = sales.filter(s => saleDateKey(s.date).startsWith(key));
   const ca   = list.reduce((s,v) => s + (Number(v.total)||0), 0);
   const due  = list.reduce((s,v) => s + (Number(v.due)||0),   0);
-  const cash = list.filter(s => s.method==='cash').reduce((s,v) => s + (Number(v.total)||0), 0);
-  const mob  = list.filter(s => s.method!=='cash').reduce((s,v) => s + (Number(v.total)||0), 0);
+  const cash   = list.filter(s => s.method==='cash').reduce((s,v) => s + (Number(v.total)||0), 0);
+  const cheque = list.filter(s => s.method==='cheque').reduce((s,v) => s + (Number(v.total)||0), 0);
+  const mob    = list.filter(s => s.method!=='cash' && s.method!=='cheque').reduce((s,v) => s + (Number(v.total)||0), 0);
   return `<div class="detail-kpi-row">
     ${_kpi('CA du mois',     fmt(ca),           'var(--accent)', 'rgba(7,61,55,0.07)')}
     ${_kpi('Transactions',   list.length,        'var(--blue)',   'rgba(237,111,44,0.07)')}
     ${_kpi(' Espèces',     fmt(cash),          'var(--text)',   'var(--surface2)')}
     ${_kpi(' Mobile',      fmt(mob),           'var(--text)',   'var(--surface2)')}
+    ${cheque > 0 ? _kpi(' Chèque', fmt(cheque), 'var(--text)', 'var(--surface2)') : ''}
     ${due > 0 ? _kpi('Reste à percevoir', fmt(due), 'var(--red)', 'rgba(255,71,87,.07)') : ''}
   </div>${_salesTableWrap(list)}`;
 }
@@ -2054,7 +2083,7 @@ function exportVentesCSV() {
         item.qty      || 1,
         item.price    || 0,
         s.total       || 0,
-        s.method === 'cash' ? 'Espèces' : 'Mobile Money',
+        '"' + _payLabel(s).replace(/"/g, '""') + '"',
         '"' + (s.ref || s.provider || '').replace(/"/g, '""') + '"',
         '"' + (s.caissier || '').replace(/"/g, '""') + '"'
       ].join(','));
@@ -2211,7 +2240,7 @@ function _renderStatsInner() {
         return `<tr>
           <td>${dateStr}</td>
           <td>${items.map(i=>`${i.name||'?'} x${i.qty||1}`).join(', ')}</td>
-          <td>${s.method==='cash'?' Espèces':` ${s.provider||'Mobile'}`}</td>
+          <td>${_payLabel(s)}</td>
           <td class="td-mono" style="font-weight:600;color:var(--accent)">${fmt(total)}</td>
           ${dueCell}
           <td><button class="btn-icon" onclick="reprintTicket(${s.id})" title="Réimprimer"></button></td>
@@ -2296,8 +2325,9 @@ function _buildReportHtml(period, customRange) {
   }
   const ca   = list.reduce((s,v) => s + (Number(v.total)||0), 0);
   const due  = list.reduce((s,v) => s + (Number(v.due)||0),   0);
-  const cash = list.filter(s => s.method==='cash').reduce((s,v) => s + (Number(v.total)||0), 0);
-  const mob  = list.filter(s => s.method!=='cash').reduce((s,v) => s + (Number(v.total)||0), 0);
+  const cash   = list.filter(s => s.method==='cash').reduce((s,v) => s + (Number(v.total)||0), 0);
+  const cheque = list.filter(s => s.method==='cheque').reduce((s,v) => s + (Number(v.total)||0), 0);
+  const mob    = list.filter(s => s.method!=='cash' && s.method!=='cheque').reduce((s,v) => s + (Number(v.total)||0), 0);
 
   const articles   = _aggregateArticles(list);
   const grandTotal = articles.reduce((s,a) => s + (Number(a.total)||0), 0);
@@ -2324,6 +2354,7 @@ function _buildReportHtml(period, customRange) {
     <div class="kpi"><div class="kpi-label">Transactions</div><div class="kpi-val" style="color:#1a6ec7">${list.length}</div></div>
     <div class="kpi"><div class="kpi-label"> Espèces</div><div class="kpi-val">${fmt(cash)}</div></div>
     <div class="kpi"><div class="kpi-label"> Mobile Money</div><div class="kpi-val">${fmt(mob)}</div></div>
+    ${cheque > 0 ? `<div class="kpi"><div class="kpi-label"> Chèque</div><div class="kpi-val">${fmt(cheque)}</div></div>` : ''}
     ${due > 0 ? `<div class="kpi"><div class="kpi-label">Reste à percevoir</div><div class="kpi-val" style="color:#c00">${fmt(due)}</div></div>` : ''}
   </div>`;
 

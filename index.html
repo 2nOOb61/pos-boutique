@@ -537,6 +537,7 @@
           <div class="payment-btns">
             <button class="btn-pay btn-cash" onclick="openPayment('cash')">Espèces</button>
             <button class="btn-pay btn-mobile" onclick="openPayment('mobile')">Mobile Money</button>
+            <button class="btn-pay btn-cheque" onclick="openPayment('cheque')">Chèque</button>
             <button class="btn-pay btn-reserve" onclick="openReservation()">Réserver</button>
             <button class="btn-pay btn-commande" onclick="openCommandeModal(true)">Commander</button>
           </div>
@@ -1638,6 +1639,7 @@
     <div class="payment-tabs">
       <button class="payment-tab active" id="tabCash" onclick="switchPayTab('cash')">Espèces</button>
       <button class="payment-tab payment-tab-mobile" id="tabMobile" onclick="switchPayTab('mobile')">Mobile Money</button>
+      <button class="payment-tab" id="tabCheque" onclick="switchPayTab('cheque')">Chèque</button>
     </div>
     <div id="cashSection">
       <div class="form-group"><label>Montant remis par le client (Ar)</label><input class="given-input" id="givenAmount" type="number" placeholder="0" oninput="calcChange()" /></div>
@@ -1654,6 +1656,10 @@
         <button class="provider-btn" id="provBmoov" onclick="selectProvider('Bmoov')">Bmoov</button>
       </div>
       <div class="form-group"><label>Référence transaction</label><input id="mobileRef" placeholder="Ex: TX12345678" /></div>
+    </div>
+    <div id="chequeSection" style="display:none">
+      <div class="form-group"><label>Banque</label><input id="chequeBank" placeholder="Ex: BNI, BOA, BFV-SG, BMOI…" /></div>
+      <div class="form-group"><label>Numéro du chèque</label><input id="chequeNumber" placeholder="Ex: 0012345" /></div>
     </div>
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeModal('paymentModal')">Annuler</button>
@@ -1964,7 +1970,7 @@
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=clear-all-05"></script>
+<script src="./app.js?v=cheque-06"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

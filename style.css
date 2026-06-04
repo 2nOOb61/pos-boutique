@@ -915,6 +915,20 @@ body {
   background: #F47B38;
 }
 
+.btn-cheque {
+  background: #2563eb;
+  color: #FFFFFF;
+}
+.btn-cheque:hover {
+  background: #1d4ed8;
+}
+.payment-tab-cheque.active,
+#tabCheque.active {
+  border-color: #2563eb;
+  color: #2563eb;
+  background: rgba(37,99,235,0.07);
+}
+
 /* INPUTS */
 input,
 select,
