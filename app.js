@@ -4009,6 +4009,29 @@ function saveConfig() {
   showToast(' Boutique enregistrée', 'success');
 }
 
+function saveDriveUrl() {
+  const url = (document.getElementById('cfgDriveUrl')?.value || '').trim();
+  if (url) {
+    localStorage.setItem('pos-drive-folder-url', url);
+    shopConfig.driveFolderUrl = url;
+    _persistConfig();
+    syncConfigToGAS(); // Sync vers GAS → tous les opérateurs la recevront
+  }
+}
+
+function testDriveUrl() {
+  const url = (document.getElementById('cfgDriveUrl')?.value || '').trim();
+  if (!url) { showToast('Collez d\'abord une URL Drive', 'error'); return; }
+  localStorage.setItem('pos-drive-folder-url', url);
+  shopConfig.driveFolderUrl = url;
+  _persistConfig();
+  syncConfigToGAS();
+  const a = document.createElement('a');
+  a.href = url; a.target = '_blank'; a.rel = 'noopener';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  showToast('URL Drive sauvegardée et ouverte', 'success');
+}
+
 function saveTicketConfig() {
   shopConfig.ticketLogoPos       = document.getElementById('cfgLogoPos')?.value        || 'center';
   shopConfig.ticketLogoSize      = document.getElementById('cfgLogoSize')?.value       || 'medium';
@@ -4103,6 +4126,8 @@ function renderConfigPage() {
   document.getElementById('cfgAddress').value  = shopConfig.address;
   document.getElementById('cfgPhone').value    = shopConfig.phone;
   document.getElementById('cfgFooter').value   = shopConfig.footer;
+  const driveEl = document.getElementById('cfgDriveUrl');
+  if (driveEl) driveEl.value = localStorage.getItem('pos-drive-folder-url') || shopConfig.driveFolderUrl || '';
   // Ticket
   const lpos  = document.getElementById('cfgLogoPos');
   const lsize = document.getElementById('cfgLogoSize');

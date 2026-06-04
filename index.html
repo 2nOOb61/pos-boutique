@@ -816,6 +816,17 @@
         <div class="form-group"><label>Adresse / Ville</label><input id="cfgAddress" placeholder="Antananarivo, Madagascar" oninput="saveConfig()" /></div>
         <div class="form-group"><label>Téléphone</label><input id="cfgPhone" placeholder="+261 XX XX XXX XX" oninput="saveConfig()" /></div>
         <div class="form-group"><label>Message de bas de ticket</label><input id="cfgFooter" placeholder="Merci de votre visite !" oninput="saveConfig()" /></div>
+        <div class="form-group">
+          <label style="display:flex;align-items:center;gap:6px;">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            URL Dossier Drive partagé
+          </label>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <input id="cfgDriveUrl" placeholder="https://drive.google.com/drive/folders/..." oninput="saveDriveUrl()" style="flex:1;" />
+            <button onclick="testDriveUrl()" style="padding:8px 12px;background:var(--accent);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:12px;white-space:nowrap;flex-shrink:0;">Tester</button>
+          </div>
+          <p style="font-size:11px;color:var(--muted);margin-top:4px;">Collez ici l'URL du dossier Drive → tous les opérateurs y accèderont sans compte Gmail</p>
+        </div>
       </div>
     </div>
 
