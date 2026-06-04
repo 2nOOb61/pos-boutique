@@ -6006,8 +6006,18 @@ function _driveImgSrc(att) {
   const fileId = att.fileId
     || (att.viewUrl ? (att.viewUrl.split('/d/')[1]||'').split('/')[0] : '')
     || (att.dlUrl   ? (att.dlUrl.split('id=')[1]||'').split('&')[0]  : '');
-  if (fileId) return 'https://drive.google.com/uc?id=' + fileId;
+  // L'endpoint thumbnail s'affiche de façon fiable dans <img> (uc?id= est bloqué par Google)
+  if (fileId) return 'https://drive.google.com/thumbnail?id=' + fileId + '&sz=w400';
   return att.data || ''; // fallback base64 local
+}
+
+// URL de secours si la vignette Drive échoue (lh3) — utilisée dans onerror
+function _driveImgFallback(att) {
+  if (!att) return '';
+  const fileId = att.fileId
+    || (att.viewUrl ? (att.viewUrl.split('/d/')[1]||'').split('/')[0] : '')
+    || (att.dlUrl   ? (att.dlUrl.split('id=')[1]||'').split('&')[0]  : '');
+  return fileId ? 'https://lh3.googleusercontent.com/d/' + fileId + '=w400' : '';
 }
 
 function saveComments() {
@@ -6054,10 +6064,11 @@ function renderCommentsSection(dossierId, comments) {
                 const viewUrl = a.viewUrl || a.data || '';
                 const dlUrl   = a.dlUrl   || a.data || '';
                 const thumbSrc = isImg ? _driveImgSrc(a) : '';
+                const fbSrc    = isImg ? _driveImgFallback(a) : '';
                 const ext = (a.name||'').split('.').pop().toUpperCase();
                 return '<div style="position:relative">'
                   + (isImg && thumbSrc
-                      ? '<img src="'+thumbSrc+'" onclick="window.open(\''+viewUrl+'\',\'_blank\')" style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--color-border);cursor:pointer" title="'+a.name+'" />'
+                      ? '<img src="'+thumbSrc+'" onerror="if(!this.dataset.fb){this.dataset.fb=1;this.src=\''+fbSrc+'\'}" onclick="window.open(\''+viewUrl+'\',\'_blank\')" style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--color-border);cursor:pointer" title="'+a.name+'" />'
                       : '<a href="'+viewUrl+'" target="_blank" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:44px;height:44px;border-radius:6px;border:1px solid var(--color-border);background:var(--color-bg);text-decoration:none;color:var(--color-primary)">'
                         + '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>'
                         + '<span style="font-size:7px;font-weight:700">'+ext+'</span></a>')
@@ -6317,10 +6328,11 @@ function renderMessagerieList(messages) {
             const viewUrl = a.viewUrl || a.data || '';
             const dlUrl   = a.dlUrl   || a.data || '';
             const thumbSrc = isImg ? _driveImgSrc(a) : '';
+            const fbSrc    = isImg ? _driveImgFallback(a) : '';
             const ext = (a.name||'').split('.').pop().toUpperCase();
             return '<div style="position:relative">'
               + (isImg && thumbSrc
-                  ? '<img src="'+thumbSrc+'" onclick="window.open(\''+viewUrl+'\',\'_blank\')" style="width:52px;height:52px;object-fit:cover;border-radius:8px;border:1px solid var(--color-border);cursor:pointer" title="'+a.name+'" />'
+                  ? '<img src="'+thumbSrc+'" onerror="if(!this.dataset.fb){this.dataset.fb=1;this.src=\''+fbSrc+'\'}" onclick="window.open(\''+viewUrl+'\',\'_blank\')" style="width:52px;height:52px;object-fit:cover;border-radius:8px;border:1px solid var(--color-border);cursor:pointer" title="'+a.name+'" />'
                   : '<a href="'+viewUrl+'" target="_blank" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:52px;height:52px;border-radius:8px;border:1px solid var(--color-border);background:var(--color-bg);text-decoration:none;color:var(--color-primary)">'
                     + '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>'
                     + '<span style="font-size:7px;font-weight:700">'+ext+'</span></a>')
