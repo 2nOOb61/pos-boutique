@@ -3863,7 +3863,8 @@ function openScriptSettings() {
     '4 → Synchroniser les ventes en attente\n' +
     '5 → SYNCHRONISER (miroir) — refléter exactement le Sheet\n' +
     '     (les éléments supprimés du Sheet sont retirés du POS)\n' +
-    '6 →  RESET COMPLET — Effacer toutes les données locales\n\n' +
+    '6 →  RESET COMPLET — Effacer toutes les données locales\n' +
+    '7 →  TOUT EFFACER (Sheet + POS) — produits, ventes, dossiers, tâches…\n\n' +
     'Tapez le numéro :',
     '2'
   );
@@ -3886,6 +3887,49 @@ function openScriptSettings() {
     forceRestoreFromSheet();
   } else if (choice.trim() === '6') {
     resetCompletPOS();
+  } else if (choice.trim() === '7') {
+    clearAllDataServerAndLocal();
+  }
+}
+
+// Efface les données du Google Sheet ET du POS (produits, ventes, dossiers, tâches…)
+// Conserve : utilisateurs, configuration boutique, journal
+async function clearAllDataServerAndLocal() {
+  if (!APPS_SCRIPT_URL) { showToast('URL Apps Script non configurée', 'error'); return; }
+  const ok1 = confirm(
+    ' TOUT EFFACER — Sheet + POS \n\n' +
+    'Cela va effacer DÉFINITIVEMENT dans Google Sheets ET dans le POS :\n' +
+    '• Produits, ventes, mouvements de stock\n' +
+    '• Réservations, commandes\n' +
+    '• Dossiers, tâches (production/attribution)\n' +
+    '• Commentaires / messagerie, notifications\n\n' +
+    'Conservés : comptes utilisateurs, configuration boutique.\n\n' +
+    'Cette action est IRRÉVERSIBLE. Continuer ?'
+  );
+  if (!ok1) return;
+  const ok2 = confirm('Dernière confirmation — Tout effacer côté Sheet ET POS ?');
+  if (!ok2) return;
+
+  showLoader('Effacement du Google Sheet...');
+  try {
+    const r = await apiCall({ action: 'clearAllData' });
+    if (!r || !r.ok) {
+      hideLoader();
+      showToast('Échec côté Sheet : ' + ((r && r.error) || 'redéployez GAS (action clearAllData)'), 'error');
+      return;
+    }
+    // Vider le local
+    products = []; sales = []; reservations = []; commandes = []; taches = []; dossiers = [];
+    dossierComments = dossierComments.filter(() => false);
+    saveData();
+    if (typeof saveTaches === 'function') saveTaches();
+    if (typeof saveComments === 'function') saveComments();
+    hideLoader();
+    showToast('Tout effacé (Sheet + POS) — rechargement…', 'success');
+    setTimeout(() => window.location.reload(true), 1500);
+  } catch(e) {
+    hideLoader();
+    showToast('Erreur : ' + e.message, 'error');
   }
 }
 

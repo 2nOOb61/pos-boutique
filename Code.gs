@@ -103,6 +103,7 @@ function doPost(e) {
     else if (action === 'getDashboard')      result = handleGetDashboard();
     else if (action === 'uploadFile')        result = handleUploadFile(data);
     else if (action === 'getDriveFolderUrl') result = handleGetDriveFolderUrl();
+    else if (action === 'clearAllData')      result = handleClearAllData(data);
     else if (action === 'addComment')        result = handleAddComment(data);
     else if (action === 'saveNotif')         result = handleSaveNotif(data);
     else if (action === 'saveShopConfig')    result = handleSaveShopConfig(data);
@@ -143,6 +144,7 @@ function doGet(e) {
       else if (action === 'saveNotif')         result = handleSaveNotif(data);
       else if (action === 'saveShopConfig')    result = handleSaveShopConfig(data);
       else if (action === 'saveRythme')        result = handleSaveRythme(data);
+      else if (action === 'clearAllData')      result = handleClearAllData(data);
       else result = { ok:false, error:'Action payload inconnue: ' + action };
       return jsonResp(result);
     } catch(err) {
@@ -1136,6 +1138,33 @@ function handleAddComment(data) {
 
 function _safeParse(val, fallback) {
   try { return val ? JSON.parse(val) : fallback; } catch(e) { return fallback; }
+}
+
+// ============================================================
+// EFFACER TOUTES LES DONNÉES (garde Utilisateurs / Config / Journal)
+// ============================================================
+function handleClearAllData(data) {
+  // Onglets de données à vider (on conserve les en-têtes, ligne 1)
+  const sheetsToClear = [
+    SHEET_PRODUCTS, SHEET_SALES, SHEET_STOCK_LOG,
+    SHEET_RESERVATIONS, SHEET_COMMANDES,
+    SHEET_DOSSIERS, SHEET_TACHES,
+    SHEET_COMMENTS, SHEET_NOTIFS
+  ];
+  // Option : effacer aussi la messagerie / commentaires ? (par défaut oui)
+  const ss = getSS();
+  const cleared = [];
+  sheetsToClear.forEach(name => {
+    const sh = ss.getSheetByName(name);
+    if (!sh) return;
+    const lastRow = sh.getLastRow();
+    const lastCol = sh.getLastColumn();
+    if (lastRow > 1 && lastCol > 0) {
+      sh.getRange(2, 1, lastRow - 1, lastCol).clearContent();
+      cleared.push(name);
+    }
+  });
+  return { ok:true, cleared, message: 'Données effacées : ' + (cleared.join(', ') || 'aucune') };
 }
 
 // ============================================================
