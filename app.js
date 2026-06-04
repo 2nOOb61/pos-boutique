@@ -3749,9 +3749,13 @@ function hideLoader() {
 
 // ── Paramètres Apps Script (modal) ──────────────────────
 function openDriveFolder() {
-  // Ouvre directement la recherche Drive du dossier POS_PiecesJointes
-  // Aucun appel GAS nécessaire
-  window.open('https://drive.google.com/drive/search?q=POS_PiecesJointes', '_blank');
+  const a = document.createElement('a');
+  a.href = 'https://drive.google.com/drive/search?q=POS_PiecesJointes';
+  a.target = '_blank';
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 function openScriptSettings() {
