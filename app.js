@@ -3439,6 +3439,26 @@ async function apiCall(payload) {
     } catch(e) { console.warn('GET error:', e.message); return null; }
   }
 
+  // ── UPLOADS / GROS PAYLOADS : POST (route vers doPost) ──
+  // uploadFile n'existe que dans doPost + le base64 peut dépasser la limite
+  // de longueur d'URL d'un GET. Content-Type text/plain = pas de préflight CORS.
+  const postActions = ['uploadFile'];
+  if (postActions.includes(payload.action) || (payload.base64Data && payload.base64Data.length > 6000)) {
+    try {
+      const res = await fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload)
+      });
+      const text = await res.text();
+      try { return JSON.parse(text); }
+      catch(e) { return { ok: false, error: 'Réponse non-JSON' }; }
+    } catch(e) {
+      console.warn('apiCall POST error:', e.message);
+      return null;
+    }
+  }
+
   // ── ÉCRITURES : GET ?payload=JSON ───────────────────────
   // Apps Script lit e.parameter.payload dans doGet → pas de CORS
   try {
