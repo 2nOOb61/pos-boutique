@@ -3861,7 +3861,8 @@ function openScriptSettings() {
     '2 → Tester la connexion\n' +
     '3 → Initialiser les feuilles (1ère utilisation)\n' +
     '4 → Synchroniser les ventes en attente\n' +
-    '5 → RESTAURER toutes les données depuis le Sheet\n' +
+    '5 → SYNCHRONISER (miroir) — refléter exactement le Sheet\n' +
+    '     (les éléments supprimés du Sheet sont retirés du POS)\n' +
     '6 →  RESET COMPLET — Effacer toutes les données locales\n\n' +
     'Tapez le numéro :',
     '2'
@@ -3934,23 +3935,45 @@ async function resetCompletPOS() {
 
 async function forceRestoreFromSheet() {
   if (!APPS_SCRIPT_URL) { showToast('URL Apps Script non configurée', 'error'); return; }
-  if (!confirm('Restaurer toutes les données depuis Google Sheets ?\nLes données locales seront remplacées par celles du Sheet.')) return;
-  showLoader('Restauration en cours...');
+  if (!confirm('Synchroniser le POS avec Google Sheets ?\n\nLe POS reflètera EXACTEMENT le contenu du Sheet :\n• Les éléments SUPPRIMÉS du Sheet seront aussi retirés du POS\n• Les éléments présents dans le Sheet seront chargés\n\nContinuer ?')) return;
+  showLoader('Synchronisation miroir en cours...');
   try {
+    // 1. Pré-vider les tableaux locaux → les fonctions de chargement laisseront
+    //    vide si le Sheet est vide, et normaliseront correctement s'il y a des données
+    products     = [];
+    sales        = [];
+    reservations = [];
+    commandes    = [];
+    taches       = [];
+    dossiers     = [];
+
+    // 2. Recharger depuis le Sheet (avec normalisation intégrée)
     await loadProductsFromScript();
     await loadSalesFromScript();
     await loadUsersFromScript();
     await loadReservationsFromScript();
     await loadCommandesFromScript();
+
+    // 3. Tâches : miroir direct du Sheet (vide si Sheet vide)
+    const rT = await apiCall({ action:'getTaches' });
+    taches = (rT && rT.ok && Array.isArray(rT.taches)) ? rT.taches : [];
+    if (typeof saveTaches === 'function') saveTaches();
+
+    // 4. Persister + re-render toutes les vues
     saveData();
+    _ensureDossierLinks();
     hideLoader();
     renderProducts();
     renderStockTable();
     renderStats();
-    showToast('Données restaurées depuis Google Sheets', 'success');
+    if (typeof renderReservations === 'function') renderReservations();
+    if (typeof renderCommandes === 'function') renderCommandes();
+    if (typeof updateResBadge === 'function') updateResBadge();
+    if (typeof updateCmdBadge === 'function') updateCmdBadge();
+    showToast('POS synchronisé avec Google Sheets', 'success');
   } catch(e) {
     hideLoader();
-    showToast('Erreur lors de la restauration : ' + e.message, 'error');
+    showToast('Erreur lors de la synchronisation : ' + e.message, 'error');
   }
 }
 
