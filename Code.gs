@@ -150,6 +150,9 @@ function doGet(e) {
       else if (action === 'saveShopConfig')    result = handleSaveShopConfig(data);
       else if (action === 'saveRythme')        result = handleSaveRythme(data);
       else if (action === 'clearAllData')      result = handleClearAllData(data);
+      else if (action === 'saveTacheLibre')    result = handleSaveTacheLibre(data);
+      else if (action === 'saveDossier')       result = handleSaveDossier(data);
+      else if (action === 'creerDossierManuel') result = handleCreerDossierManuel(data);
       else result = { ok:false, error:'Action payload inconnue: ' + action };
       return jsonResp(result);
     } catch(err) {
