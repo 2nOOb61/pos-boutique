@@ -170,7 +170,8 @@ function doGet(e) {
     if (action === 'initSheets')      return jsonResp(initSheets());
     if (action === 'setupBackup')     return jsonResp(createDailyBackupTrigger());
     if (action === 'runBackupNow')    return jsonResp(dailyBackup());
-    if (action === 'getJournal')      return jsonResp(handleGetJournal(e.parameter));
+    if (action === 'getJournal')        return jsonResp(handleGetJournal(e.parameter));
+    if (action === 'getDriveFolderUrl') return jsonResp(handleGetDriveFolderUrl());
     return jsonResp({ ok:false, error:'Action GET inconnue: ' + action });
   } catch(err) {
     return jsonResp({ ok:false, error:'GET error: ' + err.message });

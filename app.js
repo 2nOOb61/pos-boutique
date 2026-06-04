@@ -3417,7 +3417,7 @@ async function apiCall(payload) {
   if (!APPS_SCRIPT_URL) return null;
 
   // ── LECTURES & LOGIN : requête GET avec params individuels ─
-  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getDossiers', 'getOperateurs', 'getTaches', 'getDashboard', 'getComments', 'getNotifs', 'getShopConfig', 'getRythme'];
+  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getDossiers', 'getOperateurs', 'getTaches', 'getDashboard', 'getComments', 'getNotifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl'];
   if (getActions.includes(payload.action)) {
     try {
       let url = APPS_SCRIPT_URL + '?action=' + payload.action;
