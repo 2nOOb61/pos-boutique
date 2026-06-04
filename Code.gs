@@ -102,6 +102,7 @@ function doPost(e) {
     else if (action === 'pointerAction')     result = handlePointerAction(data);
     else if (action === 'getDashboard')      result = handleGetDashboard();
     else if (action === 'uploadFile')        result = handleUploadFile(data);
+    else if (action === 'getDriveFolderUrl') result = handleGetDriveFolderUrl();
     else if (action === 'addComment')        result = handleAddComment(data);
     else if (action === 'saveNotif')         result = handleSaveNotif(data);
     else if (action === 'saveShopConfig')    result = handleSaveShopConfig(data);
@@ -1145,6 +1146,15 @@ function _getPOSAttachmentsFolder() {
   const FOLDER_NAME = 'POS_PiecesJointes';
   const folders = DriveApp.getFoldersByName(FOLDER_NAME);
   return folders.hasNext() ? folders.next() : DriveApp.createFolder(FOLDER_NAME);
+}
+
+function handleGetDriveFolderUrl() {
+  try {
+    const folder = _getPOSAttachmentsFolder();
+    return { ok:true, url: 'https://drive.google.com/drive/folders/' + folder.getId() };
+  } catch(e) {
+    return { ok:false, error: e.message };
+  }
 }
 
 function handleUploadFile(data) {
