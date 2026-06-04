@@ -1299,7 +1299,6 @@ function handleGetShopConfig() {
     const key = String(rows[i][0] || '').trim();
     const val = rows[i][1];
     if (!key) continue;
-    // Tenter de parser les valeurs JSON (booléens, objets)
     try {
       const parsed = JSON.parse(val);
       config[key] = parsed;
@@ -1307,6 +1306,11 @@ function handleGetShopConfig() {
       config[key] = val;
     }
   }
+  // Toujours inclure l'URL du dossier Drive partagé
+  try {
+    const folder = _getPOSAttachmentsFolder();
+    config.driveFolderUrl = 'https://drive.google.com/drive/folders/' + folder.getId() + '?usp=sharing';
+  } catch(e) { /* silencieux */ }
   return { ok: true, config };
 }
 

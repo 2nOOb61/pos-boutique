@@ -258,7 +258,8 @@ async function doLogin() {
     loadNotifsFromGAS();
     _startNotifPolling();
     // Charger les données depuis le Sheet
-    _initDriveFolderUrl(); // Récupérer l'URL du dossier Drive pour tous les opérateurs
+    _initDriveFolderUrl();  // Récupérer l'URL du dossier Drive (fallback direct)
+    loadConfigFromGAS();    // Récupère aussi driveFolderUrl via ShopConfig
     if (APPS_SCRIPT_URL) {
       await loadProductsFromScript();
       await loadSalesFromScript();
@@ -3983,12 +3984,15 @@ function loadConfig() {
 async function loadConfigFromGAS() {
   if (!APPS_SCRIPT_URL) return;
   // Si on a déjà une config avec un nom personnalisé, ne pas écraser
-  if (shopConfig.name && shopConfig.name !== 'MA BOUTIQUE') return;
   try {
     const r = await apiCall({ action: 'getShopConfig' });
     if (r && r.ok && r.config && typeof r.config === 'object') {
       shopConfig = { ...shopConfig, ...r.config };
       _persistConfig();
+      // Sauvegarder l'URL du dossier Drive si présente
+      if (r.config.driveFolderUrl) {
+        localStorage.setItem('pos-drive-folder-url', r.config.driveFolderUrl);
+      }
       // Rafraîchir la page config si ouverte
       if (document.getElementById('cfgShopName')) renderConfigPage();
     }
