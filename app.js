@@ -3748,24 +3748,10 @@ function hideLoader() {
 }
 
 // ── Paramètres Apps Script (modal) ──────────────────────
-async function openDriveFolder() {
-  const btn = document.getElementById('btnDriveFolder');
-  const orig = btn.innerHTML;
-  btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="display:inline;vertical-align:middle;margin-right:4px;animation:spin 1s linear infinite"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>...';
-  btn.disabled = true;
-  try {
-    const r = await apiCall({ action: 'getDriveFolderUrl' });
-    if (r && r.ok && r.url) {
-      window.open(r.url, '_blank');
-    } else {
-      showToast('Impossible d\'ouvrir le dossier Drive', 'error');
-    }
-  } catch(e) {
-    showToast('Erreur : ' + (e.message || e), 'error');
-  } finally {
-    btn.innerHTML = orig;
-    btn.disabled = false;
-  }
+function openDriveFolder() {
+  // Ouvre directement la recherche Drive du dossier POS_PiecesJointes
+  // Aucun appel GAS nécessaire
+  window.open('https://drive.google.com/drive/search?q=POS_PiecesJointes', '_blank');
 }
 
 function openScriptSettings() {
