@@ -1145,13 +1145,24 @@ const MAX_FILE_BYTES_ = 5 * 1024 * 1024; // 5 Mo
 function _getPOSAttachmentsFolder() {
   const FOLDER_NAME = 'POS_PiecesJointes';
   const folders = DriveApp.getFoldersByName(FOLDER_NAME);
-  return folders.hasNext() ? folders.next() : DriveApp.createFolder(FOLDER_NAME);
+  const folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(FOLDER_NAME);
+  // Rendre le dossier accessible à tous sans compte Google
+  try {
+    folder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  } catch(e) { /* ignore si déjà configuré */ }
+  return folder;
 }
 
 function handleGetDriveFolderUrl() {
   try {
     const folder = _getPOSAttachmentsFolder();
-    return { ok:true, url: 'https://drive.google.com/drive/folders/' + folder.getId() };
+    const folderId = folder.getId();
+    // URL directe — accessible sans compte Google (anyone with link)
+    return {
+      ok: true,
+      url: 'https://drive.google.com/drive/folders/' + folderId + '?usp=sharing',
+      folderId: folderId
+    };
   } catch(e) {
     return { ok:false, error: e.message };
   }

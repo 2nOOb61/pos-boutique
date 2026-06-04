@@ -266,6 +266,7 @@ async function doLogin() {
       await loadCommandesFromScript();
       await syncPendingOfflineSales();
       saveData(); // Persister l'état fusionné après tous les chargements
+      _initDriveFolderUrl(); // Récupérer l'URL du dossier Drive (silencieux)
     }
     applyRolePermissions(currentUser.role);
     updatePendingBadge();
@@ -3749,13 +3750,30 @@ function hideLoader() {
 
 // ── Paramètres Apps Script (modal) ──────────────────────
 function openDriveFolder() {
-  const a = document.createElement('a');
-  a.href = 'https://drive.google.com/drive/search?q=POS_PiecesJointes';
-  a.target = '_blank';
-  a.rel = 'noopener';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  const url = localStorage.getItem('pos-drive-folder-url');
+  if (url) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } else {
+    showToast('URL Drive non disponible — reconnectez-vous', 'error');
+  }
+}
+
+async function _initDriveFolderUrl() {
+  if (!APPS_SCRIPT_URL) return;
+  // Ne refetch que si pas encore en cache
+  if (localStorage.getItem('pos-drive-folder-url')) return;
+  try {
+    const r = await apiCall({ action: 'getDriveFolderUrl' });
+    if (r && r.ok && r.url) {
+      localStorage.setItem('pos-drive-folder-url', r.url);
+    }
+  } catch(e) { /* silencieux */ }
 }
 
 function openScriptSettings() {
