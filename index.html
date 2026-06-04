@@ -2039,5 +2039,31 @@
     </div>
   </div>
 
+  <!-- ═══ MODAL FICHIERS PARTAGÉS ═══ -->
+  <div class="modal-overlay" id="sharedFilesModal" style="display:none;" onclick="if(event.target===this)closeSharedFiles()">
+    <div class="modal-panel" style="max-width:560px;width:100%;background:#fff;border-radius:16px;box-shadow:0 8px 40px rgba(0,0,0,0.18);overflow:hidden;">
+      <div class="modal-header" style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid #e5e3df;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="width:36px;height:36px;background:#e8f4f0;border-radius:10px;display:flex;align-items:center;justify-content:center;">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#1a4a3a" stroke-width="1.5"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          </div>
+          <div>
+            <h3 style="margin:0;font-size:15px;font-weight:600;color:#1c1917;">Fichiers partagés</h3>
+            <p style="margin:0;font-size:11px;color:#78716c;">Dossier POS_PiecesJointes</p>
+          </div>
+        </div>
+        <button onclick="closeSharedFiles()" style="background:none;border:none;cursor:pointer;padding:6px;border-radius:8px;color:#78716c;">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div id="sharedFilesList" style="padding:16px 22px;max-height:420px;overflow-y:auto;">
+        <div style="text-align:center;padding:32px;color:#a8a29e;">
+          <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:.4"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <p style="margin:8px 0 0;font-size:13px;">Chargement...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </body>
 </html>

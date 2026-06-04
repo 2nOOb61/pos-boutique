@@ -172,6 +172,7 @@ function doGet(e) {
     if (action === 'runBackupNow')    return jsonResp(dailyBackup());
     if (action === 'getJournal')        return jsonResp(handleGetJournal(e.parameter));
     if (action === 'getDriveFolderUrl') return jsonResp(handleGetDriveFolderUrl());
+    if (action === 'getSharedFiles')    return jsonResp(handleGetSharedFiles());
     return jsonResp({ ok:false, error:'Action GET inconnue: ' + action });
   } catch(err) {
     return jsonResp({ ok:false, error:'GET error: ' + err.message });
@@ -1166,6 +1167,31 @@ function handleGetDriveFolderUrl() {
     };
   } catch(e) {
     return { ok:false, error: e.message };
+  }
+}
+
+function handleGetSharedFiles() {
+  try {
+    const folder = _getPOSAttachmentsFolder();
+    const files  = [];
+    const it     = folder.getFiles();
+    while (it.hasNext()) {
+      const f = it.next();
+      files.push({
+        id       : f.getId(),
+        name     : f.getName(),
+        mimeType : f.getMimeType(),
+        size     : f.getSize(),
+        date     : f.getDateCreated().toISOString(),
+        viewUrl  : 'https://drive.google.com/uc?id=' + f.getId() + '&export=view',
+        dlUrl    : 'https://drive.google.com/uc?id=' + f.getId() + '&export=download'
+      });
+    }
+    // Plus récents en premier
+    files.sort((a, b) => new Date(b.date) - new Date(a.date));
+    return { ok: true, files: files };
+  } catch(e) {
+    return { ok: false, error: e.message };
   }
 }
 

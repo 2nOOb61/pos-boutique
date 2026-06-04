@@ -3418,7 +3418,7 @@ async function apiCall(payload) {
   if (!APPS_SCRIPT_URL) return null;
 
   // ── LECTURES & LOGIN : requête GET avec params individuels ─
-  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getDossiers', 'getOperateurs', 'getTaches', 'getDashboard', 'getComments', 'getNotifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl'];
+  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getDossiers', 'getOperateurs', 'getTaches', 'getDashboard', 'getComments', 'getNotifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles'];
   if (getActions.includes(payload.action)) {
     try {
       let url = APPS_SCRIPT_URL + '?action=' + payload.action;
@@ -3751,31 +3751,69 @@ function hideLoader() {
 
 // ── Paramètres Apps Script (modal) ──────────────────────
 async function openDriveFolder() {
-  const btn = document.getElementById('btnDriveFolder');
-  // Récupérer l'URL en cache ou la fetcher maintenant
-  let url = localStorage.getItem('pos-drive-folder-url');
-  if (!url && APPS_SCRIPT_URL) {
-    if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
-    try {
-      const r = await apiCall({ action: 'getDriveFolderUrl' });
-      if (r && r.ok && r.url) {
-        url = r.url;
-        localStorage.setItem('pos-drive-folder-url', r.url);
-      }
-    } catch(e) {}
-    if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+  const modal = document.getElementById('sharedFilesModal');
+  const list  = document.getElementById('sharedFilesList');
+  if (!modal || !list) return;
+  modal.style.display = 'flex';
+  modal.style.alignItems = 'center';
+  modal.style.justifyContent = 'center';
+  modal.style.position = 'fixed';
+  modal.style.inset = '0';
+  modal.style.background = 'rgba(0,0,0,0.4)';
+  modal.style.zIndex = '9999';
+
+  list.innerHTML = `<div style="text-align:center;padding:32px;color:#a8a29e;">
+    <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" style="animation:spin 1s linear infinite"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+    <p style="margin:8px 0 0;font-size:13px;">Chargement des fichiers...</p></div>`;
+
+  if (!APPS_SCRIPT_URL) {
+    list.innerHTML = `<div style="text-align:center;padding:32px;color:#dc2626;font-size:13px;">GAS non configuré</div>`;
+    return;
   }
-  if (url) {
-    const a = document.createElement('a');
-    a.href = url;
-    a.target = '_blank';
-    a.rel = 'noopener';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  } else {
-    showToast('Dossier Drive non disponible — vérifiez la connexion GAS', 'error');
+  try {
+    const r = await apiCall({ action: 'getSharedFiles' });
+    if (r && r.ok && Array.isArray(r.files)) {
+      renderSharedFilesList(r.files);
+    } else {
+      list.innerHTML = `<div style="text-align:center;padding:32px;color:#dc2626;font-size:13px;">
+        Erreur : ${r?.error || 'Réponse invalide'}<br>
+        <span style="color:#78716c;font-size:11px;">Redéployez GAS pour activer cette fonction</span></div>`;
+    }
+  } catch(e) {
+    list.innerHTML = `<div style="text-align:center;padding:32px;color:#dc2626;font-size:13px;">Connexion GAS impossible</div>`;
   }
+}
+
+function renderSharedFilesList(files) {
+  const list = document.getElementById('sharedFilesList');
+  if (!files.length) {
+    list.innerHTML = `<div style="text-align:center;padding:40px;color:#a8a29e;">
+      <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:.35;margin-bottom:10px"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      <p style="margin:0;font-size:13px;font-weight:500;">Aucun fichier partagé</p>
+      <p style="margin:4px 0 0;font-size:11px;">Les pièces jointes uploadées apparaîtront ici</p></div>`;
+    return;
+  }
+  const fmt = (bytes) => bytes < 1024*1024 ? Math.round(bytes/1024)+'Ko' : (bytes/1024/1024).toFixed(1)+'Mo';
+  const icon = (mime) => mime.includes('pdf')
+    ? `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#dc2626" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`
+    : `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#2563eb" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`;
+  list.innerHTML = files.map(f => `
+    <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #f3f2f0;">
+      <div style="flex-shrink:0;">${icon(f.mimeType)}</div>
+      <div style="flex:1;min-width:0;">
+        <p style="margin:0;font-size:13px;font-weight:500;color:#1c1917;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${f.name}</p>
+        <p style="margin:2px 0 0;font-size:11px;color:#a8a29e;">${fmt(f.size)} · ${new Date(f.date).toLocaleDateString('fr-FR')}</p>
+      </div>
+      <div style="display:flex;gap:6px;flex-shrink:0;">
+        <a href="${f.viewUrl}" target="_blank" rel="noopener" style="padding:5px 10px;background:#e8f4f0;color:#1a4a3a;border-radius:7px;font-size:11px;font-weight:600;text-decoration:none;">Voir</a>
+        <a href="${f.dlUrl}" target="_blank" rel="noopener" style="padding:5px 10px;background:#1a4a3a;color:#fff;border-radius:7px;font-size:11px;font-weight:600;text-decoration:none;">↓</a>
+      </div>
+    </div>`).join('');
+}
+
+function closeSharedFiles() {
+  const modal = document.getElementById('sharedFilesModal');
+  if (modal) modal.style.display = 'none';
 }
 
 async function _initDriveFolderUrl() {
