@@ -258,6 +258,7 @@ async function doLogin() {
     loadNotifsFromGAS();
     _startNotifPolling();
     // Charger les données depuis le Sheet
+    _initDriveFolderUrl(); // Récupérer l'URL du dossier Drive pour tous les opérateurs
     if (APPS_SCRIPT_URL) {
       await loadProductsFromScript();
       await loadSalesFromScript();
@@ -266,7 +267,6 @@ async function doLogin() {
       await loadCommandesFromScript();
       await syncPendingOfflineSales();
       saveData(); // Persister l'état fusionné après tous les chargements
-      _initDriveFolderUrl(); // Récupérer l'URL du dossier Drive (silencieux)
     }
     applyRolePermissions(currentUser.role);
     updatePendingBadge();
@@ -3749,8 +3749,21 @@ function hideLoader() {
 }
 
 // ── Paramètres Apps Script (modal) ──────────────────────
-function openDriveFolder() {
-  const url = localStorage.getItem('pos-drive-folder-url');
+async function openDriveFolder() {
+  const btn = document.getElementById('btnDriveFolder');
+  // Récupérer l'URL en cache ou la fetcher maintenant
+  let url = localStorage.getItem('pos-drive-folder-url');
+  if (!url && APPS_SCRIPT_URL) {
+    if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
+    try {
+      const r = await apiCall({ action: 'getDriveFolderUrl' });
+      if (r && r.ok && r.url) {
+        url = r.url;
+        localStorage.setItem('pos-drive-folder-url', r.url);
+      }
+    } catch(e) {}
+    if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+  }
   if (url) {
     const a = document.createElement('a');
     a.href = url;
@@ -3760,13 +3773,12 @@ function openDriveFolder() {
     a.click();
     document.body.removeChild(a);
   } else {
-    showToast('URL Drive non disponible — reconnectez-vous', 'error');
+    showToast('Dossier Drive non disponible — vérifiez la connexion GAS', 'error');
   }
 }
 
 async function _initDriveFolderUrl() {
   if (!APPS_SCRIPT_URL) return;
-  // Ne refetch que si pas encore en cache
   if (localStorage.getItem('pos-drive-folder-url')) return;
   try {
     const r = await apiCall({ action: 'getDriveFolderUrl' });

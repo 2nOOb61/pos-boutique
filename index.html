@@ -406,9 +406,9 @@
     <span class="topbar-brand">FOREVER MG</span>
     <div class="topbar-right">
       <div class="user-badge"><div class="user-dot"></div><span id="currentUserLabel">Admin</span></div>
-      <a href="https://drive.google.com/drive/search?q=POS_PiecesJointes" target="_blank" rel="noopener" title="Dossier partagé des pièces jointes" style="display:inline-flex;align-items:center;gap:5px;padding:7px 12px;background:transparent;border:1px solid rgba(232,131,74,0.5);border-radius:10px;color:var(--accent2);font-size:13px;cursor:pointer;transition:.2s;text-decoration:none;">
+      <button id="btnDriveFolder" onclick="openDriveFolder()" title="Dossier partagé des pièces jointes" style="display:inline-flex;align-items:center;gap:5px;padding:7px 12px;background:transparent;border:1px solid rgba(232,131,74,0.5);border-radius:10px;color:var(--accent2);font-size:13px;cursor:pointer;transition:.2s;">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>Drive
-      </a>
+      </button>
       <button class="btn-logout btn-sync-desktop" onclick="openScriptSettings()" title="Configurer Apps Script" aria-label="Configurer Google Sheets" style="border-color:rgba(26,74,58,0.3);color:var(--accent)">Google Sheets</button>
       <button class="btn-logout btn-sync-desktop" onclick="openAirtableSettings()" title="Configurer Airtable" id="btnAirtable" style="border-color:rgba(232,131,74,0.4);color:var(--accent2)">Airtable</button>
       <span id="pendingBadge" title="Ventes en attente de sync" role="button" tabindex="0" aria-live="polite" style="display:none;background:var(--red);color:#fff;border-radius:20px;padding:3px 10px;font-size:12px;font-weight:700;cursor:pointer" onclick="syncPendingOfflineSales()" onkeydown="if(event.key==='Enter')syncPendingOfflineSales()"><span id="pendingCount">0</span> en attente</span>
