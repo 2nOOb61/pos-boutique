@@ -111,6 +111,7 @@ const PAGE_ACCESS = {
   users:        ['admin'],
   attribution:  ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur'],
   production:   ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
+  messagerie:   ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
 };
 let editingUserId = null; // index dans localUsers
 
@@ -272,6 +273,8 @@ async function doLogin() {
     applyRolePermissions(currentUser.role);
     updatePendingBadge();
     updateResBadge();
+    // Précharger le fil de messagerie pour alimenter le badge non-lus
+    if (APPS_SCRIPT_URL) loadCommentsForDossier(MSG_GLOBAL_ID).then(() => _updateMsgBadge());
     renderProducts();
     renderStockTable();
     renderStats();
@@ -349,6 +352,7 @@ function showPage(id, btn, bnavBtn) {
     loadDossiers(); initModulesProduction();
   }
   if (id==='production')   { loadTaches(); _autoRefreshProduction(); initModulesProduction(); }
+  if (id==='messagerie')   { loadMessagerie(); _autoRefreshMessagerie(); }
   if (id==='patron')       { renderPatronDashboard(); _autoRefreshPatron(); }
   if (id==='commandes')    { _ensureDossierLinks(); renderCommandes(); _autoRefreshCommandes(); _loadTachesQuietly().then(renderCommandes); }
   // Garde d'accès par rôle
@@ -5481,6 +5485,8 @@ function _startNotifPolling() {
     if (newCount > 0 && document.getElementById('notifPanel')?.classList.contains('open')) {
       _renderNotifPanelList(); // rafraîchit le panneau si ouvert
     }
+    // Rafraîchir la messagerie (fil commun) + badge non-lus
+    _autoRefreshMessagerie();
   }, 30000); // 30 secondes
 }
 
@@ -6239,6 +6245,274 @@ async function submitComment(dossierId) {
     // Sauvegarder dans GAS (avec les URLs Drive finales)
     apiCall({ action:'addComment', ...comment });
   })();
+}
+
+// ============================================================
+// MESSAGERIE — Fil commun de l'équipe (+ pièces jointes)
+// Canal global : dossierId = '__GLOBAL__' (réutilise getComments/addComment)
+// ============================================================
+const MSG_GLOBAL_ID = '__GLOBAL__';
+let msgAttachments = [];      // pièces jointes du message en cours
+let _lastMsgRefresh = 0;
+
+function _msgList() {
+  return dossierComments
+    .filter(c => c.dossierId === MSG_GLOBAL_ID)
+    .sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+}
+
+async function loadMessagerie() {
+  renderMessagerieList(_msgList()); // affichage immédiat depuis le cache
+  if (APPS_SCRIPT_URL) {
+    const fresh = await loadCommentsForDossier(MSG_GLOBAL_ID);
+    renderMessagerieList(fresh || _msgList());
+  }
+  _markMessagerieRead();
+}
+
+function renderMessagerieList(messages) {
+  const box = document.getElementById('msgGlobalList');
+  if (!box) return;
+  const myLabel = currentUser?.label || currentUser?.username || '';
+  const wasNearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+
+  if (!messages.length) {
+    box.innerHTML = '<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--color-text-muted);padding:50px 20px;text-align:center">'
+      + '<div style="width:48px;height:48px;background:var(--color-bg);border-radius:14px;display:flex;align-items:center;justify-content:center;margin-bottom:12px"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>'
+      + '<p style="font-size:14px;font-weight:500;color:var(--color-text-secondary);margin:0">Aucun message</p>'
+      + '<p style="font-size:12px;margin:4px 0 0">Démarrez la conversation de l\'équipe</p></div>';
+    return;
+  }
+
+  box.innerHTML = messages.map(c => {
+    const dt = new Date(c.timestamp);
+    const dateStr = dt.toLocaleDateString('fr-FR',{day:'2-digit',month:'short'}) + ' ' + dt.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+    const isMe = c.author === myLabel;
+    const highlighted = (c.text || '').replace(/(@[\wÀ-ÿ]+(?:\s+[\wÀ-ÿ]+)?)/g,
+      '<span style="color:var(--color-secondary);font-weight:600">$1</span>');
+    const attachHtml = (c.attachments||[]).length
+      ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">'
+        + c.attachments.map(a => {
+            const isImg   = (a.type||'').startsWith('image/');
+            const viewUrl = a.viewUrl || a.data || '';
+            const dlUrl   = a.dlUrl   || a.data || '';
+            const thumbSrc = isImg ? _driveImgSrc(a) : '';
+            const ext = (a.name||'').split('.').pop().toUpperCase();
+            return '<div style="position:relative">'
+              + (isImg && thumbSrc
+                  ? '<img src="'+thumbSrc+'" onclick="window.open(\''+viewUrl+'\',\'_blank\')" style="width:52px;height:52px;object-fit:cover;border-radius:8px;border:1px solid var(--color-border);cursor:pointer" title="'+a.name+'" />'
+                  : '<a href="'+viewUrl+'" target="_blank" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:52px;height:52px;border-radius:8px;border:1px solid var(--color-border);background:var(--color-bg);text-decoration:none;color:var(--color-primary)">'
+                    + '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>'
+                    + '<span style="font-size:7px;font-weight:700">'+ext+'</span></a>')
+              + (a.dlUrl ? '<a href="'+dlUrl+'" download="'+a.name+'" title="Télécharger" style="position:absolute;bottom:-4px;right:-4px;background:var(--color-secondary);color:#fff;border-radius:50%;width:16px;height:16px;display:flex;align-items:center;justify-content:center;text-decoration:none;font-size:9px">↓</a>' : '')
+              + '</div>';
+          }).join('')
+        + '</div>'
+      : '';
+    return '<div style="display:flex;flex-direction:column;align-items:'+(isMe?'flex-end':'flex-start')+';margin-bottom:14px">'
+      + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">'
+      +   '<span style="font-size:11px;font-weight:700;color:'+(isMe?'var(--color-secondary)':'var(--color-primary)')+'">'+c.author+'</span>'
+      +   '<span style="font-size:10px;color:var(--color-text-muted)">'+dateStr+'</span>'
+      + '</div>'
+      + '<div style="max-width:78%;background:'+(isMe?'#fdf0e8':'var(--color-surface)')+';border:1px solid '+(isMe?'rgba(232,131,74,.25)':'var(--color-border)')+';border-radius:12px;padding:9px 12px">'
+      +   (c.text ? '<div style="font-size:14px;color:var(--color-text-primary);white-space:pre-wrap;word-break:break-word;line-height:1.5">'+highlighted+'</div>' : '')
+      +   attachHtml
+      + '</div>'
+      + '</div>';
+  }).join('');
+
+  if (wasNearBottom) box.scrollTop = box.scrollHeight;
+}
+
+function handleMsgMention(event) {
+  const textarea = document.getElementById('msgGlobalText');
+  const dropdown = document.getElementById('msgMentionDropdown');
+  if (!textarea || !dropdown) return;
+  const before = textarea.value.substring(0, textarea.selectionStart);
+  const match  = before.match(/@([\wÀ-ÿ]*)$/);
+  if (!match) { dropdown.style.display = 'none'; return; }
+  const query = match[1].toLowerCase();
+  const results = localUsers.filter(u => u.actif !== false && (
+    (u.label||'').toLowerCase().includes(query) || u.username.toLowerCase().includes(query)
+  )).slice(0, 6);
+  if (!results.length) { dropdown.style.display = 'none'; return; }
+  dropdown.style.display = 'block';
+  dropdown.innerHTML = results.map(u =>
+    '<div onclick="insertMsgMention(\''+encodeURIComponent(u.label||u.username)+'\')"'
+    + ' style="padding:7px 12px;cursor:pointer;font-size:13px"'
+    + ' onmouseover="this.style.background=\'var(--color-primary-light)\'"'
+    + ' onmouseout="this.style.background=\'\'">'
+    + '<span style="font-weight:600">'+(u.label||u.username)+'</span>'
+    + ' <span style="font-size:11px;color:var(--color-text-muted)">'+(ROLE_LABELS[u.role]||u.role)+'</span>'
+    + '</div>'
+  ).join('');
+}
+
+function insertMsgMention(encodedLabel) {
+  const label = decodeURIComponent(encodedLabel);
+  const textarea = document.getElementById('msgGlobalText');
+  const dropdown = document.getElementById('msgMentionDropdown');
+  if (!textarea) return;
+  const text   = textarea.value;
+  const cursor = textarea.selectionStart;
+  const before = text.substring(0, cursor).replace(/@([\wÀ-ÿ]*)$/, '@'+label+' ');
+  textarea.value = before + text.substring(cursor);
+  textarea.focus();
+  textarea.setSelectionRange(before.length, before.length);
+  if (dropdown) dropdown.style.display = 'none';
+}
+
+async function addMsgAttachment(files) {
+  if (!files || !files.length) return;
+  const MAX = 4;
+  if (msgAttachments.length >= MAX) { showToast('Maximum 4 fichiers par message', 'error'); return; }
+  const remaining = MAX - msgAttachments.length;
+  for (const file of Array.from(files).slice(0, remaining)) {
+    if (file.size > 8*1024*1024) { showToast(file.name+' trop volumineux (max 8 Mo)', 'error'); continue; }
+    try {
+      const data = file.type.startsWith('image/')
+        ? await _resizeImage(file, 1200, 1200)
+        : await new Promise((res,rej) => { const r=new FileReader(); r.onload=e=>res(e.target.result); r.onerror=rej; r.readAsDataURL(file); });
+      msgAttachments.push({ name:file.name, type:file.type, data });
+    } catch(e) { showToast('Erreur : '+file.name, 'error'); }
+  }
+  renderMsgAttachments();
+  const input = document.getElementById('msgGlobalAttachInput');
+  if (input) input.value = '';
+}
+
+function removeMsgAttachment(idx) {
+  msgAttachments.splice(idx, 1);
+  renderMsgAttachments();
+}
+
+function renderMsgAttachments() {
+  const c = document.getElementById('msgGlobalAttachPreviews');
+  if (!c) return;
+  if (!msgAttachments.length) { c.innerHTML = ''; return; }
+  c.innerHTML = msgAttachments.map((a,i) => {
+    const isImg = a.type.startsWith('image/');
+    return '<div style="position:relative;display:inline-block">'
+      + (isImg
+          ? '<img src="'+a.data+'" style="width:48px;height:48px;object-fit:cover;border-radius:8px;border:1.5px solid var(--color-border)" />'
+          : '<div style="width:48px;height:48px;border-radius:8px;border:1.5px solid var(--color-border);background:var(--color-bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:var(--color-primary)">'
+            + '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>'
+            + '<span style="font-size:8px;font-weight:700">'+a.name.split('.').pop().toUpperCase()+'</span>'
+            + '</div>')
+      + '<button onclick="removeMsgAttachment('+i+')" style="position:absolute;top:-5px;right:-5px;background:#dc2626;color:#fff;border:none;border-radius:50%;width:16px;height:16px;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0">×</button>'
+      + '</div>';
+  }).join('');
+}
+
+async function submitMsgGlobal() {
+  const textarea = document.getElementById('msgGlobalText');
+  if (!textarea) return;
+  const text = textarea.value.trim();
+  if (!text && !msgAttachments.length) { showToast('Message vide', 'error'); return; }
+
+  // Extraire les @mentions
+  const mentions = [];
+  const rx = /@([\wÀ-ÿ]+(?:\s+[\wÀ-ÿ]+)?)/g;
+  let m;
+  while ((m = rx.exec(text)) !== null) {
+    const u = localUsers.find(u => (u.label||u.username||'').toLowerCase() === m[1].toLowerCase());
+    if (u && !mentions.includes(u.label||u.username)) mentions.push(u.label||u.username);
+  }
+
+  const message = {
+    id:            'MSG_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
+    dossierId:     MSG_GLOBAL_ID,
+    numeroDossier: 'MESSAGERIE',
+    author:        currentUser?.label || currentUser?.username || 'Anonyme',
+    authorRole:    currentUser?.role || '',
+    text,
+    mentions,
+    attachments:   msgAttachments.map(a => ({ name:a.name, type:a.type, data:a.data })),
+    timestamp:     new Date().toISOString()
+  };
+
+  // 1. Affichage immédiat
+  dossierComments.push(message);
+  saveComments();
+  textarea.value = '';
+  msgAttachments = [];
+  renderMsgAttachments();
+  renderMessagerieList(_msgList());
+  _markMessagerieRead();
+
+  // Notifications ciblées pour les @mentions
+  mentions.forEach(lbl => {
+    _addNotification({ dossierId:MSG_GLOBAL_ID, numeroDossier:'Messagerie', etapeCode:'MESSAGE', etapeLabel:'Messagerie',
+      operateur:message.author, message:`${message.author} vous a mentionné : "${text.slice(0,60)}${text.length>60?'…':''}"` });
+  });
+
+  // 2. Upload Drive + sync GAS en arrière-plan
+  if (!APPS_SCRIPT_URL) return;
+  (async () => {
+    if (message.attachments.length) {
+      const uploaded = [];
+      for (const att of message.attachments) {
+        try {
+          const r = await apiCall({ action:'uploadFile', fileName:att.name, mimeType:att.type, base64Data:att.data });
+          uploaded.push(r?.ok ? { name:r.fileName||att.name, type:att.type, fileId:r.fileId, viewUrl:r.viewUrl, dlUrl:r.dlUrl } : att);
+        } catch(e) { uploaded.push(att); }
+      }
+      message.attachments = uploaded;
+      saveComments();
+      renderMessagerieList(_msgList());
+    }
+    apiCall({ action:'addComment', ...message });
+  })();
+}
+
+async function refreshMessagerie(btn) {
+  if (btn) {
+    btn.disabled = true;
+    const svg = btn.querySelector('svg');
+    if (svg) svg.style.animation = 'spin 0.8s linear infinite';
+  }
+  _lastMsgRefresh = 0;
+  await loadMessagerie();
+  if (btn) {
+    btn.disabled = false;
+    const svg = btn.querySelector('svg');
+    if (svg) svg.style.animation = '';
+  }
+}
+
+async function _autoRefreshMessagerie() {
+  if (!APPS_SCRIPT_URL) return;
+  const now = Date.now();
+  if (now - _lastMsgRefresh < 20000) return;
+  _lastMsgRefresh = now;
+  const fresh = await loadCommentsForDossier(MSG_GLOBAL_ID);
+  // Ne re-render que si la page est active
+  if (document.getElementById('page-messagerie')?.classList.contains('active')) {
+    renderMessagerieList(fresh || _msgList());
+    _markMessagerieRead();
+  } else {
+    _updateMsgBadge();
+  }
+}
+
+// ── Badge non-lus ──
+function _msgLastReadTs() {
+  if (!currentUser) return Date.now();
+  return parseInt(localStorage.getItem('pos-msg-ts-' + currentUser.username) || '0');
+}
+function _markMessagerieRead() {
+  if (!currentUser) return;
+  localStorage.setItem('pos-msg-ts-' + currentUser.username, String(Date.now()));
+  _updateMsgBadge();
+}
+function _updateMsgBadge() {
+  const badge = document.getElementById('navMsgBadge');
+  if (!badge) return;
+  const myLabel = currentUser?.label || currentUser?.username || '';
+  const lastRead = _msgLastReadTs();
+  const unread = _msgList().filter(c => c.author !== myLabel && new Date(c.timestamp).getTime() > lastRead).length;
+  if (unread > 0) { badge.textContent = unread > 99 ? '99+' : unread; badge.style.display = 'inline-block'; }
+  else { badge.style.display = 'none'; }
 }
 
 // ============================================================
