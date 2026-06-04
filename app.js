@@ -5336,15 +5336,111 @@ function _purgeOrphanTaches() {
   }
 }
 
-function openAttribForDossier(dossierId) {
-  // S'assurer que le dossier est bien dans dossiers[] (non persisté, reconstruit depuis source)
+async function openAttribForDossier(dossierId) {
+  // 1. Reconstruire les dossiers depuis les sources locales (réservations/commandes)
   _ensureDossierLinks();
-  const d = dossiers.find(x => x.id === dossierId);
+  let d = dossiers.find(x => x.id === dossierId);
+
+  // 2. Pas trouvé localement → charger depuis GAS (la page Production ne charge pas les dossiers)
+  if (!d && APPS_SCRIPT_URL) {
+    try {
+      const r = await apiCall({ action:'getDossiers', statut:'TOUS' });
+      if (r && r.ok && Array.isArray(r.dossiers)) {
+        // Fusionner sans écraser les dossiers locaux reconstruits
+        const ids = new Set(dossiers.map(x => x.id));
+        r.dossiers.forEach(x => { if (!ids.has(x.id)) dossiers.push(x); });
+      }
+    } catch(e) {}
+    _ensureDossierLinks();
+    d = dossiers.find(x => x.id === dossierId);
+  }
+
+  // 3. Toujours pas trouvé → reconstruire un dossier minimal depuis la tâche
+  if (!d) {
+    const t = taches.find(x => x.dossierId === dossierId);
+    if (t) {
+      d = {
+        id: dossierId,
+        numeroDossier: t.numeroDossier || dossierId,
+        client:      t.client || '—',
+        produit:     t.produit || t.titre || 'Articles',
+        quantite:    t.quantite || '',
+        statut:      'CREE',
+        progression: 0,
+        dateCreation: t.dateAssignation || new Date().toLocaleDateString('fr-FR'),
+        priorite:    t.priorite || 'Normale',
+        sourceVente: '',
+        reconstructed: true
+      };
+      dossiers.push(d);
+    }
+  }
+
   if (!d) { showToast('Dossier introuvable', 'error'); return; }
+
+  // 4. Si l'utilisateur n'a pas accès à l'Attribution → vue lecture seule
+  const canAttrib = PAGE_ACCESS.attribution.includes(currentUser?.role);
+  if (!canAttrib) {
+    showDossierReadOnly(d);
+    return;
+  }
+
   selectedDossier = d;
-  // Stocker l'id avant showPage qui appelle loadDossiers() (async, recrée dossiers[])
   _pendingSelectDossierId = dossierId;
   showPage('attribution', null, null);
+}
+
+// Vue lecture seule d'un dossier (pour les rôles sans accès Attribution)
+function showDossierReadOnly(d) {
+  const dt = taches.filter(t => t.dossierId === d.id);
+  const steps = ETAPES_CONFIG.map(e => {
+    const te = dt.filter(t => t.etapeCode === e.code);
+    let status = 'VIDE';
+    if (te.length > 0 && te.every(t => t.statut === 'TERMINE'))               status = 'TERMINE';
+    else if (te.some(t => t.statut === 'EN_COURS' || t.statut === 'TERMINE')) status = 'EN_COURS';
+    else if (te.some(t => t.statut === 'A_FAIRE'))                            status = 'A_FAIRE';
+    return { e, status, te };
+  });
+  const done = steps.filter(s => s.status === 'TERMINE').length;
+  const pct  = Math.round(done / ETAPES_CONFIG.length * 100);
+  const col  = s => s==='TERMINE'?'#16a34a':s==='EN_COURS'?'#d97706':s==='A_FAIRE'?'#2563eb':'#d6d3d1';
+
+  const stepsHtml = steps.map(s => `
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--color-border)">
+      <span style="width:10px;height:10px;border-radius:50%;background:${col(s.status)};flex-shrink:0"></span>
+      <span style="flex:1;font-size:13px;color:var(--color-text-primary)">${s.e.label}</span>
+      <span style="font-size:11px;font-weight:600;color:${col(s.status)}">${s.status==='TERMINE'?'Terminé':s.status==='EN_COURS'?'En cours':s.status==='A_FAIRE'?'À faire':'—'}</span>
+      ${s.te.length ? `<span style="font-size:11px;color:var(--color-text-muted)">${s.te.map(t=>t.operateur).filter(Boolean).join(', ')}</span>` : ''}
+    </div>`).join('');
+
+  let overlay = document.getElementById('dossierReadOnlyModal');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'dossierReadOnlyModal';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.style.display = 'none'; };
+    document.body.appendChild(overlay);
+  }
+  overlay.style.display = 'flex';
+  overlay.innerHTML = `
+    <div style="background:var(--color-surface);border-radius:16px;box-shadow:0 8px 40px rgba(0,0,0,.18);width:100%;max-width:480px;max-height:85vh;overflow-y:auto" onclick="event.stopPropagation()">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--color-border)">
+        <div>
+          <h3 style="margin:0;font-size:15px;font-weight:600;color:var(--color-text-primary)">${d.numeroDossier||'Dossier'}</h3>
+          <p style="margin:2px 0 0;font-size:12px;color:var(--color-text-muted)">${d.client||'—'}</p>
+        </div>
+        <button onclick="document.getElementById('dossierReadOnlyModal').style.display='none'" style="background:none;border:none;cursor:pointer;padding:6px;color:var(--color-text-muted);font-size:18px;line-height:1">×</button>
+      </div>
+      <div style="padding:18px 22px">
+        <div style="display:flex;gap:16px;margin-bottom:14px;flex-wrap:wrap">
+          <div><p style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted);margin:0">Produit</p><p style="font-size:13px;font-weight:500;color:var(--color-text-primary);margin:2px 0 0">${d.produit||'—'}</p></div>
+          ${d.quantite?`<div><p style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted);margin:0">Quantité</p><p style="font-size:13px;font-weight:500;color:var(--color-text-primary);margin:2px 0 0">${d.quantite}</p></div>`:''}
+          <div><p style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted);margin:0">Progression</p><p style="font-size:13px;font-weight:700;color:${pct===100?'#16a34a':'#e8834a'};margin:2px 0 0">${pct}%</p></div>
+        </div>
+        <p style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted);margin:0 0 6px">Étapes de production</p>
+        ${stepsHtml}
+      </div>
+    </div>`;
 }
 
 function _buildCardProductionSection(dossierId) {
