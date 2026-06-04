@@ -1192,7 +1192,15 @@ function _doFinalize(r, method, given, change, provider, ref) {
   showToast(` Vente #${sale.id} enregistrée — Réservation #${r.id} finalisée !`);
   renderReservations();
   updateResBadge();
-  _deleteTachesForDossier(r.dossierId);
+  // Ne supprimer les tâches que si toutes sont terminées (production achevée)
+  const tachesDossier   = taches.filter(function(t) { return t.dossierId === r.dossierId; });
+  const toutesTerminees = tachesDossier.length === 0 ||
+    tachesDossier.every(function(t) { return t.statut === 'TERMINE'; });
+  if (toutesTerminees) {
+    _deleteTachesForDossier(r.dossierId);
+  } else {
+    console.info('[Finalise] Tâches encore en cours pour dossier', r.dossierId, '— conservation.');
+  }
 }
 
 // ============================================================
@@ -5050,8 +5058,16 @@ function cancelCommande(id) {
   const c = commandes.find(x => String(x.id) === String(id));
   if (!c || c.status !== 'pending') return;
   if (!confirm(`Annuler la commande #${c.id} de ${c.clientName} ?`)) return;
+  // Restituer le stock pour les articles en catalogue (identique à cancelReservation)
+  (Array.isArray(c.items) ? c.items : []).forEach(function(item) {
+    if (item.custom) return;
+    const p = products.find(function(pr) { return pr.name === item.name; });
+    if (p) p.stock = (p.stock || 0) + (Number(item.qty) || 0);
+  });
   c.status = 'cancelled';
   saveData();
+  renderProducts();
+  renderStockTable();
   renderCommandes();
   updateCmdBadge();
   syncCmdUpdateToSheets(c);
@@ -5332,6 +5348,16 @@ function _createDossierFromSource(type, source) {
     sourceId:    source.id
   };
   dossiers.push(dossier);
+  // Persister dans Sheets pour visibilité multi-postes
+  if (APPS_SCRIPT_URL) {
+    apiCall({
+      action:    'saveDossier',
+      dossier:   dossier,
+      createdBy: (window.currentUser && currentUser.label) || 'frontend'
+    }).catch(function() {
+      console.warn('[Dossier] Sync GAS échouée pour', dossier.id);
+    });
+  }
   return dossier;
 }
 

@@ -34,12 +34,14 @@ function _logAction_(action, user, detail) {
 
 // Étapes de production
 const ETAPES_PROD = [
-  { code:'PAO',        label:'PAO / Conception',  progress:20 },
-  { code:'BAT',        label:'BAT validé',         progress:35 },
-  { code:'ACHAT',      label:'Achat matières',     progress:55 },
-  { code:'PRODUCTION', label:'Production atelier', progress:75 },
-  { code:'FINITION',   label:'Finition',           progress:90 },
-  { code:'LIVRE',      label:'Livré',              progress:100 },
+  { code:'ACHAT',         label:'Achat matières',    progress:12  },
+  { code:'PAO',           label:'PAO / Conception',  progress:25  },
+  { code:'BAT',           label:'BAT physique',       progress:38  },
+  { code:'RETOUR_CLIENT', label:'Retour client',      progress:50  },
+  { code:'MODIFICATIONS', label:'Modifications',      progress:62  },
+  { code:'PRODUCTION',    label:'Opérateur machine',  progress:75  },
+  { code:'FINITION',      label:'Finition',           progress:90  },
+  { code:'LIVRE',         label:'Livraison',          progress:100 },
 ];
 
 // ── Sécurité : hashage SHA-256 des mots de passe ──────────
@@ -94,6 +96,7 @@ function doPost(e) {
     else if (action === 'getCommandes')      result = handleGetCommandes();
     // Nouveaux modules
     else if (action === 'getDossiers')       result = handleGetDossiers(data);
+    else if (action === 'saveDossier')       result = handleSaveDossier(data);
     else if (action === 'getOperateurs')     result = handleGetOperateurs();
     else if (action === 'saveOperateur')     result = handleSaveOperateur(data);
     else if (action === 'attribuerTache')    result = handleAttribuerTache(data);
@@ -394,10 +397,11 @@ function creerDossiersFromVente_(ss, sale) {
     let nextId = lastId + 1;
 
     // Batch write : tous les dossiers en une seule requête
+    const clientLabel = sale.clientName || sale.clientContact || sale.caissier || 'Client';
     const batchRows = sale.items.map(item => {
       const dossId = 'D' + String(nextId).padStart(4,'0');
-      const row = [dossId, 'POS-'+sale.id+'-'+nextId, sale.caissier||'Client',
-        item.name, item.qty, 'CREE', 0, now, '', 'Normale', 'Vente #'+sale.id, ''];
+      const row = [dossId, 'POS-'+sale.id+'-'+nextId, clientLabel,
+        item.name, item.qty, 'CREE', 0, now, sale.deliveryDate||'', 'Normale', 'Vente #'+sale.id, ''];
       nextId++;
       return row;
     });
@@ -833,6 +837,49 @@ function handleGetDossiers(data) {
   return { ok:true, dossiers:list.reverse() };
 }
 
+// ── Persistance dossier RES/CMD depuis le frontend ─────────
+function handleSaveDossier(data) {
+  const d  = data.dossier;
+  if (!d || !d.id) return { ok:false, error:'dossier.id requis' };
+  const ss  = getSS();
+  const sh  = ensureSheet(ss, SHEET_DOSSIERS,
+    ['ID','NumeroDossier','Client','Produit','Quantite','Statut',
+     'Progression','DateCreation','DateLivraison','Priorite','SourceVente','Notes']);
+
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(6000);
+    const rows = sh.getDataRange().getValues();
+    // Idempotent : ne pas créer de doublon
+    for (let i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) === String(d.id)) {
+        return { ok:true, created:false };
+      }
+    }
+    const now = new Date();
+    sh.appendRow([
+      String(d.id),
+      d.numeroDossier || '',
+      d.client        || '',
+      d.produit       || '',
+      Number(d.quantite) || 1,
+      d.statut        || 'CREE',
+      Number(d.progression) || 0,
+      d.dateCreation  ? new Date(d.dateCreation) : now,
+      d.dateLivraison ? new Date(d.dateLivraison) : '',
+      d.priorite      || 'Normale',
+      d.sourceVente   || '',
+      d.notes         || ''
+    ]);
+    _logAction_('DOSSIER_CREATE', data.createdBy || 'frontend',
+      String(d.id) + ' ← ' + (d.sourceVente || ''));
+    CacheService.getScriptCache().remove('dashboard_v1');
+    return { ok:true, created:true };
+  } finally {
+    try { lock.releaseLock(); } catch(e) {}
+  }
+}
+
 // ============================================================
 // OPÉRATEURS
 // ============================================================
@@ -988,7 +1035,18 @@ function handlePointerAction(data) {
       sh.getRange(i + 1, 1, 1, 12).setValues([rowData]);
       _logAction_('TACHE_FIN', data.operateur||String(rows[i][5]),
         'Tâche:' + data.tacheId + ' étape:' + rows[i][3]);
-      majProgressionDossier_(ss, rows[i][1], data.etapeCode || rows[i][3]);
+      const dossierId_  = rows[i][1];
+      const etapeCode_  = data.etapeCode || rows[i][3];
+      // Relire les tâches après écriture pour avoir l'état à jour
+      const allRows     = sh.getDataRange().getValues();
+      const tachesEtape = allRows.slice(1).filter(function(r) {
+        return r[1] === dossierId_ && r[3] === etapeCode_;
+      });
+      const toutesTerminees = tachesEtape.length > 0 &&
+        tachesEtape.every(function(r) { return r[6] === 'TERMINE'; });
+      if (toutesTerminees) {
+        majProgressionDossier_(ss, dossierId_, etapeCode_);
+      }
     }
     CacheService.getScriptCache().remove('dashboard_v1'); // invalider le dashboard
     return { ok:true };
@@ -1012,9 +1070,13 @@ function majProgressionDossier_(ss, dossierId, etapeCode) {
 
   for (let i = 0; i < rows.length; i++) {
     if (rows[i][0] === dossierId) {
-      const rowNum = start + i;
-      // Batch write des 2 colonnes en une requête
-      sh.getRange(rowNum, 6, 1, 2).setValues([[next ? next.code : 'LIVRE', ETAPES_PROD[idx].progress]]);
+      const rowNum      = start + i;
+      const nouveauStatut = next ? next.code : 'LIVRE';
+      const progression   = ETAPES_PROD[idx].progress;
+      sh.getRange(rowNum, 6, 1, 2).setValues([[nouveauStatut, progression]]);
+      if (nouveauStatut === 'LIVRE') {
+        sh.getRange(rowNum, 9, 1, 1).setValue(new Date()); // DateLivraison (col 9)
+      }
       return;
     }
   }
