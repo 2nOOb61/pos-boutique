@@ -5911,6 +5911,14 @@ function saveTacheLibre() {
       photos:          [...tlPhotos]
     };
     tachesLibres.push(t);
+    // Sync GAS pour visibilité dans operateur.html (best-effort)
+    if (APPS_SCRIPT_URL) {
+      apiCall({
+        action:    'saveTacheLibre',
+        tache:     t,
+        createdBy: currentUser?.label || 'admin'
+      }).catch(() => {});
+    }
     created++;
   });
   saveTachesLibres();
@@ -5923,6 +5931,10 @@ function deleteTacheLibre(id) {
   if (!confirm('Supprimer cette tâche indépendante ?')) return;
   tachesLibres = tachesLibres.filter(t => t.id !== id);
   saveTachesLibres();
+  // Sync suppression dans GAS
+  if (APPS_SCRIPT_URL) {
+    apiCall({ action:'deleteTache', id }).catch(() => {});
+  }
   renderTaches();
   showToast('Tâche supprimée', 'info');
 }

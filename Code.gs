@@ -98,6 +98,7 @@ function doPost(e) {
     else if (action === 'getDossiers')       result = handleGetDossiers(data);
     else if (action === 'saveDossier')       result = handleSaveDossier(data);
     else if (action === 'creerDossierManuel') result = handleCreerDossierManuel(data);
+    else if (action === 'saveTacheLibre')    result = handleSaveTacheLibre(data);
     else if (action === 'getOperateurs')     result = handleGetOperateurs();
     else if (action === 'saveOperateur')     result = handleSaveOperateur(data);
     else if (action === 'attribuerTache')    result = handleAttribuerTache(data);
@@ -1028,6 +1029,49 @@ function handleAttribuerTache(data) {
       data.operateur + ' → ' + data.etapeCode + ' (dossier:' + data.dossierId + ')');
     CacheService.getScriptCache().remove('dashboard_v1'); // invalider le dashboard
     return { ok:true, tacheId:tId };
+  } finally {
+    try { lock.releaseLock(); } catch(e) {}
+  }
+}
+
+// ── Tâche libre (indépendante) — sync depuis app.js ────────
+function handleSaveTacheLibre(data) {
+  const t = data.tache;
+  if (!t || !t.id)  return { ok:false, error:'tache.id requis' };
+  if (!t.operateur) return { ok:false, error:'operateur requis' };
+
+  const ss = getSS();
+  const sh = ensureSheet(ss, SHEET_TACHES,
+    ['ID','DossierID','NumeroDossier','EtapeCode','EtapeLabel','Operateur',
+     'Statut','DateAssignation','DateDebut','DateFin','Commentaire','AssignePar']);
+
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(6000);
+    // Idempotent : ne pas créer de doublon
+    const rows = sh.getDataRange().getValues();
+    for (let i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) === String(t.id)) {
+        return { ok:true, created:false };
+      }
+    }
+    sh.appendRow([
+      String(t.id),
+      'LIBRE',
+      'LIBRE',
+      'LIBRE',
+      t.etapeLabel || t.titre || 'Tâche libre',
+      t.operateur,
+      'A_FAIRE',
+      new Date(),
+      '', '',
+      t.commentaire || '',
+      data.createdBy || 'admin'
+    ]);
+    _logAction_('TACHE_LIBRE_CREATE', data.createdBy || 'admin',
+      String(t.id) + ' → ' + t.operateur);
+    CacheService.getScriptCache().remove('dashboard_v1');
+    return { ok:true, created:true };
   } finally {
     try { lock.releaseLock(); } catch(e) {}
   }

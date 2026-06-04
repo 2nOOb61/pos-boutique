@@ -721,6 +721,7 @@ async function loadTasks() {
     ? all
     : all.filter(t => {
         const op = (t.operateur || '').trim().toLowerCase();
+        if (!op) return false; // tâche sans opérateur = invisible hors admin/chef
         return op === myLabel_
             || op === myUsername
             || op === myFirstName
