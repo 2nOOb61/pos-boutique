@@ -6214,6 +6214,19 @@ function initModulesProduction() {
       });
     }
   }
+  _injectBtnDossierManuel();
+}
+
+function _injectBtnDossierManuel() {
+  if (document.getElementById('btnDossierManuel')) return;
+  const topbar = document.querySelector('#page-attribution .page-topbar');
+  if (!topbar) return;
+  const btn = document.createElement('button');
+  btn.id = 'btnDossierManuel';
+  btn.style.cssText = 'background:#e8834a;color:#fff;border:none;padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px;font-family:\'DM Sans\',sans-serif';
+  btn.innerHTML = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Dossier manuel`;
+  btn.onclick = openDossierManuelModal;
+  topbar.appendChild(btn);
 }
 
 // ============================================================
@@ -6771,6 +6784,187 @@ function _updateMsgBadge() {
 // PAGE ATTRIBUTION
 // ============================================================
 let _pendingSelectDossierId = null;
+
+// ── Modale création dossier manuel ─────────────────────────
+function openDossierManuelModal() {
+  let modal = document.getElementById('dossierManuelModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'dossierManuelModal';
+    modal.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;align-items:center;justify-content:center;padding:16px';
+    modal.innerHTML = `
+      <div style="background:#fff;border-radius:16px;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,.2)" onclick="event.stopPropagation()">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid #e5e3df">
+          <div>
+            <h3 style="margin:0;font-size:15px;font-weight:700;color:#1c1917">Nouveau dossier manuel</h3>
+            <p style="margin:2px 0 0;font-size:12px;color:#a8a29e">Production sans vente POS</p>
+          </div>
+          <button onclick="closeDossierManuelModal()" style="background:none;border:none;cursor:pointer;font-size:20px;color:#a8a29e;line-height:1;padding:4px">×</button>
+        </div>
+        <div style="padding:20px 22px;display:flex;flex-direction:column;gap:14px">
+          <div>
+            <label style="font-size:12px;font-weight:600;color:#78716c;display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em">Produit / Description *</label>
+            <input id="dmProduit" type="text" placeholder="Ex: Carte de visite 500ex, T-shirt brodé..."
+              style="width:100%;padding:10px 12px;border:1.5px solid #e5e3df;border-radius:8px;font-size:14px;font-family:'DM Sans',sans-serif;outline:none;color:#1c1917;background:#fff;box-sizing:border-box"/>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div>
+              <label style="font-size:12px;font-weight:600;color:#78716c;display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em">Quantité *</label>
+              <input id="dmQty" type="number" min="1" value="1"
+                style="width:100%;padding:10px 12px;border:1.5px solid #e5e3df;border-radius:8px;font-size:14px;font-family:'DM Sans',sans-serif;outline:none;color:#1c1917;background:#fff;box-sizing:border-box"/>
+            </div>
+            <div>
+              <label style="font-size:12px;font-weight:600;color:#78716c;display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em">Priorité</label>
+              <select id="dmPriorite" style="width:100%;padding:10px 12px;border:1.5px solid #e5e3df;border-radius:8px;font-size:14px;font-family:'DM Sans',sans-serif;outline:none;color:#1c1917;background:#fff;box-sizing:border-box">
+                <option value="Normale">Normale</option>
+                <option value="Haute">Haute</option>
+                <option value="Urgente">Urgente</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:600;color:#78716c;display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em">Client (optionnel)</label>
+            <input id="dmClient" type="text" placeholder="Nom du client ou 'Interne'"
+              style="width:100%;padding:10px 12px;border:1.5px solid #e5e3df;border-radius:8px;font-size:14px;font-family:'DM Sans',sans-serif;outline:none;color:#1c1917;background:#fff;box-sizing:border-box"/>
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:600;color:#78716c;display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em">Date de livraison souhaitée</label>
+            <input id="dmDateLiv" type="date"
+              style="width:100%;padding:10px 12px;border:1.5px solid #e5e3df;border-radius:8px;font-size:14px;font-family:'DM Sans',sans-serif;outline:none;color:#1c1917;background:#fff;box-sizing:border-box"/>
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:600;color:#78716c;display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em">Notes</label>
+            <textarea id="dmNotes" rows="2" placeholder="Instructions, spécifications particulières..."
+              style="width:100%;padding:10px 12px;border:1.5px solid #e5e3df;border-radius:8px;font-size:14px;font-family:'DM Sans',sans-serif;outline:none;resize:none;color:#1c1917;background:#fff;box-sizing:border-box"></textarea>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;padding:12px;background:#f8f7f4;border-radius:8px;border:1px solid #e5e3df">
+            <input type="checkbox" id="dmDeduireStock" style="width:16px;height:16px;cursor:pointer;accent-color:#1a4a3a"/>
+            <div>
+              <label for="dmDeduireStock" style="font-size:13px;font-weight:600;color:#1c1917;cursor:pointer">Déduire du stock catalogue</label>
+              <div style="font-size:11px;color:#a8a29e;margin-top:2px">Si le produit existe dans votre catalogue, le stock sera réduit de la quantité</div>
+            </div>
+          </div>
+        </div>
+        <div style="padding:14px 22px;border-top:1px solid #e5e3df;display:flex;gap:10px;justify-content:flex-end">
+          <button onclick="closeDossierManuelModal()" style="padding:10px 18px;border:1.5px solid #e5e3df;background:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:14px;font-weight:500;color:#78716c;cursor:pointer">Annuler</button>
+          <button onclick="saveDossierManuel()" style="padding:10px 20px;background:#1a4a3a;color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:14px;font-weight:600;cursor:pointer">Créer le dossier</button>
+        </div>
+      </div>`;
+    modal.onclick = closeDossierManuelModal;
+    document.body.appendChild(modal);
+  }
+  ['dmProduit','dmClient','dmNotes','dmDateLiv'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  const dmQty = document.getElementById('dmQty');
+  if (dmQty) dmQty.value = 1;
+  const dmPrio = document.getElementById('dmPriorite');
+  if (dmPrio) dmPrio.value = 'Normale';
+  const dmStock = document.getElementById('dmDeduireStock');
+  if (dmStock) dmStock.checked = false;
+
+  modal.style.display = 'flex';
+  setTimeout(() => document.getElementById('dmProduit')?.focus(), 100);
+}
+
+function closeDossierManuelModal() {
+  const modal = document.getElementById('dossierManuelModal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function saveDossierManuel() {
+  const produit  = document.getElementById('dmProduit')?.value.trim();
+  const qty      = parseInt(document.getElementById('dmQty')?.value) || 0;
+  const priorite = document.getElementById('dmPriorite')?.value || 'Normale';
+  const client   = document.getElementById('dmClient')?.value.trim() || 'Interne';
+  const dateLiv  = document.getElementById('dmDateLiv')?.value || '';
+  const notes    = document.getElementById('dmNotes')?.value.trim() || '';
+  const deduire  = document.getElementById('dmDeduireStock')?.checked || false;
+
+  if (!produit) { showToast('Le nom du produit est requis', 'error'); return; }
+  if (qty <= 0)  { showToast('La quantité doit être supérieure à 0', 'error'); return; }
+
+  if (!APPS_SCRIPT_URL) {
+    showToast('URL GAS non configurée — dossier créé localement uniquement', 'warning');
+    _createDossierManuelLocal({ produit, qty, priorite, client, dateLiv, notes });
+    closeDossierManuelModal();
+    return;
+  }
+
+  showToast('Création du dossier...', 'info');
+  const r = await apiCall({
+    action: 'creerDossierManuel',
+    dossier: {
+      produit,
+      quantite:      qty,
+      priorite,
+      client,
+      dateLivraison: dateLiv,
+      notes,
+      deduireStock:  deduire,
+      createdBy:     currentUser?.label || 'admin'
+    }
+  });
+
+  if (!r || !r.ok) {
+    showToast('Erreur création : ' + (r?.error || 'Connexion impossible'), 'error');
+    return;
+  }
+
+  const dossierLocal = {
+    id:            r.dossId,
+    numeroDossier: r.numDoss,
+    client,
+    produit,
+    quantite:      qty,
+    statut:        'CREE',
+    progression:   0,
+    dateCreation:  new Date().toLocaleDateString('fr-FR'),
+    dateLivraison: dateLiv,
+    priorite,
+    sourceVente:   'Manuel',
+    notes
+  };
+  dossiers.unshift(dossierLocal);
+
+  if (deduire && r.stockInfo?.deduit) {
+    const p = products.find(pr => pr.name === produit);
+    if (p) {
+      p.stock = Math.max(0, p.stock - qty);
+      renderProducts();
+      renderStockTable();
+    }
+  }
+
+  closeDossierManuelModal();
+  const stockMsg = deduire
+    ? (r.stockInfo?.deduit ? ' — stock déduit' : ' — article non trouvé dans le catalogue')
+    : '';
+  showToast(`Dossier ${r.numDoss} créé${stockMsg}`);
+
+  await loadDossiers();
+
+  if (r.dossId) {
+    setTimeout(() => selectDossier(r.dossId), 500);
+  }
+}
+
+function _createDossierManuelLocal({ produit, qty, priorite, client, dateLiv, notes }) {
+  const tmpId   = 'MAN_LOCAL_' + Date.now();
+  const numDoss = 'MAN-LOCAL-' + String(dossiers.length + 1).padStart(3,'0');
+  const d = {
+    id: tmpId, numeroDossier: numDoss,
+    client, produit, quantite: qty,
+    statut: 'CREE', progression: 0,
+    dateCreation:  new Date().toLocaleDateString('fr-FR'),
+    dateLivraison: dateLiv,
+    priorite, sourceVente: 'Manuel', notes
+  };
+  dossiers.unshift(d);
+  loadDossiers();
+  showToast('Dossier créé localement (sync GAS au prochain rechargement)');
+}
 
 async function loadDossiers() {
   try {

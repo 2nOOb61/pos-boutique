@@ -97,6 +97,7 @@ function doPost(e) {
     // Nouveaux modules
     else if (action === 'getDossiers')       result = handleGetDossiers(data);
     else if (action === 'saveDossier')       result = handleSaveDossier(data);
+    else if (action === 'creerDossierManuel') result = handleCreerDossierManuel(data);
     else if (action === 'getOperateurs')     result = handleGetOperateurs();
     else if (action === 'saveOperateur')     result = handleSaveOperateur(data);
     else if (action === 'attribuerTache')    result = handleAttribuerTache(data);
@@ -409,6 +410,68 @@ function creerDossiersFromVente_(ss, sale) {
       const lastRow = sh.getLastRow();
       sh.getRange(lastRow + 1, 1, batchRows.length, 12).setValues(batchRows);
     }
+  } finally {
+    try { lock.releaseLock(); } catch(e) {}
+  }
+}
+
+// ── Dossier de production manuel (sans vente) ──────────────
+function handleCreerDossierManuel(data) {
+  const d = data.dossier;
+  if (!d || !d.produit) return { ok:false, error:'Champ produit requis' };
+  if (!d.quantite || Number(d.quantite) <= 0) return { ok:false, error:'Quantité invalide' };
+
+  const ss  = getSS();
+  const sh  = ensureSheet(ss, SHEET_DOSSIERS,
+    ['ID','NumeroDossier','Client','Produit','Quantite','Statut',
+     'Progression','DateCreation','DateLivraison','Priorite','SourceVente','Notes']);
+
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(6000);
+    const rows   = sh.getDataRange().getValues();
+    const lastId = rows.length > 1
+      ? Math.max(...rows.slice(1).map(r => Number(String(r[0]).replace(/[^\d]/g,'')) || 0))
+      : 0;
+    const dossId  = 'D' + String(lastId + 1).padStart(4,'0');
+    const numDoss = 'MAN-' + String(lastId + 1).padStart(4,'0');
+    const now     = new Date();
+    const livDate = d.dateLivraison ? new Date(d.dateLivraison) : '';
+
+    sh.appendRow([
+      dossId,
+      numDoss,
+      d.client   || 'Interne',
+      d.produit,
+      Number(d.quantite),
+      'CREE',
+      0,
+      now,
+      livDate,
+      d.priorite || 'Normale',
+      'Manuel',
+      d.notes    || ''
+    ]);
+
+    let stockInfo = { deduit: false };
+    if (d.deduireStock && d.produit) {
+      try {
+        const newStock = updateStock_(ss, d.produit, -Number(d.quantite));
+        if (newStock !== undefined) {
+          logStock_(ss, d.produit, 'Sortie production', -Number(d.quantite),
+            'Dossier manuel ' + numDoss, d.createdBy || 'admin');
+          stockInfo = { deduit: true, newStock };
+        }
+      } catch(e) {
+        stockInfo = { deduit: false, raison: e.message };
+      }
+    }
+
+    _logAction_('DOSSIER_MANUEL', d.createdBy || 'admin',
+      numDoss + ' — ' + d.produit + ' × ' + d.quantite);
+    CacheService.getScriptCache().remove('dashboard_v1');
+
+    return { ok:true, dossId, numDoss, stockInfo };
   } finally {
     try { lock.releaseLock(); } catch(e) {}
   }
@@ -897,7 +960,7 @@ function handleGetOperateurs() {
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
     if (!r[0] || String(r[2]).toLowerCase() === 'non') continue;
-    list.push({ nom:r[0], role:r[1]||'operateur' });
+    list.push({ nom:r[0], role:r[1]||'operateur', username:r[3]||'' });
   }
   const result = { ok:true, operateurs:list };
   try { cache.put(cacheKey, JSON.stringify(result), 300); } catch(e) {}
@@ -905,16 +968,22 @@ function handleGetOperateurs() {
 }
 
 function handleSaveOperateur(data) {
-  CacheService.getScriptCache().remove('operateurs_v1'); // invalider le cache
-  const sh   = getSS().getSheetByName(SHEET_OPERATEURS);
+  CacheService.getScriptCache().remove('operateurs_v1');
+  const ss  = getSS();
+  const sh  = ensureSheet(ss, SHEET_OPERATEURS, ['Nom','Role','Actif','Username']);
   const rows = sh.getDataRange().getValues();
   for (let i = 1; i < rows.length; i++) {
     if (String(rows[i][0]).trim() === String(data.nom).trim()) {
-      sh.getRange(i+1,1,1,3).setValues([[data.nom, data.role||'operateur', 'oui']]);
+      sh.getRange(i+1,1,1,4).setValues([[
+        data.nom,
+        data.role     || 'operateur',
+        'oui',
+        data.username || rows[i][3] || ''
+      ]]);
       return { ok:true, message:'Opérateur mis à jour' };
     }
   }
-  sh.appendRow([data.nom, data.role||'operateur', 'oui']);
+  sh.appendRow([data.nom, data.role||'operateur', 'oui', data.username||'']);
   return { ok:true, message:'Opérateur créé' };
 }
 
