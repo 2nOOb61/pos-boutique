@@ -5337,6 +5337,9 @@ function _createDossierFromSource(type, source) {
   const existing  = dossiers.find(d => d.id === dossierId || d.id === oldId);
   if (existing) {
     if (existing.id === oldId) existing.id = dossierId; // migration vers le nouveau format
+    // Restaurer sourceType/sourceId absents sur les dossiers chargés depuis GAS
+    if (!existing.sourceType) existing.sourceType = type;
+    if (existing.sourceId === undefined || existing.sourceId === null) existing.sourceId = source.id;
     return existing;
   }
   const prefix   = type === 'commande' ? 'CMD' : 'RES';
