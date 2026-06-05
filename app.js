@@ -5327,9 +5327,14 @@ function renderRythmeConfig() {
 // ============================================================
 
 function _createDossierFromSource(type, source) {
-  const dossierId = `D_${type.toUpperCase()}_${source.id}`;
-  const existing = dossiers.find(d => d.id === dossierId);
-  if (existing) return existing;
+  // ID stable unique par session (inclut la date → évite collision entre navigateurs)
+  const dossierId = _stableDossierId(type, source);
+  const oldId     = `D_${type.toUpperCase()}_${source.id}`; // ancien format (rétrocompat)
+  const existing  = dossiers.find(d => d.id === dossierId || d.id === oldId);
+  if (existing) {
+    if (existing.id === oldId) existing.id = dossierId; // migration vers le nouveau format
+    return existing;
+  }
   const prefix   = type === 'commande' ? 'CMD' : 'RES';
   const produit  = (source.items||[]).map(i => i.name).join(', ') || 'Articles';
   const quantite = (source.items||[]).reduce((s,i) => s + (i.qty||1), 0);
@@ -5446,11 +5451,17 @@ async function resetTachesDossier(dossierId) {
 }
 
 function _purgeOrphanTaches() {
-  // Construire l'ensemble des dossierId valides (réservations + commandes encore pending)
+  // Accepter les deux formats d'ID (ancien + nouveau stable) pour rétrocompatibilité
   const validIds = new Set([
-    ...reservations.filter(r => r.status === 'pending').map(r => `D_RESERVATION_${r.id}`),
-    ...commandes.filter(c => c.status === 'pending').map(c => `D_COMMANDE_${c.id}`),
-    'LIBRE' // taches libres toujours valides
+    ...reservations.filter(r => r.status === 'pending').flatMap(r => [
+      `D_RESERVATION_${r.id}`,
+      _stableDossierId('reservation', r)
+    ]),
+    ...commandes.filter(c => c.status === 'pending').flatMap(c => [
+      `D_COMMANDE_${c.id}`,
+      _stableDossierId('commande', c)
+    ]),
+    'LIBRE'
   ]);
   const before = taches.length;
   taches = taches.filter(t => t.dossierId === 'LIBRE' || validIds.has(t.dossierId));
