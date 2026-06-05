@@ -1306,10 +1306,13 @@
       </div>
     </div>
 
-    <!-- Notes -->
+    <!-- Briefing -->
     <div class="cmd-section">
-      <div class="cmd-section-title">Notes de personnalisation</div>
-      <textarea id="cmdNotes" placeholder="Ex: Broderie initiales JD, couleur bleu marine, taille M..."
+      <div class="cmd-section-title" style="display:flex;align-items:center;gap:6px">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        Briefing / Personnalisation client
+      </div>
+      <textarea id="cmdNotes" placeholder="Ex: Broderie initiales JD, couleur bleu marine, taille M, référence maquette jointe..."
                 style="width:100%;min-height:80px;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface2);color:var(--text);font-family:inherit;font-size:14px;resize:vertical;outline:none;transition:.2s"></textarea>
     </div>
 
@@ -1744,6 +1747,16 @@
       </div>
     </div>
 
+    <!-- Briefing / Personnalisation réservation -->
+    <div class="form-group" style="margin-bottom:12px">
+      <label style="display:flex;align-items:center;gap:6px">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        Briefing / Personnalisation client
+      </label>
+      <textarea id="resNotes" placeholder="Ex: Logo entreprise bleu marine, taille XL, finition mate, référence maquette jointe..."
+                style="width:100%;min-height:72px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface2);color:var(--text);font-family:inherit;font-size:13px;resize:vertical;outline:none;transition:.2s;box-sizing:border-box"></textarea>
+    </div>
+
     <div class="form-group" style="margin-bottom:12px">
       <label>Pièces jointes <span style="color:var(--muted);font-weight:400;font-size:12px">(PDF, image — max 6 fichiers)</span></label>
       <label for="resAttachmentsInput" style="display:inline-flex;align-items:center;gap:6px;padding:7px 14px;background:var(--color-primary-light,#e8f4f0);color:var(--color-primary,#1a4a3a);border:1px dashed rgba(26,74,58,.3);border-radius:8px;cursor:pointer;font-size:13px;font-weight:500">
@@ -1970,7 +1983,7 @@
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=fix-attrib-collision"></script>
+<script src="./app.js?v=briefing-client"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

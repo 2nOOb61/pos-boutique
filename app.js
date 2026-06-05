@@ -781,6 +781,7 @@ function openReservation() {
   document.getElementById('resTotal').textContent = fmt(net);
   document.getElementById('resClientName').value = '';
   document.getElementById('resClientContact').value = '';
+  document.getElementById('resNotes').value = '';
   document.getElementById('resAccompte').value = '';
   document.getElementById('resRestantLabel').textContent = fmt(net);
   document.getElementById('resGiven').value = '';
@@ -925,18 +926,20 @@ function confirmReservation() {
   const deliveryDate   = isLiv ? (document.getElementById('resDeliveryDate')?.value || '') : '';
   if (isLiv && !deliveryAddress) { showToast("Veuillez saisir l'adresse de livraison.", 'error'); return; }
 
+  const notes = (document.getElementById('resNotes')?.value || '').trim();
+
   if (resPaymentMode === 'cash') {
     const given = parseFloat(document.getElementById('resGiven').value) || 0;
     if (given < acc) { showToast('Montant remis insuffisant pour l\'acompte !', 'error'); return; }
     const change = given - acc;
-    saveReservation(acc, 'cash', given, change, null, null, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate, clientType, clientCompany);
+    saveReservation(acc, 'cash', given, change, null, null, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate, clientType, clientCompany, notes);
   } else {
     const ref = document.getElementById('resMobileRef').value.trim();
-    saveReservation(acc, 'mobile', acc, 0, resSelectedProvider, ref, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate, clientType, clientCompany);
+    saveReservation(acc, 'mobile', acc, 0, resSelectedProvider, ref, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate, clientType, clientCompany, notes);
   }
 }
 
-function saveReservation(accompte, depositMethod, given, change, provider, ref, clientName, clientContact, deliveryMode='retrait', deliveryAddress='', deliveryFee=0, deliveryDate='', clientType='particulier', clientCompany='') {
+function saveReservation(accompte, depositMethod, given, change, provider, ref, clientName, clientContact, deliveryMode='retrait', deliveryAddress='', deliveryFee=0, deliveryDate='', clientType='particulier', clientCompany='', notes='') {
   const subtotal = getSubtotal();
   const remise   = getRemise();
   const total    = getNetTotal();
@@ -962,7 +965,8 @@ function saveReservation(accompte, depositMethod, given, change, provider, ref, 
     saleId: null,
     attachments: resAttachments.map(a => ({ name: a.name, type: a.type, data: a.data })),
     deliveryMode, deliveryAddress, deliveryFee, deliveryDate,
-    clientType, clientCompany
+    clientType, clientCompany,
+    notes
   };
 
   const _resDossier = _createDossierFromSource('reservation', reservation);
@@ -7096,6 +7100,7 @@ function renderDossiers() {
         </div>
         <div class="dossier-row__client">${d.client}</div>
         <div class="dossier-row__produit">${d.produit} × ${d.quantite}</div>
+        ${(function(){const src=d.sourceType==='reservation'?reservations.find(r=>String(r.id)===String(d.sourceId)):commandes.find(c=>String(c.id)===String(d.sourceId));return src&&src.notes?`<div style="font-size:10px;color:#b45309;background:#fff8ed;border-radius:5px;padding:2px 6px;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px" title="${src.notes.replace(/"/g,'&quot;')}">✏ ${src.notes}</div>`:'';})()}
       </div>
       <div class="dossier-row__right">
         <div class="dossier-row__pipe">${pipeDots}</div>
@@ -7345,8 +7350,12 @@ function renderAttrPanel(tachesD, commentsD = []) {
       const finRow = '';
 
       const notesRow = src.notes
-        ? `<div style="margin-top:8px;padding:8px 10px;background:var(--color-warning-bg);border-radius:8px;font-size:12px;color:var(--color-text-primary);border-left:3px solid var(--color-warning)">
-             <strong>Notes :</strong> ${src.notes}
+        ? `<div style="margin-top:10px;padding:10px 12px;background:#fff8ed;border-radius:9px;border:1.5px solid #f5a623;position:relative">
+             <div style="display:flex;align-items:center;gap:5px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#b45309;margin-bottom:5px">
+               <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+               Briefing client
+             </div>
+             <div style="font-size:12.5px;color:#1c1917;line-height:1.55;white-space:pre-wrap">${src.notes}</div>
            </div>`
         : '';
 
