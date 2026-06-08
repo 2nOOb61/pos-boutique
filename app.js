@@ -4549,6 +4549,7 @@ let currentCmdFinalizeId = null;
 let cmdFinalPayMode = 'cash';
 let cmdFinalProvider = 'MVola';
 let _lastCmdRefresh = 0;
+let srParsedData = null;
 
 // Ferme le dropdown stock si clic en dehors
 document.addEventListener('click', e => {
@@ -9094,6 +9095,226 @@ window.addEventListener('unhandledrejection', (e) => {
   console.error('[POS] Promise rejetée:', msg);
   e.preventDefault(); // empêcher le log navigateur non formaté
 });
+
+// ============================================================
+// SAISIE RAPIDE COMMERCIALE
+// ============================================================
+function openSaisieRapideModal() {
+  srParsedData = null;
+  const el = document.getElementById('srTextInput');
+  if (el) el.value = '';
+  const prev = document.getElementById('srPreviewSection');
+  if (prev) prev.style.display = 'none';
+  const err = document.getElementById('srErrorMsg');
+  if (err) { err.style.display = 'none'; err.textContent = ''; }
+  const saveBtn = document.getElementById('srSaveBtn');
+  if (saveBtn) saveBtn.disabled = true;
+  openModal('saisieRapideModal');
+}
+
+function parseCommandeText(rawText) {
+  const data = {
+    clientId: '', clientName: '', clientContact: '',
+    deliveryMode: 'retrait', adresseLivraison: '',
+    items: [], total: 0, accompte: 0, restant: 0, notes: ''
+  };
+
+  const lines = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+    .split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+  for (const line of lines) {
+    // Skip section headers like "Commandes :"
+    if (/^Commandes\s*:?\s*$/i.test(line)) continue;
+
+    // "Client #13336" — numéro de référence client
+    const clientIdMatch = line.match(/^Client\s+#(\d+)\s*$/i);
+    if (clientIdMatch) { data.clientId = clientIdMatch[1]; continue; }
+
+    // "Client : ANDRIAMAHEFA Harilala"
+    const clientNameMatch = line.match(/^Client\s*:\s*(.+)$/i);
+    if (clientNameMatch) { data.clientName = clientNameMatch[1].trim(); continue; }
+
+    // "Contact : 34 63 103 49"
+    const contactMatch = line.match(/^Contact\s*:\s*(.+)$/i);
+    if (contactMatch) { data.clientContact = contactMatch[1].trim(); continue; }
+
+    // "Lieu : Récupération en boutique" ou "Lieu : Livraison — adresse"
+    const lieuMatch = line.match(/^Lieu\s*:\s*(.+)$/i);
+    if (lieuMatch) {
+      const lieu = lieuMatch[1].trim();
+      if (/livraison/i.test(lieu)) {
+        data.deliveryMode = 'livraison';
+        const addrMatch = lieu.match(/livraison(?:\s*[—–\-:]\s*|\s+[àa]\s+|\s+pour\s+)(.+)/i);
+        data.adresseLivraison = addrMatch ? addrMatch[1].trim() : lieu;
+      }
+      continue;
+    }
+
+    // "• bois × 1 (255000 Ar × 1 = 255000 Ar)"
+    const itemMatch = line.match(/^[•\-\*]\s*(.+?)\s*[×xX]\s*(\d+)\s*\(([\d\s]+)\s*Ar/i);
+    if (itemMatch) {
+      const price = parseInt(itemMatch[3].replace(/\s/g, ''), 10);
+      if (!isNaN(price) && price > 0) {
+        data.items.push({ name: itemMatch[1].trim(), qty: parseInt(itemMatch[2], 10) || 1, price, custom: true });
+      }
+      continue;
+    }
+
+    // "Total : 255000 Ar"
+    const totalMatch = line.match(/^Total\s*:\s*([\d\s]+)\s*Ar\s*$/i);
+    if (totalMatch) { data.total = parseInt(totalMatch[1].replace(/\s/g, ''), 10) || 0; continue; }
+
+    // "Avance : 96600 Ar" ou "Acompte : ..."
+    const avanceMatch = line.match(/^(?:Avance|Acompte|Advance)\s*:\s*([\d\s]+)\s*Ar\s*$/i);
+    if (avanceMatch) { data.accompte = parseInt(avanceMatch[1].replace(/\s/g, ''), 10) || 0; continue; }
+
+    // "Reste à payer : 158400 Ar"
+    const resteMatch = line.match(/^Reste\s+[àaÀA]\s+payer\s*:\s*([\d\s]+)\s*Ar\s*$/i);
+    if (resteMatch) { data.restant = parseInt(resteMatch[1].replace(/\s/g, ''), 10) || 0; continue; }
+
+    // "Note : ..."
+    const noteMatch = line.match(/^Notes?\s*:\s*(.+)$/i);
+    if (noteMatch) data.notes = (data.notes ? data.notes + ' — ' : '') + noteMatch[1].trim();
+  }
+
+  // Recalculer si manquant
+  if (data.items.length > 0 && data.total === 0)
+    data.total = data.items.reduce((s, i) => s + i.qty * i.price, 0);
+  if (data.restant === 0 && data.total > 0)
+    data.restant = Math.max(0, data.total - data.accompte);
+
+  // Stocker la référence client dans les notes
+  if (data.clientId) {
+    const ref = `Réf. client #${data.clientId}`;
+    data.notes = data.notes ? `${ref} — ${data.notes}` : ref;
+  }
+
+  return data;
+}
+
+function _srEsc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function analyserSaisieRapide() {
+  const text = (document.getElementById('srTextInput')?.value || '').trim();
+  const errEl  = document.getElementById('srErrorMsg');
+  const prevEl = document.getElementById('srPreviewSection');
+  const saveBtn = document.getElementById('srSaveBtn');
+
+  errEl.style.display = 'none';
+  errEl.textContent = '';
+
+  if (!text) {
+    errEl.textContent = 'Collez le texte de la commande avant d\'analyser.';
+    errEl.style.display = 'block';
+    prevEl.style.display = 'none';
+    saveBtn.disabled = true;
+    return;
+  }
+
+  const data = parseCommandeText(text);
+
+  if (!data.clientName) {
+    errEl.textContent = 'Nom du client introuvable. Format attendu : « Client : Prénom Nom »';
+    errEl.style.display = 'block';
+    prevEl.style.display = 'none';
+    saveBtn.disabled = true;
+    return;
+  }
+
+  if (data.items.length === 0) {
+    errEl.textContent = 'Aucun article détecté. Format attendu : « • article × 1 (255000 Ar × 1 = 255000 Ar) »';
+    errEl.style.display = 'block';
+    prevEl.style.display = 'none';
+    saveBtn.disabled = true;
+    return;
+  }
+
+  srParsedData = data;
+
+  // Remplir l'aperçu
+  document.getElementById('srPreviewClientName').value = data.clientName;
+  document.getElementById('srPreviewContact').value    = data.clientContact;
+  document.getElementById('srPreviewLieu').textContent = data.deliveryMode === 'livraison'
+    ? 'Livraison' + (data.adresseLivraison ? ' — ' + data.adresseLivraison : '')
+    : 'Récupération en boutique';
+
+  document.getElementById('srPreviewItemsBody').innerHTML = data.items.map(i => `
+    <tr style="border-top:1px solid var(--border)">
+      <td style="padding:8px 10px;font-size:13px;color:var(--text)">${_srEsc(i.name)}</td>
+      <td style="padding:8px 10px;font-size:13px;text-align:center;color:var(--text)">${i.qty}</td>
+      <td style="padding:8px 10px;font-size:13px;text-align:right;color:var(--muted)">${fmt(i.price)}</td>
+      <td style="padding:8px 10px;font-size:13px;text-align:right;font-weight:700;color:var(--text)">${fmt(i.qty * i.price)}</td>
+    </tr>`).join('');
+
+  document.getElementById('srPreviewTotal').textContent    = fmt(data.total);
+  document.getElementById('srPreviewAccompte').textContent = fmt(data.accompte);
+  document.getElementById('srPreviewRestant').textContent  = fmt(data.restant);
+
+  prevEl.style.display = 'block';
+  saveBtn.disabled = false;
+}
+
+function saveCommandeRapide() {
+  if (!srParsedData) return;
+
+  // Prendre en compte les éventuelles corrections dans l'aperçu
+  const editedName    = document.getElementById('srPreviewClientName')?.value.trim();
+  const editedContact = document.getElementById('srPreviewContact')?.value.trim();
+  if (editedName)    srParsedData.clientName    = editedName;
+  if (editedContact !== undefined) srParsedData.clientContact = editedContact;
+
+  if (!srParsedData.clientName)    { showToast('Le nom du client est obligatoire !', 'error'); return; }
+  if (!srParsedData.items.length)  { showToast('Aucun article dans la commande !', 'error');   return; }
+
+  const commande = {
+    id:               nextCommandeId++,
+    date:             new Date().toISOString(),
+    caissier:         currentUser?.username || 'commercial',
+    clientName:       srParsedData.clientName,
+    clientContact:    srParsedData.clientContact,
+    deliveryMode:     srParsedData.deliveryMode,
+    adresseLivraison: srParsedData.adresseLivraison,
+    fraisLivraison:   0,
+    dateLivraison:    '',
+    items:            srParsedData.items.map(i => ({ name: i.name, qty: i.qty, price: i.price, custom: true })),
+    notes:            srParsedData.notes,
+    photos:           [],
+    subtotal:         srParsedData.total,
+    remise:           0,
+    total:            srParsedData.total,
+    accompte:         srParsedData.accompte,
+    restant:          srParsedData.restant,
+    depositMethod:    'cash',
+    depositProvider:  '',
+    depositRef:       '',
+    status:           'pending',
+    dateFinalisation: null,
+    saleId:           null
+  };
+
+  const _cmdDossier = _createDossierFromSource('commande', commande);
+  commande.dossierId = _cmdDossier.id;
+  commandes.unshift(commande);
+  saveData();
+  syncCommandeToSheets(commande);
+  syncCommandeToAirtable(commande);
+  _addNotification({
+    dossierId:     commande.dossierId,
+    numeroDossier: _cmdDossier.numeroDossier,
+    etapeCode:     'RESERVE',
+    etapeLabel:    'Commande créée — saisie rapide',
+    operateur:     currentUser?.label || 'Commercial',
+    message:       `Commande rapide ${_cmdDossier.numeroDossier} — ${commande.clientName} — ${commande.items.map(i=>i.name).join(', ')}`
+  });
+
+  closeModal('saisieRapideModal');
+  showToast(`Commande #${commande.id} créée — ${commande.clientName}`);
+  updateCmdBadge();
+  renderCommandes();
+  srParsedData = null;
+}
 
 // ============================================================
 // SYNC CROSS-ONGLETS — BroadcastChannel

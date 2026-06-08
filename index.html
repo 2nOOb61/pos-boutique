@@ -758,6 +758,10 @@
         </select>
         <button id="cmdRefreshBtn" onclick="manualRefreshCommandes()" style="padding:8px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--muted);cursor:pointer;font-size:13px">Actualiser</button>
         <button class="btn-add-product" style="background:var(--accent2)" onclick="openCommandeModal(false)">+ Nouvelle commande</button>
+        <button class="btn-add-product" onclick="openSaisieRapideModal()" title="Coller une commande texte (WhatsApp / email)">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+          Saisie rapide
+        </button>
       </div>
     </div>
     <div id="commandesList"></div>
@@ -2137,6 +2141,104 @@
       </div>
     </div>
   </div>
+
+
+<!-- ═══ MODAL SAISIE RAPIDE COMMERCIALE ═══ -->
+<div class="modal-overlay" id="saisieRapideModal">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-title">
+      <span>Saisie rapide — commande commerciale</span>
+      <button class="modal-close" onclick="closeModal('saisieRapideModal')">✕</button>
+    </div>
+
+    <p style="font-size:13px;color:var(--muted);margin:0 0 14px;line-height:1.5">
+      Collez le texte de la commande reçu (WhatsApp, email…) puis cliquez sur <strong>Analyser</strong>.
+    </p>
+
+    <!-- Zone de texte -->
+    <textarea id="srTextInput"
+      placeholder="Client #13336
+Client : ANDRIAMAHEFA Harilala
+Contact : 34 63 103 49
+Lieu : Récupération en boutique
+
+Commandes :
+• bois × 1 (255000 Ar × 1 = 255000 Ar)
+Total : 255000 Ar
+Avance : 96600 Ar
+Reste à payer : 158400 Ar"
+      style="width:100%;min-height:170px;padding:12px 14px;border:1px solid var(--border);border-radius:10px;font-size:12.5px;color:var(--text);background:var(--surface2);resize:vertical;font-family:monospace;box-sizing:border-box;line-height:1.7;outline:none;transition:.15s"
+      oninput="document.getElementById('srPreviewSection').style.display='none';document.getElementById('srSaveBtn').disabled=true;srParsedData=null;document.getElementById('srErrorMsg').style.display='none';"
+    ></textarea>
+
+    <div id="srErrorMsg" style="display:none;margin-top:8px;padding:10px 14px;background:#fee2e2;border-radius:8px;font-size:13px;color:#dc2626;line-height:1.5"></div>
+
+    <button onclick="analyserSaisieRapide()"
+      style="margin-top:10px;width:100%;padding:11px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;transition:.15s;display:flex;align-items:center;justify-content:center;gap:8px">
+      <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      Analyser la commande
+    </button>
+
+    <!-- Aperçu (affiché après analyse) -->
+    <div id="srPreviewSection" style="display:none;margin-top:20px;border-top:1px solid var(--border);padding-top:16px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:12px">Aperçu détecté — modifiable</div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+        <div>
+          <label style="display:block;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Client</label>
+          <input id="srPreviewClientName" type="text"
+            style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;color:var(--text);background:var(--surface);box-sizing:border-box;outline:none" />
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Contact</label>
+          <input id="srPreviewContact" type="text"
+            style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;color:var(--text);background:var(--surface);box-sizing:border-box;outline:none" />
+        </div>
+      </div>
+
+      <div style="margin-bottom:12px;display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--surface2);border-radius:8px;font-size:13px;color:var(--muted)">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+        <span id="srPreviewLieu"></span>
+      </div>
+
+      <!-- Tableau articles -->
+      <table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-size:13px;border:1px solid var(--border);border-radius:8px;overflow:hidden">
+        <thead>
+          <tr style="background:var(--surface2)">
+            <th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)">Article</th>
+            <th style="text-align:center;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);width:48px">Qté</th>
+            <th style="text-align:right;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);width:108px">Prix unit.</th>
+            <th style="text-align:right;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);width:108px">S-total</th>
+          </tr>
+        </thead>
+        <tbody id="srPreviewItemsBody"></tbody>
+      </table>
+
+      <!-- Montants -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;padding:12px 14px;background:var(--surface2);border-radius:10px">
+        <div style="text-align:center">
+          <div style="font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px">Total</div>
+          <div id="srPreviewTotal" style="font-size:15px;font-weight:700;color:var(--text)">—</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px">Avance</div>
+          <div id="srPreviewAccompte" style="font-size:15px;font-weight:700;color:#16a34a">—</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px">Reste dû</div>
+          <div id="srPreviewRestant" style="font-size:15px;font-weight:700;color:var(--accent2)">—</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal('saisieRapideModal')">Annuler</button>
+      <button id="srSaveBtn" class="btn-primary" onclick="saveCommandeRapide()" disabled style="background:var(--accent)">
+        Enregistrer la commande
+      </button>
+    </div>
+  </div>
+</div>
 
 </body>
 </html>
