@@ -9376,7 +9376,7 @@ function _dashKpi(label, value, sub, bgColor, textColor) {
 // ARRÊT DE CAISSE
 // ============================================================
 
-const BILLETAGE_DENOMS = [20000, 10000, 5000, 2000, 1000, 500, 200, 100, 50, 20, 10, 5, 2, 1];
+const BILLETAGE_DENOMS = [20000, 10000, 5000, 2000, 1000, 500, 200, 100];
 
 function updateBilletage() {
   let total  = 0;
