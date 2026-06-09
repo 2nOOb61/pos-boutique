@@ -4,7 +4,7 @@
 //             (HTML, JS, CSS) — toujours à jour quand connecté
 //             Cache First uniquement pour icônes/manifest
 // ============================================================
-const CACHE_NAME = 'boutique-pos-v9';
+const CACHE_NAME = 'boutique-pos-v10';
 const OFFLINE_URL = './index.html';
 
 const STATIC_ASSETS = [
@@ -50,9 +50,9 @@ self.addEventListener('fetch', event => {
   const url = event.request.url;
   const isSameOrigin = url.startsWith(self.location.origin);
   const isAppFile = isSameOrigin && (
-    url.endsWith('.html') || url.endsWith('/') ||
-    url.endsWith('.js')   ||
-    url.endsWith('.css')
+    /\.html(\?.*)?$/.test(url) || url.endsWith('/') ||
+    /\.js(\?.*)?$/.test(url)   ||
+    /\.css(\?.*)?$/.test(url)
   );
   const isStaticAsset = url.endsWith('.png') || url.endsWith('.ico') || url.endsWith('manifest.json');
 
