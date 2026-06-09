@@ -2095,25 +2095,173 @@
 
     <div style="height:1px;background:var(--border);margin:0 0 14px"></div>
 
-    <!-- Section 2 : Comptage de caisse -->
+    <!-- Section 2 : Fond de caisse + Billetage -->
     <div style="margin-bottom:14px">
-      <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px">Comptage de caisse</div>
+      <!-- Fond de caisse -->
+      <div style="margin-bottom:12px">
+        <label style="display:block;font-size:12px;font-weight:600;color:var(--text);margin-bottom:5px">Fond de caisse (début de journée)</label>
+        <input id="arretFondCaisse" type="number" min="0" placeholder="0"
+          style="width:180px;padding:9px 12px;border:1px solid var(--border);border-radius:9px;font-size:14px;font-weight:600;color:var(--text);background:var(--surface);box-sizing:border-box;outline:none;transition:.15s"
+          oninput="updateBilletage()"
+          onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" />
+      </div>
+
+      <!-- Billetage -->
+      <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:8px">
+        Billetage — Comptage des espèces
+      </div>
+
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+
+        <!-- Billets -->
         <div>
-          <label style="display:block;font-size:12px;font-weight:600;color:var(--text);margin-bottom:5px">Fond de caisse (début)</label>
-          <input id="arretFondCaisse" type="number" min="0" placeholder="0"
-            style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:9px;font-size:14px;font-weight:600;color:var(--text);background:var(--surface);box-sizing:border-box;outline:none;transition:.15s"
-            oninput="updateArretEcart()"
-            onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" />
+          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);margin-bottom:5px">Billets</div>
+          <div style="display:flex;flex-direction:column;gap:3px" id="billetsGrid">
+            <!-- 20 000 -->
+            <div style="display:flex;align-items:center;gap:5px;padding:4px 6px;background:var(--surface2);border-radius:6px">
+              <span style="font-size:11px;font-weight:600;color:var(--text);min-width:54px">20 000 Ar</span>
+              <span style="font-size:10px;color:var(--muted)">×</span>
+              <input id="arretBillet_20000" type="number" min="0" value="" placeholder="0"
+                style="width:42px;padding:3px 5px;border:1px solid var(--border);border-radius:5px;font-size:12px;font-weight:700;text-align:center;background:var(--surface);outline:none;color:var(--text)"
+                oninput="updateBilletage()" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" />
+              <span style="font-size:11px;color:var(--muted);flex:1;text-align:right;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="arretBilletSub_20000">—</span>
+            </div>
+            <!-- 10 000 -->
+            <div style="display:flex;align-items:center;gap:5px;padding:4px 6px;background:var(--surface2);border-radius:6px">
+              <span style="font-size:11px;font-weight:600;color:var(--text);min-width:54px">10 000 Ar</span>
+              <span style="font-size:10px;color:var(--muted)">×</span>
+              <input id="arretBillet_10000" type="number" min="0" value="" placeholder="0"
+                style="width:42px;padding:3px 5px;border:1px solid var(--border);border-radius:5px;font-size:12px;font-weight:700;text-align:center;background:var(--surface);outline:none;color:var(--text)"
+                oninput="updateBilletage()" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" />
+              <span style="font-size:11px;color:var(--muted);flex:1;text-align:right;white-space:nowrap" id="arretBilletSub_10000">—</span>
+            </div>
+            <!-- 5 000 -->
+            <div style="display:flex;align-items:center;gap:5px;padding:4px 6px;background:var(--surface2);border-radius:6px">
+              <span style="font-size:11px;font-weight:600;color:var(--text);min-width:54px">5 000 Ar</span>
+              <span style="font-size:10px;color:var(--muted)">×</span>
+              <input id="arretBillet_5000" type="number" min="0" value="" placeholder="0"
+                style="width:42px;padding:3px 5px;border:1px solid var(--border);border-radius:5px;font-size:12px;font-weight:700;text-align:center;background:var(--surface);outline:none;color:var(--text)"
+                oninput="updateBilletage()" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" />
+              <span style="font-size:11px;color:var(--muted);flex:1;text-align:right;white-space:nowrap" id="arretBilletSub_5000">—</span>
+            </div>
+            <!-- 2 000 -->
+            <div style="display:flex;align-items:center;gap:5px;padding:4px 6px;background:var(--surface2);border-radius:6px">
+              <span style="font-size:11px;font-weight:600;color:var(--text);min-width:54px">2 000 Ar</span>
+              <span style="font-size:10px;color:var(--muted)">×</span>
+              <input id="arretBillet_2000" type="number" min="0" value="" placeholder="0"
+                style="width:42px;padding:3px 5px;border:1px solid var(--border);border-radius:5px;font-size:12px;font-weight:700;text-align:center;background:var(--surface);outline:none;color:var(--text)"
+                oninput="updateBilletage()" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" />
+              <span style="font-size:11px;color:var(--muted);flex:1;text-align:right;white-space:nowrap" id="arretBilletSub_2000">—</span>
+            </div>
+            <!-- 1 000 -->
+            <div style="display:flex;align-items:center;gap:5px;padding:4px 6px;background:var(--surface2);border-radius:6px">
+              <span style="font-size:11px;font-weight:600;color:var(--text);min-width:54px">1 000 Ar</span>
+              <span style="font-size:10px;color:var(--muted)">×</span>
+              <input id="arretBillet_1000" type="number" min="0" value="" placeholder="0"
+                style="width:42px;padding:3px 5px;border:1px solid var(--border);border-radius:5px;font-size:12px;font-weight:700;text-align:center;background:var(--surface);outline:none;color:var(--text)"
+                oninput="updateBilletage()" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" />
+              <span style="font-size:11px;color:var(--muted);flex:1;text-align:right;white-space:nowrap" id="arretBilletSub_1000">—</span>
+            </div>
+            <!-- 500 -->
+            <div style="display:flex;align-items:center;gap:5px;padding:4px 6px;background:var(--surface2);border-radius:6px">
+              <span style="font-size:11px;font-weight:600;color:var(--text);min-width:54px">500 Ar</span>
+              <span style="font-size:10px;color:var(--muted)">×</span>
+              <input id="arretBillet_500" type="number" min="0" value="" placeholder="0"
+                style="width:42px;padding:3px 5px;border:1px solid var(--border);border-radius:5px;font-size:12px;font-weight:700;text-align:center;background:var(--surface);outline:none;color:var(--text)"
+                oninput="updateBilletage()" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" />
+              <span style="font-size:11px;color:var(--muted);flex:1;text-align:right;white-space:nowrap" id="arretBilletSub_500">—</span>
+            </div>
+            <!-- 200 -->
+            <div style="display:flex;align-items:center;gap:5px;padding:4px 6px;background:var(--surface2);border-radius:6px">
+              <span style="font-size:11px;font-weight:600;color:var(--text);min-width:54px">200 Ar</span>
+              <span style="font-size:10px;color:var(--muted)">×</span>
+              <input id="arretBillet_200" type="number" min="0" value="" placeholder="0"
+                style="width:42px;padding:3px 5px;border:1px solid var(--border);border-radius:5px;font-size:12px;font-weight:700;text-align:center;background:var(--surface);outline:none;color:var(--text)"
+                oninput="updateBilletage()" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" />
+              <span style="font-size:11px;color:var(--muted);flex:1;text-align:right;white-space:nowrap" id="arretBilletSub_200">—</span>
+            </div>
+            <!-- 100 -->
+            <div style="display:flex;align-items:center;gap:5px;padding:4px 6px;background:var(--surface2);border-radius:6px">
+              <span style="font-size:11px;font-weight:600;color:var(--text);min-width:54px">100 Ar</span>
+              <span style="font-size:10px;color:var(--muted)">×</span>
+              <input id="arretBillet_100" type="number" min="0" value="" placeholder="0"
+                style="width:42px;padding:3px 5px;border:1px solid var(--border);border-radius:5px;font-size:12px;font-weight:700;text-align:center;background:var(--surface);outline:none;color:var(--text)"
+                oninput="updateBilletage()" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" />
+              <span style="font-size:11px;color:var(--muted);flex:1;text-align:right;white-space:nowrap" id="arretBilletSub_100">—</span>
+            </div>
+          </div>
         </div>
+
+        <!-- Pièces -->
         <div>
-          <label style="display:block;font-size:12px;font-weight:600;color:var(--text);margin-bottom:5px">Espèces comptées (réel)</label>
-          <input id="arretEspecesReelles" type="number" min="0" placeholder="Saisir après comptage"
-            style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:9px;font-size:14px;font-weight:600;color:var(--text);background:var(--surface);box-sizing:border-box;outline:none;transition:.15s"
-            oninput="updateArretEcart()"
-            onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" />
+          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--accent2);margin-bottom:5px">Pièces</div>
+          <div style="display:flex;flex-direction:column;gap:3px">
+            <!-- 50 -->
+            <div style="display:flex;align-items:center;gap:5px;padding:4px 6px;background:var(--surface2);border-radius:6px">
+              <span style="font-size:11px;font-weight:600;color:var(--text);min-width:42px">50 Ar</span>
+              <span style="font-size:10px;color:var(--muted)">×</span>
+              <input id="arretBillet_50" type="number" min="0" value="" placeholder="0"
+                style="width:42px;padding:3px 5px;border:1px solid var(--border);border-radius:5px;font-size:12px;font-weight:700;text-align:center;background:var(--surface);outline:none;color:var(--text)"
+                oninput="updateBilletage()" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" />
+              <span style="font-size:11px;color:var(--muted);flex:1;text-align:right;white-space:nowrap" id="arretBilletSub_50">—</span>
+            </div>
+            <!-- 20 -->
+            <div style="display:flex;align-items:center;gap:5px;padding:4px 6px;background:var(--surface2);border-radius:6px">
+              <span style="font-size:11px;font-weight:600;color:var(--text);min-width:42px">20 Ar</span>
+              <span style="font-size:10px;color:var(--muted)">×</span>
+              <input id="arretBillet_20" type="number" min="0" value="" placeholder="0"
+                style="width:42px;padding:3px 5px;border:1px solid var(--border);border-radius:5px;font-size:12px;font-weight:700;text-align:center;background:var(--surface);outline:none;color:var(--text)"
+                oninput="updateBilletage()" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" />
+              <span style="font-size:11px;color:var(--muted);flex:1;text-align:right;white-space:nowrap" id="arretBilletSub_20">—</span>
+            </div>
+            <!-- 10 -->
+            <div style="display:flex;align-items:center;gap:5px;padding:4px 6px;background:var(--surface2);border-radius:6px">
+              <span style="font-size:11px;font-weight:600;color:var(--text);min-width:42px">10 Ar</span>
+              <span style="font-size:10px;color:var(--muted)">×</span>
+              <input id="arretBillet_10" type="number" min="0" value="" placeholder="0"
+                style="width:42px;padding:3px 5px;border:1px solid var(--border);border-radius:5px;font-size:12px;font-weight:700;text-align:center;background:var(--surface);outline:none;color:var(--text)"
+                oninput="updateBilletage()" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" />
+              <span style="font-size:11px;color:var(--muted);flex:1;text-align:right;white-space:nowrap" id="arretBilletSub_10">—</span>
+            </div>
+            <!-- 5 -->
+            <div style="display:flex;align-items:center;gap:5px;padding:4px 6px;background:var(--surface2);border-radius:6px">
+              <span style="font-size:11px;font-weight:600;color:var(--text);min-width:42px">5 Ar</span>
+              <span style="font-size:10px;color:var(--muted)">×</span>
+              <input id="arretBillet_5" type="number" min="0" value="" placeholder="0"
+                style="width:42px;padding:3px 5px;border:1px solid var(--border);border-radius:5px;font-size:12px;font-weight:700;text-align:center;background:var(--surface);outline:none;color:var(--text)"
+                oninput="updateBilletage()" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" />
+              <span style="font-size:11px;color:var(--muted);flex:1;text-align:right;white-space:nowrap" id="arretBilletSub_5">—</span>
+            </div>
+            <!-- 2 -->
+            <div style="display:flex;align-items:center;gap:5px;padding:4px 6px;background:var(--surface2);border-radius:6px">
+              <span style="font-size:11px;font-weight:600;color:var(--text);min-width:42px">2 Ar</span>
+              <span style="font-size:10px;color:var(--muted)">×</span>
+              <input id="arretBillet_2" type="number" min="0" value="" placeholder="0"
+                style="width:42px;padding:3px 5px;border:1px solid var(--border);border-radius:5px;font-size:12px;font-weight:700;text-align:center;background:var(--surface);outline:none;color:var(--text)"
+                oninput="updateBilletage()" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" />
+              <span style="font-size:11px;color:var(--muted);flex:1;text-align:right;white-space:nowrap" id="arretBilletSub_2">—</span>
+            </div>
+            <!-- 1 -->
+            <div style="display:flex;align-items:center;gap:5px;padding:4px 6px;background:var(--surface2);border-radius:6px">
+              <span style="font-size:11px;font-weight:600;color:var(--text);min-width:42px">1 Ar</span>
+              <span style="font-size:10px;color:var(--muted)">×</span>
+              <input id="arretBillet_1" type="number" min="0" value="" placeholder="0"
+                style="width:42px;padding:3px 5px;border:1px solid var(--border);border-radius:5px;font-size:12px;font-weight:700;text-align:center;background:var(--surface);outline:none;color:var(--text)"
+                oninput="updateBilletage()" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" />
+              <span style="font-size:11px;color:var(--muted);flex:1;text-align:right;white-space:nowrap" id="arretBilletSub_1">—</span>
+            </div>
+          </div>
         </div>
       </div>
+
+      <!-- Total billetage -->
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#e8f4f0;border:1px solid #1a4a3a22;border-radius:9px;margin-top:10px">
+        <span style="font-size:12px;font-weight:700;color:#1a4a3a">Total espèces comptées</span>
+        <span id="arretBilletageTotal" style="font-size:17px;font-weight:900;color:#1a4a3a">0 Ar</span>
+      </div>
+
+      <!-- Champ caché — auto-calculé par updateBilletage() -->
+      <input id="arretEspecesReelles" type="hidden" value="" />
     </div>
 
     <!-- Section 3 : Résultat / Écart -->

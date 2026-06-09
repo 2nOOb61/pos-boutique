@@ -9376,6 +9376,34 @@ function _dashKpi(label, value, sub, bgColor, textColor) {
 // ARRÊT DE CAISSE
 // ============================================================
 
+const BILLETAGE_DENOMS = [20000, 10000, 5000, 2000, 1000, 500, 200, 100, 50, 20, 10, 5, 2, 1];
+
+function updateBilletage() {
+  let total  = 0;
+  let anyQty = false;
+  BILLETAGE_DENOMS.forEach(d => {
+    const input = document.getElementById(`arretBillet_${d}`);
+    const subEl = document.getElementById(`arretBilletSub_${d}`);
+    const qty   = Number(input?.value) || 0;
+    if (qty > 0) anyQty = true;
+    const sub   = qty * d;
+    total += sub;
+    if (subEl) subEl.textContent = sub > 0 ? fmt(sub) : '—';
+  });
+
+  const totalEl = document.getElementById('arretBilletageTotal');
+  if (totalEl) {
+    totalEl.textContent = fmt(total);
+    totalEl.style.color = anyQty ? '#1a4a3a' : '#a8a29e';
+  }
+
+  // Mettre à jour le champ caché — déclenche updateArretEcart()
+  const realEl = document.getElementById('arretEspecesReelles');
+  if (realEl) realEl.value = anyQty ? String(total) : '';
+
+  updateArretEcart();
+}
+
 function openArretCaisse() {
   if (!currentUser) return;
   renderArretCaisseModal();
@@ -9414,11 +9442,21 @@ function renderArretCaisseModal() {
   set('arretTotal',   fmt(d.total));
   set('arretNbTrans', d.todaySales.length + ' transaction' + (d.todaySales.length > 1 ? 's' : ''));
 
-  // Reset saisies
-  ['arretFondCaisse', 'arretEspecesReelles', 'arretNotes'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.value = '';
+  // Reset fond de caisse + notes
+  ['arretFondCaisse', 'arretNotes'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
   });
+  // Reset billetage
+  BILLETAGE_DENOMS.forEach(d => {
+    const inp = document.getElementById(`arretBillet_${d}`);
+    const sub = document.getElementById(`arretBilletSub_${d}`);
+    if (inp) inp.value = '';
+    if (sub) sub.textContent = '—';
+  });
+  const totEl = document.getElementById('arretBilletageTotal');
+  if (totEl) { totEl.textContent = '0 Ar'; totEl.style.color = '#a8a29e'; }
+  const realEl = document.getElementById('arretEspecesReelles');
+  if (realEl) realEl.value = '';
   updateArretEcart();
 }
 
@@ -9454,13 +9492,20 @@ function updateArretEcart() {
 
 function validerArretCaisse() {
   if (!currentUser) return;
-  const d          = _getArretData();
-  const fond       = Number(document.getElementById('arretFondCaisse')?.value) || 0;
-  const reelRaw    = document.getElementById('arretEspecesReelles')?.value ?? '';
-  const especesR   = reelRaw !== '' ? Number(reelRaw) : null;
-  const notes      = document.getElementById('arretNotes')?.value?.trim() || '';
-  const theorique  = fond + d.especes;
-  const ecart      = especesR !== null ? especesR - theorique : null;
+  const d         = _getArretData();
+  const fond      = Number(document.getElementById('arretFondCaisse')?.value) || 0;
+  const reelRaw   = document.getElementById('arretEspecesReelles')?.value ?? '';
+  const especesR  = reelRaw !== '' ? Number(reelRaw) : null;
+  const notes     = document.getElementById('arretNotes')?.value?.trim() || '';
+  const theorique = fond + d.especes;
+  const ecart     = especesR !== null ? especesR - theorique : null;
+
+  // Capturer le détail billetage
+  const billetage = {};
+  BILLETAGE_DENOMS.forEach(denom => {
+    const qty = Number(document.getElementById(`arretBillet_${denom}`)?.value) || 0;
+    if (qty > 0) billetage[denom] = qty;
+  });
 
   const arret = {
     id:             nextArretId++,
@@ -9473,6 +9518,7 @@ function validerArretCaisse() {
     totalCheque:    d.cheque,
     totalGeneral:   d.total,
     fondCaisse:     fond,
+    billetage,
     especesReelles: especesR,
     ecart,
     notes
@@ -9532,16 +9578,33 @@ function printArretCaisse(arret) {
 
     <table>
       <thead>
-        <tr><th>Détail du comptage de caisse</th><th style="text-align:right">Montant</th></tr>
+        <tr><th>Comptage de caisse</th><th style="text-align:right">Montant</th></tr>
       </thead>
       <tbody>
         <tr><td>Fond de caisse (début de journée)</td><td style="text-align:right">${fmt(arret.fondCaisse || 0)}</td></tr>
         <tr><td>Espèces encaissées (ventes)</td><td style="text-align:right">${fmt(arret.totalEspeces)}</td></tr>
         <tr style="font-weight:700;background:#f8f7f4"><td>Espèces théoriques en caisse</td><td style="text-align:right">${fmt(theorique)}</td></tr>
-        ${arret.especesReelles !== null ? `<tr><td>Espèces comptées (réel)</td><td style="text-align:right">${fmt(arret.especesReelles)}</td></tr>` : ''}
+        ${arret.especesReelles !== null ? `<tr><td>Espèces comptées — billetage</td><td style="text-align:right">${fmt(arret.especesReelles)}</td></tr>` : ''}
         ${ecartVal !== null ? `<tr style="font-weight:700"><td>Écart de caisse</td><td style="text-align:right">${ecartBadge}</td></tr>` : ''}
       </tbody>
     </table>
+
+    ${arret.billetage && Object.keys(arret.billetage).length > 0 ? `
+    <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#78716c;margin:16px 0 6px">Détail du billetage</p>
+    <table>
+      <thead><tr><th>Coupure</th><th style="text-align:center">Quantité</th><th style="text-align:right">Sous-total</th></tr></thead>
+      <tbody>
+        ${BILLETAGE_DENOMS.filter(d => arret.billetage[d] > 0).map(d =>
+          `<tr><td>${d >= 100 ? (Number(d).toLocaleString('fr-MG') + ' Ar') : (d + ' Ar')}</td>
+               <td style="text-align:center">× ${arret.billetage[d]}</td>
+               <td style="text-align:right;font-weight:600">${fmt(d * arret.billetage[d])}</td></tr>`
+        ).join('')}
+        <tr style="font-weight:700;background:#f8f7f4">
+          <td colspan="2">Total billetage</td>
+          <td style="text-align:right">${fmt(arret.especesReelles)}</td>
+        </tr>
+      </tbody>
+    </table>` : ''}
 
     ${arret.notes ? `<p style="font-size:12px;color:#78716c;padding:10px 0;border-top:1px solid #e5e3df"><strong>Notes :</strong> ${arret.notes}</p>` : ''}
     <p style="font-size:11px;color:#a8a29e;text-align:center;margin-top:20px;border-top:1px solid #e5e3df;padding-top:12px">Document généré par FOREVER MG POS — Ne constitue pas un document comptable officiel</p>
