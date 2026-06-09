@@ -127,9 +127,11 @@ let editingProductImage = null;
 let products = [];
 
 let sales = [];
+let arretsCaisse = [];
 
 let nextId = 1;
 let nextSaleId = 1;
+let nextArretId = 1;
 
 let reservations = [];
 let resAttachments   = []; // { name, type, data (base64) }
@@ -3021,6 +3023,9 @@ function saveData() {
         catch(e) { /* photos trop lourdes, on ignore */ }
       }
     });
+    // Arrêts de caisse
+    safeLocalSet('pos-arrets', JSON.stringify(arretsCaisse));
+    localStorage.setItem('pos-nextArretId', String(nextArretId));
   } catch(e) { console.warn('localStorage full?', e); }
 }
 
@@ -3063,6 +3068,10 @@ function loadData() {
     if (ncid) nextCommandeId = parseInt(ncid);
     const obj = localStorage.getItem('pos-objectifs');
     if (obj) objectifs = JSON.parse(obj);
+    const ar  = localStorage.getItem('pos-arrets');
+    const nai = localStorage.getItem('pos-nextArretId');
+    if (ar)  arretsCaisse = JSON.parse(ar);
+    if (nai) nextArretId  = parseInt(nai);
 
     // Recalibration depuis les données réelles pour éviter les doublons
     if (sales.length > 0) {
@@ -9349,6 +9358,9 @@ function renderMonDashboard() {
             </div>`;
           }).join('')}
     </div>`;
+
+  // Historique arrêts de caisse (section séparée dans le HTML)
+  renderHistoriqueArrets();
 }
 
 function _dashKpi(label, value, sub, bgColor, textColor) {
@@ -9358,6 +9370,238 @@ function _dashKpi(label, value, sub, bgColor, textColor) {
       <div style="font-size:19px;font-weight:800;color:${textColor};line-height:1">${value}</div>
       <div style="font-size:11px;color:${textColor};opacity:.6;margin-top:4px">${sub}</div>
     </div>`;
+}
+
+// ============================================================
+// ARRÊT DE CAISSE
+// ============================================================
+
+function openArretCaisse() {
+  if (!currentUser) return;
+  renderArretCaisseModal();
+  openModal('arretCaisseModal');
+}
+
+// Calcule les ventes du jour pour le caissier courant
+function _getArretData() {
+  const username = currentUser ? currentUser.username : '';
+  const label    = currentUser ? (currentUser.label || username) : '';
+  const today    = new Date().toDateString();
+  const todaySales = sales.filter(s => {
+    const d = parseSaleDate(s.date);
+    return d && d.toDateString() === today &&
+      (s.caissier === username || s.caissier === label);
+  });
+  const especes = todaySales.filter(s => s.method === 'cash').reduce((a, b) => a + (Number(b.total) || 0), 0);
+  const mobile  = todaySales.filter(s => s.method === 'mobile').reduce((a, b) => a + (Number(b.total) || 0), 0);
+  const cheque  = todaySales.filter(s => s.method === 'cheque').reduce((a, b) => a + (Number(b.total) || 0), 0);
+  return { todaySales, especes, mobile, cheque, total: especes + mobile + cheque };
+}
+
+function renderArretCaisseModal() {
+  const d   = _getArretData();
+  const now = new Date();
+  const dateStr  = now.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const heureStr = now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
+  const infoEl = document.getElementById('arretCaisseInfo');
+  if (infoEl) infoEl.textContent = `${currentUser.label || currentUser.username} — ${dateStr} à ${heureStr}`;
+
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  set('arretEspeces', fmt(d.especes));
+  set('arretMobile',  fmt(d.mobile));
+  set('arretCheque',  fmt(d.cheque));
+  set('arretTotal',   fmt(d.total));
+  set('arretNbTrans', d.todaySales.length + ' transaction' + (d.todaySales.length > 1 ? 's' : ''));
+
+  // Reset saisies
+  ['arretFondCaisse', 'arretEspecesReelles', 'arretNotes'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  updateArretEcart();
+}
+
+function updateArretEcart() {
+  const d = _getArretData();
+  const fond           = Number(document.getElementById('arretFondCaisse')?.value)       || 0;
+  const reelRaw        = document.getElementById('arretEspecesReelles')?.value ?? '';
+  const especesReelles = reelRaw !== '' ? Number(reelRaw) : null;
+  const theorique      = fond + d.especes;
+
+  const theoriqueEl = document.getElementById('arretTheoriqueVal');
+  const ecartEl     = document.getElementById('arretEcartVal');
+  const ecartRow    = document.getElementById('arretEcartRow');
+
+  if (theoriqueEl) theoriqueEl.textContent = fmt(theorique);
+
+  if (especesReelles !== null) {
+    const ecart = especesReelles - theorique;
+    if (ecartEl) {
+      if (ecart === 0) {
+        ecartEl.textContent = 'Équilibré';
+        ecartEl.style.color = '#16a34a';
+      } else {
+        ecartEl.textContent = (ecart > 0 ? '+' : '') + fmt(ecart);
+        ecartEl.style.color = ecart > 0 ? '#16a34a' : '#dc2626';
+      }
+    }
+    if (ecartRow) ecartRow.style.display = '';
+  } else {
+    if (ecartRow) ecartRow.style.display = 'none';
+  }
+}
+
+function validerArretCaisse() {
+  if (!currentUser) return;
+  const d          = _getArretData();
+  const fond       = Number(document.getElementById('arretFondCaisse')?.value) || 0;
+  const reelRaw    = document.getElementById('arretEspecesReelles')?.value ?? '';
+  const especesR   = reelRaw !== '' ? Number(reelRaw) : null;
+  const notes      = document.getElementById('arretNotes')?.value?.trim() || '';
+  const theorique  = fond + d.especes;
+  const ecart      = especesR !== null ? especesR - theorique : null;
+
+  const arret = {
+    id:             nextArretId++,
+    date:           new Date().toISOString(),
+    caissier:       currentUser.username,
+    caissierLabel:  currentUser.label || currentUser.username,
+    nbTransactions: d.todaySales.length,
+    totalEspeces:   d.especes,
+    totalMobile:    d.mobile,
+    totalCheque:    d.cheque,
+    totalGeneral:   d.total,
+    fondCaisse:     fond,
+    especesReelles: especesR,
+    ecart,
+    notes
+  };
+
+  arretsCaisse.unshift(arret);
+  try {
+    localStorage.setItem('pos-arrets',     JSON.stringify(arretsCaisse));
+    localStorage.setItem('pos-nextArretId', String(nextArretId));
+  } catch(e) {}
+
+  closeModal('arretCaisseModal');
+  showToast('Arrêt de caisse enregistré');
+  printArretCaisse(arret);
+  syncArretToSheets(arret);
+
+  // Rafraîchir Mon Dashboard si affiché
+  if (document.getElementById('page-mon-dashboard')?.classList.contains('active')) {
+    renderMonDashboard();
+  }
+}
+
+function printArretCaisse(arret) {
+  if (!arret) return;
+  const d         = new Date(arret.date);
+  const dateStr   = d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+  const heureStr  = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  const theorique = (arret.fondCaisse || 0) + arret.totalEspeces;
+  const ecartVal  = arret.ecart;
+
+  let ecartBadge = '';
+  if (ecartVal !== null) {
+    if (ecartVal === 0)       ecartBadge = `<span class="badge badge-green">Équilibré</span>`;
+    else if (ecartVal > 0)    ecartBadge = `<span class="badge badge-green">+${fmt(ecartVal)}</span>`;
+    else                      ecartBadge = `<span class="badge badge-red">${fmt(ecartVal)}</span>`;
+  }
+
+  _printWindow(`Arrêt de caisse — ${arret.caissierLabel} — ${dateStr}`, `
+    <div class="rpt-header">
+      <div class="rpt-logo">FOREVER<span>MG</span></div>
+      <div class="rpt-meta">
+        <div style="font-size:14px;font-weight:700;color:#1c1917">ARRÊT DE CAISSE</div>
+        <div>${dateStr} à ${heureStr}</div>
+        <div>Caissier : <strong>${arret.caissierLabel}</strong></div>
+      </div>
+    </div>
+
+    <p class="rpt-period">Clôture de la journée — ventes enregistrées au moment de l'arrêt</p>
+
+    <div class="kpi-row">
+      <div class="kpi-box"><div class="kl">Espèces</div><div class="kv">${fmt(arret.totalEspeces)}</div></div>
+      <div class="kpi-box"><div class="kl">Mobile Money</div><div class="kv">${fmt(arret.totalMobile)}</div></div>
+      ${arret.totalCheque > 0 ? `<div class="kpi-box"><div class="kl">Chèque</div><div class="kv">${fmt(arret.totalCheque)}</div></div>` : ''}
+      <div class="kpi-box"><div class="kl">Total encaissé</div><div class="kv" style="color:#1a4a3a">${fmt(arret.totalGeneral)}</div></div>
+      <div class="kpi-box"><div class="kl">Transactions</div><div class="kv">${arret.nbTransactions}</div></div>
+    </div>
+
+    <table>
+      <thead>
+        <tr><th>Détail du comptage de caisse</th><th style="text-align:right">Montant</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Fond de caisse (début de journée)</td><td style="text-align:right">${fmt(arret.fondCaisse || 0)}</td></tr>
+        <tr><td>Espèces encaissées (ventes)</td><td style="text-align:right">${fmt(arret.totalEspeces)}</td></tr>
+        <tr style="font-weight:700;background:#f8f7f4"><td>Espèces théoriques en caisse</td><td style="text-align:right">${fmt(theorique)}</td></tr>
+        ${arret.especesReelles !== null ? `<tr><td>Espèces comptées (réel)</td><td style="text-align:right">${fmt(arret.especesReelles)}</td></tr>` : ''}
+        ${ecartVal !== null ? `<tr style="font-weight:700"><td>Écart de caisse</td><td style="text-align:right">${ecartBadge}</td></tr>` : ''}
+      </tbody>
+    </table>
+
+    ${arret.notes ? `<p style="font-size:12px;color:#78716c;padding:10px 0;border-top:1px solid #e5e3df"><strong>Notes :</strong> ${arret.notes}</p>` : ''}
+    <p style="font-size:11px;color:#a8a29e;text-align:center;margin-top:20px;border-top:1px solid #e5e3df;padding-top:12px">Document généré par FOREVER MG POS — Ne constitue pas un document comptable officiel</p>
+  `);
+}
+
+async function syncArretToSheets(arret) {
+  if (!APPS_SCRIPT_URL || !navigator.onLine) return;
+  try { await apiCall({ action: 'addArretCaisse', arret }); }
+  catch(e) { console.warn('Sync arrêt caisse GAS:', e); }
+}
+
+function renderHistoriqueArrets() {
+  const container = document.getElementById('historiqueArretsContent');
+  if (!container || !currentUser) return;
+
+  const username = currentUser.username;
+  const label    = currentUser.label || username;
+  const isAdmin  = currentUser.role === 'admin';
+
+  const list = isAdmin
+    ? [...arretsCaisse]
+    : arretsCaisse.filter(a => a.caissier === username || a.caissierLabel === label);
+
+  if (list.length === 0) {
+    container.innerHTML = `<div style="text-align:center;padding:28px;color:var(--muted);font-size:13px">Aucun arrêt de caisse enregistré</div>`;
+    return;
+  }
+
+  container.innerHTML = list.slice(0, 15).map(a => {
+    const d        = new Date(a.date);
+    const dateStr  = d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const heureStr = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
+    let ecartBadgeHtml = '';
+    if (a.ecart === null || a.ecart === undefined) {
+      ecartBadgeHtml = `<span style="font-size:11px;color:var(--muted)">Non compté</span>`;
+    } else if (a.ecart === 0) {
+      ecartBadgeHtml = `<span style="background:#dcfce7;color:#16a34a;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700">Équilibré</span>`;
+    } else if (a.ecart > 0) {
+      ecartBadgeHtml = `<span style="background:#dcfce7;color:#16a34a;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700">+${fmt(a.ecart)}</span>`;
+    } else {
+      ecartBadgeHtml = `<span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700">${fmt(a.ecart)}</span>`;
+    }
+
+    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:11px 16px;border-bottom:1px solid var(--border);gap:12px;cursor:pointer;transition:.15s" onclick="printArretCaisse(arretsCaisse.find(x=>x.id===${a.id}))" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;color:var(--text)">
+          ${dateStr} à ${heureStr}
+          ${isAdmin ? `<span style="font-size:11px;color:var(--muted);font-weight:400"> · ${a.caissierLabel}</span>` : ''}
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${a.nbTransactions} transaction${a.nbTransactions > 1 ? 's' : ''} · Total ${fmt(a.totalGeneral)}</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        ${ecartBadgeHtml}
+        <div style="font-size:11px;color:var(--muted);margin-top:3px">Esp. théor. ${fmt((a.fondCaisse||0)+a.totalEspeces)}</div>
+      </div>
+      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted);flex-shrink:0"><polyline points="9 18 15 12 9 6"/></svg>
+    </div>`;
+  }).join('');
 }
 
 // ============================================================

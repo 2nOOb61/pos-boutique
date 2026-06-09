@@ -549,6 +549,10 @@
             <button class="btn-pay btn-commande" onclick="openCommandeModal(true)">Commander</button>
           </div>
           <button class="btn-clear" onclick="clearCart()" aria-label="Vider le panier">Vider le panier</button>
+          <button class="btn-arret-caisse" onclick="openArretCaisse()" data-roles="admin,caissier" aria-label="Arrêt de caisse" title="Clôturer la session de caisse du jour">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            Arrêt de caisse
+          </button>
         </div>
       </div>
     </div>
@@ -723,15 +727,33 @@
         <h1 id="dashCaissierGreet" style="font-family:'DM Sans',sans-serif;font-size:22px;font-weight:800;color:var(--text);margin:0">Mon Tableau de Bord</h1>
         <p id="dashCaissierSub" style="font-size:13px;color:var(--muted);margin:4px 0 0"></p>
       </div>
-      <select id="dashPeriod" onchange="renderMonDashboard()"
-        style="padding:9px 14px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);font-size:13px;font-weight:600;cursor:pointer">
-        <option value="day">Aujourd'hui</option>
-        <option value="month" selected>Ce mois</option>
-        <option value="year">Cette année</option>
-      </select>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <select id="dashPeriod" onchange="renderMonDashboard()"
+          style="padding:9px 14px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);font-size:13px;font-weight:600;cursor:pointer">
+          <option value="day">Aujourd'hui</option>
+          <option value="month" selected>Ce mois</option>
+          <option value="year">Cette année</option>
+        </select>
+        <button onclick="openArretCaisse()" data-roles="admin,caissier"
+          style="display:inline-flex;align-items:center;gap:7px;padding:9px 16px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;transition:.2s"
+          onmouseover="this.style.background='#153d30'" onmouseout="this.style.background='var(--accent)'">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          Arrêt de caisse
+        </button>
+      </div>
     </div>
-    <!-- Contenu dynamique -->
+    <!-- Contenu dynamique KPIs -->
     <div id="dashCaissierContent"></div>
+    <!-- Historique des arrêts de caisse -->
+    <div id="historiqueArretsSection" style="margin-top:20px;background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-bottom:1px solid var(--border)">
+        <span style="font-size:13px;font-weight:700;color:var(--text)">Historique des arrêts de caisse</span>
+        <span style="font-size:11px;color:var(--muted)">Cliquer pour imprimer</span>
+      </div>
+      <div id="historiqueArretsContent">
+        <div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">Aucun arrêt de caisse enregistré</div>
+      </div>
+    </div>
   </div>
 
   <!-- RÉSERVATIONS -->
@@ -2033,6 +2055,99 @@
   <div class="ticket-center" style="font-size:10px;margin-top:4px">Revenez bientôt </div>
 </div>
 
+
+<!-- ============================================================ -->
+<!-- ARRÊT DE CAISSE MODAL                                       -->
+<!-- ============================================================ -->
+<div class="modal-overlay" id="arretCaisseModal">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-title">
+      <div>
+        <span style="font-weight:700">Arrêt de caisse</span>
+        <div id="arretCaisseInfo" style="font-size:12px;font-weight:400;color:var(--muted);margin-top:2px"></div>
+      </div>
+      <button class="modal-close" onclick="closeModal('arretCaisseModal')">✕</button>
+    </div>
+
+    <!-- Section 1 : Résumé du jour -->
+    <div style="padding:0 0 14px">
+      <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px">Ventes du jour</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+        <div style="background:#e8f4f0;border-radius:10px;padding:11px 14px">
+          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#1a4a3a;opacity:.75;margin-bottom:3px">Espèces</div>
+          <div id="arretEspeces" style="font-size:18px;font-weight:800;color:#1a4a3a">0 Ar</div>
+        </div>
+        <div style="background:#fdf0e8;border-radius:10px;padding:11px 14px">
+          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#c2410c;opacity:.75;margin-bottom:3px">Mobile Money</div>
+          <div id="arretMobile" style="font-size:18px;font-weight:800;color:#c2410c">0 Ar</div>
+        </div>
+        <div style="background:#f0f9ff;border-radius:10px;padding:11px 14px">
+          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#1e40af;opacity:.75;margin-bottom:3px">Chèque</div>
+          <div id="arretCheque" style="font-size:18px;font-weight:800;color:#1e40af">0 Ar</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:10px;padding:11px 14px">
+          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text);opacity:.6;margin-bottom:3px">Total encaissé</div>
+          <div id="arretTotal" style="font-size:18px;font-weight:800;color:var(--text)">0 Ar</div>
+        </div>
+      </div>
+      <div style="text-align:right;font-size:12px;color:var(--muted)" id="arretNbTrans">0 transaction</div>
+    </div>
+
+    <div style="height:1px;background:var(--border);margin:0 0 14px"></div>
+
+    <!-- Section 2 : Comptage de caisse -->
+    <div style="margin-bottom:14px">
+      <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px">Comptage de caisse</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div>
+          <label style="display:block;font-size:12px;font-weight:600;color:var(--text);margin-bottom:5px">Fond de caisse (début)</label>
+          <input id="arretFondCaisse" type="number" min="0" placeholder="0"
+            style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:9px;font-size:14px;font-weight:600;color:var(--text);background:var(--surface);box-sizing:border-box;outline:none;transition:.15s"
+            oninput="updateArretEcart()"
+            onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" />
+        </div>
+        <div>
+          <label style="display:block;font-size:12px;font-weight:600;color:var(--text);margin-bottom:5px">Espèces comptées (réel)</label>
+          <input id="arretEspecesReelles" type="number" min="0" placeholder="Saisir après comptage"
+            style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:9px;font-size:14px;font-weight:600;color:var(--text);background:var(--surface);box-sizing:border-box;outline:none;transition:.15s"
+            oninput="updateArretEcart()"
+            onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Section 3 : Résultat / Écart -->
+    <div style="background:var(--surface2);border-radius:10px;padding:14px 16px;margin-bottom:14px">
+      <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px">Résultat</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)">
+        <span style="font-size:13px;color:var(--muted)">Espèces théoriques en caisse</span>
+        <span id="arretTheoriqueVal" style="font-size:13px;font-weight:700;color:var(--text)">—</span>
+      </div>
+      <div id="arretEcartRow" style="display:none;padding-top:8px;margin-top:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:13px;font-weight:700;color:var(--text)">Écart de caisse</span>
+          <span id="arretEcartVal" style="font-size:20px;font-weight:900">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Notes -->
+    <div style="margin-bottom:4px">
+      <label style="display:block;font-size:12px;font-weight:600;color:var(--text);margin-bottom:5px">Notes / observations</label>
+      <textarea id="arretNotes" placeholder="Observations, incidents, commentaires..."
+        style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:9px;font-size:13px;color:var(--text);background:var(--surface);box-sizing:border-box;resize:vertical;min-height:60px;outline:none;transition:.15s;font-family:inherit"
+        onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'"></textarea>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal('arretCaisseModal')">Annuler</button>
+      <button class="btn-primary" onclick="validerArretCaisse()" style="background:var(--accent);display:flex;align-items:center;gap:7px">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        Valider et clôturer
+      </button>
+    </div>
+  </div>
+</div>
 
 <div id="toast-container"></div>
 
