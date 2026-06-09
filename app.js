@@ -102,16 +102,17 @@ const ROLE_ICONS = {
 };
 
 const PAGE_ACCESS = {
-  caisse:       ['admin','caissier','commerciale','utilisateur','gestionnaire'],
-  reservations: ['admin','caissier','commerciale','utilisateur','gestionnaire','comptable'],
-  commandes:    ['admin','caissier','commerciale','gestionnaire','comptable','livreur'],
-  stock:        ['admin','gestionnaire'],
-  stats:        ['admin','comptable'],
-  config:       ['admin'],
-  users:        ['admin'],
-  attribution:  ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur'],
-  production:   ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
-  messagerie:   ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
+  caisse:         ['admin','caissier','commerciale','utilisateur','gestionnaire'],
+  reservations:   ['admin','caissier','commerciale','utilisateur','gestionnaire','comptable'],
+  commandes:      ['admin','caissier','commerciale','gestionnaire','comptable','livreur'],
+  stock:          ['admin','gestionnaire'],
+  stats:          ['admin','comptable'],
+  'mon-dashboard':['admin','caissier','commerciale','utilisateur','gestionnaire','comptable'],
+  config:         ['admin'],
+  users:          ['admin'],
+  attribution:    ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur'],
+  production:     ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
+  messagerie:     ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
 };
 let editingUserId = null; // index dans localUsers
 
@@ -346,8 +347,9 @@ function showPage(id, btn, bnavBtn) {
   document.querySelectorAll('.nav-btn').forEach(b => {
     if (b.getAttribute('onclick') && b.getAttribute('onclick').includes("'"+id+"'")) b.classList.add('active');
   });
-  if (id==='stats')        { renderStats(); _autoRefreshStats(); _loadProdStats(); }
-  if (id==='config')       { renderConfigPage(); renderRythmeConfig(); }
+  if (id==='stats')           { renderStats(); _autoRefreshStats(); _loadProdStats(); }
+  if (id==='mon-dashboard')  { renderMonDashboard(); }
+  if (id==='config')         { renderConfigPage(); renderRythmeConfig(); renderObjectifsConfig(); }
   if (id==='users')        renderUsersPage();
   if (id==='reservations') { _ensureDossierLinks(); renderReservations(); _autoRefreshReservations(); _loadTachesQuietly().then(renderReservations); }
   if (id==='attribution')  {
@@ -2276,6 +2278,8 @@ function _renderStatsInner() {
       if (body) body.innerHTML = _buildStatDetail(_openStatType);
     } catch(e) { console.warn('statDetail error:', e); }
   }
+  // Tableau ventes par caissier (admin/comptable uniquement)
+  renderCaissierStats();
 } // end _renderStatsInner
 function reprintTicket(id) {
   const s = sales.find(s=>s.id===id);
@@ -3057,6 +3061,8 @@ function loadData() {
       });
     }
     if (ncid) nextCommandeId = parseInt(ncid);
+    const obj = localStorage.getItem('pos-objectifs');
+    if (obj) objectifs = JSON.parse(obj);
 
     // Recalibration depuis les données réelles pour éviter les doublons
     if (sales.length > 0) {
@@ -4550,6 +4556,7 @@ let cmdFinalPayMode = 'cash';
 let cmdFinalProvider = 'MVola';
 let _lastCmdRefresh = 0;
 let srParsedData = null;
+let objectifs    = {}; // { username: montantMensuel }
 
 // Ferme le dropdown stock si clic en dehors
 document.addEventListener('click', e => {
@@ -9095,6 +9102,263 @@ window.addEventListener('unhandledrejection', (e) => {
   console.error('[POS] Promise rejetée:', msg);
   e.preventDefault(); // empêcher le log navigateur non formaté
 });
+
+// ============================================================
+// OBJECTIFS COMMERCIAUX
+// ============================================================
+function saveObjectifs() {
+  localStorage.setItem('pos-objectifs', JSON.stringify(objectifs));
+}
+
+function getObjectif(username) {
+  return Number(objectifs[username] || 0);
+}
+
+function renderObjectifsConfig() {
+  const container = document.getElementById('objectifsConfigContainer');
+  if (!container) return;
+  const users = (localUsers || []).filter(u => u.actif !== false && ['admin','caissier','commerciale','utilisateur','gestionnaire'].includes(u.role));
+  if (users.length === 0) {
+    container.innerHTML = '<p style="font-size:13px;color:var(--muted)">Aucun utilisateur trouvé. Ajoutez des utilisateurs d\'abord.</p>';
+    return;
+  }
+  container.innerHTML = `
+    <p style="font-size:13px;color:var(--muted);margin:0 0 14px;line-height:1.5">
+      Définissez l'objectif de ventes mensuel (en Ar) pour chaque commercial / caissier.
+    </p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px">
+      ${users.map(u => `
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px 14px">
+          <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:2px">${_srEsc(u.label || u.username)}</div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:10px">${u.username} · ${u.role}</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <input type="number" id="obj_${u.username}"
+              value="${objectifs[u.username] || ''}"
+              placeholder="Ex : 2000000"
+              min="0" step="100000"
+              style="flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);outline:none"
+              oninput="objectifs['${u.username}'] = parseInt(this.value)||0; saveObjectifs()" />
+            <span style="font-size:11px;color:var(--muted);white-space:nowrap">Ar/mois</span>
+          </div>
+        </div>`).join('')}
+    </div>`;
+}
+
+// ============================================================
+// VENTES PAR CAISSIER — section stats
+// ============================================================
+function renderCaissierStats() {
+  const container = document.getElementById('statsCaissierContent');
+  if (!container) return;
+  const thisMonth = new Date().toISOString().slice(0, 7);
+  const today     = new Date().toDateString();
+  const caissierMap = {};
+
+  sales.forEach(s => {
+    const name = (s.caissier || 'Inconnu').trim();
+    if (!caissierMap[name]) caissierMap[name] = { ventesAuj: 0, ventesMois: 0, countMois: 0, total: 0, count: 0 };
+    const t = Number(s.total) || 0;
+    caissierMap[name].total += t;
+    caissierMap[name].count++;
+    const d = parseSaleDate(s.date);
+    if (d && d.toDateString() === today)         caissierMap[name].ventesAuj += t;
+    if (saleDateKey(s.date).startsWith(thisMonth)){ caissierMap[name].ventesMois += t; caissierMap[name].countMois++; }
+  });
+
+  const rows = Object.entries(caissierMap).sort((a, b) => b[1].ventesMois - a[1].ventesMois);
+  if (rows.length === 0) {
+    container.innerHTML = '<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">Aucune donnée de vente disponible.</div>';
+    return;
+  }
+  container.innerHTML = `
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead>
+          <tr style="background:var(--surface2)">
+            <th style="text-align:left;padding:9px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)">Caissier</th>
+            <th style="text-align:right;padding:9px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)">Auj.</th>
+            <th style="text-align:right;padding:9px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)">Ce mois</th>
+            <th style="text-align:right;padding:9px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)">Trans.</th>
+            <th style="text-align:right;padding:9px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)">Panier moy.</th>
+            <th style="padding:9px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);min-width:130px">Objectif mois</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(([name, d]) => {
+            const obj   = getObjectif(name);
+            const pct   = obj > 0 ? Math.min(100, Math.round(d.ventesMois / obj * 100)) : 0;
+            const pColor= pct >= 100 ? '#16a34a' : pct >= 70 ? '#d97706' : obj > 0 ? '#dc2626' : 'var(--muted)';
+            const panierMoy = d.countMois > 0 ? Math.round(d.ventesMois / d.countMois) : 0;
+            return `
+              <tr style="border-bottom:1px solid var(--border)">
+                <td style="padding:10px 12px;font-weight:600;color:var(--text)">${_srEsc(name)}</td>
+                <td style="padding:10px 12px;text-align:right;color:var(--muted)">${fmt(d.ventesAuj)}</td>
+                <td style="padding:10px 12px;text-align:right;font-weight:700;color:var(--accent)">${fmt(d.ventesMois)}</td>
+                <td style="padding:10px 12px;text-align:right;color:var(--muted)">${d.countMois}</td>
+                <td style="padding:10px 12px;text-align:right;color:var(--muted)">${fmt(panierMoy)}</td>
+                <td style="padding:10px 12px">
+                  ${obj > 0 ? `
+                    <div style="display:flex;align-items:center;gap:6px">
+                      <div style="flex:1;background:var(--border);border-radius:100px;height:6px;overflow:hidden;min-width:60px">
+                        <div style="background:${pColor};height:100%;width:${pct}%;border-radius:100px"></div>
+                      </div>
+                      <span style="font-size:11px;font-weight:700;color:${pColor};white-space:nowrap">${pct}%</span>
+                    </div>
+                    <div style="font-size:10px;color:var(--muted);margin-top:2px">${fmt(d.ventesMois)} / ${fmt(obj)}</div>`
+                  : '<span style="font-size:11px;color:var(--muted)">—</span>'}
+                </td>
+              </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+// ============================================================
+// MON TABLEAU DE BORD — CAISSIER / COMMERCIAL
+// ============================================================
+function renderMonDashboard() {
+  if (!currentUser) return;
+  const period   = document.getElementById('dashPeriod')?.value || 'month';
+  const username = currentUser.username;
+  const label    = currentUser.label || username;
+  const now      = new Date();
+  const today    = now.toDateString();
+  const thisMonth= now.toISOString().slice(0, 7);
+  const thisYear = String(now.getFullYear());
+
+  // Filtrer mes ventes (username OU label pour rétrocompat)
+  const mySales = sales.filter(s => s.caissier === username || s.caissier === label);
+
+  // Période sélectionnée
+  let periodSales, periodLabel;
+  if (period === 'day') {
+    periodSales  = mySales.filter(s => { const d = parseSaleDate(s.date); return d && d.toDateString() === today; });
+    periodLabel  = "Aujourd'hui";
+  } else if (period === 'month') {
+    periodSales  = mySales.filter(s => saleDateKey(s.date).startsWith(thisMonth));
+    const ml     = now.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+    periodLabel  = ml.charAt(0).toUpperCase() + ml.slice(1);
+  } else {
+    periodSales  = mySales.filter(s => saleDateKey(s.date).startsWith(thisYear));
+    periodLabel  = `Année ${thisYear}`;
+  }
+
+  const totalPeriod = periodSales.reduce((s, i) => s + (Number(i.total) || 0), 0);
+  const countPeriod = periodSales.length;
+  const avgBasket   = countPeriod > 0 ? Math.round(totalPeriod / countPeriod) : 0;
+
+  // Stats du jour et du mois (toujours calculées pour l'objectif)
+  const todaySales  = mySales.filter(s => { const d = parseSaleDate(s.date); return d && d.toDateString() === today; });
+  const monthSales  = mySales.filter(s => saleDateKey(s.date).startsWith(thisMonth));
+  const totalToday  = todaySales.reduce((s, i) => s + (Number(i.total) || 0), 0);
+  const totalMonth  = monthSales.reduce((s, i) => s + (Number(i.total) || 0), 0);
+  const countMonth  = monthSales.length;
+
+  // Objectif mensuel
+  const objMonth   = getObjectif(username);
+  const progPct    = objMonth > 0 ? Math.min(100, Math.round(totalMonth / objMonth * 100)) : 0;
+  const progColor  = progPct >= 100 ? '#16a34a' : progPct >= 70 ? '#d97706' : '#dc2626';
+  const progBg     = progPct >= 100 ? '#dcfce7' : progPct >= 70 ? '#fef3c7' : '#fee2e2';
+
+  // Graphique 7 jours (mes ventes)
+  const days7 = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    const ds = d.toDateString();
+    const t  = mySales.filter(s => { const sd = parseSaleDate(s.date); return sd && sd.toDateString() === ds; })
+                       .reduce((a, b) => a + (Number(b.total) || 0), 0);
+    days7.push({ label: d.toLocaleDateString('fr-FR', { weekday: 'short' }), total: t });
+  }
+  const maxDay = Math.max(...days7.map(d => d.total), 1);
+
+  // Mes 5 dernières transactions
+  const last5 = [...mySales]
+    .sort((a, b) => (parseSaleDate(b.date)?.getTime() || 0) - (parseSaleDate(a.date)?.getTime() || 0))
+    .slice(0, 5);
+
+  // Mise à jour header
+  const greetEl = document.getElementById('dashCaissierGreet');
+  const subEl   = document.getElementById('dashCaissierSub');
+  if (greetEl) greetEl.textContent = `Bonjour, ${label}`;
+  if (subEl)   subEl.textContent   = periodLabel;
+
+  // Rendu du contenu
+  const container = document.getElementById('dashCaissierContent');
+  if (!container) return;
+
+  container.innerHTML = `
+    <!-- KPI Cards -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:12px;margin-bottom:16px">
+      ${_dashKpi(period==='day'?"Ventes auj.":(period==='month'?'Ventes ce mois':'Ventes cette année'), fmt(totalPeriod), countPeriod+' transaction'+(countPeriod>1?'s':''), '#e8f4f0','#1a4a3a')}
+      ${period!=='day'?_dashKpi("Aujourd'hui", fmt(totalToday), todaySales.length+' transaction'+(todaySales.length>1?'s':''), '#dbeafe','#1e40af'):''}
+      ${_dashKpi('Transactions', String(countPeriod), period==='day'?'ce jour':(period==='month'?'ce mois':'cette année'), '#fdf0e8','#c2410c')}
+      ${_dashKpi('Panier moyen', fmt(avgBasket), 'par transaction', '#f3e8ff','#7e22ce')}
+    </div>
+
+    <!-- Objectif mensuel -->
+    ${objMonth > 0 ? `
+    <div style="background:${progBg};border:1px solid ${progColor}44;border-radius:14px;padding:16px 20px;margin-bottom:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:${progColor}">Objectif mensuel</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:3px">${fmt(totalMonth)} sur ${fmt(objMonth)}</div>
+        </div>
+        <div style="font-size:32px;font-weight:900;color:${progColor};line-height:1">${progPct}%</div>
+      </div>
+      <div style="background:${progColor}28;border-radius:100px;height:10px;overflow:hidden">
+        <div style="background:${progColor};height:100%;width:${progPct}%;border-radius:100px;transition:.6s ease"></div>
+      </div>
+      ${progPct>=100?`<div style="font-size:12px;font-weight:700;color:${progColor};margin-top:8px;text-align:center">Objectif atteint ce mois !</div>`:''}
+    </div>` : `
+    <div style="background:var(--surface2);border:1px dashed var(--border);border-radius:14px;padding:14px 18px;margin-bottom:16px;text-align:center">
+      <div style="font-size:13px;color:var(--muted)">Aucun objectif défini — demandez à votre administrateur de le configurer.</div>
+    </div>`}
+
+    <!-- Graphique 7 jours -->
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px 18px;margin-bottom:16px">
+      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:14px">Mes ventes — 7 derniers jours</div>
+      <div style="display:flex;align-items:flex-end;height:90px;gap:3px">
+        ${days7.map(d=>`
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">
+            <div style="flex:1;width:100%;display:flex;align-items:flex-end;justify-content:center">
+              <div style="width:78%;height:${Math.max(3,Math.round(d.total/maxDay*80))}px;background:${d.total>0?'var(--accent)':'var(--border)'};border-radius:4px 4px 0 0"></div>
+            </div>
+            <span style="font-size:9px;color:var(--muted)">${d.label}</span>
+          </div>`).join('')}
+      </div>
+    </div>
+
+    <!-- 5 dernières transactions -->
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden">
+      <div style="padding:13px 16px;border-bottom:1px solid var(--border)">
+        <span style="font-size:13px;font-weight:700;color:var(--text)">Mes dernières ventes</span>
+      </div>
+      ${last5.length===0
+        ? `<div style="text-align:center;padding:28px;color:var(--muted);font-size:13px">Aucune vente enregistrée</div>`
+        : last5.map(s => {
+            const d = parseSaleDate(s.date);
+            const dateStr = d ? d.toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
+            const items = (s.items||[]).map(i=>`${i.name} ×${i.qty}`).join(', ') || '—';
+            return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--border);gap:12px">
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${items}</div>
+                <div style="font-size:11px;color:var(--muted)">${dateStr}</div>
+              </div>
+              <div style="font-size:14px;font-weight:700;color:var(--accent);white-space:nowrap">${fmt(s.total)}</div>
+            </div>`;
+          }).join('')}
+    </div>`;
+}
+
+function _dashKpi(label, value, sub, bgColor, textColor) {
+  return `
+    <div style="background:${bgColor};border:1px solid ${textColor}20;border-radius:12px;padding:14px 16px">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:${textColor};opacity:.75;margin-bottom:6px;line-height:1.2">${label}</div>
+      <div style="font-size:19px;font-weight:800;color:${textColor};line-height:1">${value}</div>
+      <div style="font-size:11px;color:${textColor};opacity:.6;margin-top:4px">${sub}</div>
+    </div>`;
+}
 
 // ============================================================
 // SAISIE RAPIDE COMMERCIALE
