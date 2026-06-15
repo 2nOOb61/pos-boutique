@@ -1297,7 +1297,7 @@ function handleGetControlPatron(data) {
   var parCais = {}, parClient = {};
   function cais_(nom) {
     var n = String(nom || '').trim() || 'Inconnu';
-    if (!parCais[n]) parCais[n] = { nom:n, nbVentes:0, engage:0, encaisse:0, restant:0 };
+    if (!parCais[n]) parCais[n] = { nom:n, nb:0, nbVentes:0, engage:0, encaisse:0, restant:0 };
     return parCais[n];
   }
   function client_(nom) {
@@ -1317,7 +1317,7 @@ function handleGetControlPatron(data) {
       if (!inRange_(vRows[i][1])) continue;
       var tot = Number(vRows[i][7]) || 0;
       totals.engage += tot; totals.encaisse += tot; totals.nbVentes++;
-      var cv = cais_(vRows[i][11]); cv.nbVentes++; cv.engage += tot; cv.encaisse += tot;
+      var cv = cais_(vRows[i][11]); cv.nb++; cv.nbVentes++; cv.engage += tot; cv.encaisse += tot;
     }
   }
 
@@ -1333,7 +1333,7 @@ function handleGetControlPatron(data) {
       if (!inRange_(rc[1])) continue;
       var tC = Number(rc[12]) || 0, aC = Number(rc[13]) || 0, reC = Number(rc[14]) || 0;
       totals.engage += tC; totals.encaisse += aC; totals.restant += reC; totals.nbEnCours++;
-      var ccC = cais_(rc[2]); ccC.engage += tC; ccC.encaisse += aC; ccC.restant += reC;
+      var ccC = cais_(rc[2]); ccC.nb++; ccC.engage += tC; ccC.encaisse += aC; ccC.restant += reC;
       var clC = client_(rc[3]); clC.nb++; clC.engage += tC; clC.accompte += aC; clC.restant += reC;
     }
   }
@@ -1352,7 +1352,7 @@ function handleGetControlPatron(data) {
       if (!inRange_(rr[1])) continue;
       var tR = Number(rr[11]) || 0, aR = Number(rr[12]) || 0, reR = Number(rr[13]) || 0;
       totals.engage += tR; totals.encaisse += aR; totals.restant += reR; totals.nbEnCours++;
-      var ccR = cais_(rr[17]); ccR.engage += tR; ccR.encaisse += aR; ccR.restant += reR;
+      var ccR = cais_(rr[17]); ccR.nb++; ccR.engage += tR; ccR.encaisse += aR; ccR.restant += reR;
       var clR = client_(rr[3]); clR.nb++; clR.engage += tR; clR.accompte += aR; clR.restant += reR;
     }
   }

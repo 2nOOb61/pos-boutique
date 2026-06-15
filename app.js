@@ -8843,14 +8843,14 @@ async function renderControlFinance() {
     ${_pdbKpi('Total engagé', fmt(t.engage), 'sur la période', '#2563eb')}
     ${_pdbKpi('Encaissé', fmt(t.encaisse), 'déjà reçu', '#16a34a')}
     ${_pdbKpi('Reste à recouvrer', fmt(t.restant), (r.parClient||[]).length + ' client(s)', '#dc2626')}
-    ${_pdbKpi('Ventes · En cours', (t.nbVentes||0) + ' · ' + (t.nbEnCours||0), 'terminées · à recouvrer', '#7c3aed')}
+    ${_pdbKpi('Opérations', ((t.nbVentes||0) + (t.nbEnCours||0)), (t.nbVentes||0) + ' vente(s) · ' + (t.nbEnCours||0) + ' commande(s)/résa', '#7c3aed')}
   </div>`;
 
   const cais = r.parCaissier || [];
   const caisRows = cais.length
     ? cais.map(c => `<tr>
         <td><span style="font-weight:600">${_cfEsc(c.nom)}</span></td>
-        <td style="text-align:center">${c.nbVentes||0}</td>
+        <td style="text-align:center">${c.nb||0}</td>
         <td style="text-align:right">${fmt(c.engage)}</td>
         <td style="text-align:right;color:#16a34a">${fmt(c.encaisse)}</td>
         <td style="text-align:right;color:#dc2626;font-weight:600">${fmt(c.restant)}</td>
@@ -8858,7 +8858,7 @@ async function renderControlFinance() {
     : `<tr><td colspan="5"><div class="pdb-empty">Aucune vente sur la période</div></td></tr>`;
   const caisHtml = `<div class="pdb-section">
     <div class="pdb-section-head"><div><div class="pdb-section-title">Par caissier</div><div class="pdb-section-sub">Ventes + commandes/réservations en cours</div></div><span class="pdb-section-badge" style="background:#e8f4f0;color:#1a4a3a">${cais.length} caissier(s)</span></div>
-    <table class="pdb-table"><thead><tr><th>Caissier</th><th style="text-align:center">Ventes</th><th style="text-align:right">Engagé</th><th style="text-align:right">Encaissé</th><th style="text-align:right">Restant</th></tr></thead><tbody>${caisRows}</tbody></table>
+    <table class="pdb-table"><thead><tr><th>Caissier</th><th style="text-align:center">Opér.</th><th style="text-align:right">Engagé</th><th style="text-align:right">Encaissé</th><th style="text-align:right">Restant</th></tr></thead><tbody>${caisRows}</tbody></table>
   </div>`;
 
   const cli = r.parClient || [];
