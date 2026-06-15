@@ -1363,7 +1363,52 @@ function handleGetControlPatron(data) {
     .filter(function(c){ return c.restant > 0; })
     .sort(function(a, b){ return b.restant - a.restant; });
 
-  return { ok:true, totals:totals, parCaissier:caissiers, parClient:clients };
+  // ── VENTES PAR JOUR : chaque entrée POS comptée comme une vente à sa DATE D'ENTRÉE ──
+  // (commandes + réservations + ventes comptant ; chaque transaction comptée une seule fois)
+  var parJour = {};
+  var tz = Session.getScriptTimeZone();
+  function jourKey_(v) { var d = _ctrlParseDate(v); return d ? Utilities.formatDate(d, tz, 'yyyy-MM-dd') : null; }
+  function addJour_(v, montant) {
+    var j = jourKey_(v); if (!j) return;
+    if (!parJour[j]) parJour[j] = { jour:j, nb:0, montant:0 };
+    parJour[j].nb++; parJour[j].montant += (Number(montant) || 0);
+  }
+  var finalizedIds = {};
+  if (shC && shC.getLastRow() > 1) {
+    var cJ = shC.getRange(2, 1, shC.getLastRow() - 1, 22).getValues();
+    for (var ja = 0; ja < cJ.length; ja++) {
+      var rcj = cJ[ja]; if (!rcj[0]) continue;
+      var vidc = String(rcj[21] || '').trim(); if (vidc) finalizedIds[vidc] = true;
+      var stc = String(rcj[19] || ''); if (stc === 'Annulée' || stc === 'Annulé') continue;
+      if (!inRange_(rcj[1])) continue;
+      addJour_(rcj[1], rcj[12]);
+    }
+  }
+  if (shR && shR.getLastRow() > 1) {
+    var rJ = shR.getRange(2, 1, shR.getLastRow() - 1, 22).getValues();
+    var rSeenJ = {};
+    for (var jb = 0; jb < rJ.length; jb++) {
+      var rrj = rJ[jb]; var ridj = String(rrj[0]); if (!ridj || rSeenJ[ridj]) continue; rSeenJ[ridj] = true;
+      var vidr = String(rrj[20] || '').trim(); if (vidr) finalizedIds[vidr] = true;
+      var str = String(rrj[18] || ''); if (str === 'Annulée' || str === 'Annulé') continue;
+      if (!inRange_(rrj[1])) continue;
+      addJour_(rrj[1], rrj[11]);
+    }
+  }
+  if (shV && shV.getLastRow() > 1) {
+    var vJ = shV.getRange(2, 1, shV.getLastRow() - 1, 12).getValues();
+    var vSeenJ = {};
+    for (var jc = 0; jc < vJ.length; jc++) {
+      var vrj = vJ[jc]; var vidj = String(vrj[0]); if (!vidj || vSeenJ[vidj]) continue; vSeenJ[vidj] = true;
+      if (finalizedIds[vidj]) continue;     // déjà comptée via sa commande/réservation
+      if (!inRange_(vrj[1])) continue;
+      addJour_(vrj[1], vrj[7]);
+    }
+  }
+  var jours = Object.keys(parJour).map(function(k){ return parJour[k]; })
+    .sort(function(a, b){ return a.jour < b.jour ? 1 : (a.jour > b.jour ? -1 : 0); });
+
+  return { ok:true, totals:totals, parCaissier:caissiers, parClient:clients, parJour:jours };
 }
 
 function _ctrlParseDate(v) {

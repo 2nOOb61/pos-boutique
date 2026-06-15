@@ -8786,6 +8786,11 @@ function _patronPeriodRange() {
   const mode = _patronPeriod.mode;
   const a = new Date(_patronPeriod.anchor);
   if (mode === 'all') return { from:null, to:null, label:"Tout l'historique" };
+  if (mode === 'day') {
+    const start = _cfStartDay(a), end = _cfEndDay(a);
+    const lbl = a.toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long' });
+    return { from:start.getTime(), to:end.getTime(), label: lbl.charAt(0).toUpperCase() + lbl.slice(1) };
+  }
   if (mode === 'week') {
     const day = (a.getDay() + 6) % 7; // lundi = 0
     const start = _cfStartDay(new Date(a.getFullYear(), a.getMonth(), a.getDate() - day));
@@ -8811,7 +8816,8 @@ function setPatronPeriodMode(mode) {
 }
 function shiftPatronPeriod(dir) {
   const a = new Date(_patronPeriod.anchor);
-  if (_patronPeriod.mode === 'week')       a.setDate(a.getDate() + dir * 7);
+  if (_patronPeriod.mode === 'day')        a.setDate(a.getDate() + dir);
+  else if (_patronPeriod.mode === 'week')  a.setDate(a.getDate() + dir * 7);
   else if (_patronPeriod.mode === 'year')  a.setFullYear(a.getFullYear() + dir);
   else if (_patronPeriod.mode === 'month') a.setMonth(a.getMonth() + dir);
   else return; // 'all' : pas de navigation
@@ -8827,7 +8833,7 @@ function _cfBar() {
   const navBtn = (dir,ch) => `<button onclick="shiftPatronPeriod(${dir})" ${dis?'disabled':''} style="width:30px;height:30px;border:1px solid var(--color-border,#e5e7eb);border-radius:8px;background:transparent;cursor:${dis?'default':'pointer'};opacity:${dis?'.4':'1'};font-size:16px;line-height:1">${ch}</button>`;
   return `
   <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:16px">
-    <div style="display:flex;gap:6px;flex-wrap:wrap">${btn('week','Semaine')}${btn('month','Mois')}${btn('year','Année')}${btn('all','Tout')}</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">${btn('day','Jour')}${btn('week','Semaine')}${btn('month','Mois')}${btn('year','Année')}${btn('all','Tout')}</div>
     <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
       ${navBtn(-1,'‹')}<span style="font-size:13px;font-weight:700;min-width:165px;text-align:center">${_cfEsc(range.label)}</span>${navBtn(1,'›')}
     </div>
@@ -8886,7 +8892,17 @@ async function renderControlFinance() {
     <table class="pdb-table"><thead><tr><th>Client</th><th style="text-align:center">Dossiers</th><th style="text-align:right">Engagé</th><th style="text-align:right">Acompte</th><th style="text-align:right">Restant</th></tr></thead><tbody>${cliRows}</tbody></table>
   </div>`;
 
-  box.innerHTML = _cfBar() + kpis + caisHtml + cliHtml;
+  const jours = r.parJour || [];
+  const _jourLbl = (j) => { const p = String(j).split('-'); const d = new Date(+p[0], +p[1]-1, +p[2]); return d.toLocaleDateString('fr-FR', { weekday:'short', day:'2-digit', month:'2-digit' }); };
+  const jourRows = jours.length
+    ? jours.map(j => `<tr><td style="font-weight:600">${_cfEsc(_jourLbl(j.jour))}</td><td style="text-align:center">${j.nb||0}</td><td style="text-align:right;font-weight:600">${fmt(j.montant)}</td></tr>`).join('')
+    : `<tr><td colspan="3"><div class="pdb-empty">Aucune vente sur la période</div></td></tr>`;
+  const jourHtml = `<div class="pdb-section">
+    <div class="pdb-section-head"><div><div class="pdb-section-title">Ventes par jour</div><div class="pdb-section-sub">chaque entrée POS comptée à sa date d'entrée</div></div><span class="pdb-section-badge" style="background:#e8f4f0;color:#1a4a3a">${jours.length} jour(s)</span></div>
+    <table class="pdb-table"><thead><tr><th>Jour</th><th style="text-align:center">Nb</th><th style="text-align:right">Montant</th></tr></thead><tbody>${jourRows}</tbody></table>
+  </div>`;
+
+  box.innerHTML = _cfBar() + kpis + jourHtml + caisHtml + cliHtml;
 }
 
 function renderPatronDashboard() {
