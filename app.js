@@ -349,7 +349,7 @@ function showPage(id, btn, bnavBtn) {
   document.querySelectorAll('.nav-btn').forEach(b => {
     if (b.getAttribute('onclick') && b.getAttribute('onclick').includes("'"+id+"'")) b.classList.add('active');
   });
-  if (id==='stats')           { renderStats(); _autoRefreshStats(); _loadProdStats(); }
+  if (id==='stats')           { renderStats(); loadSalesFromScript(true, true).then(renderStats); _loadProdStats(); }
   if (id==='mon-dashboard')  { renderMonDashboard(); }
   if (id==='config')         { renderConfigPage(); renderRythmeConfig(); renderObjectifsConfig(); }
   if (id==='users')        renderUsersPage();
@@ -1060,8 +1060,8 @@ function renderReservations() {
     const actions = r.status === 'pending' ? `
       <button class="btn-finalize" onclick="openFinalizeModal('${r.id}')"> Finaliser</button>
       <button class="btn-cancel-res" onclick="cancelReservation('${r.id}')"> Annuler</button>
-      <button class="btn-reprint-res" onclick="printReservationTicket(reservations.find(x=>String(x.id)==='${r.id}'))" title="Réimprimer"></button>
-    ` : `<button class="btn-reprint-res" onclick="printReservationTicket(reservations.find(x=>String(x.id)==='${r.id}'))" title="Réimprimer"></button>`;
+      <button class="btn-reprint-res" onclick="printReservationTicket(reservations.find(x=>String(x.id)==='${r.id}'))" title="Réimprimer le ticket">🖨 Imprimer</button>
+    ` : `<button class="btn-reprint-res" onclick="printReservationTicket(reservations.find(x=>String(x.id)==='${r.id}'))" title="Réimprimer le ticket">🖨 Imprimer</button>`;
 
     return `
     <div class="res-card">
@@ -2259,7 +2259,7 @@ function _renderStatsInner() {
           <td>${_payLabel(s)}</td>
           <td class="td-mono" style="font-weight:600;color:var(--accent)">${fmt(total)}</td>
           ${dueCell}
-          <td><button class="btn-icon" onclick="reprintTicket(${s.id})" title="Réimprimer"></button></td>
+          <td><button class="btn-icon" onclick="reprintTicket(${s.id})" title="Réimprimer le ticket" style="font-size:12px;white-space:nowrap;color:var(--accent,#e8834a);font-weight:600">🖨 Imprimer</button></td>
           <td style="white-space:nowrap">${adminActions}</td>
         </tr>`;
       }).join('');
@@ -3672,32 +3672,40 @@ async function syncStockMove(productName, type, qty, reason) {
 }
 
 // ── Charger l'historique des ventes depuis Sheet (pagination offset) ─────
-async function loadSalesFromScript(fullReload = false) {
+async function loadSalesFromScript(fullReload = false, serverTruth = false) {
   if (!APPS_SCRIPT_URL) return;
   showLoader('Chargement des ventes...');
   let allRemote = [];
+  let gotResponse = false;
   const PAGE = 500;
   let offset = 0;
   // Charger jusqu'à 2000 ventes par pages de 500
   while (offset < 2000) {
     const r = await apiCall({ action: 'getSales', limit: PAGE, offset });
     if (!r || !r.ok || !Array.isArray(r.sales)) break;
+    gotResponse = true;
     allRemote = allRemote.concat(r.sales);
     if (r.sales.length < PAGE) break;  // dernière page
     offset += PAGE;
   }
   hideLoader();
-  if (allRemote.length > 0) {
+  const sortByDate = (a, b) => {
+    const da = parseSaleDate(a.date), db = parseSaleDate(b.date);
+    if (!da && !db) return 0;
+    if (!da) return 1;
+    if (!db) return -1;
+    return db - da;
+  };
+  if (serverTruth && gotResponse) {
+    // Le serveur fait foi : dédoublonner et jeter le cache local périmé (ghosts)
+    const seen = new Set();
+    sales = allRemote.filter(s => { const k = String(s.id); if (seen.has(k)) return false; seen.add(k); return true; });
+    sales.sort(sortByDate);
+  } else if (allRemote.length > 0) {
     const sheetIds = new Set(allRemote.map(s => String(s.id)));
     const localOnly = sales.filter(s => !sheetIds.has(String(s.id)));
     sales = [...allRemote, ...localOnly];
-    sales.sort((a, b) => {
-      const da = parseSaleDate(a.date), db = parseSaleDate(b.date);
-      if (!da && !db) return 0;
-      if (!da) return 1;
-      if (!db) return -1;
-      return db - da;
-    });
+    sales.sort(sortByDate);
   }
   saveData();
 }
