@@ -1280,8 +1280,9 @@ function _ticketShopHeader(tc, st) {
 }
 
 function _openTicketWindow(htmlBody, title='Ticket') {
+  const w = window.open('', '_blank', 'width=420,height=620');
+  if (!w) { alert("Impression bloquée : autorisez les fenêtres pop-up pour ce site, puis réessayez."); return; }
   setTimeout(() => {
-    const w = window.open('', '_blank', 'width=420,height=620');
     const tc = shopConfig;
     const font = tc.ticketFont || 'Arial';
     w.document.write(`<html><head><title>${title}</title><style>
@@ -2259,7 +2260,7 @@ function _renderStatsInner() {
           <td>${_payLabel(s)}</td>
           <td class="td-mono" style="font-weight:600;color:var(--accent)">${fmt(total)}</td>
           ${dueCell}
-          <td><button class="btn-icon" onclick="reprintTicket(${s.id})" title="Réimprimer le ticket" style="font-size:12px;white-space:nowrap;color:var(--accent,#e8834a);font-weight:600">🖨 Imprimer</button></td>
+          <td><button class="btn-icon" onclick="reprintTicket('${s.id}')" title="Réimprimer le ticket" style="font-size:12px;white-space:nowrap;color:var(--accent,#e8834a);font-weight:600">🖨 Imprimer</button></td>
           <td style="white-space:nowrap">${adminActions}</td>
         </tr>`;
       }).join('');
@@ -2284,8 +2285,9 @@ function _renderStatsInner() {
   renderCaissierStats();
 } // end _renderStatsInner
 function reprintTicket(id) {
-  const s = sales.find(s=>s.id===id);
+  const s = sales.find(s=>String(s.id)===String(id));
   if(s) printTicket(s);
+  else alert("Vente introuvable pour réimpression (recharge la page).");
 }
 
 // ============================================================
