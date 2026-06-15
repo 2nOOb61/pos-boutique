@@ -106,6 +106,7 @@ function doPost(e) {
     else if (action === 'deleteTache')       result = handleDeleteTache(data);
     else if (action === 'pointerAction')     result = handlePointerAction(data);
     else if (action === 'getDashboard')      result = handleGetDashboard();
+    else if (action === 'getControlPatron')  result = handleGetControlPatron(data);
     else if (action === 'uploadFile')        result = handleUploadFile(data);
     else if (action === 'getDriveFolderUrl') result = handleGetDriveFolderUrl();
     else if (action === 'clearAllData')      result = handleClearAllData(data);
@@ -153,6 +154,7 @@ function doGet(e) {
       else if (action === 'saveTacheLibre')    result = handleSaveTacheLibre(data);
       else if (action === 'saveDossier')       result = handleSaveDossier(data);
       else if (action === 'creerDossierManuel') result = handleCreerDossierManuel(data);
+      else if (action === 'getControlPatron')   result = handleGetControlPatron(data);
       else result = { ok:false, error:'Action payload inconnue: ' + action };
       return jsonResp(result);
     } catch(err) {
@@ -1266,6 +1268,109 @@ function handleGetDashboard() {
   };
   try { cache.put(cacheKey, JSON.stringify(result), 180); } catch(e) {} // cache 3 min
   return result;
+}
+
+// ============================================================
+// CONTRÔLE PATRON — agrégation financière par période
+// Ventes (terminées, encaissées) + Commandes/Réservations EN COURS
+// (non finalisées). Pas de double compte : une commande/réservation
+// finalisée (Vente_ID rempli) est déjà comptée dans Ventes.
+// Filtre [from,to] en epoch ms (calculés côté client selon la période).
+// ============================================================
+function handleGetControlPatron(data) {
+  data = data || {};
+  var from = (data.from !== undefined && data.from !== null && data.from !== '') ? Number(data.from) : null;
+  var to   = (data.to   !== undefined && data.to   !== null && data.to   !== '') ? Number(data.to)   : null;
+  function inRange_(v) {
+    if (from === null && to === null) return true;
+    var d = _ctrlParseDate(v);
+    if (!d) return false;
+    var t = d.getTime();
+    if (from !== null && t < from) return false;
+    if (to   !== null && t > to)   return false;
+    return true;
+  }
+
+  var ss = getSS();
+  var totals = { engage:0, encaisse:0, restant:0, nbVentes:0, nbEnCours:0 };
+  var parCais = {}, parClient = {};
+  function cais_(nom) {
+    var n = String(nom || '').trim() || 'Inconnu';
+    if (!parCais[n]) parCais[n] = { nom:n, nbVentes:0, engage:0, encaisse:0, restant:0 };
+    return parCais[n];
+  }
+  function client_(nom) {
+    var n = String(nom || '').trim() || 'Sans nom';
+    if (!parClient[n]) parClient[n] = { client:n, nb:0, engage:0, accompte:0, restant:0 };
+    return parClient[n];
+  }
+
+  // ── Ventes (terminées) — multi-lignes par ID ──
+  var shV = ss.getSheetByName(SHEET_SALES);
+  if (shV && shV.getLastRow() > 1) {
+    var vRows = shV.getRange(2, 1, shV.getLastRow() - 1, 12).getValues();
+    var vSeen = {};
+    for (var i = 0; i < vRows.length; i++) {
+      var vid = String(vRows[i][0]); if (!vid || vSeen[vid]) continue;
+      vSeen[vid] = true;
+      if (!inRange_(vRows[i][1])) continue;
+      var tot = Number(vRows[i][7]) || 0;
+      totals.engage += tot; totals.encaisse += tot; totals.nbVentes++;
+      var cv = cais_(vRows[i][11]); cv.nbVentes++; cv.engage += tot; cv.encaisse += tot;
+    }
+  }
+
+  // ── Commandes EN COURS (Statut != Annulée, Vente_ID vide) ──
+  var shC = ss.getSheetByName(SHEET_COMMANDES);
+  if (shC && shC.getLastRow() > 1) {
+    var cRows = shC.getRange(2, 1, shC.getLastRow() - 1, 22).getValues();
+    for (var j = 0; j < cRows.length; j++) {
+      var rc = cRows[j]; if (!rc[0]) continue;
+      if (String(rc[21] || '').trim()) continue;                 // finalisée → dans Ventes
+      var stC = String(rc[19] || '');
+      if (stC === 'Annulée' || stC === 'Annulé') continue;
+      if (!inRange_(rc[1])) continue;
+      var tC = Number(rc[12]) || 0, aC = Number(rc[13]) || 0, reC = Number(rc[14]) || 0;
+      totals.engage += tC; totals.encaisse += aC; totals.restant += reC; totals.nbEnCours++;
+      var ccC = cais_(rc[2]); ccC.engage += tC; ccC.encaisse += aC; ccC.restant += reC;
+      var clC = client_(rc[3]); clC.nb++; clC.engage += tC; clC.accompte += aC; clC.restant += reC;
+    }
+  }
+
+  // ── Réservations EN COURS — multi-lignes par ID ──
+  var shR = ss.getSheetByName(SHEET_RESERVATIONS);
+  if (shR && shR.getLastRow() > 1) {
+    var rRows = shR.getRange(2, 1, shR.getLastRow() - 1, 22).getValues();
+    var rSeen = {};
+    for (var k = 0; k < rRows.length; k++) {
+      var rr = rRows[k]; var rid = String(rr[0]); if (!rid || rSeen[rid]) continue;
+      rSeen[rid] = true;
+      if (String(rr[20] || '').trim()) continue;                 // finalisée → dans Ventes
+      var stR = String(rr[18] || '');
+      if (stR === 'Annulée' || stR === 'Annulé') continue;
+      if (!inRange_(rr[1])) continue;
+      var tR = Number(rr[11]) || 0, aR = Number(rr[12]) || 0, reR = Number(rr[13]) || 0;
+      totals.engage += tR; totals.encaisse += aR; totals.restant += reR; totals.nbEnCours++;
+      var ccR = cais_(rr[17]); ccR.engage += tR; ccR.encaisse += aR; ccR.restant += reR;
+      var clR = client_(rr[3]); clR.nb++; clR.engage += tR; clR.accompte += aR; clR.restant += reR;
+    }
+  }
+
+  var caissiers = Object.keys(parCais).map(function(x){ return parCais[x]; })
+    .sort(function(a, b){ return b.engage - a.engage; });
+  var clients = Object.keys(parClient).map(function(x){ return parClient[x]; })
+    .filter(function(c){ return c.restant > 0; })
+    .sort(function(a, b){ return b.restant - a.restant; });
+
+  return { ok:true, totals:totals, parCaissier:caissiers, parClient:clients };
+}
+
+function _ctrlParseDate(v) {
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
+  var s = String(v || '').trim(); if (!s) return null;
+  var m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2}))?/);
+  if (m) return new Date(+m[3], +m[2] - 1, +m[1], m[4] ? +m[4] : 0, m[5] ? +m[5] : 0);
+  var d = new Date(s); return isNaN(d.getTime()) ? null : d;
 }
 
 // ============================================================

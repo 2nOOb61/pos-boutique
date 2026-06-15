@@ -365,7 +365,7 @@ function showPage(id, btn, bnavBtn) {
   }
   if (id==='production')   { loadTaches(); _autoRefreshProduction(); initModulesProduction(); }
   if (id==='messagerie')   { loadMessagerie(); _autoRefreshMessagerie(); }
-  if (id==='patron')       { renderPatronDashboard(); _autoRefreshPatron(); }
+  if (id==='patron')       { renderControlFinance(); renderPatronDashboard(); _autoRefreshPatron(); }
   if (id==='commandes')    { _ensureDossierLinks(); renderCommandes(); _autoRefreshCommandes(); _loadTachesQuietly().then(renderCommandes); }
   // Garde d'accès par rôle
   if (currentUser) {
@@ -8754,8 +8754,126 @@ async function refreshPatronDashboard(btn) {
   _lastPatronRefresh = 0;
   if (btn) { btn.disabled = true; document.getElementById('patronRefreshIcon').style.animation = 'spin .8s linear infinite'; }
   await _autoRefreshPatron();
+  renderControlFinance();
   if (btn) { btn.disabled = false; document.getElementById('patronRefreshIcon').style.animation = ''; }
   showToast('Tableau de bord actualisé');
+}
+
+// ============================================================
+// CONTRÔLE FINANCIER PATRON — par période (semaine / mois / année / tout)
+// Données agrégées CÔTÉ SERVEUR (action getControlPatron) pour couvrir
+// TOUT l'historique, pas seulement les ventes chargées côté client.
+// ============================================================
+let _patronPeriod = { mode: 'month', anchor: new Date() };
+
+function _cfEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]; }); }
+function _cfStartDay(d){ const x=new Date(d); x.setHours(0,0,0,0); return x; }
+function _cfEndDay(d){ const x=new Date(d); x.setHours(23,59,59,999); return x; }
+
+function _patronPeriodRange() {
+  const mode = _patronPeriod.mode;
+  const a = new Date(_patronPeriod.anchor);
+  if (mode === 'all') return { from:null, to:null, label:"Tout l'historique" };
+  if (mode === 'week') {
+    const day = (a.getDay() + 6) % 7; // lundi = 0
+    const start = _cfStartDay(new Date(a.getFullYear(), a.getMonth(), a.getDate() - day));
+    const end   = _cfEndDay(new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6));
+    const f = d => d.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit' });
+    return { from:start.getTime(), to:end.getTime(), label:'Semaine ' + f(start) + ' – ' + f(end) };
+  }
+  if (mode === 'year') {
+    const start = _cfStartDay(new Date(a.getFullYear(), 0, 1));
+    const end   = _cfEndDay(new Date(a.getFullYear(), 11, 31));
+    return { from:start.getTime(), to:end.getTime(), label:'Année ' + a.getFullYear() };
+  }
+  const start = _cfStartDay(new Date(a.getFullYear(), a.getMonth(), 1));
+  const end   = _cfEndDay(new Date(a.getFullYear(), a.getMonth() + 1, 0));
+  const lbl = start.toLocaleDateString('fr-FR', { month:'long', year:'numeric' });
+  return { from:start.getTime(), to:end.getTime(), label: lbl.charAt(0).toUpperCase() + lbl.slice(1) };
+}
+
+function setPatronPeriodMode(mode) {
+  _patronPeriod.mode = mode;
+  _patronPeriod.anchor = new Date();
+  renderControlFinance();
+}
+function shiftPatronPeriod(dir) {
+  const a = new Date(_patronPeriod.anchor);
+  if (_patronPeriod.mode === 'week')       a.setDate(a.getDate() + dir * 7);
+  else if (_patronPeriod.mode === 'year')  a.setFullYear(a.getFullYear() + dir);
+  else if (_patronPeriod.mode === 'month') a.setMonth(a.getMonth() + dir);
+  else return; // 'all' : pas de navigation
+  _patronPeriod.anchor = a;
+  renderControlFinance();
+}
+
+function _cfBar() {
+  const mode = _patronPeriod.mode;
+  const range = _patronPeriodRange();
+  const btn = (m, lbl) => `<button onclick="setPatronPeriodMode('${m}')" style="padding:6px 13px;border:1px solid var(--color-border,#e5e7eb);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;background:${mode===m?'var(--color-primary,#1a4a3a)':'transparent'};color:${mode===m?'#fff':'var(--color-text,#374151)'}">${lbl}</button>`;
+  const dis = mode === 'all';
+  const navBtn = (dir,ch) => `<button onclick="shiftPatronPeriod(${dir})" ${dis?'disabled':''} style="width:30px;height:30px;border:1px solid var(--color-border,#e5e7eb);border-radius:8px;background:transparent;cursor:${dis?'default':'pointer'};opacity:${dis?'.4':'1'};font-size:16px;line-height:1">${ch}</button>`;
+  return `
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:16px">
+    <div style="display:flex;gap:6px;flex-wrap:wrap">${btn('week','Semaine')}${btn('month','Mois')}${btn('year','Année')}${btn('all','Tout')}</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
+      ${navBtn(-1,'‹')}<span style="font-size:13px;font-weight:700;min-width:165px;text-align:center">${_cfEsc(range.label)}</span>${navBtn(1,'›')}
+    </div>
+  </div>`;
+}
+
+async function renderControlFinance() {
+  const box = document.getElementById('patronControlFinance');
+  if (!box) return;
+  const range = _patronPeriodRange();
+  box.innerHTML = _cfBar() + `<div style="padding:28px 0;text-align:center;color:var(--color-text-muted,#9ca3af);font-size:13px">Calcul en cours…</div>`;
+
+  let r = null;
+  try { r = await apiCall({ action:'getControlPatron', from: range.from, to: range.to }); } catch(e) {}
+  if (!r || !r.ok) {
+    box.innerHTML = _cfBar() + `<div style="padding:18px;border:1px solid var(--color-border,#e5e7eb);border-radius:10px;color:#dc2626;font-size:13px">Impossible de charger le contrôle financier${APPS_SCRIPT_URL ? '' : ' (Apps Script non configuré)'}.</div>`;
+    return;
+  }
+  const t = r.totals || { engage:0, encaisse:0, restant:0, nbVentes:0, nbEnCours:0 };
+
+  const kpis = `<div class="pdb-kpi-grid">
+    ${_pdbKpi('Total engagé', fmt(t.engage), 'sur la période', '#2563eb')}
+    ${_pdbKpi('Encaissé', fmt(t.encaisse), 'déjà reçu', '#16a34a')}
+    ${_pdbKpi('Reste à recouvrer', fmt(t.restant), (r.parClient||[]).length + ' client(s)', '#dc2626')}
+    ${_pdbKpi('Ventes · En cours', (t.nbVentes||0) + ' · ' + (t.nbEnCours||0), 'terminées · à recouvrer', '#7c3aed')}
+  </div>`;
+
+  const cais = r.parCaissier || [];
+  const caisRows = cais.length
+    ? cais.map(c => `<tr>
+        <td><span style="font-weight:600">${_cfEsc(c.nom)}</span></td>
+        <td style="text-align:center">${c.nbVentes||0}</td>
+        <td style="text-align:right">${fmt(c.engage)}</td>
+        <td style="text-align:right;color:#16a34a">${fmt(c.encaisse)}</td>
+        <td style="text-align:right;color:#dc2626;font-weight:600">${fmt(c.restant)}</td>
+      </tr>`).join('')
+    : `<tr><td colspan="5"><div class="pdb-empty">Aucune vente sur la période</div></td></tr>`;
+  const caisHtml = `<div class="pdb-section">
+    <div class="pdb-section-head"><div><div class="pdb-section-title">Par caissier</div><div class="pdb-section-sub">Ventes + commandes/réservations en cours</div></div><span class="pdb-section-badge" style="background:#e8f4f0;color:#1a4a3a">${cais.length} caissier(s)</span></div>
+    <table class="pdb-table"><thead><tr><th>Caissier</th><th style="text-align:center">Ventes</th><th style="text-align:right">Engagé</th><th style="text-align:right">Encaissé</th><th style="text-align:right">Restant</th></tr></thead><tbody>${caisRows}</tbody></table>
+  </div>`;
+
+  const cli = r.parClient || [];
+  const cliRows = cli.length
+    ? cli.map(c => `<tr>
+        <td><span style="font-weight:600">${_cfEsc(c.client)}</span></td>
+        <td style="text-align:center">${c.nb||0}</td>
+        <td style="text-align:right">${fmt(c.engage)}</td>
+        <td style="text-align:right;color:#16a34a">${fmt(c.accompte)}</td>
+        <td style="text-align:right;color:#dc2626;font-weight:600">${fmt(c.restant)}</td>
+      </tr>`).join('')
+    : `<tr><td colspan="5"><div class="pdb-empty">Aucun reste à recouvrer</div></td></tr>`;
+  const cliHtml = `<div class="pdb-section">
+    <div class="pdb-section-head"><div><div class="pdb-section-title">Par client — à recouvrer</div><div class="pdb-section-sub">Commandes / réservations non soldées</div></div><span class="pdb-section-badge" style="background:#fee2e2;color:#dc2626">${fmt(t.restant)}</span></div>
+    <table class="pdb-table"><thead><tr><th>Client</th><th style="text-align:center">Dossiers</th><th style="text-align:right">Engagé</th><th style="text-align:right">Acompte</th><th style="text-align:right">Restant</th></tr></thead><tbody>${cliRows}</tbody></table>
+  </div>`;
+
+  box.innerHTML = _cfBar() + kpis + caisHtml + cliHtml;
 }
 
 function renderPatronDashboard() {
