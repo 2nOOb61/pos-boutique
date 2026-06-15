@@ -175,6 +175,7 @@ function doGet(e) {
     if (action === 'getOperateurs')   return jsonResp(handleGetOperateurs());
     if (action === 'getTaches')       return jsonResp(handleGetTaches(e.parameter));
     if (action === 'getDashboard')    return jsonResp(handleGetDashboard());
+    if (action === 'getControlPatron') return jsonResp(handleGetControlPatron(e.parameter));
     if (action === 'getComments')     return jsonResp(handleGetComments(e.parameter));
     if (action === 'getNotifs')       return jsonResp(handleGetNotifs(e.parameter));
     if (action === 'getShopConfig')   return jsonResp(handleGetShopConfig());

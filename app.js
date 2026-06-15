@@ -3480,7 +3480,7 @@ async function apiCall(payload) {
   if (!APPS_SCRIPT_URL) return null;
 
   // ── LECTURES & LOGIN : requête GET avec params individuels ─
-  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getDossiers', 'getOperateurs', 'getTaches', 'getDashboard', 'getComments', 'getNotifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles'];
+  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getDossiers', 'getOperateurs', 'getTaches', 'getDashboard', 'getControlPatron', 'getComments', 'getNotifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles'];
   if (getActions.includes(payload.action)) {
     try {
       let url = APPS_SCRIPT_URL + '?action=' + payload.action;
@@ -3490,6 +3490,8 @@ async function apiCall(payload) {
       if (payload.statut)    url += '&statut='    + encodeURIComponent(payload.statut);
       if (payload.dossierId) url += '&dossierId=' + encodeURIComponent(payload.dossierId);
       if (payload.operateur) url += '&operateur=' + encodeURIComponent(payload.operateur);
+      if (payload.from != null) url += '&from=' + encodeURIComponent(payload.from);
+      if (payload.to   != null) url += '&to='   + encodeURIComponent(payload.to);
       const res  = await fetch(url);
       const text = await res.text();
       try { return JSON.parse(text); }
@@ -8831,7 +8833,8 @@ async function renderControlFinance() {
   let r = null;
   try { r = await apiCall({ action:'getControlPatron', from: range.from, to: range.to }); } catch(e) {}
   if (!r || !r.ok) {
-    box.innerHTML = _cfBar() + `<div style="padding:18px;border:1px solid var(--color-border,#e5e7eb);border-radius:10px;color:#dc2626;font-size:13px">Impossible de charger le contrôle financier${APPS_SCRIPT_URL ? '' : ' (Apps Script non configuré)'}.</div>`;
+    const _m = r ? (r.error || 'réponse ok=false') : 'aucune réponse (réseau)';
+    box.innerHTML = _cfBar() + `<div style="padding:18px;border:1px solid var(--color-border,#e5e7eb);border-radius:10px;color:#dc2626;font-size:13px">Impossible de charger le contrôle financier${APPS_SCRIPT_URL ? '' : ' (Apps Script non configuré)'} — <span style="font-family:monospace;font-size:12px">${_cfEsc(_m)}</span></div>`;
     return;
   }
   const t = r.totals || { engage:0, encaisse:0, restant:0, nbVentes:0, nbEnCours:0 };
