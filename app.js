@@ -1285,9 +1285,9 @@ function _openTicketWindow(htmlBody, title='Ticket') {
     const tc = shopConfig;
     const font = tc.ticketFont || 'Arial';
     w.document.write(`<html><head><title>${title}</title><style>
-      @page{size:10.5cm 15cm;margin:0.5cm}
+      @page{size:10cm 15cm;margin:0.3cm}
       *{box-sizing:border-box}
-      body{font-family:${font},sans-serif;font-size:10pt;margin:0;padding:0;width:10.5cm;color:#000}
+      body{font-family:${font},sans-serif;font-size:10pt;margin:0;padding:0;width:9.4cm;color:#000}
       .row{display:flex;justify-content:space-between;align-items:baseline;padding:1px 0}
       .row span:first-child{color:#555}
       .row span:last-child{font-weight:500}
