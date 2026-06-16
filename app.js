@@ -1033,7 +1033,9 @@ async function manualRefreshReservations() {
 
 function renderReservations() {
   const filter = document.getElementById('resFilter')?.value || 'pending';
+  const _rq = (document.getElementById('resSearch')?.value||'').trim().toLowerCase();
   let list = reservations.filter(r => filter === 'all' ? true : r.status === filter);
+  if (_rq) list = list.filter(r => ((r.clientName||'')+' '+(r.clientContact||'')+' '+(Array.isArray(r.items)?r.items:[]).map(i=>i.name||'').join(' ')).toLowerCase().includes(_rq));
 
   // Summary (pending only)
   const pending = reservations.filter(r => r.status === 'pending');
@@ -1044,50 +1046,66 @@ function renderReservations() {
 
   const container = document.getElementById('reservationsList');
   if (!container) return;
-
   if (list.length === 0) {
-    container.innerHTML = `<div class="res-empty"> Aucune réservation ${filter === 'pending' ? 'en attente' : ''}</div>`;
+    container.innerHTML = `<div class="res-empty">Aucune réservation${_rq?` pour « ${_rq} »`:(filter === 'pending' ? ' en attente' : '')}</div>`;
     return;
   }
 
-  container.innerHTML = list.map(r => {
-    try {
-    const d = parseSaleDate(r.date);
-    const dateStr = d ? d.toLocaleString('fr-FR') : '—';
-    const statusLabel = { pending: 'En attente', completed: 'Finalisée', cancelled: 'Annulée' }[r.status] || r.status;
-    const statusClass = { pending: 'res-status-pending', completed: 'res-status-completed', cancelled: 'res-status-cancelled' }[r.status] || '';
-    const itemsStr = (Array.isArray(r.items) ? r.items : []).map(i => `${String(i.name||'?')} ×${Number(i.qty)||1} — ${fmt(Number(i.price)||0)}`).join('<br>') || '—';
-    const actions = r.status === 'pending' ? `
-      <button class="btn-finalize" onclick="openFinalizeModal('${r.id}')"> Finaliser</button>
-      <button class="btn-cancel-res" onclick="cancelReservation('${r.id}')"> Annuler</button>
-      <button class="btn-reprint-res" onclick="printReservationTicket(reservations.find(x=>String(x.id)==='${r.id}'))" title="Réimprimer le ticket">🖨 Imprimer</button>
-    ` : `<button class="btn-reprint-res" onclick="printReservationTicket(reservations.find(x=>String(x.id)==='${r.id}'))" title="Réimprimer le ticket">🖨 Imprimer</button>`;
+  list.sort((a,b)=>{const da=parseSaleDate(a.date),db=parseSaleDate(b.date);if(!da&&!db)return 0;if(!da)return 1;if(!db)return -1;return db-da;});
+  const _rgroups=[]; const _rmap={};
+  list.forEach(r=>{ const k=_histDayKey(r.date); if(!_rmap[k]){_rmap[k]={key:k,date:r.date,rows:[],total:0};_rgroups.push(_rmap[k]);} _rmap[k].rows.push(r); _rmap[k].total+=Number(r.total)||0; });
 
-    return `
-    <div class="res-card">
-      <div class="res-card-header">
-        <div>
-          <div class="res-card-client"> ${escapeHtml(r.clientName)} <span style="font-size:12px;color:var(--muted);font-weight:400">#${r.id}</span></div>
-          ${r.clientContact ? `<div class="res-card-contact"> ${escapeHtml(r.clientContact)}</div>` : ''}
-        </div>
-        <div style="text-align:right">
-          <span class="res-status ${statusClass}">${statusLabel}</span>
-          <div class="res-card-date">${dateStr}</div>
-        </div>
-      </div>
-      <div class="res-items" style="line-height:1.8"> ${itemsStr}</div>
-      <div class="res-amounts">
-        <div class="res-amount-item"><span class="lbl">Total</span><span class="val">${fmt(r.total)}</span></div>
-        <div class="res-amount-item"><span class="lbl">Acompte versé</span><span class="val" style="color:var(--green)">${fmt(r.accompte)}</span></div>
-        <div class="res-amount-item"><span class="lbl">Restant dû</span><span class="val" style="color:${r.status==='pending'?'var(--accent)':'var(--muted)'}">${fmt(r.restant)}</span></div>
-      </div>
-      <div class="res-actions">${actions}</div>
-      ${r.status === 'pending' && r.dossierId ? _buildCardProductionSection(r.dossierId) : ''}
-    </div>`;
-    } catch(e) {
-      console.error('renderReservations card #' + r.id + ':', e);
-      return `<div class="res-card" style="color:var(--muted);font-size:13px;padding:12px"> Réservation #${r.id} — erreur affichage: ${e.message}</div>`;
-    }
+  const _pSvg = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>';
+  const _dSvg = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>';
+
+  container.innerHTML = _rgroups.map((_g,_gi)=>{
+    const gid='rg'+_gi;
+    const _ghdr=`<div class="cmd-group" id="rgrp-${gid}" onclick="toggleResGroup('${gid}')"><svg class="gchev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>${_histDayLabel(_g.date)}<span class="gcount">${_g.rows.length}</span><span class="gtotal">${fmt(_g.total)}</span></div>`;
+    const _gcards=_g.rows.map(r => {
+      try {
+        const d = parseSaleDate(r.date);
+        const timeStr = d ? d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}) : '—';
+        const statusLabel = { pending: 'En attente', completed: 'Finalisée', cancelled: 'Annulée' }[r.status] || r.status;
+        const statusClass = { pending: 'res-status-pending', completed: 'res-status-completed', cancelled: 'res-status-cancelled' }[r.status] || '';
+        const itemsStr = (Array.isArray(r.items) ? r.items : []).map(i => `${escapeHtml(String(i.name||'?'))} ×${Number(i.qty)||1} — ${fmt(Number(i.price)||0)}`).join('<br>') || '—';
+        const itemCount = (Array.isArray(r.items)?r.items:[]).length;
+        const printBtn = `<button class="hist-print-btn" onclick="printReservationTicket(reservations.find(x=>String(x.id)==='${r.id}'))" title="Imprimer le ticket">${_pSvg}<span>Imprimer</span></button>`;
+        const finalizeBtn = r.status === 'pending' ? `<button class="btn-finalize" onclick="openFinalizeModal('${r.id}')">Finaliser</button>` : '';
+        const kebab = r.status === 'pending'
+          ? `<div class="kebab-wrap"><button class="kebab-btn" aria-label="Plus d'actions" aria-haspopup="true" onclick="toggleKebab('res${r.id}',event)">${_dSvg}</button><div class="kebab-menu" id="kb-res${r.id}" role="menu"><button class="kebab-item danger" role="menuitem" onclick="closeAllKebabs();cancelReservation('${r.id}')">${_kebabIcon('trash')}<span>Annuler la réservation</span></button></div></div>`
+          : '';
+        return `
+        <div class="res-card" data-rgrp="${gid}">
+          <div class="res-card-header">
+            <div style="min-width:0">
+              <div class="res-card-client">${escapeHtml(r.clientName||'Client')} <span style="font-size:11px;color:var(--muted);font-weight:400">#${r.id}</span></div>
+              <div style="font-size:12px;color:var(--muted)">${r.clientContact ? escapeHtml(r.clientContact)+' · ' : ''}${timeStr}</div>
+            </div>
+            <div style="text-align:right;flex-shrink:0">
+              <span class="res-status ${statusClass}">${statusLabel}</span>
+              <div style="font-size:18px;font-weight:800;color:var(--text);margin-top:5px">${fmt(r.total)}</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;font-size:13px">
+            <span style="color:var(--muted)">Acompte <b style="color:var(--green)">${fmt(r.accompte)}</b></span>
+            <span style="color:var(--muted)">Restant <b style="color:${r.status==='pending'?'var(--red)':'var(--muted)'}">${fmt(r.restant)}</b></span>
+          </div>
+          <button class="cmd-detail-toggle" id="res-det-btn-${r.id}" onclick="toggleResDetail('${r.id}')">
+            <svg class="hist-chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+            Détails (${itemCount} article${itemCount>1?'s':''})
+          </button>
+          <div class="cmd-detail" id="res-det-${r.id}">
+            <div class="res-items" style="line-height:1.8">${itemsStr}</div>
+          </div>
+          <div class="res-actions" style="margin-top:10px">${finalizeBtn}${printBtn}${kebab}</div>
+          ${r.status === 'pending' && r.dossierId ? _buildCardProductionSection(r.dossierId) : ''}
+        </div>`;
+      } catch(e) {
+        console.error('renderReservations card #' + r.id + ':', e);
+        return `<div class="res-card" style="color:var(--muted);font-size:13px;padding:12px"> Réservation #${r.id} — erreur affichage: ${e.message}</div>`;
+      }
+    }).join('');
+    return _ghdr + _gcards;
   }).join('');
 }
 
@@ -2353,6 +2371,18 @@ function toggleCmdGroup(gid){
   if(!hdr) return;
   const collapsed=hdr.classList.toggle('collapsed');
   document.querySelectorAll('[data-cgrp="'+gid+'"]').forEach(el=>{ el.style.display = collapsed ? 'none' : ''; });
+}
+function toggleResGroup(gid){
+  const hdr=document.getElementById('rgrp-'+gid);
+  if(!hdr) return;
+  const collapsed=hdr.classList.toggle('collapsed');
+  document.querySelectorAll('[data-rgrp="'+gid+'"]').forEach(el=>{ el.style.display = collapsed ? 'none' : ''; });
+}
+function toggleResDetail(id){
+  const d=document.getElementById('res-det-'+id), b=document.getElementById('res-det-btn-'+id);
+  if(!d) return;
+  const open=d.classList.toggle('open');
+  if(b) b.classList.toggle('open', open);
 }
 function renderHistoryList(){
   const tbody=document.getElementById('historyTbody');
