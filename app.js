@@ -1473,9 +1473,9 @@ function printCommandeTicket(cmd) {
   const html = `
     ${_ticketShopHeader(tc, st)}
     <hr style="${st.sepSolid}"/>
-    <div style="text-align:center;font-size:11pt;font-weight:bold;letter-spacing:.08em;font-family:${st.font};margin:4px 0">BON DE COMMANDE</div>
+    <div style="text-align:center;font-size:11pt;font-weight:bold;letter-spacing:.08em;font-family:${st.font};margin:4px 0">FACTURE</div>
     <hr style="${st.sepSolid}"/>
-    ${tc.ticketShowNum !== false ? `<div class="row"><span>Commande N°</span><span>#${cmd.id}</span></div>` : ''}
+    ${tc.ticketShowNum !== false ? `<div class="row"><span>Facture N°</span><span>#${cmd.id}</span></div>` : ''}
     <div class="row"><span>Date</span><span>${dateStr}</span></div>
     ${tc.ticketShowCaissier !== false ? `<div class="row"><span>Caissier</span><span>${cmd.caissier||''}</span></div>` : ''}
     ${cmd.clientName    ? `<div class="row"><span>Client</span><span>${cmd.clientName}</span></div>` : ''}
@@ -1486,7 +1486,7 @@ function printCommandeTicket(cmd) {
     ${cmd.dateLivraison ? `<div class="row"><span>Date livraison</span><span>${new Date(cmd.dateLivraison+'T00:00:00').toLocaleDateString('fr-FR')}</span></div>` : ''}
     <hr style="${st.sepLight}"/>
     <div class="items-section">
-      ${(Array.isArray(cmd.items)?cmd.items:[]).map(i=>`<div class="row"><span>${i.name||'?'} <em style="color:#777">x${Number(i.qty)||1}</em></span><span>${((Number(i.price)||0)*(Number(i.qty)||1)).toLocaleString()} Ar</span></div>`).join('')}
+      ${(Array.isArray(cmd.items)?cmd.items:[]).map(i=>`<div class="row"><span>${i.name||'?'} <em style="color:#777">${(Number(i.price)||0).toLocaleString()} Ar × ${Number(i.qty)||1}</em></span><span>${((Number(i.price)||0)*(Number(i.qty)||1)).toLocaleString()} Ar</span></div>`).join('')}
     </div>
     <hr style="${st.sepLight}"/>
     ${tc.ticketShowSubtotal !== false && cmd.subtotal ? `<div class="row"><span>Sous-total</span><span>${fmt(cmd.subtotal)}</span></div>` : ''}
@@ -1499,10 +1499,10 @@ function printCommandeTicket(cmd) {
       <div class="row bold"><span>RESTE DU</span><span>${fmt(cmd.restant)}</span></div>
     </div>
     <hr style="${st.sepSolid}"/>
-    <div class="footer">A recuperer sur presentation de ce bon</div>
+    <div class="footer">A recuperer sur presentation de cette facture</div>
     <div class="footer">${tc.footer||'Merci de votre confiance !'}</div>`;
 
-  _openTicketWindow(html, 'Commande #' + cmd.id);
+  _openTicketWindow(html, 'Facture #' + cmd.id);
 }
 
 // ============================================================
@@ -10023,9 +10023,10 @@ function parseCommandeText(rawText) {
   const lines = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
     .split('\n').map(l => l.trim()).filter(l => l.length > 0);
 
+  let inAddress = false;
   for (const line of lines) {
     // Skip section headers like "Commandes :"
-    if (/^Commandes\s*:?\s*$/i.test(line)) continue;
+    if (/^Commandes\s*:?\s*$/i.test(line)) { inAddress = false; continue; }
 
     // "Client #13336" — numéro de référence client
     const clientIdMatch = line.match(/^Client\s+#(\d+)\s*$/i);
@@ -10042,11 +10043,17 @@ function parseCommandeText(rawText) {
     // "Lieu : Récupération en boutique" ou "Lieu : Livraison — adresse"
     const lieuMatch = line.match(/^Lieu\s*:\s*(.+)$/i);
     if (lieuMatch) {
-      const lieu = lieuMatch[1].trim();
-      if (/livraison/i.test(lieu)) {
+      let lieu = lieuMatch[1].trim();
+      // Le Lieu = adresse de LIVRAISON par défaut ; retrait uniquement si mention explicite
+      if (/(retrait|boutique|sur\s*place|r[ée]cup)/i.test(lieu)) {
+        data.deliveryMode = 'retrait';
+        data.adresseLivraison = '';
+        inAddress = false;
+      } else {
+        lieu = lieu.replace(/^livraison\s*[—–:\-]*\s*/i, '').trim() || lieu;
         data.deliveryMode = 'livraison';
-        const addrMatch = lieu.match(/livraison(?:\s*[—–\-:]\s*|\s+[àa]\s+|\s+pour\s+)(.+)/i);
-        data.adresseLivraison = addrMatch ? addrMatch[1].trim() : lieu;
+        data.adresseLivraison = lieu;
+        inAddress = true;
       }
       continue;
     }
@@ -10054,6 +10061,7 @@ function parseCommandeText(rawText) {
     // "• bois × 1 (255000 Ar × 1 = 255000 Ar)"
     const itemMatch = line.match(/^[•\-\*]\s*(.+?)\s*[×xX]\s*(\d+)\s*\(([\d\s]+)\s*Ar/i);
     if (itemMatch) {
+      inAddress = false;
       const price = parseInt(itemMatch[3].replace(/\s/g, ''), 10);
       if (!isNaN(price) && price > 0) {
         data.items.push({ name: itemMatch[1].trim(), qty: parseInt(itemMatch[2], 10) || 1, price, custom: true });
@@ -10075,7 +10083,10 @@ function parseCommandeText(rawText) {
 
     // "Note : ..."
     const noteMatch = line.match(/^Notes?\s*:\s*(.+)$/i);
-    if (noteMatch) data.notes = (data.notes ? data.notes + ' — ' : '') + noteMatch[1].trim();
+    if (noteMatch) { data.notes = (data.notes ? data.notes + ' — ' : '') + noteMatch[1].trim(); continue; }
+
+    // Ligne non reconnue → continuation de l'adresse de livraison (ex. 2e ligne sous "Lieu :")
+    if (inAddress && line) data.adresseLivraison = (data.adresseLivraison ? data.adresseLivraison + ' ' : '') + line;
   }
 
   // Recalculer si manquant
