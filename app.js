@@ -1390,7 +1390,7 @@ function printTicket(sale) {
     }
     <hr style="${st.sepLight}"/>
     <div class="items-section">
-      ${(Array.isArray(sale.items)?sale.items:[]).map(i=>`<div class="row"><span>${i.name||'?'} <em style="color:#777">×${Number(i.qty)||1}</em></span><span>${((Number(i.price)||0)*(Number(i.qty)||1)).toLocaleString()} Ar</span></div>`).join('')}
+      ${(Array.isArray(sale.items)?sale.items:[]).map(i=>`<div class="row"><span>${i.name||'?'} <em style="color:#777">${(Number(i.price)||0).toLocaleString()} Ar × ${Number(i.qty)||1}</em></span><span>${((Number(i.price)||0)*(Number(i.qty)||1)).toLocaleString()} Ar</span></div>`).join('')}
     </div>
     <hr style="${st.sepLight}"/>
     ${tc.ticketShowSubtotal !== false ? `<div class="row"><span>Sous-total</span><span>${fmt(sale.subtotal??sale.total)}</span></div>` : ''}
@@ -1438,7 +1438,7 @@ function printReservationTicket(res) {
     }
     <hr style="${st.sepLight}"/>
     <div class="items-section">
-      ${(Array.isArray(res.items)?res.items:[]).map(i=>`<div class="row"><span>${i.name||'?'} <em style="color:#777">x${Number(i.qty)||1}</em></span><span>${((Number(i.price)||0)*(Number(i.qty)||1)).toLocaleString()} Ar</span></div>`).join('')}
+      ${(Array.isArray(res.items)?res.items:[]).map(i=>`<div class="row"><span>${i.name||'?'} <em style="color:#777">${(Number(i.price)||0).toLocaleString()} Ar × ${Number(i.qty)||1}</em></span><span>${((Number(i.price)||0)*(Number(i.qty)||1)).toLocaleString()} Ar</span></div>`).join('')}
     </div>
     <hr style="${st.sepLight}"/>
     ${tc.ticketShowSubtotal !== false ? `<div class="row"><span>Sous-total</span><span>${fmt(res.subtotal)}</span></div>` : ''}
