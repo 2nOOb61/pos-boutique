@@ -130,6 +130,8 @@ let sales = [];
 let arretsCaisse = [];
 
 let nextId = 1;
+// Id GLOBALEMENT unique (timestamp + aléatoire) — évite les collisions entre postes/caissiers
+function _genUid(prefix){ return (prefix||'') + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
 let nextSaleId = 1;
 let nextArretId = 1;
 
@@ -353,7 +355,7 @@ function showPage(id, btn, bnavBtn) {
   if (id==='mon-dashboard')  { renderMonDashboard(); }
   if (id==='config')         { renderConfigPage(); renderRythmeConfig(); renderObjectifsConfig(); }
   if (id==='users')        renderUsersPage();
-  if (id==='reservations') { _ensureDossierLinks(); renderReservations(); _autoRefreshReservations(); _loadTachesQuietly().then(renderReservations); }
+  if (id==='reservations') { _ensureDossierLinks(); renderReservations(); _lastResRefresh = 0; _autoRefreshReservations(); _loadTachesQuietly().then(renderReservations); }
   if (id==='attribution')  {
     // Reset uniquement à la navigation (pas lors des changements de filtre)
     if (!_pendingSelectDossierId) {
@@ -366,7 +368,7 @@ function showPage(id, btn, bnavBtn) {
   if (id==='production')   { loadTaches(); _autoRefreshProduction(); initModulesProduction(); }
   if (id==='messagerie')   { loadMessagerie(); _autoRefreshMessagerie(); }
   if (id==='patron')       { renderControlFinance(); renderPatronDashboard(); _autoRefreshPatron(); }
-  if (id==='commandes')    { _ensureDossierLinks(); renderCommandes(); _autoRefreshCommandes(); _loadTachesQuietly().then(renderCommandes); }
+  if (id==='commandes')    { _ensureDossierLinks(); renderCommandes(); _lastCmdRefresh = 0; _autoRefreshCommandes(); _loadTachesQuietly().then(renderCommandes); }
   // Garde d'accès par rôle
   if (currentUser) {
     const allowed = PAGE_ACCESS[id];
@@ -956,7 +958,7 @@ function saveReservation(accompte, depositMethod, given, change, provider, ref, 
   });
 
   const reservation = {
-    id:            nextReservationId++,
+    id:            _genUid('R'),
     date:          new Date().toISOString(),
     caissier:      currentUser?.label || 'Caissier',
     clientName, clientContact,
@@ -4987,7 +4989,7 @@ function saveCommande() {
   }
 
   const commande = {
-    id:               nextCommandeId++,
+    id:               _genUid('C'),
     date:             new Date().toISOString(),
     caissier:         currentUser?.username || 'caissier',
     clientName, clientContact,
@@ -10168,7 +10170,7 @@ function saveCommandeRapide() {
   if (!srParsedData.items.length)  { showToast('Aucun article dans la commande !', 'error');   return; }
 
   const commande = {
-    id:               nextCommandeId++,
+    id:               _genUid('C'),
     date:             new Date().toISOString(),
     caissier:         currentUser?.username || 'commercial',
     clientName:       srParsedData.clientName,

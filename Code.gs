@@ -176,6 +176,7 @@ function doGet(e) {
     if (action === 'getTaches')       return jsonResp(handleGetTaches(e.parameter));
     if (action === 'getDashboard')    return jsonResp(handleGetDashboard());
     if (action === 'getControlPatron') return jsonResp(handleGetControlPatron(e.parameter));
+    if (action === 'migrateCommandeIds') return jsonResp(migrateCommandeIds());
     if (action === 'getComments')     return jsonResp(handleGetComments(e.parameter));
     if (action === 'getNotifs')       return jsonResp(handleGetNotifs(e.parameter));
     if (action === 'getShopConfig')   return jsonResp(handleGetShopConfig());
@@ -828,6 +829,31 @@ function handleGetCommandes() {
     }
   }
   return { ok:true, commandes: order.map(id => map[id]).reverse() };
+}
+
+// Migration unique : rend uniques les ids de commandes en double (collisions inter-postes)
+function migrateCommandeIds() {
+  const sh = getSS().getSheetByName(SHEET_COMMANDES);
+  if (!sh) return { ok:false, error:'Feuille Commandes introuvable' };
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return { ok:true, fixed:0, total:0 };
+  const idCells = sh.getRange(2, 1, lastRow - 1, 1).getValues();
+  const seen = {};
+  let fixed = 0;
+  const stamp = Date.now();
+  for (let i = 0; i < idCells.length; i++) {
+    const id = String(idCells[i][0] || '').trim();
+    if (!id) continue;
+    if (seen[id]) {
+      const newId = 'CMD' + stamp + '-' + (i + 2) + '-' + Math.floor(Math.random() * 10000);
+      sh.getRange(i + 2, 1).setValue(newId);
+      seen[newId] = true;
+      fixed++;
+    } else {
+      seen[id] = true;
+    }
+  }
+  return { ok:true, fixed:fixed, total:idCells.length };
 }
 
 function handleAddCommande(data) {
