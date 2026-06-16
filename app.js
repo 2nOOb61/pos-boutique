@@ -2348,6 +2348,12 @@ function toggleHistGroup(gid){
   const collapsed=hdr.classList.toggle('collapsed');
   document.querySelectorAll('[data-grp="'+gid+'"]').forEach(el=>{ el.style.display = collapsed ? 'none' : ''; });
 }
+function toggleCmdGroup(gid){
+  const hdr=document.getElementById('cgrp-'+gid);
+  if(!hdr) return;
+  const collapsed=hdr.classList.toggle('collapsed');
+  document.querySelectorAll('[data-cgrp="'+gid+'"]').forEach(el=>{ el.style.display = collapsed ? 'none' : ''; });
+}
 function renderHistoryList(){
   const tbody=document.getElementById('historyTbody');
   if(!tbody) return;
@@ -5021,7 +5027,9 @@ async function manualRefreshCommandes() {
 
 function renderCommandes() {
   const filter = document.getElementById('cmdFilter')?.value || 'pending';
-  const list = commandes.filter(c => filter === 'all' ? true : c.status === filter);
+  const _cq = (document.getElementById('cmdSearch')?.value||'').trim().toLowerCase();
+  let list = commandes.filter(c => filter === 'all' ? true : c.status === filter);
+  if (_cq) list = list.filter(c => ((c.clientName||'')+' '+(c.clientContact||'')+' '+(c.items||[]).map(i=>i.name||'').join(' ')).toLowerCase().includes(_cq));
 
   const pending = commandes.filter(c => c.status === 'pending');
   if (document.getElementById('cmdSumCount'))   document.getElementById('cmdSumCount').textContent   = pending.length;
@@ -5032,11 +5040,18 @@ function renderCommandes() {
   const container = document.getElementById('commandesList');
   if (!container) return;
   if (list.length === 0) {
-    container.innerHTML = `<div style="text-align:center;color:var(--muted);padding:48px 20px;font-size:15px"> Aucune commande ${filter==='pending'?'en cours':''}</div>`;
+    container.innerHTML = `<div style="text-align:center;color:var(--muted);padding:48px 20px;font-size:15px">Aucune commande${_cq?` pour « ${_cq} »`:(filter==='pending'?' en cours':'')}</div>`;
     return;
   }
 
-  container.innerHTML = list.map(c => {
+  list.sort((a,b)=>{const da=parseSaleDate(a.date),db=parseSaleDate(b.date);if(!da&&!db)return 0;if(!da)return 1;if(!db)return -1;return db-da;});
+  const _cgroups=[]; const _cmap={};
+  list.forEach(c=>{ const k=_histDayKey(c.date); if(!_cmap[k]){_cmap[k]={key:k,date:c.date,rows:[],total:0};_cgroups.push(_cmap[k]);} _cmap[k].rows.push(c); _cmap[k].total+=Number(c.total)||0; });
+
+  container.innerHTML = _cgroups.map((_g,_gi)=>{
+    const gid='cg'+_gi;
+    const _ghdr=`<div class="cmd-group" id="cgrp-${gid}" onclick="toggleCmdGroup('${gid}')"><svg class="gchev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>${_histDayLabel(_g.date)}<span class="gcount">${_g.rows.length}</span><span class="gtotal">${fmt(_g.total)}</span></div>`;
+    const _gcards=_g.rows.map(c => {
     try {
       const d = parseSaleDate(c.date);
       const dateStr = d ? d.toLocaleString('fr-FR') : '—';
@@ -5070,7 +5085,7 @@ function renderCommandes() {
         : '';
 
       return `
-      <div class="cmd-card">
+      <div class="cmd-card" data-cgrp="${gid}">
         <div class="cmd-card-header">
           <div style="min-width:0">
             <div class="cmd-card-client">${c.clientName||'Client'} <span style="font-size:11px;color:var(--muted);font-weight:400">#${c.id}</span></div>
@@ -5101,6 +5116,8 @@ function renderCommandes() {
     } catch(e) {
       return `<div class="cmd-card" style="color:var(--muted);font-size:13px;padding:12px"> Commande #${c.id} — erreur: ${e.message}</div>`;
     }
+    }).join('');
+    return _ghdr + _gcards;
   }).join('');
 }
 
