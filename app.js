@@ -2394,6 +2394,12 @@ function toggleHistDetail(uid){
   const open=d.classList.toggle('open');
   r.classList.toggle('open', open);
 }
+function toggleCmdDetail(id){
+  const d=document.getElementById('cmd-det-'+id), b=document.getElementById('cmd-det-btn-'+id);
+  if(!d) return;
+  const open=d.classList.toggle('open');
+  if(b) b.classList.toggle('open', open);
+}
 function closeAllKebabs(){ document.querySelectorAll('.kebab-menu.open').forEach(m=>m.classList.remove('open')); }
 function toggleKebab(uid, ev){
   if(ev) ev.stopPropagation();
@@ -5051,34 +5057,47 @@ function renderCommandes() {
       const photosHtml = (c.photos||[]).length > 0
         ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${(c.photos||[]).map(src=>`<img src="${src}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:pointer" onclick="window.open(this.src,'_blank')" />`).join('')}</div>` : '';
 
-      const printBtn = `<button class="btn-reprint-res" onclick="printCommandeTicket(commandes.find(x=>String(x.id)==='${c.id}'))" title="Imprimer le bon de commande">🖨 Imprimer</button>`;
-      const actions = (c.status === 'pending'
-        ? `<button class="btn-finalize" onclick="openCmdFinalizeModal('${c.id}')"> Finaliser</button>
-           <button class="btn-cancel-res" onclick="cancelCommande('${c.id}')"> Annuler</button>`
-        : '') + printBtn;
+      const itemCount = (c.items||[]).length;
+      const _pSvg = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>';
+      const _dSvg = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>';
+      const printBtn = `<button class="hist-print-btn" onclick="printCommandeTicket(commandes.find(x=>String(x.id)==='${c.id}'))" title="Imprimer le bon de commande">${_pSvg}<span>Imprimer</span></button>`;
+      const finalizeBtn = c.status === 'pending' ? `<button class="btn-finalize" onclick="openCmdFinalizeModal('${c.id}')">Finaliser</button>` : '';
+      const kebab = c.status === 'pending'
+        ? `<div class="kebab-wrap">
+             <button class="kebab-btn" aria-label="Plus d'actions" aria-haspopup="true" onclick="toggleKebab('cmd${c.id}',event)">${_dSvg}</button>
+             <div class="kebab-menu" id="kb-cmd${c.id}" role="menu">
+               <button class="kebab-item danger" role="menuitem" onclick="closeAllKebabs();cancelCommande('${c.id}')">${_kebabIcon('trash')}<span>Annuler la commande</span></button>
+             </div>
+           </div>`
+        : '';
 
       return `
       <div class="cmd-card">
         <div class="cmd-card-header">
-          <div>
-            <div class="cmd-card-client"> ${c.clientName} <span style="font-size:12px;color:var(--muted);font-weight:400">#${c.id}</span></div>
-            ${c.clientContact ? `<div style="font-size:13px;color:var(--muted)"> ${c.clientContact}</div>` : ''}
+          <div style="min-width:0">
+            <div class="cmd-card-client">${c.clientName||'Client'} <span style="font-size:11px;color:var(--muted);font-weight:400">#${c.id}</span></div>
+            <div style="font-size:12px;color:var(--muted)">${c.clientContact ? c.clientContact+' · ' : ''}${dateStr}</div>
           </div>
-          <div style="text-align:right">
+          <div style="text-align:right;flex-shrink:0">
             <span class="cmd-status ${statusClass}">${statusLabel}</span>
-            <div class="cmd-card-date">${dateStr}</div>
+            <div style="font-size:18px;font-weight:800;color:var(--text);margin-top:5px">${fmt(c.total)}</div>
           </div>
         </div>
-        ${deliveryHtml}
-        <div class="cmd-items"> ${itemsStr}</div>
-        ${notesHtml}
-        ${photosHtml}
-        <div class="res-amounts" style="margin-top:12px">
-          <div class="res-amount-item"><span class="lbl">Total</span><span class="val">${fmt(c.total)}</span></div>
-          <div class="res-amount-item"><span class="lbl">Acompte versé</span><span class="val" style="color:var(--green)">${fmt(c.accompte)}</span></div>
-          <div class="res-amount-item"><span class="lbl">Restant dû</span><span class="val" style="color:${c.status==='pending'?'var(--accent2)':'var(--muted)'}">${fmt(c.restant)}</span></div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;font-size:13px">
+          <span style="color:var(--muted)">Acompte <b style="color:var(--green)">${fmt(c.accompte)}</b></span>
+          <span style="color:var(--muted)">Restant <b style="color:${c.status==='pending'?'var(--red)':'var(--muted)'}">${fmt(c.restant)}</b></span>
         </div>
-        ${actions ? `<div class="res-actions">${actions}</div>` : ''}
+        <button class="cmd-detail-toggle" id="cmd-det-btn-${c.id}" onclick="toggleCmdDetail('${c.id}')">
+          <svg class="hist-chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          Détails (${itemCount} article${itemCount>1?'s':''})
+        </button>
+        <div class="cmd-detail" id="cmd-det-${c.id}">
+          ${deliveryHtml}
+          <div class="cmd-items">${itemsStr}</div>
+          ${notesHtml}
+          ${photosHtml}
+        </div>
+        <div class="res-actions" style="margin-top:10px">${finalizeBtn}${printBtn}${kebab}</div>
         ${c.status === 'pending' && c.dossierId ? _buildCardProductionSection(c.dossierId) : ''}
       </div>`;
     } catch(e) {

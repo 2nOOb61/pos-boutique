@@ -741,6 +741,11 @@
     .hist-detail.open{display:block}
     .hist-detail .di{display:flex;justify-content:space-between;gap:12px;padding:4px 0;border-bottom:1px dotted var(--border)}
     .hist-detail .di:last-child{border-bottom:none}
+    .cmd-detail-toggle{display:inline-flex;align-items:center;gap:6px;margin-top:10px;padding:4px 0;background:none;border:none;color:var(--accent);font-size:12px;font-weight:700;cursor:pointer}
+    .cmd-detail-toggle .hist-chev{transition:transform .2s}
+    .cmd-detail-toggle.open .hist-chev{transform:rotate(90deg)}
+    .cmd-detail{display:none;margin-top:4px}
+    .cmd-detail.open{display:block}
     @media (max-width:768px){
       .hist-table thead{display:none}
       .hist-table,.hist-table tbody{display:block;width:100%}
