@@ -2273,89 +2273,7 @@ function _renderStatsInner() {
   }
 
   // History — remplir le tableau EN PREMIER avant tout autre appel
-  const tbody = document.getElementById('historyTbody');
-  if (tbody) {
-    if (sales.length === 0 && (commandes||[]).length === 0 && (reservations||[]).length === 0) {
-      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:28px">
-        <div style="margin-bottom:10px">Aucune vente enregistrée</div>
-        <button onclick="manualRefreshStats()" style="padding:8px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--muted);cursor:pointer;font-size:13px"> Recharger depuis Sheets</button>
-      </td></tr>`;
-    } else {
-      const isAdmin = currentUser && currentUser.role === 'admin';
-      // Historique FUSIONNÉ (UX) : ventes comptant + commandes + réservations
-      const _esc = v => String(v==null?'':v).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-      const _allHist = [];
-      (sales||[]).forEach(s => _allHist.push({
-        date:s.date, type:'Vente', tcol:'#1a4a3a',
-        client:s.clientName||'', contact:s.clientContact||'', itemsArr:(Array.isArray(s.items)?s.items:[]),
-        pay:_payLabel(s), total:Number(s.total)||0, due:Number(s.due)||0,
-        print:`reprintTicket('${s.id}')`,
-        kebab: isAdmin ? [{label:'Modifier',icon:'edit',act:`openEditSaleModal('${s.id}')`},{label:'Supprimer',icon:'trash',danger:true,act:`openDeleteSaleModal('${s.id}')`}] : []
-      }));
-      (commandes||[]).filter(c=>c.status!=='cancelled').forEach(c => _allHist.push({
-        date:c.date, type:'Cmd rapide', tcol:'#0891b2',
-        client:c.clientName||'', contact:c.clientContact||'', itemsArr:(Array.isArray(c.items)?c.items:[]),
-        pay:'Commande', total:Number(c.total)||0, due:Number(c.restant)||0,
-        print:`printCommandeTicket(commandes.find(x=>String(x.id)==='${c.id}'))`,
-        kebab:[{label:'Ouvrir dans Commandes',icon:'open',act:`showPage('commandes')`}]
-      }));
-      (reservations||[]).filter(r=>r.status!=='cancelled').forEach(r => _allHist.push({
-        date:r.date, type:'Réserv.', tcol:'#7c3aed',
-        client:r.clientName||'', contact:r.clientContact||'', itemsArr:(Array.isArray(r.items)?r.items:[]),
-        pay:'Réservation', total:Number(r.total)||0, due:Number(r.restant)||0,
-        print:`printReservationTicket(reservations.find(x=>String(x.id)==='${r.id}'))`,
-        kebab:[{label:'Ouvrir dans Réservations',icon:'open',act:`showPage('reservations')`}]
-      }));
-      _allHist.sort((a,b)=>{ const da=parseSaleDate(a.date), db=parseSaleDate(b.date); if(!da&&!db)return 0; if(!da)return 1; if(!db)return -1; return db-da; });
-
-      const _printSvg = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>';
-      const _dotsSvg  = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>';
-
-      tbody.innerHTML = _allHist.slice(0, 100).map((row, i) => {
-        const uid = 'h'+i;
-        const d = parseSaleDate(row.date);
-        const dateStr = d ? d.toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
-        const itemsSummary = row.itemsArr.map(it=>`${_esc(it.name||'?')}×${Number(it.qty)||1}`).join(', ') || '—';
-        const primary = row.client ? _esc(row.client) : (row.type==='Vente' ? 'Vente comptant' : '—');
-        const dueHtml = row.due>0 ? `<span class="hist-due-pill">${fmt(row.due)}</span>` : '';
-        const kebabHtml = (row.kebab && row.kebab.length) ? `
-            <div class="kebab-wrap">
-              <button class="kebab-btn" aria-label="Plus d'actions" aria-haspopup="true" onclick="toggleKebab('${uid}',event)">${_dotsSvg}</button>
-              <div class="kebab-menu" id="kb-${uid}" role="menu">
-                ${row.kebab.map(k=>`<button class="kebab-item ${k.danger?'danger':''}" role="menuitem" onclick="closeAllKebabs();${k.act}">${_kebabIcon(k.icon)}<span>${k.label}</span></button>`).join('')}
-              </div>
-            </div>` : '';
-        const detail = `
-            <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:6px">Détail de la transaction</div>
-            ${row.itemsArr.length ? row.itemsArr.map(it=>`<div class="di"><span>${_esc(it.name||'?')} × ${Number(it.qty)||1}</span><span>${fmt((Number(it.price)||0)*(Number(it.qty)||1))}</span></div>`).join('') : '<div class="di"><span>Pas de détail d\'article</span><span></span></div>'}
-            ${row.contact ? `<div class="di"><span>Contact</span><span>${_esc(row.contact)}</span></div>` : ''}
-            <div class="di"><span>Paiement</span><span>${_esc(row.pay)}</span></div>
-            ${row.due>0 ? `<div class="di"><span>Reste dû</span><span style="color:var(--red);font-weight:700">${fmt(row.due)}</span></div>` : `<div class="di"><span>Statut</span><span style="color:var(--green);font-weight:700">Soldé</span></div>`}`;
-        return `
-        <tr class="hist-row" id="hr-${uid}" onclick="toggleHistDetail('${uid}')">
-          <td class="c-date" data-label="Date">${dateStr}</td>
-          <td class="c-trans" data-label="Transaction">
-            <div style="display:flex;align-items:flex-start;gap:8px">
-              <svg class="hist-chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-              <div style="min-width:0">
-                <div class="hist-client">${primary}</div>
-                <div class="hist-sub"><span class="hist-badge" style="background:${row.tcol}1a;color:${row.tcol}">${row.type}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px">${itemsSummary}</span></div>
-              </div>
-            </div>
-          </td>
-          <td class="c-total hist-cell-num hist-total" data-label="Total">${fmt(row.total)}</td>
-          <td class="c-due hist-cell-num" data-label="Reste dû">${dueHtml}</td>
-          <td class="c-actions" onclick="event.stopPropagation()">
-            <div class="hist-actions">
-              <button class="hist-print-btn" onclick="${row.print}" title="Imprimer le ticket">${_printSvg}<span>Imprimer</span></button>
-              ${kebabHtml}
-            </div>
-          </td>
-        </tr>
-        <tr class="hist-detail-row"><td colspan="5"><div class="hist-detail" id="hd-${uid}">${detail}</div></td></tr>`;
-      }).join('');
-    }
-  }
+  renderHistoryList();
 
   // Bouton Export CSV ventes (affiché uniquement s'il y a des ventes)
   const exportWrap = document.getElementById('statsExportWrap');
@@ -2411,6 +2329,86 @@ function toggleKebab(uid, ev){
 }
 document.addEventListener('click', closeAllKebabs);
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeAllKebabs(); });
+
+// ===== Historique : recherche + filtre type + regroupement par date =====
+function _histDayKey(v){ const d=parseSaleDate(v); return d ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` : 'zzzz'; }
+function _histDayLabel(v){
+  const d=parseSaleDate(v); if(!d) return 'Date inconnue';
+  const t=new Date(); t.setHours(0,0,0,0);
+  const dd=new Date(d); dd.setHours(0,0,0,0);
+  const diff=Math.round((t-dd)/86400000);
+  if(diff===0) return "Aujourd'hui";
+  if(diff===1) return "Hier";
+  const lbl=d.toLocaleDateString('fr-FR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'});
+  return lbl.charAt(0).toUpperCase()+lbl.slice(1);
+}
+function toggleHistGroup(gid){
+  const hdr=document.getElementById('grp-'+gid);
+  if(!hdr) return;
+  const collapsed=hdr.classList.toggle('collapsed');
+  document.querySelectorAll('[data-grp="'+gid+'"]').forEach(el=>{ el.style.display = collapsed ? 'none' : ''; });
+}
+function renderHistoryList(){
+  const tbody=document.getElementById('historyTbody');
+  if(!tbody) return;
+  const isAdmin=currentUser && currentUser.role==='admin';
+  const _esc=v=>String(v==null?'':v).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const q=(document.getElementById('histSearch')?.value||'').trim().toLowerCase();
+  const typeF=document.getElementById('histTypeFilter')?.value||'all';
+
+  if((sales||[]).length===0 && (commandes||[]).length===0 && (reservations||[]).length===0){
+    tbody.innerHTML=`<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:28px"><div style="margin-bottom:10px">Aucune vente enregistrée</div><button onclick="manualRefreshStats()" style="padding:8px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--muted);cursor:pointer;font-size:13px">Recharger depuis Sheets</button></td></tr>`;
+    return;
+  }
+
+  const all=[];
+  (sales||[]).forEach(s=>all.push({date:s.date,type:'Vente',tcol:'#1a4a3a',client:s.clientName||'',contact:s.clientContact||'',itemsArr:(Array.isArray(s.items)?s.items:[]),pay:_payLabel(s),total:Number(s.total)||0,due:Number(s.due)||0,print:`reprintTicket('${s.id}')`,kebab:isAdmin?[{label:'Modifier',icon:'edit',act:`openEditSaleModal('${s.id}')`},{label:'Supprimer',icon:'trash',danger:true,act:`openDeleteSaleModal('${s.id}')`}]:[]}));
+  (commandes||[]).filter(c=>c.status!=='cancelled').forEach(c=>all.push({date:c.date,type:'Cmd rapide',tcol:'#0891b2',client:c.clientName||'',contact:c.clientContact||'',itemsArr:(Array.isArray(c.items)?c.items:[]),pay:'Commande',total:Number(c.total)||0,due:Number(c.restant)||0,print:`printCommandeTicket(commandes.find(x=>String(x.id)==='${c.id}'))`,kebab:[{label:'Ouvrir dans Commandes',icon:'open',act:`showPage('commandes')`}]}));
+  (reservations||[]).filter(r=>r.status!=='cancelled').forEach(r=>all.push({date:r.date,type:'Réserv.',tcol:'#7c3aed',client:r.clientName||'',contact:r.clientContact||'',itemsArr:(Array.isArray(r.items)?r.items:[]),pay:'Réservation',total:Number(r.total)||0,due:Number(r.restant)||0,print:`printReservationTicket(reservations.find(x=>String(x.id)==='${r.id}'))`,kebab:[{label:'Ouvrir dans Réservations',icon:'open',act:`showPage('reservations')`}]}));
+
+  let list=all.filter(r=>{
+    if(typeF!=='all' && r.type!==typeF) return false;
+    if(q){ const hay=(r.client+' '+r.itemsArr.map(it=>it.name||'').join(' ')+' '+r.pay).toLowerCase(); if(!hay.includes(q)) return false; }
+    return true;
+  });
+  list.sort((a,b)=>{const da=parseSaleDate(a.date),db=parseSaleDate(b.date);if(!da&&!db)return 0;if(!da)return 1;if(!db)return -1;return db-da;});
+  list=list.slice(0,300);
+
+  if(!list.length){
+    tbody.innerHTML=`<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:28px">Aucun résultat${q?` pour « ${_esc(q)} »`:''}.</td></tr>`;
+    return;
+  }
+
+  const _printSvg='<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>';
+  const _dotsSvg='<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>';
+
+  const groups=[]; const gmap={};
+  list.forEach(r=>{ const k=_histDayKey(r.date); if(!gmap[k]){gmap[k]={key:k,date:r.date,rows:[],total:0};groups.push(gmap[k]);} gmap[k].rows.push(r); gmap[k].total+=r.total; });
+
+  tbody.innerHTML = groups.map((g,gi)=>{
+    const gid='g'+gi;
+    const header=`<tr class="hist-group" id="grp-${gid}" onclick="toggleHistGroup('${gid}')"><td colspan="5"><svg class="gchev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>${_histDayLabel(g.date)}<span class="gcount">${g.rows.length}</span><span class="gtotal">${fmt(g.total)}</span></td></tr>`;
+    const rowsHtml=g.rows.map((row,ri)=>{
+      const uid=gid+'_'+ri;
+      const d=parseSaleDate(row.date);
+      const timeStr=d?d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}):'—';
+      const itemsSummary=row.itemsArr.map(it=>`${_esc(it.name||'?')}×${Number(it.qty)||1}`).join(', ')||'—';
+      const primary=row.client?_esc(row.client):(row.type==='Vente'?'Vente comptant':'—');
+      const dueHtml=row.due>0?`<span class="hist-due-pill">${fmt(row.due)}</span>`:'';
+      const kebabHtml=(row.kebab&&row.kebab.length)?`<div class="kebab-wrap"><button class="kebab-btn" aria-label="Plus d'actions" aria-haspopup="true" onclick="toggleKebab('${uid}',event)">${_dotsSvg}</button><div class="kebab-menu" id="kb-${uid}" role="menu">${row.kebab.map(k=>`<button class="kebab-item ${k.danger?'danger':''}" role="menuitem" onclick="closeAllKebabs();${k.act}">${_kebabIcon(k.icon)}<span>${k.label}</span></button>`).join('')}</div></div>`:'';
+      const detail=`<div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:6px">Détail de la transaction</div>${row.itemsArr.length?row.itemsArr.map(it=>`<div class="di"><span>${_esc(it.name||'?')} × ${Number(it.qty)||1}</span><span>${fmt((Number(it.price)||0)*(Number(it.qty)||1))}</span></div>`).join(''):'<div class="di"><span>Pas de détail d\'article</span><span></span></div>'}${row.contact?`<div class="di"><span>Contact</span><span>${_esc(row.contact)}</span></div>`:''}<div class="di"><span>Paiement</span><span>${_esc(row.pay)}</span></div>${row.due>0?`<div class="di"><span>Reste dû</span><span style="color:var(--red);font-weight:700">${fmt(row.due)}</span></div>`:`<div class="di"><span>Statut</span><span style="color:var(--green);font-weight:700">Soldé</span></div>`}`;
+      return `<tr class="hist-row" id="hr-${uid}" data-grp="${gid}" onclick="toggleHistDetail('${uid}')">
+        <td class="c-date" data-label="Heure">${timeStr}</td>
+        <td class="c-trans" data-label="Transaction"><div style="display:flex;align-items:flex-start;gap:8px"><svg class="hist-chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg><div style="min-width:0"><div class="hist-client">${primary}</div><div class="hist-sub"><span class="hist-badge" style="background:${row.tcol}1a;color:${row.tcol}">${row.type}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:260px">${itemsSummary}</span></div></div></div></td>
+        <td class="c-total hist-cell-num hist-total" data-label="Total">${fmt(row.total)}</td>
+        <td class="c-due hist-cell-num" data-label="Reste dû">${dueHtml}</td>
+        <td class="c-actions" onclick="event.stopPropagation()"><div class="hist-actions"><button class="hist-print-btn" onclick="${row.print}" title="Imprimer le ticket">${_printSvg}<span>Imprimer</span></button>${kebabHtml}</div></td>
+      </tr>
+      <tr class="hist-detail-row" data-grp="${gid}"><td colspan="5"><div class="hist-detail" id="hd-${uid}">${detail}</div></td></tr>`;
+    }).join('');
+    return header+rowsHtml;
+  }).join('');
+}
 
 // ============================================================
 // RAPPORT DE VENTES — IMPRESSION (jour / mois)

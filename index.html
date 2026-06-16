@@ -746,6 +746,18 @@
     .cmd-detail-toggle.open .hist-chev{transform:rotate(90deg)}
     .cmd-detail{display:none;margin-top:4px}
     .cmd-detail.open{display:block}
+    .hist-toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+    .hist-search{position:relative;flex:1;min-width:200px}
+    .hist-search svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--muted);pointer-events:none}
+    .hist-search input{width:100%;padding:10px 12px 10px 38px;border:1px solid var(--border);border-radius:10px;background:var(--surface2);color:var(--text);font-size:14px}
+    .hist-search input:focus{outline:none;border-color:var(--accent)}
+    #histTypeFilter{padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface2);color:var(--text);font-size:14px;cursor:pointer;min-height:42px}
+    .hist-group{background:var(--surface2);cursor:pointer}
+    .hist-group>td{padding:9px 12px;font-weight:700;font-size:13px;border-top:2px solid var(--border)}
+    .hist-group .gchev{transition:transform .2s;color:var(--muted);vertical-align:middle;margin-right:6px}
+    .hist-group.collapsed .gchev{transform:rotate(-90deg)}
+    .hist-group .gcount{font-size:11px;font-weight:700;color:var(--muted);background:var(--surface);border:1px solid var(--border);border-radius:999px;padding:1px 9px;margin-left:8px}
+    .hist-group .gtotal{float:right;color:var(--accent);font-weight:800}
     @media (max-width:768px){
       .hist-table thead{display:none}
       .hist-table,.hist-table tbody{display:block;width:100%}
@@ -761,8 +773,24 @@
       .hist-print-btn{flex:1;justify-content:center;min-height:44px}
       .kebab-btn{min-width:44px;min-height:44px}
       .hist-detail{padding-left:16px}
+      .hist-group{display:block;border-radius:10px;margin:14px 0 8px}
+      .hist-group>td{display:block}
+      .hist-toolbar{flex-direction:column;align-items:stretch}
+      #histTypeFilter{width:100%}
     }
     </style>
+    <div class="hist-toolbar">
+      <div class="hist-search">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="histSearch" type="search" placeholder="Rechercher un client, un article…" oninput="renderHistoryList()" autocomplete="off">
+      </div>
+      <select id="histTypeFilter" onchange="renderHistoryList()" aria-label="Filtrer par type">
+        <option value="all">Tous les types</option>
+        <option value="Vente">Ventes</option>
+        <option value="Cmd rapide">Cmd rapides</option>
+        <option value="Réserv.">Réservations</option>
+      </select>
+    </div>
     <div class="history-table-wrap" style="overflow:visible">
       <table class="hist-table">
         <thead><tr><th>Date</th><th>Transaction</th><th>Total</th><th>Reste dû</th><th></th></tr></thead>
