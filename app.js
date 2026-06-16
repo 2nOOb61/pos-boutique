@@ -1311,7 +1311,7 @@ function _openTicketWindow(htmlBody, title='Ticket') {
       body{font-family:${font},sans-serif;font-size:10pt;margin:0;padding:0;width:9.4cm;color:#000}
       .row{display:flex;justify-content:space-between;align-items:baseline;padding:1px 0}
       .row span:first-child{color:#555}
-      .row span:last-child{font-weight:500}
+      .row span:last-child{font-weight:500;text-align:right;min-width:0}
       .row.bold{font-weight:bold;font-size:11pt}
       .row.bold span:first-child{color:#000}
       .items-section .row{border-bottom:1px dotted #ccc;padding:3px 0}
@@ -1481,7 +1481,7 @@ function printCommandeTicket(cmd) {
     ${cmd.clientName    ? `<div class="row"><span>Client</span><span>${cmd.clientName}</span></div>` : ''}
     ${cmd.clientContact ? `<div class="row"><span>Contact</span><span>${cmd.clientContact}</span></div>` : ''}
     ${cmd.adresseLivraison
-      ? `<div class="row"><span>Livraison</span><span>${cmd.adresseLivraison}</span></div>`
+      ? `<div class="row"><span>Livraison</span><span style="flex:1;margin-left:10px">${cmd.adresseLivraison}</span></div>`
       : `<div class="row"><span>Mode</span><span>Retrait boutique</span></div>`}
     ${cmd.dateLivraison ? `<div class="row"><span>Date livraison</span><span>${new Date(cmd.dateLivraison+'T00:00:00').toLocaleDateString('fr-FR')}</span></div>` : ''}
     <hr style="${st.sepLight}"/>
