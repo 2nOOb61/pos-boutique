@@ -1444,6 +1444,47 @@ function printReservationTicket(res) {
   _openTicketWindow(html, 'Reservation #' + res.id);
 }
 
+function printCommandeTicket(cmd) {
+  if (!cmd) return;
+  const tc  = shopConfig;
+  const st  = _ticketStyles(tc);
+  const dateStr = (parseSaleDate(cmd.date) || new Date()).toLocaleString('fr-MG');
+
+  const html = `
+    ${_ticketShopHeader(tc, st)}
+    <hr style="${st.sepSolid}"/>
+    <div style="text-align:center;font-size:11pt;font-weight:bold;letter-spacing:.08em;font-family:${st.font};margin:4px 0">BON DE COMMANDE</div>
+    <hr style="${st.sepSolid}"/>
+    ${tc.ticketShowNum !== false ? `<div class="row"><span>Commande N°</span><span>#${cmd.id}</span></div>` : ''}
+    <div class="row"><span>Date</span><span>${dateStr}</span></div>
+    ${tc.ticketShowCaissier !== false ? `<div class="row"><span>Caissier</span><span>${cmd.caissier||''}</span></div>` : ''}
+    ${cmd.clientName    ? `<div class="row"><span>Client</span><span>${cmd.clientName}</span></div>` : ''}
+    ${cmd.clientContact ? `<div class="row"><span>Contact</span><span>${cmd.clientContact}</span></div>` : ''}
+    ${cmd.adresseLivraison
+      ? `<div class="row"><span>Livraison</span><span>${cmd.adresseLivraison}</span></div>`
+      : `<div class="row"><span>Mode</span><span>Retrait boutique</span></div>`}
+    ${cmd.dateLivraison ? `<div class="row"><span>Date livraison</span><span>${new Date(cmd.dateLivraison+'T00:00:00').toLocaleDateString('fr-FR')}</span></div>` : ''}
+    <hr style="${st.sepLight}"/>
+    <div class="items-section">
+      ${(Array.isArray(cmd.items)?cmd.items:[]).map(i=>`<div class="row"><span>${i.name||'?'} <em style="color:#777">x${Number(i.qty)||1}</em></span><span>${((Number(i.price)||0)*(Number(i.qty)||1)).toLocaleString()} Ar</span></div>`).join('')}
+    </div>
+    <hr style="${st.sepLight}"/>
+    ${tc.ticketShowSubtotal !== false && cmd.subtotal ? `<div class="row"><span>Sous-total</span><span>${fmt(cmd.subtotal)}</span></div>` : ''}
+    ${cmd.remise>0 ? `<div class="row"><span>Remise</span><span>-${fmt(cmd.remise)}</span></div>` : ''}
+    <div style="background:${st.color}18;border:1px solid ${st.color};border-radius:4px;padding:4px 6px;margin:4px 0">
+      <div class="row bold" style="color:${st.color}"><span>TOTAL A PAYER</span><span>${fmt(cmd.total)}</span></div>
+    </div>
+    <div style="border:1px solid #333;border-radius:4px;padding:5px 8px;margin:4px 0">
+      <div class="row bold"><span>ACOMPTE VERSE</span><span>${fmt(cmd.accompte)}</span></div>
+      <div class="row bold"><span>RESTE DU</span><span>${fmt(cmd.restant)}</span></div>
+    </div>
+    <hr style="${st.sepSolid}"/>
+    <div class="footer">A recuperer sur presentation de ce bon</div>
+    <div class="footer">${tc.footer||'Merci de votre confiance !'}</div>`;
+
+  _openTicketWindow(html, 'Commande #' + cmd.id);
+}
+
 // ============================================================
 // SCANNER — html5-qrcode (caméra réelle)
 // ============================================================
@@ -4935,10 +4976,11 @@ function renderCommandes() {
       const photosHtml = (c.photos||[]).length > 0
         ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${(c.photos||[]).map(src=>`<img src="${src}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:pointer" onclick="window.open(this.src,'_blank')" />`).join('')}</div>` : '';
 
-      const actions = c.status === 'pending'
+      const printBtn = `<button class="btn-reprint-res" onclick="printCommandeTicket(commandes.find(x=>String(x.id)==='${c.id}'))" title="Imprimer le bon de commande">🖨 Imprimer</button>`;
+      const actions = (c.status === 'pending'
         ? `<button class="btn-finalize" onclick="openCmdFinalizeModal('${c.id}')"> Finaliser</button>
            <button class="btn-cancel-res" onclick="cancelCommande('${c.id}')"> Annuler</button>`
-        : '';
+        : '') + printBtn;
 
       return `
       <div class="cmd-card">
