@@ -898,6 +898,10 @@ function handleUpdateCommande(data) {
     if (data.saleId)           sh.getRange(i+1, 22).setValue(String(data.saleId));
     if (data.adresseLivraison !== undefined) sh.getRange(i+1, 8).setValue(data.adresseLivraison); // col H = Adresse_Livraison
     if (data.deliveryMode !== undefined)     sh.getRange(i+1, 7).setValue(data.deliveryMode);     // col G = Mode_Livraison
+    if (data.fraisLivraison !== undefined)   sh.getRange(i+1, 9).setValue(Number(data.fraisLivraison)||0);  // col I = Frais_Livraison
+    if (data.subtotal !== undefined)         sh.getRange(i+1, 11).setValue(Number(data.subtotal)||0);       // col K = Sous_Total
+    if (data.total !== undefined)            sh.getRange(i+1, 13).setValue(Number(data.total)||0);          // col M = Total
+    if (data.restant !== undefined)          sh.getRange(i+1, 15).setValue(Number(data.restant)||0);        // col O = Restant
     updated = true;
   }
   return updated ? { ok:true } : { ok:false, error:'Commande introuvable' };

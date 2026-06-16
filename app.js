@@ -2325,6 +2325,7 @@ function _kebabIcon(name){
   if(name==='edit')  return s+'<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
   if(name==='trash') return s+'<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
   if(name==='open')  return s+'<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
+  if(name==='cash')  return s+'<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/></svg>';
   return '';
 }
 function toggleHistDetail(uid){
@@ -2353,6 +2354,27 @@ function editCommandeAddress(id){
   if (APPS_SCRIPT_URL) {
     apiCall({ action:'updateCommande', id: c.id, adresseLivraison: addr, deliveryMode: c.deliveryMode })
       .then(r => { if (r && r.ok) showToast('Adresse enregistrée'); else showToast('Erreur enregistrement', 'error'); })
+      .catch(() => showToast('Erreur réseau', 'error'));
+  }
+}
+// Corriger les frais de livraison d'une commande (recalcule sous-total/total/reste depuis les articles)
+function editCommandeFrais(id){
+  const c = commandes.find(x => String(x.id) === String(id));
+  if (!c) { showToast('Commande introuvable', 'error'); return; }
+  const v = prompt("Frais de livraison (Ar) pour « " + (c.clientName || 'commande') + " »\n(0 = aucun) :", String(Number(c.fraisLivraison)||0));
+  if (v === null) return; // annulé
+  const frais = Math.max(0, parseInt(String(v).replace(/[^\d]/g,''), 10) || 0);
+  const itemsSum = (c.items||[]).reduce((s,i)=>s+(Number(i.qty)||0)*(Number(i.price)||0), 0);
+  const remise = Number(c.remise)||0;
+  const newSub = itemsSum > 0 ? itemsSum : (Number(c.subtotal)||0);
+  const newTotal = itemsSum > 0 ? (itemsSum - remise + frais) : ((Number(c.total)||0) - (Number(c.fraisLivraison)||0) + frais);
+  const newRestant = Math.max(0, newTotal - (Number(c.accompte)||0));
+  c.fraisLivraison = frais; c.subtotal = newSub; c.total = newTotal; c.restant = newRestant;
+  saveData();
+  renderCommandes();
+  if (APPS_SCRIPT_URL) {
+    apiCall({ action:'updateCommande', id: c.id, fraisLivraison: frais, subtotal: newSub, total: newTotal, restant: newRestant })
+      .then(r => { if (r && r.ok) showToast('Frais de livraison enregistrés'); else showToast('Erreur enregistrement', 'error'); })
       .catch(() => showToast('Erreur réseau', 'error'));
   }
 }
@@ -5126,6 +5148,7 @@ function renderCommandes() {
       const printBtn = `<button class="hist-print-btn" onclick="printCommandeTicket(commandes.find(x=>String(x.id)==='${c.id}'))" title="Imprimer le bon de commande">${_pSvg}<span>Imprimer</span></button>`;
       const finalizeBtn = c.status === 'pending' ? `<button class="btn-finalize" onclick="openCmdFinalizeModal('${c.id}')">Finaliser</button>` : '';
       const kebabItems = `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeAddress('${c.id}')">${_kebabIcon('edit')}<span>Modifier l'adresse</span></button>`
+        + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeFrais('${c.id}')">${_kebabIcon('cash')}<span>Modifier les frais de livraison</span></button>`
         + (c.status === 'pending' ? `<button class="kebab-item danger" role="menuitem" onclick="closeAllKebabs();cancelCommande('${c.id}')">${_kebabIcon('trash')}<span>Annuler la commande</span></button>` : '');
       const kebab = `<div class="kebab-wrap">
              <button class="kebab-btn" aria-label="Plus d'actions" aria-haspopup="true" onclick="toggleKebab('cmd${c.id}',event)">${_dSvg}</button>
