@@ -349,7 +349,7 @@ function showPage(id, btn, bnavBtn) {
   document.querySelectorAll('.nav-btn').forEach(b => {
     if (b.getAttribute('onclick') && b.getAttribute('onclick').includes("'"+id+"'")) b.classList.add('active');
   });
-  if (id==='stats')           { renderStats(); loadSalesFromScript(true, true).then(renderStats); _loadProdStats(); }
+  if (id==='stats')           { renderStats(); Promise.all([loadSalesFromScript(true, true), loadReservationsFromScript(), loadCommandesFromScript()]).then(renderStats).catch(()=>renderStats()); _loadProdStats(); }
   if (id==='mon-dashboard')  { renderMonDashboard(); }
   if (id==='config')         { renderConfigPage(); renderRythmeConfig(); renderObjectifsConfig(); }
   if (id==='users')        renderUsersPage();
@@ -2275,34 +2275,49 @@ function _renderStatsInner() {
   // History — remplir le tableau EN PREMIER avant tout autre appel
   const tbody = document.getElementById('historyTbody');
   if (tbody) {
-    if (sales.length === 0) {
+    if (sales.length === 0 && (commandes||[]).length === 0 && (reservations||[]).length === 0) {
       tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:28px">
         <div style="margin-bottom:10px">Aucune vente enregistrée</div>
         <button onclick="manualRefreshStats()" style="padding:8px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--muted);cursor:pointer;font-size:13px"> Recharger depuis Sheets</button>
       </td></tr>`;
     } else {
       const isAdmin = currentUser && currentUser.role === 'admin';
-      tbody.innerHTML = sales.slice(0, 50).map(s => {
-        const due   = Number(s.due)   || 0;
-        const total = Number(s.total) || 0;
-        const items = Array.isArray(s.items) ? s.items : [];
-        const d = parseSaleDate(s.date);
+      // Historique FUSIONNÉ : ventes comptant + commandes (ventes rapides) + réservations
+      const _allHist = [];
+      (sales||[]).forEach(s => _allHist.push({
+        date:s.date, type:'Vente', tcol:'#1a4a3a',
+        items:(Array.isArray(s.items)?s.items:[]).map(i=>`${i.name||'?'} x${i.qty||1}`).join(', '),
+        pay:_payLabel(s), total:Number(s.total)||0, due:Number(s.due)||0,
+        print:`reprintTicket('${s.id}')`,
+        admin: isAdmin ? `<button class="btn-icon" onclick="openEditSaleModal('${s.id}')" title="Modifier"></button><button class="btn-icon" onclick="openDeleteSaleModal('${s.id}')" title="Supprimer" style="color:var(--red)"></button>` : ''
+      }));
+      (commandes||[]).filter(c=>c.status!=='cancelled').forEach(c => _allHist.push({
+        date:c.date, type:'Cmd rapide', tcol:'#0891b2',
+        items:(Array.isArray(c.items)?c.items:[]).map(i=>`${i.name||'?'} x${i.qty||1}`).join(', '),
+        pay:'Commande', total:Number(c.total)||0, due:Number(c.restant)||0,
+        print:`printCommandeTicket(commandes.find(x=>String(x.id)==='${c.id}'))`, admin:''
+      }));
+      (reservations||[]).filter(r=>r.status!=='cancelled').forEach(r => _allHist.push({
+        date:r.date, type:'Réserv.', tcol:'#7c3aed',
+        items:(Array.isArray(r.items)?r.items:[]).map(i=>`${i.name||'?'} x${i.qty||1}`).join(', '),
+        pay:'Réservation', total:Number(r.total)||0, due:Number(r.restant)||0,
+        print:`printReservationTicket(reservations.find(x=>String(x.id)==='${r.id}'))`, admin:''
+      }));
+      _allHist.sort((a,b)=>{ const da=parseSaleDate(a.date), db=parseSaleDate(b.date); if(!da&&!db)return 0; if(!da)return 1; if(!db)return -1; return db-da; });
+      tbody.innerHTML = _allHist.slice(0, 100).map(row => {
+        const d = parseSaleDate(row.date);
         const dateStr = d ? d.toLocaleString('fr-FR') : '—';
-        const dueCell = due > 0
-          ? `<td class="td-mono" style="font-weight:700;color:var(--red)">${fmt(due)}</td>`
+        const dueCell = row.due > 0
+          ? `<td class="td-mono" style="font-weight:700;color:var(--red)">${fmt(row.due)}</td>`
           : `<td class="td-mono" style="color:var(--muted)">—</td>`;
-        const adminActions = isAdmin
-          ? `<button class="btn-icon" onclick="openEditSaleModal(${s.id})" title="Modifier" style="margin-left:4px"></button>
-             <button class="btn-icon" onclick="openDeleteSaleModal(${s.id})" title="Supprimer" style="margin-left:2px;color:var(--red)"></button>`
-          : '';
         return `<tr>
           <td>${dateStr}</td>
-          <td>${items.map(i=>`${i.name||'?'} x${i.qty||1}`).join(', ')}</td>
-          <td>${_payLabel(s)}</td>
-          <td class="td-mono" style="font-weight:600;color:var(--accent)">${fmt(total)}</td>
+          <td><span style="display:inline-block;font-size:9px;font-weight:700;padding:1px 6px;border-radius:6px;background:${row.tcol}1a;color:${row.tcol};margin-right:6px">${row.type}</span>${row.items}</td>
+          <td>${row.pay}</td>
+          <td class="td-mono" style="font-weight:600;color:var(--accent)">${fmt(row.total)}</td>
           ${dueCell}
-          <td><button class="btn-icon" onclick="reprintTicket('${s.id}')" title="Réimprimer le ticket" style="font-size:12px;white-space:nowrap;color:var(--accent,#e8834a);font-weight:600">🖨 Imprimer</button></td>
-          <td style="white-space:nowrap">${adminActions}</td>
+          <td><button class="btn-icon" onclick="${row.print}" title="Imprimer le ticket" style="font-size:12px;white-space:nowrap;color:var(--accent,#e8834a);font-weight:600">🖨 Imprimer</button></td>
+          <td style="white-space:nowrap">${row.admin}</td>
         </tr>`;
       }).join('');
     }
