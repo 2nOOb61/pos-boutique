@@ -1491,6 +1491,7 @@ function printCommandeTicket(cmd) {
     <hr style="${st.sepLight}"/>
     ${tc.ticketShowSubtotal !== false && cmd.subtotal ? `<div class="row"><span>Sous-total</span><span>${fmt(cmd.subtotal)}</span></div>` : ''}
     ${cmd.remise>0 ? `<div class="row"><span>Remise</span><span>-${fmt(cmd.remise)}</span></div>` : ''}
+    ${Number(cmd.fraisLivraison)>0 ? `<div class="row"><span>Frais de livraison</span><span>+${fmt(cmd.fraisLivraison)}</span></div>` : ''}
     <div style="background:${st.color}18;border:1px solid ${st.color};border-radius:4px;padding:4px 6px;margin:4px 0">
       <div class="row bold" style="color:${st.color}"><span>TOTAL A PAYER</span><span>${fmt(cmd.total)}</span></div>
     </div>
@@ -10032,7 +10033,7 @@ function parseCommandeText(rawText) {
   const data = {
     clientId: '', clientName: '', clientContact: '',
     deliveryMode: 'retrait', adresseLivraison: '',
-    items: [], total: 0, accompte: 0, restant: 0, notes: ''
+    items: [], total: 0, subtotal: 0, fraisLivraison: 0, accompte: 0, restant: 0, notes: ''
   };
 
   const lines = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
@@ -10092,6 +10093,10 @@ function parseCommandeText(rawText) {
     const avanceMatch = line.match(/^(?:Avance|Acompte|Advance)\s*:\s*([\d\s]+)\s*Ar\s*$/i);
     if (avanceMatch) { data.accompte = parseInt(avanceMatch[1].replace(/\s/g, ''), 10) || 0; continue; }
 
+    // "Frais de livraison : 5000 Ar"
+    const fraisMatch = line.match(/^Frais\s+de\s+livraison\s*:\s*([\d\s]+)\s*Ar/i);
+    if (fraisMatch) { data.fraisLivraison = parseInt(fraisMatch[1].replace(/\s/g, ''), 10) || 0; continue; }
+
     // "Reste à payer : 158400 Ar"
     const resteMatch = line.match(/^Reste\s+[àaÀA]\s+payer\s*:\s*([\d\s]+)\s*Ar\s*$/i);
     if (resteMatch) { data.restant = parseInt(resteMatch[1].replace(/\s/g, ''), 10) || 0; continue; }
@@ -10104,9 +10109,14 @@ function parseCommandeText(rawText) {
     if (inAddress && line) data.adresseLivraison = (data.adresseLivraison ? data.adresseLivraison + ' ' : '') + line;
   }
 
-  // Recalculer si manquant
-  if (data.items.length > 0 && data.total === 0)
-    data.total = data.items.reduce((s, i) => s + i.qty * i.price, 0);
+  // Sous-total = somme des articles ; intégrer les frais de livraison
+  const _itemsSum = data.items.reduce((s, i) => s + i.qty * i.price, 0);
+  data.subtotal = _itemsSum;
+  if (data.total === 0) {
+    data.total = _itemsSum + data.fraisLivraison;          // pas de "Total :" saisi
+  } else if (data.total === _itemsSum && data.fraisLivraison > 0) {
+    data.total = _itemsSum + data.fraisLivraison;          // "Total :" = articles seuls → ajouter les frais
+  }
   if (data.restant === 0 && data.total > 0)
     data.restant = Math.max(0, data.total - data.accompte);
 
@@ -10203,12 +10213,12 @@ function saveCommandeRapide() {
     clientContact:    srParsedData.clientContact,
     deliveryMode:     srParsedData.deliveryMode,
     adresseLivraison: srParsedData.adresseLivraison,
-    fraisLivraison:   0,
+    fraisLivraison:   srParsedData.fraisLivraison || 0,
     dateLivraison:    '',
     items:            srParsedData.items.map(i => ({ name: i.name, qty: i.qty, price: i.price, custom: true })),
     notes:            srParsedData.notes,
     photos:           [],
-    subtotal:         srParsedData.total,
+    subtotal:         srParsedData.subtotal || srParsedData.total,
     remise:           0,
     total:            srParsedData.total,
     accompte:         srParsedData.accompte,
