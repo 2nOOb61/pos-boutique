@@ -2338,6 +2338,23 @@ function toggleCmdDetail(id){
   const open=d.classList.toggle('open');
   if(b) b.classList.toggle('open', open);
 }
+// Corriger l'adresse de livraison d'une commande (depuis le menu ⋮) — écrit dans le Sheet
+function editCommandeAddress(id){
+  const c = commandes.find(x => String(x.id) === String(id));
+  if (!c) { showToast('Commande introuvable', 'error'); return; }
+  const v = prompt("Adresse de livraison pour « " + (c.clientName || 'commande') + " »\n(laisser vide = Retrait boutique) :", c.adresseLivraison || '');
+  if (v === null) return; // annulé
+  const addr = v.trim();
+  c.adresseLivraison = addr;
+  c.deliveryMode = addr ? 'livraison' : 'retrait';
+  saveData();
+  renderCommandes();
+  if (APPS_SCRIPT_URL) {
+    apiCall({ action:'updateCommande', id: c.id, adresseLivraison: addr, deliveryMode: c.deliveryMode })
+      .then(r => { if (r && r.ok) showToast('Adresse enregistrée'); else showToast('Erreur enregistrement', 'error'); })
+      .catch(() => showToast('Erreur réseau', 'error'));
+  }
+}
 function closeAllKebabs(){ document.querySelectorAll('.kebab-menu.open').forEach(m=>m.classList.remove('open')); }
 function toggleKebab(uid, ev){
   if(ev) ev.stopPropagation();
@@ -5107,14 +5124,12 @@ function renderCommandes() {
       const _dSvg = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>';
       const printBtn = `<button class="hist-print-btn" onclick="printCommandeTicket(commandes.find(x=>String(x.id)==='${c.id}'))" title="Imprimer le bon de commande">${_pSvg}<span>Imprimer</span></button>`;
       const finalizeBtn = c.status === 'pending' ? `<button class="btn-finalize" onclick="openCmdFinalizeModal('${c.id}')">Finaliser</button>` : '';
-      const kebab = c.status === 'pending'
-        ? `<div class="kebab-wrap">
+      const kebabItems = `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeAddress('${c.id}')">${_kebabIcon('edit')}<span>Modifier l'adresse</span></button>`
+        + (c.status === 'pending' ? `<button class="kebab-item danger" role="menuitem" onclick="closeAllKebabs();cancelCommande('${c.id}')">${_kebabIcon('trash')}<span>Annuler la commande</span></button>` : '');
+      const kebab = `<div class="kebab-wrap">
              <button class="kebab-btn" aria-label="Plus d'actions" aria-haspopup="true" onclick="toggleKebab('cmd${c.id}',event)">${_dSvg}</button>
-             <div class="kebab-menu" id="kb-cmd${c.id}" role="menu">
-               <button class="kebab-item danger" role="menuitem" onclick="closeAllKebabs();cancelCommande('${c.id}')">${_kebabIcon('trash')}<span>Annuler la commande</span></button>
-             </div>
-           </div>`
-        : '';
+             <div class="kebab-menu" id="kb-cmd${c.id}" role="menu">${kebabItems}</div>
+           </div>`;
 
       return `
       <div class="cmd-card" data-cgrp="${gid}">
