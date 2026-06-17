@@ -1181,7 +1181,7 @@ function _doFinalize(r, method, given, change, provider, ref) {
   const sale = {
     id:            nextSaleId++,
     date:          new Date().toISOString(),
-    caissier:      currentUser?.label || 'Caissier',
+    caissier:      r.caissier || currentUser?.username || 'caissier',
     clientName:    r.clientName,
     clientContact: r.clientContact,
     items:         r.items,
@@ -3794,7 +3794,13 @@ async function syncToAppsScript(sale) {
     showToast(' Hors ligne — vente mise en file d\'attente', 'info');
     return;
   }
-  sale.caissier = currentUser ? currentUser.username : 'caissier';
+  // Une vente issue d'une commande/réservation reste attribuée au commercial qui
+  // l'a créée (le comptable ne fait que finaliser l'encaissement du reste).
+  if (sale.fromCommande || sale.fromReservation) {
+    sale.caissier = sale.caissier || (currentUser ? currentUser.username : 'caissier');
+  } else {
+    sale.caissier = currentUser ? currentUser.username : 'caissier';
+  }
   const r = await apiCall({ action: 'addSale', sale });
   if (r && r.ok) {
     showToast(' Vente enregistrée dans Google Sheets ');
@@ -5260,7 +5266,7 @@ function _doCmdFinalize(c, method, given, change, provider, ref) {
   const sale = {
     id:            nextSaleId++,
     date:          new Date().toISOString(),
-    caissier:      currentUser?.label || 'Caissier',
+    caissier:      c.caissier || currentUser?.username || 'caissier',
     clientName:    c.clientName,
     clientContact: c.clientContact,
     items:         c.items.map(i => ({ name: i.name, qty: i.qty, price: i.price })),
