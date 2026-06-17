@@ -9049,7 +9049,7 @@ function shiftPatronPeriod(dir) {
 
 // ── Refonte UX vue patron (pcf-*) : hiérarchie, scanabilité, progressive
 //    disclosure, kebab, table responsive → cartes, 80/20. ──────────────────
-let _pcfCais = [], _pcfCli = [];
+let _pcfCais = [], _pcfCli = [], _pcfLast = null;
 const _PCF_DOTS = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>';
 
 function _pcfToolbar() {
@@ -9057,12 +9057,24 @@ function _pcfToolbar() {
   const range = _patronPeriodRange();
   const seg = (m, lbl) => `<button class="pcf-seg${mode===m?' active':''}" onclick="setPatronPeriodMode('${m}')">${lbl}</button>`;
   const dis = mode === 'all';
+  const csvIcon = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
+  const prnIcon = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>';
+  const dlIcon  = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:-2px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';
   return `<div class="pcf-toolbar">
     <div class="pcf-segs">${seg('day','Jour')}${seg('week','Semaine')}${seg('month','Mois')}${seg('year','Année')}${seg('all','Tout')}</div>
-    <div class="pcf-nav">
-      <button onclick="shiftPatronPeriod(-1)" ${dis?'disabled':''} aria-label="Période précédente">‹</button>
-      <span class="pcf-nav-label">${_cfEsc(range.label)}</span>
-      <button onclick="shiftPatronPeriod(1)" ${dis?'disabled':''} aria-label="Période suivante">›</button>
+    <div class="pcf-tools">
+      <div class="pcf-nav">
+        <button onclick="shiftPatronPeriod(-1)" ${dis?'disabled':''} aria-label="Période précédente">‹</button>
+        <span class="pcf-nav-label">${_cfEsc(range.label)}</span>
+        <button onclick="shiftPatronPeriod(1)" ${dis?'disabled':''} aria-label="Période suivante">›</button>
+      </div>
+      <div class="kebab-wrap">
+        <button class="pcf-export-btn" aria-haspopup="true" onclick="toggleKebab('pcfexp',event)">${dlIcon}Exporter</button>
+        <div class="kebab-menu" id="kb-pcfexp" role="menu">
+          <button class="kebab-item" role="menuitem" onclick="closeAllKebabs();exportControlFinanceCSV()">${csvIcon}<span>Exporter en CSV</span></button>
+          <button class="kebab-item" role="menuitem" onclick="closeAllKebabs();printControlFinanceReport()">${prnIcon}<span>Imprimer / PDF</span></button>
+        </div>
+      </div>
     </div>
   </div>`;
 }
@@ -9145,6 +9157,7 @@ async function renderControlFinance() {
   const jours = r.parJour || [];
   const topCais = cais[0];
   _pcfCais = cais; _pcfCli = cli;
+  _pcfLast = { rangeLabel: range.label, totals: t, cais: cais, cli: cli, jours: jours };
 
   // ── HERO — métrique principale (Information Hierarchy + 80/20) ──
   const hero = `<div class="pcf-hero">
@@ -9323,6 +9336,114 @@ function _pcfClientCard(cli, t){
     </table>
     ${more}
   </div>`;
+}
+
+// ── Export du contrôle financier (CSV + impression PDF), période affichée ──
+function _pcfSlug(s){ return String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'') || 'periode'; }
+
+function exportControlFinanceCSV(){
+  const d = _pcfLast;
+  if (!d){ showToast('Aucune donnée à exporter — ouvrez la période', 'error'); return; }
+  const BOM = '﻿';
+  const q = v => '"' + String(v==null?'':v).replace(/"/g,'""') + '"';
+  const num = n => Number(n)||0;
+  const L = [];
+  L.push(q("Contrôle financier — " + d.rangeLabel));
+  L.push(q("Édité le " + new Date().toLocaleString('fr-FR')));
+  L.push('');
+  L.push(q('TOTAUX'));
+  L.push([q("Chiffre d'affaires (engagé)"), num(d.totals.engage)].join(','));
+  L.push([q('Encaissé'), num(d.totals.encaisse)].join(','));
+  L.push([q('Reste à recouvrer'), num(d.totals.restant)].join(','));
+  L.push([q('Ventes comptant'), num(d.totals.nbVentes)].join(','));
+  L.push([q('Commandes/réservations en cours'), num(d.totals.nbEnCours)].join(','));
+  L.push('');
+  L.push(q('VENTES PAR JOUR'));
+  L.push(['Jour','Nb ventes','Montant'].map(q).join(','));
+  (d.jours||[]).forEach(j => L.push([q(j.jour), num(j.nb), num(j.montant)].join(',')));
+  L.push('');
+  L.push(q('PAR CAISSIER'));
+  L.push(['Caissier','Opérations','Ventes comptant','Engagé','Encaissé','Restant'].map(q).join(','));
+  (d.cais||[]).forEach(c => L.push([q(c.nom), num(c.nb), num(c.nbVentes), num(c.engage), num(c.encaisse), num(c.restant)].join(',')));
+  L.push('');
+  L.push(q('À RECOUVRER PAR CLIENT'));
+  L.push(['Client','Dossiers','Engagé','Acompte','Reste dû'].map(q).join(','));
+  (d.cli||[]).forEach(c => L.push([q(c.client), num(c.nb), num(c.engage), num(c.accompte), num(c.restant)].join(',')));
+
+  const blob = new Blob([BOM + L.join('\n')], { type:'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = 'controle_financier_' + (_pcfSlug(d.rangeLabel) || 'periode') + '_' + new Date().toISOString().split('T')[0] + '.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('Export CSV généré');
+}
+
+function _pcfOpenReportWindow(bodyHtml, title){
+  const w = window.open('', '_blank', 'width=900,height=1000');
+  if (!w){ alert("Impression bloquée : autorisez les fenêtres pop-up pour ce site, puis réessayez."); return; }
+  setTimeout(() => {
+    w.document.write(`<html><head><meta charset="utf-8"><title>${title}</title><style>
+      @page{size:A4;margin:14mm}
+      *{box-sizing:border-box}
+      body{font-family:Arial,Helvetica,sans-serif;color:#1c1917;margin:0;font-size:12px}
+      h1{font-size:18px;margin:0 0 2px}
+      .sub{color:#78716c;font-size:12px;margin-bottom:14px}
+      .kpis{display:flex;gap:10px;margin:0 0 4px;flex-wrap:wrap}
+      .kpi{flex:1;min-width:120px;border:1px solid #e5e3df;border-radius:8px;padding:8px 11px}
+      .kpi .l{font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:#a8a29e;font-weight:bold}
+      .kpi .v{font-size:16px;font-weight:bold;margin-top:2px}
+      h2{font-size:13px;margin:18px 0 6px;border-bottom:2px solid #1a4a3a;padding-bottom:3px}
+      table{width:100%;border-collapse:collapse;font-size:11px}
+      th{text-align:left;background:#f3f2ef;padding:5px 7px;font-size:9px;text-transform:uppercase;letter-spacing:.04em;color:#555;border-bottom:1px solid #e5e3df}
+      td{padding:5px 7px;border-bottom:1px solid #f0efed}
+      .r{text-align:right;white-space:nowrap}
+      .c{text-align:center}.muted{color:#a8a29e}
+      .g{color:#16a34a}.rd{color:#dc2626;font-weight:bold}
+      .foot{margin-top:18px;color:#a8a29e;font-size:10px;text-align:center}
+      @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+    </style></head><body onload="window.print()">${bodyHtml}</body></html>`);
+    w.document.close();
+  }, 200);
+}
+
+function printControlFinanceReport(){
+  const d = _pcfLast;
+  if (!d){ showToast('Aucune donnée à imprimer — ouvrez la période', 'error'); return; }
+  const t = d.totals || {};
+  const nbOps = (t.nbVentes||0) + (t.nbEnCours||0);
+  const taux  = t.engage>0 ? Math.round((t.encaisse||0)/t.engage*100) : 0;
+  const shop  = (typeof shopConfig !== 'undefined' && shopConfig) ? shopConfig : {};
+  const shopName = shop.name || 'Boutique';
+  const esc = _cfEsc, money = n => fmt(n);
+  const _jl = (j) => { const p=String(j).split('-'); const dt=new Date(+p[0],+p[1]-1,+p[2]); const s=dt.toLocaleDateString('fr-FR',{weekday:'short',day:'2-digit',month:'short'}); return s.charAt(0).toUpperCase()+s.slice(1); };
+  const jourRows = (d.jours||[]).length
+    ? d.jours.map(j => `<tr><td>${esc(_jl(j.jour))}</td><td class="r">${j.nb||0}</td><td class="r">${money(j.montant)}</td></tr>`).join('')
+    : `<tr><td colspan="3" class="c muted">Aucune vente sur la période</td></tr>`;
+  const caisRows = (d.cais||[]).length
+    ? d.cais.map((c,i) => `<tr><td class="c">${i+1}</td><td>${esc(c.nom)}</td><td class="r">${c.nb||0}</td><td class="r">${money(c.engage)}</td><td class="r g">${money(c.encaisse)}</td><td class="r rd">${money(c.restant)}</td></tr>`).join('')
+    : `<tr><td colspan="6" class="c muted">Aucune vente sur la période</td></tr>`;
+  const cliRows = (d.cli||[]).length
+    ? d.cli.map(c => `<tr><td>${esc(c.client)}</td><td class="r">${c.nb||0}</td><td class="r">${money(c.engage)}</td><td class="r g">${money(c.accompte)}</td><td class="r rd">${money(c.restant)}</td></tr>`).join('')
+    : `<tr><td colspan="5" class="c muted">Aucun reste à recouvrer</td></tr>`;
+  const html = `
+    <h1>${esc(shopName)} — Contrôle financier</h1>
+    <div class="sub">Période : ${esc(d.rangeLabel)} · édité le ${new Date().toLocaleDateString('fr-FR')} à ${new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</div>
+    <div class="kpis">
+      <div class="kpi"><div class="l">Chiffre d'affaires</div><div class="v">${money(t.engage)}</div></div>
+      <div class="kpi"><div class="l">Encaissé (${taux}%)</div><div class="v g">${money(t.encaisse)}</div></div>
+      <div class="kpi"><div class="l">Reste à recouvrer</div><div class="v rd">${money(t.restant)}</div></div>
+      <div class="kpi"><div class="l">Opérations</div><div class="v">${nbOps}</div></div>
+    </div>
+    <h2>Ventes par jour</h2>
+    <table><thead><tr><th>Jour</th><th class="r">Nb</th><th class="r">Montant</th></tr></thead><tbody>${jourRows}</tbody></table>
+    <h2>Performance par caissier</h2>
+    <table><thead><tr><th class="c">#</th><th>Caissier</th><th class="r">Opér.</th><th class="r">Engagé</th><th class="r">Encaissé</th><th class="r">Restant</th></tr></thead><tbody>${caisRows}</tbody></table>
+    <h2>À recouvrer par client</h2>
+    <table><thead><tr><th>Client</th><th class="r">Dossiers</th><th class="r">Engagé</th><th class="r">Acompte</th><th class="r">Reste dû</th></tr></thead><tbody>${cliRows}</tbody></table>
+    <div class="foot">Rapport généré par le POS — ${esc(shopName)}</div>`;
+  _pcfOpenReportWindow(html, 'Contrôle financier — ' + d.rangeLabel);
 }
 
 function renderPatronDashboard() {

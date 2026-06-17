@@ -188,10 +188,13 @@
 .pcf-segs{ display:flex; gap:3px; background:var(--surface2); border:1px solid var(--border); border-radius:12px; padding:4px; }
 .pcf-seg{ padding:7px 14px; border:none; border-radius:8px; font-size:12.5px; font-weight:700; cursor:pointer; background:transparent; color:var(--muted); transition:.15s; }
 .pcf-seg.active{ background:var(--surface); color:var(--accent); box-shadow:0 1px 3px rgba(0,0,0,.12); }
-.pcf-nav{ display:flex; align-items:center; gap:7px; margin-left:auto; }
+.pcf-nav{ display:flex; align-items:center; gap:7px; }
 .pcf-nav button{ width:34px; height:34px; border:1px solid var(--border); border-radius:9px; background:var(--surface); cursor:pointer; font-size:18px; line-height:1; color:var(--text); display:flex; align-items:center; justify-content:center; }
 .pcf-nav button:disabled{ opacity:.35; cursor:default; }
 .pcf-nav-label{ font-size:13px; font-weight:800; min-width:150px; text-align:center; color:var(--text); }
+.pcf-tools{ display:flex; align-items:center; gap:8px; margin-left:auto; flex-wrap:wrap; }
+.pcf-export-btn{ display:inline-flex; align-items:center; gap:7px; padding:8px 14px; border:1px solid var(--border); border-radius:9px; background:var(--surface); color:var(--accent); font-size:12.5px; font-weight:800; cursor:pointer; transition:.15s; }
+.pcf-export-btn:hover{ background:var(--surface2); }
 
 /* HERO — métrique principale + jauge d'encaissement (Information Hierarchy / 80-20) */
 .pcf-hero{ display:grid; grid-template-columns:1.05fr 1fr; gap:18px; background:linear-gradient(135deg,#1a4a3a 0%,#14624a 100%); border-radius:18px; padding:22px 24px; color:#fff; margin-bottom:14px; box-shadow:0 10px 26px rgba(26,74,58,.24); }
