@@ -167,6 +167,112 @@
 .pdb-empty { display:flex; flex-direction:column; align-items:center; padding:32px 16px; color:#a8a29e; font-size:12px; gap:8px; }
 @media(max-width:700px){ .pdb-two-col{ grid-template-columns:1fr; } .pdb-kpi-grid{ grid-template-columns:repeat(2,1fr); } }
 
+/* ══ PATRON — pdb-table responsive (cartes sur mobile) ══ */
+@media(max-width:760px){
+  .pdb-table thead{ display:none; }
+  .pdb-table, .pdb-table tbody, .pdb-table tr, .pdb-table td{ display:block; width:auto; }
+  .pdb-table tr{ border:1px solid var(--border); border-radius:12px; margin:0 0 10px; padding:4px 2px; background:var(--surface); }
+  .pdb-table tr:hover td{ background:transparent; }
+  .pdb-table td{ display:flex; justify-content:space-between; align-items:center; gap:14px; padding:8px 14px!important; border:none!important; text-align:right; }
+  .pdb-table td::before{ content:attr(data-label); font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); text-align:left; flex-shrink:0; }
+  .pdb-table td:first-child{ border-bottom:1px solid var(--surface2)!important; padding-bottom:10px!important; }
+  .pdb-table td:first-child::before{ display:none; }
+  .pdb-table td .pdb-bar-wrap{ display:none; }
+  .pdb-table td[colspan]{ justify-content:center; }
+  .pdb-table td[colspan]::before{ display:none; }
+}
+
+/* ══ PATRON — CONTRÔLE FINANCIER (vue patron, refonte UX) ══ */
+/* Toolbar période (segmented control + nav) */
+.pcf-toolbar{ display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:16px; }
+.pcf-segs{ display:flex; gap:3px; background:var(--surface2); border:1px solid var(--border); border-radius:12px; padding:4px; }
+.pcf-seg{ padding:7px 14px; border:none; border-radius:8px; font-size:12.5px; font-weight:700; cursor:pointer; background:transparent; color:var(--muted); transition:.15s; }
+.pcf-seg.active{ background:var(--surface); color:var(--accent); box-shadow:0 1px 3px rgba(0,0,0,.12); }
+.pcf-nav{ display:flex; align-items:center; gap:7px; margin-left:auto; }
+.pcf-nav button{ width:34px; height:34px; border:1px solid var(--border); border-radius:9px; background:var(--surface); cursor:pointer; font-size:18px; line-height:1; color:var(--text); display:flex; align-items:center; justify-content:center; }
+.pcf-nav button:disabled{ opacity:.35; cursor:default; }
+.pcf-nav-label{ font-size:13px; font-weight:800; min-width:150px; text-align:center; color:var(--text); }
+
+/* HERO — métrique principale + jauge d'encaissement (Information Hierarchy / 80-20) */
+.pcf-hero{ display:grid; grid-template-columns:1.05fr 1fr; gap:18px; background:linear-gradient(135deg,#1a4a3a 0%,#14624a 100%); border-radius:18px; padding:22px 24px; color:#fff; margin-bottom:14px; box-shadow:0 10px 26px rgba(26,74,58,.24); }
+.pcf-hero-label{ font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.08em; opacity:.82; }
+.pcf-hero-val{ font-size:38px; font-weight:800; line-height:1.04; margin:7px 0 5px; letter-spacing:-.5px; }
+.pcf-hero-meta{ font-size:12.5px; opacity:.85; }
+.pcf-gauge{ background:rgba(255,255,255,.12); border-radius:14px; padding:15px 17px; display:flex; flex-direction:column; justify-content:center; }
+.pcf-gauge-top{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:9px; }
+.pcf-gauge-top span{ font-size:12px; font-weight:700; opacity:.88; }
+.pcf-gauge-top strong{ font-size:23px; font-weight:800; }
+.pcf-gauge-bar{ height:10px; border-radius:6px; background:rgba(255,255,255,.22); overflow:hidden; }
+.pcf-gauge-fill{ height:100%; border-radius:6px; background:#fff; transition:width .5s ease; }
+.pcf-gauge-legend{ display:flex; gap:18px; margin-top:11px; flex-wrap:wrap; }
+.pcf-gauge-legend span{ font-size:11.5px; opacity:.92; display:flex; align-items:center; gap:6px; }
+.pcf-gauge-legend b{ font-weight:800; }
+.pcf-dot{ width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+
+/* KPIs secondaires */
+.pcf-kpis{ display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:20px; }
+.pcf-kpi{ background:var(--surface); border:1px solid var(--border); border-left:3px solid var(--kc,#1a4a3a); border-radius:14px; padding:13px 15px; }
+.pcf-kpi-label{ font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+.pcf-kpi-val{ font-size:20px; font-weight:800; color:var(--text); margin-top:4px; line-height:1.15; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pcf-kpi-sub{ font-size:11px; color:var(--muted); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+/* Cartes / sections */
+.pcf-card{ background:var(--surface); border:1px solid var(--border); border-radius:16px; margin-bottom:18px; overflow:visible; }
+.pcf-card-head{ display:flex; align-items:center; gap:11px; padding:14px 18px; border-bottom:1px solid var(--surface2); }
+.pcf-card-head .ic{ width:32px; height:32px; border-radius:9px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.pcf-card-title{ font-size:14px; font-weight:800; color:var(--text); }
+.pcf-card-sub{ font-size:11px; color:var(--muted); margin-top:1px; }
+.pcf-card-badge{ margin-left:auto; font-size:11px; font-weight:800; padding:4px 11px; border-radius:20px; white-space:nowrap; }
+
+/* Table de données (Responsive Data Table) */
+.pcf-table{ width:100%; border-collapse:collapse; }
+.pcf-table thead th{ text-align:left; font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); padding:9px 16px; border-bottom:1px solid var(--surface2); white-space:nowrap; }
+.pcf-table tbody td{ padding:12px 16px; font-size:13px; color:var(--text); vertical-align:middle; }
+.pcf-row>td{ border-bottom:1px solid var(--surface2); }
+.pcf-row{ cursor:pointer; transition:background .12s; }
+.pcf-row:hover>td{ background:var(--surface2); }
+.pcf-num{ text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.pcf-rank{ display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; border-radius:7px; font-size:11px; font-weight:800; flex-shrink:0; }
+.pcf-name{ font-weight:700; color:var(--text); }
+.pcf-chev{ width:14px; height:14px; color:var(--muted); transition:transform .2s; flex-shrink:0; }
+.pcf-row.open .pcf-chev{ transform:rotate(90deg); }
+.pcf-minibar{ display:inline-block; width:60px; height:6px; border-radius:4px; background:var(--surface2); vertical-align:middle; margin-right:8px; overflow:hidden; }
+.pcf-minibar>i{ display:block; height:100%; border-radius:4px; }
+.pcf-c-act{ width:1%; white-space:nowrap; text-align:right; }
+.pcf-detail-row>td{ padding:0!important; border:none; }
+.pcf-detail{ display:none; padding:13px 18px 15px; background:var(--surface2); }
+.pcf-detail.open{ display:block; }
+.pcf-detail-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(118px,1fr)); gap:10px; }
+.pcf-dt{ background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:9px 12px; }
+.pcf-dt-l{ font-size:9.5px; font-weight:800; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+.pcf-dt-v{ font-size:14px; font-weight:800; color:var(--text); margin-top:2px; }
+.pcf-empty{ text-align:center; padding:30px 16px; color:var(--muted); font-size:13px; }
+.pcf-more{ display:block; width:100%; padding:11px; background:var(--surface2); border:none; border-top:1px solid var(--border); border-radius:0 0 16px 16px; color:var(--accent); font-weight:800; font-size:12.5px; cursor:pointer; }
+.pcf-more:hover{ background:var(--surface3); }
+.pcf-loading{ padding:30px 0; text-align:center; color:var(--muted); font-size:13px; }
+.pcf-error{ padding:18px; border:1px solid var(--border); border-radius:12px; color:var(--red); font-size:13px; }
+
+/* Mobile — Mobile Card Layout */
+@media(max-width:760px){
+  .pcf-hero{ grid-template-columns:1fr; gap:14px; padding:18px; }
+  .pcf-hero-val{ font-size:31px; }
+  .pcf-kpis{ grid-template-columns:repeat(2,1fr); }
+  .pcf-table thead{ display:none; }
+  .pcf-table, .pcf-table tbody{ display:block; width:100%; }
+  .pcf-row{ display:block; border:1px solid var(--border); border-radius:14px; margin:0 12px 10px; padding:3px 2px; background:var(--surface); }
+  .pcf-row:hover>td{ background:transparent; }
+  .pcf-row>td{ display:flex; justify-content:space-between; align-items:center; gap:14px; padding:8px 14px!important; border:none!important; }
+  .pcf-row>td::before{ content:attr(data-label); font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); flex-shrink:0; }
+  .pcf-row>td.pcf-c-main{ border-bottom:1px solid var(--surface2)!important; padding-bottom:11px!important; }
+  .pcf-row>td.pcf-c-main::before{ display:none; }
+  .pcf-row>td.pcf-c-act{ justify-content:flex-end; }
+  .pcf-row>td.pcf-c-act::before{ display:none; }
+  .pcf-minibar{ display:none; }
+  .pcf-detail-row{ display:block; }
+  .pcf-detail-row>td{ display:block; }
+  .pcf-detail{ margin:0 12px 12px; border-radius:12px; }
+}
+
 /* ══ PRODUCTION — Operator workload bar ══ */
 .op-workload-section { margin-bottom:16px; }
 .op-workload-title { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--color-text-muted); margin-bottom:8px; }

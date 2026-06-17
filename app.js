@@ -9047,84 +9047,282 @@ function shiftPatronPeriod(dir) {
   renderControlFinance();
 }
 
-function _cfBar() {
+// ── Refonte UX vue patron (pcf-*) : hiérarchie, scanabilité, progressive
+//    disclosure, kebab, table responsive → cartes, 80/20. ──────────────────
+let _pcfCais = [], _pcfCli = [];
+const _PCF_DOTS = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>';
+
+function _pcfToolbar() {
   const mode = _patronPeriod.mode;
   const range = _patronPeriodRange();
-  const btn = (m, lbl) => `<button onclick="setPatronPeriodMode('${m}')" style="padding:6px 13px;border:1px solid var(--color-border,#e5e7eb);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;background:${mode===m?'var(--color-primary,#1a4a3a)':'transparent'};color:${mode===m?'#fff':'var(--color-text,#374151)'}">${lbl}</button>`;
+  const seg = (m, lbl) => `<button class="pcf-seg${mode===m?' active':''}" onclick="setPatronPeriodMode('${m}')">${lbl}</button>`;
   const dis = mode === 'all';
-  const navBtn = (dir,ch) => `<button onclick="shiftPatronPeriod(${dir})" ${dis?'disabled':''} style="width:30px;height:30px;border:1px solid var(--color-border,#e5e7eb);border-radius:8px;background:transparent;cursor:${dis?'default':'pointer'};opacity:${dis?'.4':'1'};font-size:16px;line-height:1">${ch}</button>`;
-  return `
-  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:16px">
-    <div style="display:flex;gap:6px;flex-wrap:wrap">${btn('day','Jour')}${btn('week','Semaine')}${btn('month','Mois')}${btn('year','Année')}${btn('all','Tout')}</div>
-    <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
-      ${navBtn(-1,'‹')}<span style="font-size:13px;font-weight:700;min-width:165px;text-align:center">${_cfEsc(range.label)}</span>${navBtn(1,'›')}
+  return `<div class="pcf-toolbar">
+    <div class="pcf-segs">${seg('day','Jour')}${seg('week','Semaine')}${seg('month','Mois')}${seg('year','Année')}${seg('all','Tout')}</div>
+    <div class="pcf-nav">
+      <button onclick="shiftPatronPeriod(-1)" ${dis?'disabled':''} aria-label="Période précédente">‹</button>
+      <span class="pcf-nav-label">${_cfEsc(range.label)}</span>
+      <button onclick="shiftPatronPeriod(1)" ${dis?'disabled':''} aria-label="Période suivante">›</button>
     </div>
   </div>`;
+}
+
+function _pcfIcon(name){
+  const s='<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">';
+  if(name==='users')    return s+'<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
+  if(name==='wallet')   return s+'<path d="M20 12V8H6a2 2 0 0 1-2-2c0-1.1.9-2 2-2h12v4"/><path d="M4 6v12a2 2 0 0 0 2 2h14v-4"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>';
+  if(name==='calendar') return s+'<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>';
+  return '';
+}
+
+function _pcfKpi(label, val, sub, color){
+  return `<div class="pcf-kpi" style="--kc:${color}">
+    <div class="pcf-kpi-label">${label}</div>
+    <div class="pcf-kpi-val" style="color:${color}">${val}</div>
+    <div class="pcf-kpi-sub">${sub}</div>
+  </div>`;
+}
+
+// Progressive disclosure — déplier une ligne (caissier/client)
+function _pcfToggle(key){
+  const r=document.getElementById('pcfr-'+key), d=document.getElementById('pcfd-'+key);
+  if(!r||!d) return;
+  const open=r.classList.toggle('open');
+  d.classList.toggle('open', open);
+}
+function _pcfToggleMenu(key, ev){ if(ev) ev.stopPropagation(); closeAllKebabs(); _pcfToggle(key); }
+function _pcfMore(cls, btn){ document.querySelectorAll('.'+cls).forEach(el=>{ el.style.display=''; }); if(btn) btn.style.display='none'; }
+
+// Kebab — actions secondaires
+function _pcfCopy(txt){
+  const done=()=>{ if(typeof showToast==='function') showToast('Récapitulatif copié'); };
+  try{
+    if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(done).catch(()=>_pcfCopyFallback(txt,done)); }
+    else _pcfCopyFallback(txt, done);
+  }catch(e){ _pcfCopyFallback(txt, done); }
+}
+function _pcfCopyFallback(txt, done){
+  try{ const ta=document.createElement('textarea'); ta.value=txt; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); done&&done(); }catch(e){}
+}
+function _pcfCopyCais(i, ev){
+  if(ev) ev.stopPropagation(); closeAllKebabs();
+  const c=_pcfCais[i]; if(!c) return;
+  _pcfCopy(`Caissier : ${c.nom}\nPériode : ${_patronPeriodRange().label}\nOpérations : ${c.nb||0}\nEngagé : ${fmt(c.engage)}\nEncaissé : ${fmt(c.encaisse)}\nReste : ${fmt(c.restant)}`);
+}
+function _pcfCopyCli(i, ev){
+  if(ev) ev.stopPropagation(); closeAllKebabs();
+  const c=_pcfCli[i]; if(!c) return;
+  _pcfCopy(`Client : ${c.client}\nDossiers : ${c.nb||0}\nEngagé : ${fmt(c.engage)}\nAcompte : ${fmt(c.accompte)}\nReste dû : ${fmt(c.restant)}`);
+}
+function _pcfVoirCommandes(i, ev){
+  if(ev) ev.stopPropagation(); closeAllKebabs();
+  const c=_pcfCli[i]; if(!c) return;
+  showPage('commandes');
+  const s=document.getElementById('cmdSearch'); if(s) s.value=c.client;
+  if(typeof renderCommandes==='function') renderCommandes();
 }
 
 async function renderControlFinance() {
   const box = document.getElementById('patronControlFinance');
   if (!box) return;
   const range = _patronPeriodRange();
-  box.innerHTML = _cfBar() + `<div style="padding:28px 0;text-align:center;color:var(--color-text-muted,#9ca3af);font-size:13px">Calcul en cours…</div>`;
+  box.innerHTML = _pcfToolbar() + `<div class="pcf-loading">Calcul en cours…</div>`;
 
   let r = null;
   try { r = await apiCall({ action:'getControlPatron', from: range.from, to: range.to }); } catch(e) {}
   if (!r || !r.ok) {
     const _m = r ? (r.error || 'réponse ok=false') : 'aucune réponse (réseau)';
-    box.innerHTML = _cfBar() + `<div style="padding:18px;border:1px solid var(--color-border,#e5e7eb);border-radius:10px;color:#dc2626;font-size:13px">Impossible de charger le contrôle financier${APPS_SCRIPT_URL ? '' : ' (Apps Script non configuré)'} — <span style="font-family:monospace;font-size:12px">${_cfEsc(_m)}</span></div>`;
+    box.innerHTML = _pcfToolbar() + `<div class="pcf-error">Impossible de charger le contrôle financier${APPS_SCRIPT_URL ? '' : ' (Apps Script non configuré)'} — <span style="font-family:monospace;font-size:12px">${_cfEsc(_m)}</span></div>`;
     return;
   }
+
   const t = r.totals || { engage:0, encaisse:0, restant:0, nbVentes:0, nbEnCours:0 };
-
-  const kpis = `<div class="pdb-kpi-grid">
-    ${_pdbKpi('Total engagé', fmt(t.engage), 'sur la période', '#2563eb')}
-    ${_pdbKpi('Encaissé', fmt(t.encaisse), 'déjà reçu', '#16a34a')}
-    ${_pdbKpi('Reste à recouvrer', fmt(t.restant), (r.parClient||[]).length + ' client(s)', '#dc2626')}
-    ${_pdbKpi('Opérations', ((t.nbVentes||0) + (t.nbEnCours||0)), (t.nbVentes||0) + ' vente(s) · ' + (t.nbEnCours||0) + ' commande(s)/résa', '#7c3aed')}
-  </div>`;
-
-  const cais = r.parCaissier || [];
-  const caisRows = cais.length
-    ? cais.map(c => `<tr>
-        <td><span style="font-weight:600">${_cfEsc(c.nom)}</span></td>
-        <td style="text-align:center">${c.nb||0}</td>
-        <td style="text-align:right">${fmt(c.engage)}</td>
-        <td style="text-align:right;color:#16a34a">${fmt(c.encaisse)}</td>
-        <td style="text-align:right;color:#dc2626;font-weight:600">${fmt(c.restant)}</td>
-      </tr>`).join('')
-    : `<tr><td colspan="5"><div class="pdb-empty">Aucune vente sur la période</div></td></tr>`;
-  const caisHtml = `<div class="pdb-section">
-    <div class="pdb-section-head"><div><div class="pdb-section-title">Par caissier</div><div class="pdb-section-sub">Ventes + commandes/réservations en cours</div></div><span class="pdb-section-badge" style="background:#e8f4f0;color:#1a4a3a">${cais.length} caissier(s)</span></div>
-    <table class="pdb-table"><thead><tr><th>Caissier</th><th style="text-align:center">Opér.</th><th style="text-align:right">Engagé</th><th style="text-align:right">Encaissé</th><th style="text-align:right">Restant</th></tr></thead><tbody>${caisRows}</tbody></table>
-  </div>`;
-
-  const cli = r.parClient || [];
-  const cliRows = cli.length
-    ? cli.map(c => `<tr>
-        <td><span style="font-weight:600">${_cfEsc(c.client)}</span></td>
-        <td style="text-align:center">${c.nb||0}</td>
-        <td style="text-align:right">${fmt(c.engage)}</td>
-        <td style="text-align:right;color:#16a34a">${fmt(c.accompte)}</td>
-        <td style="text-align:right;color:#dc2626;font-weight:600">${fmt(c.restant)}</td>
-      </tr>`).join('')
-    : `<tr><td colspan="5"><div class="pdb-empty">Aucun reste à recouvrer</div></td></tr>`;
-  const cliHtml = `<div class="pdb-section">
-    <div class="pdb-section-head"><div><div class="pdb-section-title">Par client — à recouvrer</div><div class="pdb-section-sub">Commandes / réservations non soldées</div></div><span class="pdb-section-badge" style="background:#fee2e2;color:#dc2626">${fmt(t.restant)}</span></div>
-    <table class="pdb-table"><thead><tr><th>Client</th><th style="text-align:center">Dossiers</th><th style="text-align:right">Engagé</th><th style="text-align:right">Acompte</th><th style="text-align:right">Restant</th></tr></thead><tbody>${cliRows}</tbody></table>
-  </div>`;
-
+  const nbOps   = (t.nbVentes||0) + (t.nbEnCours||0);
+  const tauxEnc = t.engage>0 ? Math.round((t.encaisse||0)/t.engage*100) : 0;
+  const panier  = nbOps>0 ? Math.round((t.engage||0)/nbOps) : 0;
+  const cais  = (r.parCaissier||[]).slice().sort((a,b)=>(b.engage||0)-(a.engage||0));
+  const cli   = (r.parClient||[]).slice().sort((a,b)=>(b.restant||0)-(a.restant||0));
   const jours = r.parJour || [];
-  const _jourLbl = (j) => { const p = String(j).split('-'); const d = new Date(+p[0], +p[1]-1, +p[2]); return d.toLocaleDateString('fr-FR', { weekday:'short', day:'2-digit', month:'2-digit' }); };
-  const jourRows = jours.length
-    ? jours.map(j => `<tr><td style="font-weight:600">${_cfEsc(_jourLbl(j.jour))}</td><td style="text-align:center">${j.nb||0}</td><td style="text-align:right;font-weight:600">${fmt(j.montant)}</td></tr>`).join('')
-    : `<tr><td colspan="3"><div class="pdb-empty">Aucune vente sur la période</div></td></tr>`;
-  const jourHtml = `<div class="pdb-section">
-    <div class="pdb-section-head"><div><div class="pdb-section-title">Ventes par jour</div><div class="pdb-section-sub">chaque entrée POS comptée à sa date d'entrée</div></div><span class="pdb-section-badge" style="background:#e8f4f0;color:#1a4a3a">${jours.length} jour(s)</span></div>
-    <table class="pdb-table"><thead><tr><th>Jour</th><th style="text-align:center">Nb</th><th style="text-align:right">Montant</th></tr></thead><tbody>${jourRows}</tbody></table>
+  const topCais = cais[0];
+  _pcfCais = cais; _pcfCli = cli;
+
+  // ── HERO — métrique principale (Information Hierarchy + 80/20) ──
+  const hero = `<div class="pcf-hero">
+    <div class="pcf-hero-main">
+      <div class="pcf-hero-label">Chiffre d'affaires · ${_cfEsc(range.label)}</div>
+      <div class="pcf-hero-val">${fmt(t.engage)}</div>
+      <div class="pcf-hero-meta">${nbOps} opération(s) · ${t.nbVentes||0} vente(s) comptant · ${t.nbEnCours||0} commande(s)/résa</div>
+    </div>
+    <div class="pcf-gauge">
+      <div class="pcf-gauge-top"><span>Taux d'encaissement</span><strong>${tauxEnc}%</strong></div>
+      <div class="pcf-gauge-bar"><div class="pcf-gauge-fill" style="width:${Math.min(100,tauxEnc)}%"></div></div>
+      <div class="pcf-gauge-legend">
+        <span><span class="pcf-dot" style="background:#7be0b8"></span>Encaissé <b>${fmt(t.encaisse)}</b></span>
+        <span><span class="pcf-dot" style="background:#ffb4a8"></span>Reste <b>${fmt(t.restant)}</b></span>
+      </div>
+    </div>
   </div>`;
 
-  box.innerHTML = _cfBar() + kpis + jourHtml + caisHtml + cliHtml;
+  // ── KPIs secondaires ──
+  const kpis = `<div class="pcf-kpis">
+    ${_pcfKpi('Panier moyen', fmt(panier), 'par opération', '#2563eb')}
+    ${_pcfKpi('Opérations', nbOps, (t.nbVentes||0)+' vente(s) · '+(t.nbEnCours||0)+' en cours', '#7c3aed')}
+    ${_pcfKpi('Clients débiteurs', cli.length, fmt(t.restant)+' à recouvrer', '#dc2626')}
+    ${_pcfKpi('Top caissier', topCais?_cfEsc(topCais.nom):'—', topCais?fmt(topCais.engage):'aucune vente', '#1a4a3a')}
+  </div>`;
+
+  box.innerHTML = _pcfToolbar() + hero + kpis + _pcfJoursCard(jours) + _pcfCaissierCard(cais, t) + _pcfClientCard(cli, t);
+}
+
+// ── Carte « Ventes par jour » (scanabilité + mini-barres + voir plus) ──
+function _pcfJoursCard(jours){
+  const _lbl = (j)=>{ const p=String(j).split('-'); const d=new Date(+p[0],+p[1]-1,+p[2]); const s=d.toLocaleDateString('fr-FR',{weekday:'short',day:'2-digit',month:'short'}); return s.charAt(0).toUpperCase()+s.slice(1); };
+  const arr = jours.slice().sort((a,b)=> String(b.jour).localeCompare(String(a.jour)));
+  const maxM = Math.max(1, ...arr.map(j=>j.montant||0));
+  const total = arr.reduce((a,j)=>a+(j.montant||0),0);
+  const N=7;
+  const rows = arr.map((j,i)=>{
+    const w=Math.round((j.montant||0)/maxM*100);
+    const hide=i>=N;
+    return `<tr class="pcf-row${hide?' pcf-x-jour':''}"${hide?' style="display:none"':''} style="cursor:default">
+      <td class="pcf-c-main" data-label="Jour"><span class="pcf-name">${_lbl(j.jour)}</span></td>
+      <td class="pcf-num" data-label="Ventes">${j.nb||0}</td>
+      <td class="pcf-num" data-label="Montant"><span class="pcf-minibar"><i style="width:${w}%;background:#1a4a3a"></i></span>${fmt(j.montant)}</td>
+    </tr>`;
+  }).join('');
+  const more = arr.length>N ? `<button class="pcf-more" onclick="_pcfMore('pcf-x-jour',this)">Voir les ${arr.length-N} autres jours ›</button>` : '';
+  const body = arr.length ? rows : `<tr><td colspan="3"><div class="pcf-empty">Aucune vente sur la période</div></td></tr>`;
+  return `<div class="pcf-card">
+    <div class="pcf-card-head">
+      <div class="ic" style="background:#e8f4f0;color:#1a4a3a">${_pcfIcon('calendar')}</div>
+      <div><div class="pcf-card-title">Ventes par jour</div><div class="pcf-card-sub">Chaque entrée POS comptée à sa date d'entrée</div></div>
+      <span class="pcf-card-badge" style="background:#e8f4f0;color:#1a4a3a">${fmt(total)}</span>
+    </div>
+    <table class="pcf-table">
+      <thead><tr><th>Jour</th><th class="pcf-num">Ventes</th><th class="pcf-num">Montant</th></tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+    ${more}
+  </div>`;
+}
+
+// ── Carte « Performance par caissier » (responsive + disclosure + kebab) ──
+function _pcfCaissierCard(cais, t){
+  const maxEng = Math.max(1, ...cais.map(c=>c.engage||0));
+  const totEng = cais.reduce((a,c)=>a+(c.engage||0),0) || 1;
+  const N=8;
+  const rankBg=['#fef3c7','#e5e7eb','#fde4cf'], rankFg=['#b45309','#4b5563','#9a3412'];
+  const rows = cais.map((c,i)=>{
+    const key='c'+i, uid='pcfc'+i;
+    const share=Math.round((c.engage||0)/maxEng*100);
+    const pct=Math.round((c.engage||0)/totEng*100);
+    const nbVent=c.nbVentes||0, nbCmd=Math.max(0,(c.nb||0)-nbVent);
+    const moy=(c.nb||0)?Math.round((c.engage||0)/c.nb):0;
+    const encPct=(c.engage||0)>0?Math.round((c.encaisse||0)/c.engage*100):0;
+    const rank = i<3
+      ? `<span class="pcf-rank" style="background:${rankBg[i]};color:${rankFg[i]}">${i+1}</span>`
+      : `<span class="pcf-rank" style="background:var(--surface2);color:var(--muted)">${i+1}</span>`;
+    const hide=i>=N, hideCls=hide?' pcf-x-cais':'', hideSt=hide?' style="display:none"':'';
+    return `<tr class="pcf-row${hideCls}" id="pcfr-${key}" onclick="_pcfToggle('${key}')"${hideSt}>
+        <td class="pcf-c-main" data-label="Caissier">
+          <span style="display:inline-flex;align-items:center;gap:9px">${rank}<span class="pcf-name">${_cfEsc(c.nom)}</span>
+          <svg class="pcf-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></span>
+        </td>
+        <td class="pcf-num" data-label="Opér.">${c.nb||0}</td>
+        <td class="pcf-num" data-label="Engagé"><span class="pcf-minibar"><i style="width:${share}%;background:#1a4a3a"></i></span>${fmt(c.engage)}</td>
+        <td class="pcf-num" data-label="Encaissé" style="color:#16a34a">${fmt(c.encaisse)}</td>
+        <td class="pcf-num" data-label="Restant" style="color:${(c.restant||0)>0?'#dc2626':'var(--muted)'};font-weight:700">${fmt(c.restant)}</td>
+        <td class="pcf-c-act">
+          <div class="kebab-wrap" onclick="event.stopPropagation()">
+            <button class="kebab-btn" aria-label="Actions" aria-haspopup="true" onclick="toggleKebab('${uid}',event)">${_PCF_DOTS}</button>
+            <div class="kebab-menu" id="kb-${uid}" role="menu">
+              <button class="kebab-item" role="menuitem" onclick="_pcfToggleMenu('${key}',event)">${_kebabIcon('open')}<span>Voir le détail</span></button>
+              <button class="kebab-item" role="menuitem" onclick="_pcfCopyCais(${i},event)">${_kebabIcon('cash')}<span>Copier le récap</span></button>
+            </div>
+          </div>
+        </td>
+      </tr>
+      <tr class="pcf-detail-row${hideCls}"${hideSt}><td colspan="6">
+        <div class="pcf-detail" id="pcfd-${key}">
+          <div class="pcf-detail-grid">
+            <div class="pcf-dt"><div class="pcf-dt-l">Ventes comptant</div><div class="pcf-dt-v">${nbVent}</div></div>
+            <div class="pcf-dt"><div class="pcf-dt-l">Commandes / résa</div><div class="pcf-dt-v">${nbCmd}</div></div>
+            <div class="pcf-dt"><div class="pcf-dt-l">Panier moyen</div><div class="pcf-dt-v">${fmt(moy)}</div></div>
+            <div class="pcf-dt"><div class="pcf-dt-l">Part du CA</div><div class="pcf-dt-v">${pct}%</div></div>
+            <div class="pcf-dt"><div class="pcf-dt-l">Taux encaissé</div><div class="pcf-dt-v">${encPct}%</div></div>
+          </div>
+        </div>
+      </td></tr>`;
+  }).join('');
+  const more = cais.length>N ? `<button class="pcf-more" onclick="_pcfMore('pcf-x-cais',this)">Voir les ${cais.length-N} autres caissiers ›</button>` : '';
+  const body = cais.length ? rows : `<tr><td colspan="6"><div class="pcf-empty">Aucune vente sur la période</div></td></tr>`;
+  return `<div class="pcf-card">
+    <div class="pcf-card-head">
+      <div class="ic" style="background:#e8f4f0;color:#1a4a3a">${_pcfIcon('users')}</div>
+      <div><div class="pcf-card-title">Performance par caissier</div><div class="pcf-card-sub">Classé par CA · touchez une ligne pour le détail</div></div>
+      <span class="pcf-card-badge" style="background:#e8f4f0;color:#1a4a3a">${cais.length} caissier(s)</span>
+    </div>
+    <table class="pcf-table">
+      <thead><tr><th>Caissier</th><th class="pcf-num">Opér.</th><th class="pcf-num">Engagé</th><th class="pcf-num">Encaissé</th><th class="pcf-num">Restant</th><th></th></tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+    ${more}
+  </div>`;
+}
+
+// ── Carte « À recouvrer par client » (responsive + disclosure + kebab) ──
+function _pcfClientCard(cli, t){
+  const maxRest = Math.max(1, ...cli.map(c=>c.restant||0));
+  const N=8;
+  const rows = cli.map((c,i)=>{
+    const key='k'+i, uid='pcfk'+i;
+    const share=Math.round((c.restant||0)/maxRest*100);
+    const payPct=(c.engage||0)>0?Math.round((c.accompte||0)/c.engage*100):0;
+    const hide=i>=N, hideCls=hide?' pcf-x-cli':'', hideSt=hide?' style="display:none"':'';
+    return `<tr class="pcf-row${hideCls}" id="pcfr-${key}" onclick="_pcfToggle('${key}')"${hideSt}>
+        <td class="pcf-c-main" data-label="Client">
+          <span style="display:inline-flex;align-items:center;gap:9px"><span class="pcf-name">${_cfEsc(c.client)}</span>
+          <svg class="pcf-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></span>
+        </td>
+        <td class="pcf-num" data-label="Dossiers">${c.nb||0}</td>
+        <td class="pcf-num" data-label="Engagé">${fmt(c.engage)}</td>
+        <td class="pcf-num" data-label="Acompte" style="color:#16a34a">${fmt(c.accompte)}</td>
+        <td class="pcf-num" data-label="Reste dû"><span class="pcf-minibar"><i style="width:${share}%;background:#dc2626"></i></span><span style="color:#dc2626;font-weight:800">${fmt(c.restant)}</span></td>
+        <td class="pcf-c-act">
+          <div class="kebab-wrap" onclick="event.stopPropagation()">
+            <button class="kebab-btn" aria-label="Actions" aria-haspopup="true" onclick="toggleKebab('${uid}',event)">${_PCF_DOTS}</button>
+            <div class="kebab-menu" id="kb-${uid}" role="menu">
+              <button class="kebab-item" role="menuitem" onclick="_pcfVoirCommandes(${i},event)">${_kebabIcon('open')}<span>Voir ses commandes</span></button>
+              <button class="kebab-item" role="menuitem" onclick="_pcfCopyCli(${i},event)">${_kebabIcon('cash')}<span>Copier le récap</span></button>
+            </div>
+          </div>
+        </td>
+      </tr>
+      <tr class="pcf-detail-row${hideCls}"${hideSt}><td colspan="6">
+        <div class="pcf-detail" id="pcfd-${key}">
+          <div class="pcf-detail-grid">
+            <div class="pcf-dt"><div class="pcf-dt-l">Dossiers en cours</div><div class="pcf-dt-v">${c.nb||0}</div></div>
+            <div class="pcf-dt"><div class="pcf-dt-l">Total engagé</div><div class="pcf-dt-v">${fmt(c.engage)}</div></div>
+            <div class="pcf-dt"><div class="pcf-dt-l">Déjà payé</div><div class="pcf-dt-v">${payPct}%</div></div>
+            <div class="pcf-dt"><div class="pcf-dt-l">Reste dû</div><div class="pcf-dt-v" style="color:#dc2626">${fmt(c.restant)}</div></div>
+          </div>
+        </div>
+      </td></tr>`;
+  }).join('');
+  const more = cli.length>N ? `<button class="pcf-more" onclick="_pcfMore('pcf-x-cli',this)">Voir les ${cli.length-N} autres clients ›</button>` : '';
+  const body = cli.length ? rows : `<tr><td colspan="6"><div class="pcf-empty">Aucun reste à recouvrer 🎉</div></td></tr>`;
+  return `<div class="pcf-card">
+    <div class="pcf-card-head">
+      <div class="ic" style="background:#fee2e2;color:#dc2626">${_pcfIcon('wallet')}</div>
+      <div><div class="pcf-card-title">À recouvrer par client</div><div class="pcf-card-sub">Commandes / réservations non soldées</div></div>
+      <span class="pcf-card-badge" style="background:#fee2e2;color:#dc2626">${fmt(t.restant)}</span>
+    </div>
+    <table class="pcf-table">
+      <thead><tr><th>Client</th><th class="pcf-num">Dossiers</th><th class="pcf-num">Engagé</th><th class="pcf-num">Acompte</th><th class="pcf-num">Reste dû</th><th></th></tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+    ${more}
+  </div>`;
 }
 
 function renderPatronDashboard() {
@@ -9185,9 +9383,9 @@ function renderPatronDashboard() {
         const moy = d.nb ? Math.round(d.total / d.nb) : 0;
         return `<tr>
           <td><span style="font-weight:600">${nom}</span></td>
-          <td style="text-align:center"><span style="background:#e8f4f0;color:#1a4a3a;padding:2px 8px;border-radius:12px;font-weight:700;font-size:11px">${d.nb}</span></td>
-          <td><div class="pdb-bar-wrap"><div class="pdb-bar-fill" style="width:${pct}%"></div></div>${fmt(d.total)}</td>
-          <td style="color:#78716c">${fmt(moy)}</td>
+          <td data-label="Nb ventes" style="text-align:center"><span style="background:#e8f4f0;color:#1a4a3a;padding:2px 8px;border-radius:12px;font-weight:700;font-size:11px">${d.nb}</span></td>
+          <td data-label="Total"><div class="pdb-bar-wrap"><div class="pdb-bar-fill" style="width:${pct}%"></div></div>${fmt(d.total)}</td>
+          <td data-label="Panier moyen" style="color:#78716c">${fmt(moy)}</td>
         </tr>`;
       }).join('')
     : `<tr><td colspan="4"><div class="pdb-empty"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:.4"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>Aucune vente ce mois</div></td></tr>`;
@@ -9221,10 +9419,10 @@ function renderPatronDashboard() {
         const pct = d.total ? Math.round(d.termine / d.total * 100) : 0;
         return `<tr>
           <td><span style="font-weight:600">${nom}</span></td>
-          <td style="text-align:center"><span style="background:#dbeafe;color:#2563eb;padding:2px 7px;border-radius:10px;font-size:11px;font-weight:700">${d.aFaire}</span></td>
-          <td style="text-align:center"><span style="background:#fef3c7;color:#d97706;padding:2px 7px;border-radius:10px;font-size:11px;font-weight:700">${d.enCours}</span></td>
-          <td style="text-align:center"><span style="background:#dcfce7;color:#16a34a;padding:2px 7px;border-radius:10px;font-size:11px;font-weight:700">${d.termine}</span></td>
-          <td><div class="pdb-bar-wrap" style="width:100px"><div class="pdb-bar-fill" style="width:${pct}%;background:${pct===100?'#16a34a':'#1a4a3a'}"></div></div><span style="font-size:11px;color:#78716c">${pct}%</span></td>
+          <td data-label="À faire" style="text-align:center"><span style="background:#dbeafe;color:#2563eb;padding:2px 7px;border-radius:10px;font-size:11px;font-weight:700">${d.aFaire}</span></td>
+          <td data-label="En cours" style="text-align:center"><span style="background:#fef3c7;color:#d97706;padding:2px 7px;border-radius:10px;font-size:11px;font-weight:700">${d.enCours}</span></td>
+          <td data-label="Terminé" style="text-align:center"><span style="background:#dcfce7;color:#16a34a;padding:2px 7px;border-radius:10px;font-size:11px;font-weight:700">${d.termine}</span></td>
+          <td data-label="Avancement"><div class="pdb-bar-wrap" style="width:100px"><div class="pdb-bar-fill" style="width:${pct}%;background:${pct===100?'#16a34a':'#1a4a3a'}"></div></div><span style="font-size:11px;color:#78716c">${pct}%</span></td>
         </tr>`;
       }).join('')
     : `<tr><td colspan="5"><div class="pdb-empty">Aucune tâche assignée</div></td></tr>`;
@@ -9336,9 +9534,9 @@ function renderPatronDashboard() {
         const col = p.stock === 0 ? '#dc2626' : p.stock <= p.minStock ? '#d97706' : '#16a34a';
         return `<tr>
           <td><span style="font-weight:600">${p.name}</span></td>
-          <td style="text-align:center"><span style="font-weight:700;color:${col};font-size:13px">${p.stock}</span></td>
-          <td style="text-align:center;color:#78716c">${p.minStock}</td>
-          <td>${p.stock === 0 ? '<span style="background:#fee2e2;color:#dc2626;font-size:10px;font-weight:700;padding:2px 6px;border-radius:8px">RUPTURE</span>' : '<span style="background:#fef3c7;color:#d97706;font-size:10px;font-weight:700;padding:2px 6px;border-radius:8px">BAS</span>'}</td>
+          <td data-label="Stock actuel" style="text-align:center"><span style="font-weight:700;color:${col};font-size:13px">${p.stock}</span></td>
+          <td data-label="Seuil min" style="text-align:center;color:#78716c">${p.minStock}</td>
+          <td data-label="Statut">${p.stock === 0 ? '<span style="background:#fee2e2;color:#dc2626;font-size:10px;font-weight:700;padding:2px 6px;border-radius:8px">RUPTURE</span>' : '<span style="background:#fef3c7;color:#d97706;font-size:10px;font-weight:700;padding:2px 6px;border-radius:8px">BAS</span>'}</td>
         </tr>`;
       }).join('')
     : `<tr><td colspan="4"><div class="pdb-empty" style="padding:20px">Aucune alerte stock</div></td></tr>`;
@@ -9366,9 +9564,9 @@ function renderPatronDashboard() {
   const creanceHtml = creanceRows.length
     ? creanceRows.map(c => `<tr>
         <td><span style="font-weight:600">${c.nom}</span>${c.contact ? `<div style="font-size:10px;color:#78716c">${c.contact}</div>` : ''}</td>
-        <td><span style="background:${c.type==='Vente'?'#e8f4f0':'#f3e8ff'};color:${c.type==='Vente'?'#1a4a3a':'#7c3aed'};font-size:10px;font-weight:700;padding:2px 6px;border-radius:8px">${c.type}</span></td>
-        <td style="text-align:right">${fmt(c.montant)}</td>
-        <td style="text-align:right"><span style="font-weight:700;color:#dc2626">${fmt(c.restant)}</span></td>
+        <td data-label="Type"><span style="background:${c.type==='Vente'?'#e8f4f0':'#f3e8ff'};color:${c.type==='Vente'?'#1a4a3a':'#7c3aed'};font-size:10px;font-weight:700;padding:2px 6px;border-radius:8px">${c.type}</span></td>
+        <td data-label="Total" style="text-align:right">${fmt(c.montant)}</td>
+        <td data-label="Reste dû" style="text-align:right"><span style="font-weight:700;color:#dc2626">${fmt(c.restant)}</span></td>
       </tr>`).join('')
     : `<tr><td colspan="4"><div class="pdb-empty">Aucune créance</div></td></tr>`;
 
