@@ -9924,8 +9924,28 @@ function renderMonDashboard() {
   const thisMonth= now.toISOString().slice(0, 7);
   const thisYear = String(now.getFullYear());
 
-  // Filtrer mes ventes (username OU label pour rétrocompat)
-  const mySales = sales.filter(s => s.caissier === username || s.caissier === label);
+  // Mon activité = ventes comptant + commandes + réservations qui me sont
+  // attribuées. (Avant : seules les « Ventes » étaient comptées → dashboard à
+  // zéro pour ceux qui travaillent surtout en commandes/réservations.)
+  // Anti double-compte : on ne prend que les commandes/réservations « en cours »
+  // (status pending) ; une fois finalisées elles deviennent une Vente (déjà comptée).
+  const _norm   = v => String(v == null ? '' : v).trim().toLowerCase();
+  const _meSet  = [username, label].filter(Boolean).map(_norm);
+  const _isMine = name => _meSet.indexOf(_norm(name)) !== -1;
+  const mySales = [
+    ...sales.filter(s => _isMine(s.caissier)).map(s => ({
+      date: s.date, total: Number(s.total) || 0, due: Number(s.due) || 0,
+      items: s.items || [], clientName: s.clientName || '', method: s.method, type: 'Vente'
+    })),
+    ...commandes.filter(c => _isMine(c.caissier) && c.status === 'pending').map(c => ({
+      date: c.date, total: Number(c.total) || 0, due: Number(c.restant) || 0,
+      items: c.items || [], clientName: c.clientName || '', type: 'Commande'
+    })),
+    ...reservations.filter(r => _isMine(r.caissier) && r.status === 'pending').map(r => ({
+      date: r.date, total: Number(r.total) || 0, due: Number(r.restant) || 0,
+      items: r.items || [], clientName: r.clientName || '', type: 'Réservation'
+    })),
+  ];
 
   // Période sélectionnée
   let periodSales, periodLabel;
@@ -9987,10 +10007,10 @@ function renderMonDashboard() {
   container.innerHTML = `
     <!-- KPI Cards -->
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:12px;margin-bottom:16px">
-      ${_dashKpi(period==='day'?"Ventes auj.":(period==='month'?'Ventes ce mois':'Ventes cette année'), fmt(totalPeriod), countPeriod+' transaction'+(countPeriod>1?'s':''), '#e8f4f0','#1a4a3a')}
-      ${period!=='day'?_dashKpi("Aujourd'hui", fmt(totalToday), todaySales.length+' transaction'+(todaySales.length>1?'s':''), '#dbeafe','#1e40af'):''}
-      ${_dashKpi('Transactions', String(countPeriod), period==='day'?'ce jour':(period==='month'?'ce mois':'cette année'), '#fdf0e8','#c2410c')}
-      ${_dashKpi('Panier moyen', fmt(avgBasket), 'par transaction', '#f3e8ff','#7e22ce')}
+      ${_dashKpi(period==='day'?"Mon CA auj.":(period==='month'?'Mon CA ce mois':'Mon CA cette année'), fmt(totalPeriod), countPeriod+' opération'+(countPeriod>1?'s':''), '#e8f4f0','#1a4a3a')}
+      ${period!=='day'?_dashKpi("Aujourd'hui", fmt(totalToday), todaySales.length+' opération'+(todaySales.length>1?'s':''), '#dbeafe','#1e40af'):''}
+      ${_dashKpi('Opérations', String(countPeriod), period==='day'?'ce jour':(period==='month'?'ce mois':'cette année'), '#fdf0e8','#c2410c')}
+      ${_dashKpi('Panier moyen', fmt(avgBasket), 'par opération', '#f3e8ff','#7e22ce')}
     </div>
 
     <!-- Objectif mensuel -->
@@ -10014,7 +10034,7 @@ function renderMonDashboard() {
 
     <!-- Graphique 7 jours -->
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px 18px;margin-bottom:16px">
-      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:14px">Mes ventes — 7 derniers jours</div>
+      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:14px">Mon activité — 7 derniers jours</div>
       <div style="display:flex;align-items:flex-end;height:90px;gap:3px">
         ${days7.map(d=>`
           <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">
@@ -10029,20 +10049,31 @@ function renderMonDashboard() {
     <!-- 5 dernières transactions -->
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden">
       <div style="padding:13px 16px;border-bottom:1px solid var(--border)">
-        <span style="font-size:13px;font-weight:700;color:var(--text)">Mes dernières ventes</span>
+        <span style="font-size:13px;font-weight:700;color:var(--text)">Mes dernières opérations</span>
       </div>
       ${last5.length===0
-        ? `<div style="text-align:center;padding:28px;color:var(--muted);font-size:13px">Aucune vente enregistrée</div>`
+        ? `<div style="text-align:center;padding:28px;color:var(--muted);font-size:13px">Aucune opération enregistrée</div>`
         : last5.map(s => {
             const d = parseSaleDate(s.date);
             const dateStr = d ? d.toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
             const items = (s.items||[]).map(i=>`${i.name} ×${i.qty}`).join(', ') || '—';
+            const ty   = s.type || 'Vente';
+            const tcol = ty==='Vente' ? '#1a4a3a' : ty==='Commande' ? '#0891b2' : '#7c3aed';
+            const tbg  = ty==='Vente' ? '#e8f4f0' : ty==='Commande' ? '#e0f2fe' : '#f3e8ff';
+            const due  = Number(s.due)||0;
             return `<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--border);gap:12px">
               <div style="flex:1;min-width:0">
-                <div style="font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${items}</div>
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+                  <span style="background:${tbg};color:${tcol};font-size:9px;font-weight:800;padding:1px 7px;border-radius:999px;text-transform:uppercase;letter-spacing:.03em;flex-shrink:0">${ty}</span>
+                  <span style="font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.clientName||'—'}</span>
+                </div>
+                <div style="font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${items}</div>
                 <div style="font-size:11px;color:var(--muted)">${dateStr}</div>
               </div>
-              <div style="font-size:14px;font-weight:700;color:var(--accent);white-space:nowrap">${fmt(s.total)}</div>
+              <div style="text-align:right;flex-shrink:0">
+                <div style="font-size:14px;font-weight:700;color:var(--accent);white-space:nowrap">${fmt(s.total)}</div>
+                ${due>0?`<div style="font-size:10px;color:#dc2626;white-space:nowrap">Reste ${fmt(due)}</div>`:''}
+              </div>
             </div>`;
           }).join('')}
     </div>`;
