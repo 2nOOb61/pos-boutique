@@ -1,10 +1,11 @@
 // ============================================================
 // SERVICE WORKER — Boutique POS
-// Stratégie : Network First pour tous les fichiers locaux
-//             (HTML, JS, CSS) — toujours à jour quand connecté
-//             Cache First uniquement pour icônes/manifest
+// Stratégie : Stale-While-Revalidate pour HTML/JS/CSS — chargement
+//             INSTANTANÉ depuis le cache (crucial en réseau lent/instable,
+//             ex. data mobile à quelques Ko/s) + mise à jour en arrière-plan.
+//             Cache First pour icônes/manifest.
 // ============================================================
-const CACHE_NAME = 'boutique-pos-v11';
+const CACHE_NAME = 'boutique-pos-v12';
 const OFFLINE_URL = './index.html';
 
 const STATIC_ASSETS = [
@@ -70,16 +71,23 @@ self.addEventListener('fetch', event => {
       })
     );
   } else if (isAppFile) {
-    // Network First pour HTML/JS/CSS : toujours la version fraîche
+    // Stale-While-Revalidate pour HTML/JS/CSS : répondre depuis le CACHE
+    // immédiatement (chargement instantané même en réseau très lent), puis
+    // rafraîchir le cache en arrière-plan (requête conditionnelle → 304 si
+    // inchangé = très peu de données). Réseau direct seulement au 1er chargement.
     event.respondWith(
-      fetch(event.request, { cache: 'no-store' })
-        .then(response => {
-          if (response && response.status === 200) {
-            caches.open(CACHE_NAME).then(cache => cache.put(event.request, response.clone()));
-          }
-          return response;
-        })
-        .catch(() => caches.match(event.request).then(cached => cached || caches.match(OFFLINE_URL)))
+      caches.match(event.request).then(cached => {
+        const networkFetch = fetch(event.request)
+          .then(response => {
+            if (response && response.status === 200) {
+              const clone = response.clone();
+              caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+            }
+            return response;
+          })
+          .catch(() => cached || caches.match(OFFLINE_URL));
+        return cached || networkFetch;
+      })
     );
   }
 });
