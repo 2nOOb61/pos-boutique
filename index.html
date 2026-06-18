@@ -2436,7 +2436,7 @@
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=dashboard-caissier"></script>
+<script src="./app.js?v=20260618-mobilefix"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
@@ -2689,5 +2689,34 @@ Reste à payer : 158400 Ar"
   </div>
 </div>
 
+<script>
+/* Service Worker (network-first) — garantit des fichiers toujours frais sur
+   mobile/tablette. Sans cet enregistrement, app.js restait en cache (ancienne
+   version) sur les téléphones → affichage cassé. Le SW se met à jour seul à
+   chaque déploiement (SKIP_WAITING + rechargement unique). */
+if ('serviceWorker' in navigator) {
+  var _swHadCtrl = !!navigator.serviceWorker.controller;
+  var _swReloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', function () {
+    if (!_swHadCtrl || _swReloading) return;   // 1ère installation : pas de reload
+    _swReloading = true;
+    window.location.reload();
+  });
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then(function (reg) {
+      reg.update();
+      reg.addEventListener('updatefound', function () {
+        var nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener('statechange', function () {
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+            nw.postMessage({ type: 'SKIP_WAITING' });   // activer la nouvelle version
+          }
+        });
+      });
+    }).catch(function () {});
+  });
+}
+</script>
 </body>
 </html>
