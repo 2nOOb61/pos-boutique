@@ -1468,6 +1468,7 @@ function printCommandeTicket(cmd) {
   if (!cmd) return;
   const tc  = shopConfig;
   const st  = _ticketStyles(tc);
+  st.color  = '#000';   // facture en monochrome (noir & blanc), indépendamment de la couleur configurée
   const dateStr = (parseSaleDate(cmd.date) || new Date()).toLocaleString('fr-MG');
   // Code de suivi interne (ex. #13692) capté en saisie rapide. Fallback : extrait
   // depuis les notes ("Réf. client #…") pour les commandes rechargées depuis le Sheet.
@@ -1475,8 +1476,6 @@ function printCommandeTicket(cmd) {
 
   const html = `
     ${_ticketShopHeader(tc, st)}
-    <hr style="${st.sepSolid}"/>
-    <div style="text-align:center;font-size:11pt;font-weight:bold;letter-spacing:.08em;font-family:${st.font};margin:4px 0">FACTURE</div>
     <hr style="${st.sepSolid}"/>
     ${tc.ticketShowNum !== false ? `<div class="row"><span>Facture N°</span><span>#${cmd.id}</span></div>` : ''}
     ${_suivi ? `<div class="row"><span>Code suivi</span><span>#${_suivi}</span></div>` : ''}
