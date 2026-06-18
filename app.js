@@ -274,20 +274,13 @@ async function doLogin() {
     // Charger les données depuis le Sheet
     _initDriveFolderUrl();  // Récupérer l'URL du dossier Drive (fallback direct)
     loadConfigFromGAS();    // Récupère aussi driveFolderUrl via ShopConfig
-    if (APPS_SCRIPT_URL) {
-      await loadProductsFromScript();
-      await loadSalesFromScript();
-      await loadUsersFromScript();
-      await loadReservationsFromScript();
-      await loadCommandesFromScript();
-      await syncPendingOfflineSales();
-      saveData(); // Persister l'état fusionné après tous les chargements
-    }
+    // ── AFFICHAGE IMMÉDIAT depuis le cache local (instantané même en réseau
+    //    lent / haute latence). On NE BLOQUE PLUS sur les appels serveur :
+    //    avant, 5 chargements GAS étaient attendus EN SÉRIE avant tout rendu
+    //    (~2 s chacun en latence → ~10 s d'écran blanc après connexion). ──
     applyRolePermissions(currentUser.role);
     updatePendingBadge();
     updateResBadge();
-    // Précharger le fil de messagerie pour alimenter le badge non-lus
-    if (APPS_SCRIPT_URL) loadCommentsForDossier(MSG_GLOBAL_ID).then(() => _updateMsgBadge());
     renderProducts();
     renderStockTable();
     renderStats();
@@ -295,6 +288,28 @@ async function doLogin() {
     const startPage = Object.keys(PAGE_ACCESS).find(p => PAGE_ACCESS[p].includes(currentUser.role)) || 'caisse';
     showPage(startPage, null, null);
     if (window.innerWidth <= 768) switchCaisseTab('products');
+
+    // ── Rafraîchir depuis le serveur EN PARALLÈLE et EN ARRIÈRE-PLAN (non bloquant) ──
+    if (APPS_SCRIPT_URL) {
+      Promise.all([
+        loadProductsFromScript().catch(() => {}),
+        loadSalesFromScript().catch(() => {}),
+        loadUsersFromScript().catch(() => {}),
+        loadReservationsFromScript().catch(() => {}),
+        loadCommandesFromScript().catch(() => {}),
+      ]).then(() => syncPendingOfflineSales().catch(() => {}))
+        .then(() => {
+          saveData(); // Persister l'état fusionné
+          // Re-rendu avec les données fraîches (l'app était déjà affichée)
+          renderProducts();
+          renderStockTable();
+          renderStats();
+          updatePendingBadge();
+          updateResBadge();
+        }).catch(() => {});
+      // Précharger le fil de messagerie pour le badge non-lus
+      loadCommentsForDossier(MSG_GLOBAL_ID).then(() => _updateMsgBadge()).catch(() => {});
+    }
   } else {
     err.textContent = ' Identifiant ou mot de passe incorrect';
     err.style.display='block';
