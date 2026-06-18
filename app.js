@@ -1469,6 +1469,9 @@ function printCommandeTicket(cmd) {
   const tc  = shopConfig;
   const st  = _ticketStyles(tc);
   const dateStr = (parseSaleDate(cmd.date) || new Date()).toLocaleString('fr-MG');
+  // Code de suivi interne (ex. #13692) capté en saisie rapide. Fallback : extrait
+  // depuis les notes ("Réf. client #…") pour les commandes rechargées depuis le Sheet.
+  const _suivi = cmd.codeSuivi || (cmd.notes ? ((cmd.notes.match(/R[ée]f\.?\s*client\s*#?(\d+)/i) || [])[1] || '') : '');
 
   const html = `
     ${_ticketShopHeader(tc, st)}
@@ -1476,6 +1479,7 @@ function printCommandeTicket(cmd) {
     <div style="text-align:center;font-size:11pt;font-weight:bold;letter-spacing:.08em;font-family:${st.font};margin:4px 0">FACTURE</div>
     <hr style="${st.sepSolid}"/>
     ${tc.ticketShowNum !== false ? `<div class="row"><span>Facture N°</span><span>#${cmd.id}</span></div>` : ''}
+    ${_suivi ? `<div class="row"><span>Code suivi</span><span>#${_suivi}</span></div>` : ''}
     <div class="row"><span>Date</span><span>${dateStr}</span></div>
     ${tc.ticketShowCaissier !== false ? `<div class="row"><span>Caissier</span><span>${cmd.caissier||''}</span></div>` : ''}
     ${cmd.clientName    ? `<div class="row"><span>Client</span><span>${cmd.clientName}</span></div>` : ''}
@@ -10596,6 +10600,7 @@ function saveCommandeRapide() {
     dateLivraison:    '',
     items:            srParsedData.items.map(i => ({ name: i.name, qty: i.qty, price: i.price, custom: true })),
     notes:            srParsedData.notes,
+    codeSuivi:        srParsedData.clientId || '',
     photos:           [],
     subtotal:         srParsedData.subtotal || srParsedData.total,
     remise:           0,
