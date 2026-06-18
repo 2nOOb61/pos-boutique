@@ -1095,7 +1095,7 @@ function renderReservations() {
         <div class="res-card" data-rgrp="${gid}">
           <div class="res-card-header">
             <div style="min-width:0">
-              <div class="res-card-client">${escapeHtml(r.clientName||'Client')} <span style="font-size:11px;color:var(--muted);font-weight:400">#${r.id}</span></div>
+              <div class="res-card-client">${escapeHtml(r.clientName||'Client')} <span style="font-size:11px;color:var(--muted);font-weight:400">#${_factureNum(r)}</span></div>
               <div style="font-size:12px;color:var(--muted)">${r.clientContact ? escapeHtml(r.clientContact)+' · ' : ''}${timeStr}</div>
             </div>
             <div style="text-align:right;flex-shrink:0">
@@ -1314,6 +1314,17 @@ function _ticketShopHeader(tc, st) {
     ${tc.phone   ? `<div style="font-size:9pt;text-align:center;color:#555;margin-bottom:2px">Tél : ${tc.phone}</div>` : ''}`;
 }
 
+// Numéro de facture/reçu LISIBLE et NUMÉRIQUE (sans lettres). Les ids internes
+// commande/réservation sont des uid « C… »/« R… » (uniques multi-appareils) → on
+// n'affiche PAS l'uid. Dérivé de la date de création → stable à la réimpression,
+// cohérent entre le ticket et la carte. Format AAMMJJ-HHMMSS.
+function _factureNum(obj){
+  const d = (obj && parseSaleDate(obj.date)) || new Date();
+  const p = n => String(n).padStart(2, '0');
+  return p(d.getFullYear() % 100) + p(d.getMonth() + 1) + p(d.getDate())
+       + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+}
+
 function _openTicketWindow(htmlBody, title='Ticket') {
   const w = window.open('', '_blank', 'width=420,height=620');
   if (!w) { alert("Impression bloquée : autorisez les fenêtres pop-up pour ce site, puis réessayez."); return; }
@@ -1439,7 +1450,7 @@ function printReservationTicket(res) {
     <hr style="${st.sepSolid}"/>
     <div style="text-align:center;font-size:11pt;font-weight:bold;letter-spacing:.08em;font-family:${st.font};margin:4px 0">BON DE RESERVATION</div>
     <hr style="${st.sepSolid}"/>
-    ${tc.ticketShowNum !== false ? `<div class="row"><span>Reservation N°</span><span>#${res.id}</span></div>` : ''}
+    ${tc.ticketShowNum !== false ? `<div class="row"><span>Reservation N°</span><span>${_factureNum(res)}</span></div>` : ''}
     <div class="row"><span>Date</span><span>${dateStr}</span></div>
     ${tc.ticketShowCaissier !== false ? `<div class="row"><span>Caissier</span><span>${res.caissier||''}</span></div>` : ''}
     ${res.clientName    ? `<div class="row"><span>Client</span><span>${res.clientName}</span></div>` : ''}
@@ -1476,7 +1487,7 @@ function printReservationTicket(res) {
     <div class="footer">A recuperer sur presentation de ce bon</div>
     <div class="footer">${tc.footer||'Merci de votre confiance !'}</div>`;
 
-  _openTicketWindow(html, 'Reservation #' + res.id);
+  _openTicketWindow(html, 'Reservation ' + _factureNum(res));
 }
 
 function printCommandeTicket(cmd) {
@@ -1492,7 +1503,7 @@ function printCommandeTicket(cmd) {
   const html = `
     ${_ticketShopHeader(tc, st)}
     <hr style="${st.sepSolid}"/>
-    ${tc.ticketShowNum !== false ? `<div class="row"><span>Facture N°</span><span>#${cmd.id}</span></div>` : ''}
+    ${tc.ticketShowNum !== false ? `<div class="row"><span>Facture N°</span><span>${_factureNum(cmd)}</span></div>` : ''}
     ${_suivi ? `<div class="row"><span>Code suivi</span><span>#${_suivi}</span></div>` : ''}
     <div class="row"><span>Date</span><span>${dateStr}</span></div>
     ${tc.ticketShowCaissier !== false ? `<div class="row"><span>Caissier</span><span>${cmd.caissier||''}</span></div>` : ''}
@@ -1521,7 +1532,7 @@ function printCommandeTicket(cmd) {
     <div class="footer">A recuperer sur presentation de cette facture</div>
     <div class="footer">${tc.footer||'Merci de votre confiance !'}</div>`;
 
-  _openTicketWindow(html, 'Facture #' + cmd.id);
+  _openTicketWindow(html, 'Facture ' + _factureNum(cmd));
 }
 
 // ============================================================
@@ -5183,7 +5194,7 @@ function renderCommandes() {
       <div class="cmd-card" data-cgrp="${gid}">
         <div class="cmd-card-header">
           <div style="min-width:0">
-            <div class="cmd-card-client">${c.clientName||'Client'} <span style="font-size:11px;color:var(--muted);font-weight:400">#${c.id}</span></div>
+            <div class="cmd-card-client">${c.clientName||'Client'} <span style="font-size:11px;color:var(--muted);font-weight:400">#${_factureNum(c)}</span></div>
             <div style="font-size:12px;color:var(--muted)">${c.clientContact ? c.clientContact+' · ' : ''}${dateStr}</div>
           </div>
           <div style="text-align:right;flex-shrink:0">
