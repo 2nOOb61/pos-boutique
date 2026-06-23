@@ -2355,6 +2355,9 @@ function _kebabIcon(name){
   if(name==='trash') return s+'<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
   if(name==='open')  return s+'<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
   if(name==='cash')  return s+'<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/></svg>';
+  if(name==='eye')   return s+'<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+  if(name==='print') return s+'<polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>';
+  if(name==='reset') return s+'<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.2"/></svg>';
   return '';
 }
 function toggleHistDetail(uid){
@@ -2407,6 +2410,30 @@ function editCommandeFrais(id){
       .catch(() => showToast('Erreur réseau', 'error'));
   }
 }
+// Corriger une date de livraison d'une commande (depuis le menu ⋮). Format AAAA-MM-JJ.
+function _editCommandeDate(id, field, label) {
+  const c = commandes.find(x => String(x.id) === String(id));
+  if (!c) { showToast('Commande introuvable', 'error'); return; }
+  const v = prompt(label + " pour « " + (c.clientName || 'commande') + " »\nFormat AAAA-MM-JJ (laisser vide = aucune) :", c[field] || '');
+  if (v === null) return; // annulé
+  const val = v.trim();
+  if (val && !/^\d{4}-\d{2}-\d{2}$/.test(val)) { showToast('Format attendu : AAAA-MM-JJ', 'error'); return; }
+  c[field] = val;
+  // Répercuter sur le dossier lié → visible dans la vue Production
+  const dos = dossiers.find(d => d.sourceType === 'commande' && String(d.sourceId) === String(c.id));
+  if (dos) dos[field] = val;
+  saveData();
+  renderCommandes();
+  if (APPS_SCRIPT_URL) {
+    const payload = { action:'updateCommande', id: c.id };
+    payload[field] = val;
+    apiCall(payload)
+      .then(r => { if (r && r.ok) showToast(label + ' enregistrée'); else showToast('Erreur enregistrement', 'error'); })
+      .catch(() => showToast('Erreur réseau', 'error'));
+  }
+}
+function editCommandeDateClient(id){ _editCommandeDate(id, 'dateLivraison',     'Date de livraison client'); }
+function editCommandeDateProd(id){   _editCommandeDate(id, 'dateLivraisonProd', 'Date de livraison production'); }
 function closeAllKebabs(){ document.querySelectorAll('.kebab-menu.open').forEach(m=>m.classList.remove('open')); }
 function toggleKebab(uid, ev){
   if(ev) ev.stopPropagation();
@@ -4832,6 +4859,7 @@ function openCommandeModal(fromCart) {
   document.getElementById('cmdClientContact').value = '';
   document.getElementById('cmdAdresse').value = '';
   document.getElementById('cmdDateLivraison').value = '';
+  if (document.getElementById('cmdDateLivraisonProd')) document.getElementById('cmdDateLivraisonProd').value = '';
   if (document.getElementById('cmdFraisLivraison')) document.getElementById('cmdFraisLivraison').value = '';
   setCmdDeliveryMode('retrait');
   document.getElementById('cmdNotes').value = '';
@@ -5034,7 +5062,9 @@ function saveCommande() {
   const cmdDelivMode  = isCmdLiv ? 'livraison' : 'retrait';
   const adresse       = isCmdLiv ? (document.getElementById('cmdAdresse')?.value.trim() || '') : '';
   const fraisLiv      = isCmdLiv ? (parseFloat(document.getElementById('cmdFraisLivraison')?.value) || 0) : 0;
-  const dateLiv       = isCmdLiv ? (document.getElementById('cmdDateLivraison')?.value || '') : '';
+  // Dates de livraison : disponibles quel que soit le mode (retrait ou livraison)
+  const dateLiv       = document.getElementById('cmdDateLivraison')?.value || '';
+  const dateLivProd   = document.getElementById('cmdDateLivraisonProd')?.value || '';
   if (isCmdLiv && !adresse) { showToast("Veuillez saisir l'adresse de livraison.", 'error'); return; }
   const notes         = document.getElementById('cmdNotes').value.trim();
   const remise        = Math.max(0, parseFloat(document.getElementById('cmdRemise').value) || 0);
@@ -5071,7 +5101,8 @@ function saveCommande() {
     deliveryMode:     cmdDelivMode,
     adresseLivraison: adresse,
     fraisLivraison:   fraisLiv,
-    dateLivraison:    dateLiv,
+    dateLivraison:     dateLiv,
+    dateLivraisonProd: dateLivProd,
     items:            cmdModalItems.map(i => ({ name: i.name.trim(), qty: i.qty, price: i.price, custom: !!i.custom })),
     notes,
     photos:           [...cmdModalPhotos],
@@ -5166,10 +5197,11 @@ function renderCommandes() {
       const statusClass = { pending:'cmd-status-pending', completed:'cmd-status-completed', cancelled:'cmd-status-cancelled' }[c.status] || '';
       const itemsStr = (c.items||[]).map(i=>`${i.name} ×${i.qty} — ${fmt(i.price)}`).join('<br>')||'—';
 
-      const deliveryHtml = (c.adresseLivraison || c.dateLivraison) ? `
+      const deliveryHtml = (c.adresseLivraison || c.dateLivraison || c.dateLivraisonProd) ? `
         <div class="cmd-card-delivery">
           ${c.adresseLivraison ? ` ${c.adresseLivraison}` : ''}
-          ${c.dateLivraison ? ` &nbsp; Livraison : <strong>${new Date(c.dateLivraison+'T00:00:00').toLocaleDateString('fr-FR')}</strong>` : ''}
+          ${c.dateLivraison ? ` &nbsp; Client : <strong>${new Date(c.dateLivraison+'T00:00:00').toLocaleDateString('fr-FR')}</strong>` : ''}
+          ${c.dateLivraisonProd ? ` &nbsp; <span style="color:#e8834a">Production : <strong>${new Date(c.dateLivraisonProd+'T00:00:00').toLocaleDateString('fr-FR')}</strong></span>` : ''}
         </div>` : '';
 
       const notesHtml = c.notes ? `<div class="cmd-notes"> ${c.notes}</div>` : '';
@@ -5184,6 +5216,8 @@ function renderCommandes() {
       const finalizeBtn = c.status === 'pending' ? `<button class="btn-finalize" onclick="openCmdFinalizeModal('${c.id}')">Finaliser</button>` : '';
       const kebabItems = `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeAddress('${c.id}')">${_kebabIcon('edit')}<span>Modifier l'adresse</span></button>`
         + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeFrais('${c.id}')">${_kebabIcon('cash')}<span>Modifier les frais de livraison</span></button>`
+        + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeDateClient('${c.id}')">${_kebabIcon('edit')}<span>Modifier date livraison client</span></button>`
+        + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeDateProd('${c.id}')">${_kebabIcon('edit')}<span>Modifier date production</span></button>`
         + (c.status === 'pending' ? `<button class="kebab-item danger" role="menuitem" onclick="closeAllKebabs();cancelCommande('${c.id}')">${_kebabIcon('trash')}<span>Annuler la commande</span></button>` : '');
       const kebab = `<div class="kebab-wrap">
              <button class="kebab-btn" aria-label="Plus d'actions" aria-haspopup="true" onclick="toggleKebab('cmd${c.id}',event)">${_dSvg}</button>
@@ -5390,7 +5424,8 @@ async function syncCommandeToSheets(cmd) {
     deliveryMode:    cmd.deliveryMode,
     adresseLivraison:cmd.adresseLivraison,
     fraisLivraison:  cmd.fraisLivraison,
-    dateLivraison:   cmd.dateLivraison,
+    dateLivraison:    cmd.dateLivraison,
+    dateLivraisonProd: cmd.dateLivraisonProd,
     subtotal:        cmd.subtotal,
     remise:          cmd.remise,
     total:           cmd.total,
@@ -5643,7 +5678,9 @@ function _createDossierFromSource(type, source) {
     priorite:    'Normale',
     sourceVente: `${type === 'commande' ? 'Commande' : 'Réservation'} #${source.id}`,
     sourceType:  type,
-    sourceId:    source.id
+    sourceId:    source.id,
+    dateLivraison:     source.dateLivraison || source.deliveryDate || '',
+    dateLivraisonProd: source.dateLivraisonProd || ''
   };
   dossiers.push(dossier);
   // Persister dans Sheets pour visibilité multi-postes
@@ -5657,6 +5694,25 @@ function _createDossierFromSource(type, source) {
     });
   }
   return dossier;
+}
+
+// Recopie les dates de livraison (client + production) depuis la commande/réservation
+// source vers son dossier. Idempotent — appelé au rendu (Production/Attribution) pour que
+// la date de production soit visible par tous, même après rechargement depuis GAS (elle
+// n'est pas stockée côté feuille Dossiers : la source de vérité est la commande).
+function _syncDossierDates() {
+  if (!Array.isArray(dossiers)) return;
+  dossiers.forEach(d => {
+    if (!d || !d.sourceType || d.sourceId === undefined || d.sourceId === null) return;
+    const src = d.sourceType === 'reservation'
+      ? (typeof reservations !== 'undefined' ? reservations : []).find(r => String(r.id) === String(d.sourceId))
+      : (typeof commandes    !== 'undefined' ? commandes    : []).find(c => String(c.id) === String(d.sourceId));
+    if (!src) return;
+    const cli  = src.dateLivraison || src.deliveryDate || '';
+    const prod = src.dateLivraisonProd || '';
+    if (cli)  d.dateLivraison     = cli;
+    if (prod) d.dateLivraisonProd = prod;
+  });
 }
 
 // Génère un dossierId stable et unique basé sur l'ID + date de création.
@@ -7313,6 +7369,7 @@ async function loadDossiers() {
 function renderDossiers() {
   const container = document.getElementById('dossierListContainer');
   if (!container) return;
+  _syncDossierDates();
 
   // Mettre à jour les tabs avec les compteurs
   _renderDossierTabs();
@@ -7355,6 +7412,7 @@ function renderDossiers() {
     return;
   }
 
+  const _dotsRow = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>';
   container.innerHTML = list.map(d => {
     const etape      = ETAPES_CONFIG.find(e => e.code === d.statut);
     const pct        = d.progression || 0;
@@ -7396,6 +7454,14 @@ function renderDossiers() {
         <div class="dossier-row__meta">
           <div class="dossier-row__bar"><div class="dossier-row__bar-fill" style="width:${pct}%;background:${pctColor}"></div></div>
           <span class="dossier-row__pct" style="color:${pctColor}">${pct}%</span>
+        </div>
+      </div>
+      <div class="kebab-wrap dossier-row__kebab">
+        <button class="kebab-btn" aria-label="Plus d'actions" aria-haspopup="true" onclick="toggleKebab('dos${d.id}',event)">${_dotsRow}</button>
+        <div class="kebab-menu" id="kb-dos${d.id}" role="menu">
+          <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();selectDossier('${d.id}')">${_kebabIcon('eye')}<span>Ouvrir / attribuer</span></button>
+          <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printDossier('${d.id}')">${_kebabIcon('print')}<span>Imprimer le dossier</span></button>
+          <button class="kebab-item danger" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();resetTachesDossier('${d.id}')">${_kebabIcon('reset')}<span>Réinitialiser les tâches</span></button>
         </div>
       </div>
     </div>`;
@@ -7710,17 +7776,18 @@ function renderAttrPanel(tachesD, commentsD = []) {
           ${d.sourceVente?`<span>·</span><span>${d.sourceVente}</span>`:''}
           ${d.dateCreation?`<span>·</span><span>${d.dateCreation}</span>`:''}
         </div>
-        <div style="display:flex;gap:6px">
-          <button onclick="resetTachesDossier('${d.id}')" title="Réinitialiser les tâches"
-            style="display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:7px;background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;cursor:pointer;font-size:11px;font-weight:600;flex-shrink:0">
-            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.2"/></svg>
-            Reset tâches
-          </button>
+        <div style="display:flex;gap:6px;align-items:center">
           <button onclick="printDossier('${d.id}')" title="Imprimer le dossier"
-            style="display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:7px;background:var(--color-primary);color:#fff;border:none;cursor:pointer;font-size:11px;font-weight:600;flex-shrink:0">
-            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+            style="display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:7px;background:var(--color-primary);color:#fff;border:none;cursor:pointer;font-size:11px;font-weight:600;flex-shrink:0">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
             Imprimer
           </button>
+          <div class="kebab-wrap">
+            <button class="kebab-btn" aria-label="Plus d'actions" aria-haspopup="true" onclick="toggleKebab('attrh${d.id}',event)"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>
+            <div class="kebab-menu" id="kb-attrh${d.id}" role="menu">
+              <button class="kebab-item danger" role="menuitem" onclick="closeAllKebabs();resetTachesDossier('${d.id}')">${_kebabIcon('reset')}<span>Réinitialiser les tâches</span></button>
+            </div>
+          </div>
         </div>
       </div>
       <div class="attr-panel-title">${d.produit}</div>
@@ -7731,6 +7798,11 @@ function renderAttrPanel(tachesD, commentsD = []) {
         <span style="color:var(--color-border)">·</span>
         <span style="background:${prioBg};color:${prioColor};font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px">${d.priorite}</span>
       </div>
+      ${d.dateLivraisonProd ? `<div style="margin-top:9px;display:inline-flex;align-items:center;gap:7px;padding:6px 11px;border-radius:9px;background:#fff0e6;border:1px solid rgba(232,131,74,.3)">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#e8834a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+        <span style="font-size:12px;font-weight:700;color:#c2410c">Livraison production : ${new Date(d.dateLivraisonProd+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'2-digit',month:'short'})}</span>
+        ${(()=>{const dd=_daysUntil(d.dateLivraisonProd);return dd==null?'':`<span style="font-size:11px;font-weight:800;color:${dd<0?'#dc2626':dd<=2?'#e8834a':'#1a4a3a'}">${dd<0?Math.abs(dd)+'j de retard':dd===0?"aujourd'hui":dd===1?'demain':dd+'j restants'}</span>`;})()}
+      </div>` : ''}
       <div style="margin-top:10px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
           <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted)">Progression</span>
@@ -7969,6 +8041,7 @@ function printDossier(dossierId) {
         <div style="margin-top:8px">
           <span style="background:${prioBg};color:${prioColor};font-size:9pt;font-weight:700;padding:2px 10px;border-radius:10px">${d.priorite || 'Normale'}</span>
         </div>
+        ${d.dateLivraisonProd ? `<div style="margin-top:10px;padding-top:8px;border-top:1px dashed #e5e3df"><div style="font-size:9pt;font-weight:700;color:#e8834a;text-transform:uppercase;letter-spacing:.06em">Livraison production</div><div style="font-size:13pt;font-weight:800;color:#c2410c;margin-top:2px">${new Date(d.dateLivraisonProd+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'})}</div></div>` : ''}
       </div>
     </div>
 
@@ -8462,11 +8535,18 @@ function _tacheRow(t) {
             ? `<button class="btn-prod-start" onclick="pointerStart('${t.id}')">▶ Démarrer</button>`
             : `<span style="font-size:10px;font-weight:600;color:var(--color-text-muted);padding:4px 8px;background:#f5f5f4;border-radius:6px;white-space:nowrap">${t.operateur}</span>`);
 
-  const deleteBtn = isLibre && isAdminOrChef && !isDone
-    ? `<button onclick="deleteTacheLibre('${t.id}')" style="width:24px;height:24px;border:none;background:var(--color-danger-bg);color:var(--color-danger);border-radius:6px;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;line-height:1">×</button>`
-    : '';
-  const voirBtn = !isLibre
-    ? `<button onclick="openAttribForDossier('${t.dossierId}')" title="Voir les détails du dossier" style="padding:4px 8px;border-radius:6px;background:var(--color-primary-light);color:var(--color-primary);border:1px solid rgba(26,74,58,.18);cursor:pointer;font-size:10px;font-weight:600;white-space:nowrap;flex-shrink:0">→</button>`
+  // — 80/20 : actions secondaires regroupées dans un menu kebab ⋮ —
+  const _dots = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>';
+  const kbItems = [];
+  if (!isLibre) {
+    kbItems.push(`<button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();openAttribForDossier('${t.dossierId}')">${_kebabIcon('eye')}<span>Voir le dossier</span></button>`);
+    kbItems.push(`<button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printDossier('${t.dossierId}')">${_kebabIcon('print')}<span>Imprimer le dossier</span></button>`);
+  }
+  if (isLibre && isAdminOrChef && !isDone) {
+    kbItems.push(`<button class="kebab-item danger" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();deleteTacheLibre('${t.id}')">${_kebabIcon('trash')}<span>Supprimer la tâche</span></button>`);
+  }
+  const kebab = kbItems.length
+    ? `<div class="kebab-wrap"><button class="kebab-btn" aria-label="Plus d'actions" aria-haspopup="true" onclick="toggleKebab('pt${t.id}',event)">${_dots}</button><div class="kebab-menu" id="kb-pt${t.id}" role="menu">${kbItems.join('')}</div></div>`
     : '';
 
   const prioColor = t.priorite==='Urgente'?'var(--color-danger)':t.priorite==='Haute'?'var(--color-warning)':'';
@@ -8483,16 +8563,44 @@ function _tacheRow(t) {
     : '';
   const retardStyle  = retardInfo.isRetard ? 'border-left:3px solid #dc2626;' : '';
 
-  return `<div class="tache-card ${isEC?'tache-card--encours':''} ${isDone?'tache-card--done':''}" style="${retardStyle}">
-    <div class="tache-card__icon" style="background:${etape.color}15;border-color:${etape.color};color:${etape.color}">${etape.icon}</div>
-    <div class="tache-card__body">
-      <div class="tache-card__label" style="color:${etape.color}">${isLibre?t.titre:t.etapeLabel}${prioBadge}</div>
-      ${isLibre&&t.commentaire?`<div style="font-size:10px;color:var(--color-text-muted);margin-bottom:2px;white-space:pre-wrap">${t.commentaire}</div>`:''}
-      ${isLibre&&t.photos?.length?`<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:3px;margin-bottom:2px">${t.photos.map(src=>`<img src="${src}" onclick="window.open(this.src,'_blank')" style="width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--color-border);cursor:pointer" />`).join('')}</div>`:''}
-      <div class="tache-card__sub">${subLine}</div>
+  // — Détail repliable (Progressive Disclosure) —
+  const _dt = (l,v)=>v?`<div><div class="pt-dt-l">${l}</div><div class="pt-dt-v">${v}</div></div>`:'';
+  const retardChip = retardInfo.isRetard
+    ? `<span class="pt-retard" title="Délai dépassé de ${retardInfo.depassement}mn">+${retardInfo.depassement}mn</span>` : '';
+  const detail = `
+      <div class="pt-detail">
+        <div class="pt-detail-grid">
+          ${_dt('Opérateur', t.operateur||'—')}
+          ${!isLibre?_dt('Dossier', t.numeroDossier||t.dossierId):''}
+          ${_dt('Assigné le', t.dateAssignation)}
+          ${_dt('Démarré le', t.dateDebut)}
+          ${_dt('Terminé le', t.dateFin)}
+          ${retardInfo.isRetard?_dt('Retard', '+'+retardInfo.depassement+' mn'):''}
+        </div>
+        ${t.commentaire?`<div class="pt-note">${t.commentaire}</div>`:''}
+        ${isLibre&&t.photos?.length?`<div class="pt-photos">${t.photos.map(src=>`<img src="${src}" onclick="event.stopPropagation();window.open(this.src,'_blank')" />`).join('')}</div>`:''}
+      </div>`;
+
+  return `<div class="pt-item" id="pti-${t.id}">
+    <div class="tache-card ${isEC?'tache-card--encours':''} ${isDone?'tache-card--done':''}" style="${retardStyle}">
+      <div class="tache-card__icon" style="background:${etape.color}15;border-color:${etape.color};color:${etape.color}">${etape.icon}</div>
+      <div class="tache-card__body" onclick="togglePtDetail('${t.id}')">
+        <div class="pt-head">
+          <span class="tache-card__label" style="color:${etape.color}">${isLibre?t.titre:t.etapeLabel}</span>
+          ${prioBadge}${retardChip}
+          <svg class="pt-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+        <div class="tache-card__sub">${subLine}</div>
+      </div>
+      <div class="tache-card__actions">${actions}${kebab}</div>
     </div>
-    <div class="tache-card__actions">${retardBadge}${actions}${voirBtn}${deleteBtn}</div>
+    ${detail}
   </div>`;
+}
+
+function togglePtDetail(id){
+  const el = document.getElementById('pti-' + id);
+  if (el) el.classList.toggle('open');
 }
 
 function toggleProdView(mode) {
@@ -8725,9 +8833,86 @@ function _buildOpWorkload() {
   </div>`;
 }
 
+// ── Échéances de livraison PRODUCTION (vue partagée — visible par TOUS les opérateurs) ──
+function _daysUntil(ymd) {
+  if (!ymd) return null;
+  const d = new Date(ymd + 'T00:00:00');
+  if (isNaN(d.getTime())) return null;
+  const today = new Date(); today.setHours(0,0,0,0);
+  return Math.round((d - today) / 86400000);
+}
+
+function _prodDeadlineChip(ymd) {
+  const days = _daysUntil(ymd);
+  const late = days != null && days < 0;
+  const soon = days != null && days >= 0 && days <= 2;
+  const c  = late ? '#dc2626' : soon ? '#e8834a' : '#1a4a3a';
+  const bg = late ? '#fee2e2' : soon ? '#fff0e6' : '#e8f4f0';
+  const dateStr = new Date(ymd + 'T00:00:00').toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit' });
+  const cd = days == null ? '' : late ? ` · ${Math.abs(days)}j retard` : days===0 ? ' · auj.' : days===1 ? ' · demain' : ` · ${days}j`;
+  return `<span title="Livraison production" style="display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:800;color:${c};background:${bg};padding:1px 6px;border-radius:6px;white-space:nowrap">Prod ${dateStr}${cd}</span>`;
+}
+
+// Dossiers ayant une date de livraison PRODUCTION, triés par urgence. Rendu en haut de la
+// page Production pour tous les rôles → chaque opérateur voit l'échéancier de l'atelier.
+function _buildProdDeadlines() {
+  if (!Array.isArray(dossiers)) return '';
+  const rows = dossiers
+    .filter(d => d && d.dateLivraisonProd)
+    .map(d => {
+      const dt = taches.filter(t => t.dossierId === d.id);
+      let done = 0;
+      ETAPES_CONFIG.forEach(e => { const te = dt.filter(t => t.etapeCode === e.code); if (te.length && te.every(t => t.statut === 'TERMINE')) done++; });
+      const pct  = dt.length ? Math.round(done / ETAPES_CONFIG.length * 100) : (d.progression || 0);
+      const days = _daysUntil(d.dateLivraisonProd);
+      const ops  = [...new Set(dt.map(t => t.operateur).filter(Boolean))];
+      return { d, pct, days, ops };
+    })
+    .filter(x => x.pct < 100 && x.d.statut !== 'LIVRE')
+    .sort((a,b) => (a.days==null?1e9:a.days) - (b.days==null?1e9:b.days));
+
+  if (!rows.length) return '';
+
+  const cards = rows.slice(0, 40).map(({ d, pct, days, ops }) => {
+    const late = days != null && days < 0;
+    const soon = days != null && days >= 0 && days <= 2;
+    const accent = late ? '#dc2626' : soon ? '#e8834a' : '#1a4a3a';
+    const bgAcc  = late ? '#fef2f2' : soon ? '#fff8f3' : 'var(--color-surface)';
+    const cd = days == null ? '' : late ? `${Math.abs(days)}j de retard` : days===0 ? "Aujourd'hui" : days===1 ? 'Demain' : `${days}j restants`;
+    const dateStr = new Date(d.dateLivraisonProd + 'T00:00:00').toLocaleDateString('fr-FR', { weekday:'short', day:'2-digit', month:'short' });
+    const opsStr = ops.length ? ops.join(', ') : 'Non assigné';
+    return `<div class="prodd-card" style="border-left:3px solid ${accent};background:${bgAcc}" onclick="openAttribForDossier('${d.id}')">
+      <div class="prodd-top">
+        <span class="prodd-date" style="color:${accent}">${dateStr}</span>
+        ${cd?`<span class="prodd-count" style="color:${accent}">${cd}</span>`:''}
+      </div>
+      <div class="prodd-client">${d.client||'—'}</div>
+      <div class="prodd-prod">${d.produit||''}</div>
+      <div class="prodd-foot">
+        <div class="prodd-bar"><div style="width:${pct}%;background:${accent}"></div></div>
+        <span class="prodd-pct">${pct}%</span>
+      </div>
+      <div class="prodd-ops">${opsStr}</div>
+    </div>`;
+  }).join('');
+
+  const lateCount = rows.filter(x => x.days != null && x.days < 0).length;
+  return `<div class="prodd-section">
+    <div class="prodd-head">
+      <div class="prodd-title">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+        Échéances production
+      </div>
+      <span class="prodd-sub">${rows.length} travaux planifiés${lateCount?` · <b style="color:#dc2626">${lateCount} en retard</b>`:''}</span>
+    </div>
+    <div class="prodd-scroll">${cards}</div>
+  </div>`;
+}
+
 function renderTaches() {
   const container = document.getElementById('tachesContainer');
   if (!container) return;
+  _syncDossierDates();
 
   if (_prodView === 'charge') {
     _renderChargeView();
@@ -8739,6 +8924,7 @@ function renderTaches() {
   if (wlEl) wlEl.innerHTML = _buildOpWorkload();
 
   const dash          = _buildMonDashboard();
+  const deadlines     = _buildProdDeadlines();
   const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
   const myLabel       = currentUser?.label || currentUser?.username || '';
 
@@ -8768,7 +8954,7 @@ function renderTaches() {
   });
 
   if (!dossierList.length && !libreList.length) {
-    container.innerHTML = dash + `<div style="display:flex;flex-direction:column;align-items:center;padding:64px 0;text-align:center">
+    container.innerHTML = deadlines + dash + `<div style="display:flex;flex-direction:column;align-items:center;padding:64px 0;text-align:center">
       <div style="width:44px;height:44px;background:var(--color-bg);border-radius:12px;display:flex;align-items:center;justify-content:center;margin-bottom:12px">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.4"><polyline points="20 6 9 17 4 12"/></svg>
       </div>
@@ -8814,6 +9000,7 @@ function renderTaches() {
           ${prio}
           ${client}
           ${produit}
+          ${d && d.dateLivraisonProd ? _prodDeadlineChip(d.dateLivraisonProd) : ''}
         </div>
         <span style="font-size:11px;font-weight:600;color:var(--color-text-muted);flex-shrink:0">${doneCount}/${total}</span>
       </div>
@@ -8822,7 +9009,7 @@ function renderTaches() {
     </div>`;
   }).join('');
 
-  container.innerHTML = dash + libreHtml + groupsHtml;
+  container.innerHTML = deadlines + dash + libreHtml + groupsHtml;
 }
 
 async function pointerStart(tacheId) {
