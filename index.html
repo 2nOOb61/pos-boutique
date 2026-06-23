@@ -42,6 +42,13 @@
 .attr-left { display:flex; flex-direction:column; gap:10px; }
 .attr-right { position:sticky; top:80px; }
 .attr-panel { background:var(--color-surface); border:1px solid var(--color-border); border-radius:14px; overflow:hidden; min-height:200px; }
+/* Fix « fenêtre bloquée » : le panneau de détail (8 étapes) dépasse la hauteur de l'écran.
+   Un élément sticky plus haut que la fenêtre ne peut pas défiler → on rend le panneau
+   défilable en interne sur desktop pour atteindre toutes les étapes (Finition / Livraison). */
+@media(min-width:901px){
+  .attr-right { max-height:calc(100vh - 100px); }
+  .attr-panel { max-height:calc(100vh - 100px); overflow-y:auto; overflow-x:hidden; }
+}
 .dossier-list-wrap { display:flex; flex-direction:column; gap:10px; }
 .dossier-card { background:var(--color-surface); border:1.5px solid var(--color-border); border-radius:12px; padding:14px 16px; cursor:pointer; transition:border-color .15s, box-shadow .15s; }
 .dossier-card:hover { border-color:var(--color-primary); box-shadow:0 2px 8px rgba(26,74,58,.08); }
