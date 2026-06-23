@@ -37,6 +37,7 @@ const APP_VERSION = '2.1.0';
 var _notifRetryQueue   = [];
 var _notifPollInterval = null;
 var _notifPopupSince   = 0; // pop-ups uniquement pour les notifs créées après le début de session
+var _notifAudioCtx     = null; // contexte Web Audio pour le son de notification
 var notifications      = (function() {
   try { var r = localStorage.getItem('pos-notifications'); return r ? JSON.parse(r) : []; } catch(e) { return []; }
 }());
@@ -6199,16 +6200,54 @@ function showNotifPopup(n) {
   _updateNotifPopAllClose();
 }
 
+// Son de notification — chime court généré en Web Audio (aucun fichier externe).
+// Désactivable via localStorage 'pos-notif-sound' = 'off'.
+function _notifSound() {
+  if (localStorage.getItem('pos-notif-sound') === 'off') return;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!_notifAudioCtx) _notifAudioCtx = new AC();
+    const ctx = _notifAudioCtx;
+    if (ctx.state === 'suspended') ctx.resume();
+    const now = ctx.currentTime;
+    [[880, 0], [1174.66, 0.12]].forEach(function(p) {
+      const freq = p[0], t = p[1];
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, now + t);
+      gain.gain.exponentialRampToValueAtTime(0.18, now + t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + t + 0.32);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + t);
+      osc.stop(now + t + 0.34);
+    });
+  } catch(e) {}
+}
+
 // Affiche les pop-ups pour les notifs nouvelles pendant la session (pas le backlog, pas les siennes)
 function _spawnNotifPopups(fresh) {
   if (!Array.isArray(fresh) || !fresh.length) return;
   const myLabel = currentUser?.label || currentUser?.username || '';
-  fresh
+  const toShow = fresh
     .filter(n => n && n.timestamp && new Date(n.timestamp).getTime() > _notifPopupSince && !_sameOp(n.operateur, myLabel))
     .sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp))
-    .slice(-6) // au plus 6 d'un coup ; le reste reste dans la cloche
-    .forEach(showNotifPopup);
+    .slice(-6); // au plus 6 d'un coup ; le reste reste dans la cloche
+  if (!toShow.length) return;
+  toShow.forEach(showNotifPopup);
+  _notifSound(); // un seul son par lot
 }
+
+// Débloquer l'audio (politique autoplay des navigateurs) au 1er geste utilisateur
+document.addEventListener('click', function() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (AC && !_notifAudioCtx) _notifAudioCtx = new AC();
+    if (_notifAudioCtx && _notifAudioCtx.state === 'suspended') _notifAudioCtx.resume();
+  } catch(e) {}
+}, { once:true });
 
 function toggleNotifPanel() {
   const panel = document.getElementById('notifPanel');
