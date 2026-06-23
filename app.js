@@ -6696,7 +6696,7 @@ function renderCommentsSection(dossierId, comments) {
     : '<div style="font-size:12px;color:var(--color-text-muted);text-align:center;padding:10px 0;font-style:italic">Aucun commentaire</div>';
 
   container.innerHTML = `
-    <div style="max-height:260px;overflow-y:auto;margin-bottom:10px;padding-right:4px">${listHtml}</div>
+    <div style="margin-bottom:10px">${listHtml}</div>
     <div style="position:relative">
       <textarea id="commentTextarea" onkeyup="handleCommentMention(event)"
         placeholder="Ajouter une note… tapez @ pour mentionner un utilisateur"
@@ -7861,7 +7861,7 @@ function renderAttrPanel(tachesD, commentsD = []) {
     }).join('')}
       </div>
     </div>
-    <div style="border-top:1px solid var(--color-border);padding:14px 18px">
+    <div style="border-top:1px solid var(--color-border);padding:14px 18px 24px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <div style="font-size:11px;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:.06em;display:flex;align-items:center;gap:6px">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
