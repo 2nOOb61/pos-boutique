@@ -7596,7 +7596,7 @@ function _renderDossierCardGrid(list) {
     } else {
       dateHtml = `<span class="dossier-card-v2__date">
         <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-        ${d.dateCreation || '—'}
+        ${_cleanDate(d.dateCreation) || '—'}
       </span>`;
     }
 
@@ -7774,7 +7774,7 @@ function renderAttrPanel(tachesD, commentsD = []) {
         <div class="attr-panel-dossier-meta">
           <span>${d.numeroDossier}</span>
           ${d.sourceVente?`<span>·</span><span>${d.sourceVente}</span>`:''}
-          ${d.dateCreation?`<span>·</span><span>${d.dateCreation}</span>`:''}
+          ${_cleanDate(d.dateCreation)?`<span>·</span><span>${_cleanDate(d.dateCreation)}</span>`:''}
         </div>
         <div style="display:flex;gap:6px;align-items:center">
           <button onclick="printDossier('${d.id}')" title="Imprimer le dossier"
@@ -8018,7 +8018,7 @@ function printDossier(dossierId) {
       </div>
       <div style="text-align:right">
         <div style="font-size:20pt;font-weight:900;color:#1a4a3a;letter-spacing:-.03em">${d.numeroDossier}</div>
-        <div style="font-size:9pt;color:#78716c;margin-top:2px">Créé le ${d.dateCreation || '—'}</div>
+        <div style="font-size:9pt;color:#78716c;margin-top:2px">Créé le ${_cleanDate(d.dateCreation) || '—'}</div>
         <div style="font-size:9pt;color:#78716c">Imprimé le ${new Date().toLocaleDateString('fr-FR', {day:'2-digit',month:'long',year:'numeric'})}</div>
       </div>
     </div>
@@ -8831,6 +8831,15 @@ function _buildOpWorkload() {
     <div class="op-workload-title">Charge opérateurs</div>
     <div class="op-workload-row">${cards}</div>
   </div>`;
+}
+
+// Évite d'afficher « 01/01/1970 » (epoch 0 = date absente) : renvoie '' si la date est
+// vide, invalide ou tombe en 1970. Pour les chaînes déjà formatées (dd/MM/yyyy).
+function _cleanDate(v) {
+  if (!v) return '';
+  const s = String(v).trim();
+  if (!s || /\b1970\b/.test(s)) return '';
+  return s;
 }
 
 // ── Échéances de livraison PRODUCTION (vue partagée — visible par TOUS les opérateurs) ──
