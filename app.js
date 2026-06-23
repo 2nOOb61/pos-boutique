@@ -36,6 +36,7 @@ const APP_VERSION = '2.1.0';
 // Polling notifications — déclarés en tête pour éviter TDZ
 var _notifRetryQueue   = [];
 var _notifPollInterval = null;
+var _notifPopupSince   = 0; // pop-ups uniquement pour les notifs créées après le début de session
 var notifications      = (function() {
   try { var r = localStorage.getItem('pos-notifications'); return r ? JSON.parse(r) : []; } catch(e) { return []; }
 }());
@@ -6053,7 +6054,7 @@ function _getNotifSince() {
 }
 
 // Charger les notifications depuis GAS (delta uniquement)
-async function loadNotifsFromGAS() {
+async function loadNotifsFromGAS(spawnPopups) {
   if (!APPS_SCRIPT_URL) return;
   try {
     const since = _getNotifSince();
@@ -6067,6 +6068,7 @@ async function loadNotifsFromGAS() {
           .slice(0, 100);
         saveNotifications();
         _renderNotifBell();
+        if (spawnPopups) _spawnNotifPopups(fresh); // pop-ups persistants pour les notifs des collègues
         return fresh.length; // retourne le nb de nouvelles notifs
       }
     }
@@ -6078,10 +6080,11 @@ async function loadNotifsFromGAS() {
 
 function _startNotifPolling() {
   if (_notifPollInterval) clearInterval(_notifPollInterval);
+  _notifPopupSince = Date.now(); // ne pop-up que ce qui arrive après le début de session (pas le backlog)
   _notifPollInterval = setInterval(async () => {
     if (document.hidden) return; // ne pas polluer quand l'onglet est en arrière-plan
     _flushNotifRetryQueue();
-    const newCount = await loadNotifsFromGAS();
+    const newCount = await loadNotifsFromGAS(true);
     if (newCount > 0 && document.getElementById('notifPanel')?.classList.contains('open')) {
       _renderNotifPanelList(); // rafraîchit le panneau si ouvert
     }
@@ -6119,6 +6122,92 @@ function _renderNotifBell() {
   const count = _getUnreadCount();
   badge.style.display = count > 0 ? 'flex' : 'none';
   badge.textContent = count > 99 ? '99+' : String(count);
+}
+
+// ════════════════════════════════════════════════════════════
+// POP-UPS DE NOTIFICATION PERSISTANTS
+// Restent affichés jusqu'à ce que l'utilisateur les ferme (il ne rate rien).
+// Déclenchés par le polling pour les actions des AUTRES (jamais les siennes).
+// ════════════════════════════════════════════════════════════
+function _notifPopStack() {
+  let el = document.getElementById('notifPopStack');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'notifPopStack';
+    el.className = 'notif-pop-stack';
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+function _notifPopColors(n) {
+  const msg = n.message || '';
+  const code = n.etapeCode || '';
+  if (code === 'COMMENT' || msg.indexOf('@') !== -1)       return { np:'#7c3aed', npbg:'#f3e8ff' };
+  if (code === 'ANNULE'  || /annul/i.test(msg))            return { np:'#dc2626', npbg:'#fee2e2' };
+  if (/termin|100%|complet|livr/i.test(msg))               return { np:'#16a34a', npbg:'#dcfce7' };
+  if (code === 'RESERVE' || /commande|r[ée]serv/i.test(msg)) return { np:'#2563eb', npbg:'#dbeafe' };
+  return { np:'#e8834a', npbg:'#fff0e6' };
+}
+
+function _updateNotifPopAllClose() {
+  const stack = document.getElementById('notifPopStack');
+  if (!stack) return;
+  const n = stack.querySelectorAll('.notif-pop').length;
+  let btn = stack.querySelector('.notif-pop-allclose');
+  if (n >= 2) {
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.className = 'notif-pop-allclose';
+      btn.onclick = () => { stack.querySelectorAll('.notif-pop').forEach(p => p.remove()); btn.remove(); };
+      stack.insertBefore(btn, stack.firstChild);
+    }
+    btn.textContent = '✕ Tout fermer (' + n + ')';
+  } else if (btn) {
+    btn.remove();
+  }
+}
+
+function showNotifPopup(n) {
+  if (!n) return;
+  const stack = _notifPopStack();
+  if (n.id && stack.querySelector('[data-nid="' + n.id + '"]')) return; // anti-doublon
+  const c = _notifPopColors(n);
+  const dt = n.timestamp ? new Date(n.timestamp) : new Date();
+  const timeStr = isNaN(dt.getTime()) ? '' : dt.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
+  const meta = (n.operateur ? n.operateur + ' · ' : '') + timeStr;
+  const pop = document.createElement('div');
+  pop.className = 'notif-pop';
+  if (n.id) pop.dataset.nid = n.id;
+  pop.style.setProperty('--np', c.np);
+  pop.style.setProperty('--npbg', c.npbg);
+  pop.innerHTML =
+      '<div class="notif-pop__ic"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg></div>'
+    + '<div class="notif-pop__body"><div class="notif-pop__msg"></div><div class="notif-pop__meta"></div></div>'
+    + '<button class="notif-pop__close" aria-label="Fermer">&times;</button>';
+  pop.querySelector('.notif-pop__msg').textContent  = n.message || 'Nouvelle notification';
+  pop.querySelector('.notif-pop__meta').textContent = meta;
+  const close = () => { pop.remove(); _updateNotifPopAllClose(); };
+  pop.querySelector('.notif-pop__close').addEventListener('click', (e) => { e.stopPropagation(); close(); });
+  pop.addEventListener('click', () => {
+    if (n.dossierId) { try { openAttribForDossier(n.dossierId); } catch(e){} }
+    else            { try { openNotifPanel(); } catch(e){} }
+    close();
+  });
+  const allBtn = stack.querySelector('.notif-pop-allclose');
+  stack.insertBefore(pop, allBtn ? allBtn.nextSibling : stack.firstChild); // plus récent en haut
+  _updateNotifPopAllClose();
+}
+
+// Affiche les pop-ups pour les notifs nouvelles pendant la session (pas le backlog, pas les siennes)
+function _spawnNotifPopups(fresh) {
+  if (!Array.isArray(fresh) || !fresh.length) return;
+  const myLabel = currentUser?.label || currentUser?.username || '';
+  fresh
+    .filter(n => n && n.timestamp && new Date(n.timestamp).getTime() > _notifPopupSince && !_sameOp(n.operateur, myLabel))
+    .sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp))
+    .slice(-6) // au plus 6 d'un coup ; le reste reste dans la cloche
+    .forEach(showNotifPopup);
 }
 
 function toggleNotifPanel() {

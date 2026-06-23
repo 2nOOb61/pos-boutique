@@ -489,6 +489,20 @@
 .prodd-pct { font-size:10px; font-weight:700; color:var(--color-text-muted); }
 .prodd-ops { font-size:10px; color:var(--color-text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 @media(max-width:680px){ .prodd-scroll { grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); } }
+
+/* — Pop-ups de notification persistants (restent jusqu'à fermeture par l'utilisateur) — */
+.notif-pop-stack { position:fixed; top:62px; right:14px; z-index:3500; display:flex; flex-direction:column; gap:9px; width:344px; max-width:calc(100vw - 28px); max-height:calc(100vh - 78px); overflow-y:auto; pointer-events:none; padding:3px; }
+.notif-pop-stack > * { pointer-events:auto; }
+.notif-pop-allclose { align-self:flex-end; padding:6px 12px; background:var(--color-text-primary); color:#fff; border:none; border-radius:8px; font-size:11px; font-weight:700; cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,.2); }
+.notif-pop { display:flex; gap:10px; align-items:flex-start; background:var(--color-surface); border:1px solid var(--color-border); border-left:4px solid var(--np,#e8834a); border-radius:12px; padding:12px 11px 12px 13px; box-shadow:0 10px 30px rgba(0,0,0,.18); animation:notifPopIn .22s ease; cursor:pointer; }
+.notif-pop__ic { width:30px; height:30px; border-radius:9px; background:var(--npbg,#fff0e6); color:var(--np,#e8834a); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.notif-pop__body { flex:1; min-width:0; }
+.notif-pop__msg { font-size:13px; font-weight:600; color:var(--color-text-primary); line-height:1.4; word-break:break-word; }
+.notif-pop__meta { font-size:11px; color:var(--color-text-muted); margin-top:3px; }
+.notif-pop__close { width:26px; height:26px; flex-shrink:0; border:none; background:none; color:var(--color-text-muted); border-radius:7px; cursor:pointer; font-size:18px; line-height:1; display:flex; align-items:center; justify-content:center; }
+.notif-pop__close:hover { background:var(--color-bg); color:var(--color-text-primary); }
+@keyframes notifPopIn { from { opacity:0; transform:translateX(22px); } to { opacity:1; transform:translateX(0); } }
+@media(max-width:560px){ .notif-pop-stack { top:56px; right:8px; left:8px; width:auto; } }
 </style>
 </head>
 <body>
@@ -2519,7 +2533,7 @@
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260623-comments"></script>
+<script src="./app.js?v=20260623-notifpop"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
