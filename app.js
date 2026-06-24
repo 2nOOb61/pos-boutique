@@ -2437,6 +2437,7 @@ function _editCommandeDate(id, field, label) {
 }
 function editCommandeDateClient(id){ _editCommandeDate(id, 'dateLivraison',     'Date de livraison client'); }
 function editCommandeDateProd(id){   _editCommandeDate(id, 'dateLivraisonProd', 'Date de livraison production'); }
+function editCommandeDateBAT(id){     _editCommandeDate(id, 'dateBAT',           'Date de BAT'); }
 function closeAllKebabs(){ document.querySelectorAll('.kebab-menu.open').forEach(m=>m.classList.remove('open')); }
 function toggleKebab(uid, ev){
   if(ev) ev.stopPropagation();
@@ -4870,6 +4871,7 @@ function openCommandeModal(fromCart) {
   document.getElementById('cmdAdresse').value = '';
   document.getElementById('cmdDateLivraison').value = '';
   if (document.getElementById('cmdDateLivraisonProd')) document.getElementById('cmdDateLivraisonProd').value = '';
+  if (document.getElementById('cmdDateBAT')) document.getElementById('cmdDateBAT').value = '';
   if (document.getElementById('cmdFraisLivraison')) document.getElementById('cmdFraisLivraison').value = '';
   setCmdDeliveryMode('retrait');
   document.getElementById('cmdNotes').value = '';
@@ -5075,6 +5077,7 @@ function saveCommande() {
   // Dates de livraison : disponibles quel que soit le mode (retrait ou livraison)
   const dateLiv       = document.getElementById('cmdDateLivraison')?.value || '';
   const dateLivProd   = document.getElementById('cmdDateLivraisonProd')?.value || '';
+  const dateBAT       = document.getElementById('cmdDateBAT')?.value || '';
   if (isCmdLiv && !adresse) { showToast("Veuillez saisir l'adresse de livraison.", 'error'); return; }
   const notes         = document.getElementById('cmdNotes').value.trim();
   const remise        = Math.max(0, parseFloat(document.getElementById('cmdRemise').value) || 0);
@@ -5113,6 +5116,7 @@ function saveCommande() {
     fraisLivraison:   fraisLiv,
     dateLivraison:     dateLiv,
     dateLivraisonProd: dateLivProd,
+    dateBAT:           dateBAT,
     items:            cmdModalItems.map(i => ({ name: i.name.trim(), qty: i.qty, price: i.price, custom: !!i.custom })),
     notes,
     photos:           [...cmdModalPhotos],
@@ -5207,10 +5211,11 @@ function renderCommandes() {
       const statusClass = { pending:'cmd-status-pending', completed:'cmd-status-completed', cancelled:'cmd-status-cancelled' }[c.status] || '';
       const itemsStr = (c.items||[]).map(i=>`${i.name} ×${i.qty} — ${fmt(i.price)}`).join('<br>')||'—';
 
-      const deliveryHtml = (c.adresseLivraison || c.dateLivraison || c.dateLivraisonProd) ? `
+      const deliveryHtml = (c.adresseLivraison || c.dateLivraison || c.dateBAT || c.dateLivraisonProd) ? `
         <div class="cmd-card-delivery">
           ${c.adresseLivraison ? ` ${c.adresseLivraison}` : ''}
           ${c.dateLivraison ? ` &nbsp; Client : <strong>${new Date(c.dateLivraison+'T00:00:00').toLocaleDateString('fr-FR')}</strong>` : ''}
+          ${c.dateBAT ? ` &nbsp; <span style="color:#2563eb">BAT : <strong>${new Date(c.dateBAT+'T00:00:00').toLocaleDateString('fr-FR')}</strong></span>` : ''}
           ${c.dateLivraisonProd ? ` &nbsp; <span style="color:#e8834a">Production : <strong>${new Date(c.dateLivraisonProd+'T00:00:00').toLocaleDateString('fr-FR')}</strong></span>` : ''}
         </div>` : '';
 
@@ -5232,6 +5237,7 @@ function renderCommandes() {
         : `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeAddress('${c.id}')">${_kebabIcon('edit')}<span>Modifier l'adresse</span></button>`
           + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeFrais('${c.id}')">${_kebabIcon('cash')}<span>Modifier les frais de livraison</span></button>`
           + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeDateClient('${c.id}')">${_kebabIcon('edit')}<span>Modifier date livraison client</span></button>`
+          + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeDateBAT('${c.id}')">${_kebabIcon('edit')}<span>Modifier date BAT</span></button>`
           + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeDateProd('${c.id}')">${_kebabIcon('edit')}<span>Modifier date production</span></button>`
           + (c.status === 'pending' ? `<button class="kebab-item danger" role="menuitem" onclick="closeAllKebabs();cancelCommande('${c.id}')">${_kebabIcon('trash')}<span>Annuler la commande</span></button>` : '');
       const kebab = `<div class="kebab-wrap">
@@ -5598,7 +5604,7 @@ function approveCommandeModif(modId) {
       apiCall({ action: 'updateCommande', id: c.id,
         clientName: c.clientName, clientContact: c.clientContact,
         adresseLivraison: c.adresseLivraison, deliveryMode: c.deliveryMode,
-        fraisLivraison: c.fraisLivraison, dateLivraison: c.dateLivraison, dateLivraisonProd: c.dateLivraisonProd,
+        fraisLivraison: c.fraisLivraison, dateLivraison: c.dateLivraison, dateLivraisonProd: c.dateLivraisonProd, dateBAT: c.dateBAT,
         remise: c.remise, accompte: c.accompte, notes: c.notes,
         subtotal: c.subtotal, total: c.total, restant: c.restant
       }).catch(() => {});
@@ -5658,6 +5664,7 @@ async function syncCommandeToSheets(cmd) {
     fraisLivraison:  cmd.fraisLivraison,
     dateLivraison:    cmd.dateLivraison,
     dateLivraisonProd: cmd.dateLivraisonProd,
+    dateBAT:          cmd.dateBAT,
     subtotal:        cmd.subtotal,
     remise:          cmd.remise,
     total:           cmd.total,
@@ -5942,7 +5949,8 @@ function _createDossierFromSource(type, source) {
     sourceType:  type,
     sourceId:    source.id,
     dateLivraison:     source.dateLivraison || source.deliveryDate || '',
-    dateLivraisonProd: source.dateLivraisonProd || ''
+    dateLivraisonProd: source.dateLivraisonProd || '',
+    dateBAT:           source.dateBAT || ''
   };
   dossiers.push(dossier);
   // Persister dans Sheets pour visibilité multi-postes
@@ -5972,8 +5980,10 @@ function _syncDossierDates() {
     if (!src) return;
     const cli  = src.dateLivraison || src.deliveryDate || '';
     const prod = src.dateLivraisonProd || '';
+    const bat  = src.dateBAT || '';
     if (cli)  d.dateLivraison     = cli;
     if (prod) d.dateLivraisonProd = prod;
+    if (bat)  d.dateBAT           = bat;
   });
 }
 
@@ -8264,6 +8274,11 @@ function renderAttrPanel(tachesD, commentsD = []) {
         <span style="color:var(--color-border)">·</span>
         <span style="background:${prioBg};color:${prioColor};font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px">${d.priorite}</span>
       </div>
+      ${d.dateBAT ? `<div style="margin-top:9px;margin-right:6px;display:inline-flex;align-items:center;gap:7px;padding:6px 11px;border-radius:9px;background:#eaf1fb;border:1px solid rgba(37,99,235,.3)">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg>
+        <span style="font-size:12px;font-weight:700;color:#1d4ed8">BAT : ${new Date(d.dateBAT+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'2-digit',month:'short'})}</span>
+        ${(()=>{const dd=_daysUntil(d.dateBAT);return dd==null?'':`<span style="font-size:11px;font-weight:800;color:${dd<0?'#dc2626':dd<=2?'#e8834a':'#1a4a3a'}">${dd<0?Math.abs(dd)+'j de retard':dd===0?"aujourd'hui":dd===1?'demain':dd+'j restants'}</span>`;})()}
+      </div>` : ''}
       ${d.dateLivraisonProd ? `<div style="margin-top:9px;display:inline-flex;align-items:center;gap:7px;padding:6px 11px;border-radius:9px;background:#fff0e6;border:1px solid rgba(232,131,74,.3)">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#e8834a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
         <span style="font-size:12px;font-weight:700;color:#c2410c">Livraison production : ${new Date(d.dateLivraisonProd+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'2-digit',month:'short'})}</span>
@@ -8507,6 +8522,7 @@ function printDossier(dossierId) {
         <div style="margin-top:8px">
           <span style="background:${prioBg};color:${prioColor};font-size:9pt;font-weight:700;padding:2px 10px;border-radius:10px">${d.priorite || 'Normale'}</span>
         </div>
+        ${d.dateBAT ? `<div style="margin-top:10px;padding-top:8px;border-top:1px dashed #e5e3df"><div style="font-size:9pt;font-weight:700;color:#2563eb;text-transform:uppercase;letter-spacing:.06em">BAT (épreuve)</div><div style="font-size:13pt;font-weight:800;color:#1d4ed8;margin-top:2px">${new Date(d.dateBAT+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'})}</div></div>` : ''}
         ${d.dateLivraisonProd ? `<div style="margin-top:10px;padding-top:8px;border-top:1px dashed #e5e3df"><div style="font-size:9pt;font-weight:700;color:#e8834a;text-transform:uppercase;letter-spacing:.06em">Livraison production</div><div style="font-size:13pt;font-weight:800;color:#c2410c;margin-top:2px">${new Date(d.dateLivraisonProd+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'})}</div></div>` : ''}
       </div>
     </div>

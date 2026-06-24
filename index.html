@@ -1667,14 +1667,19 @@
       </div>
     </div>
 
-    <!-- Dates de livraison -->
+    <!-- Dates clés -->
     <div class="cmd-section">
-      <div class="cmd-section-title">Dates de livraison</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="cmd-section-title">Dates clés</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">
         <div class="form-group" style="margin:0">
           <label>Livraison client</label>
           <input type="date" id="cmdDateLivraison" />
           <div style="font-size:11px;color:#a8a29e;margin-top:3px">Date promise au client</div>
+        </div>
+        <div class="form-group" style="margin:0">
+          <label>BAT <span style="color:#2563eb">(épreuve)</span></label>
+          <input type="date" id="cmdDateBAT" />
+          <div style="font-size:11px;color:#a8a29e;margin-top:3px">Bon à tirer / validation</div>
         </div>
         <div class="form-group" style="margin:0">
           <label>Livraison production <span style="color:#e8834a">(atelier)</span></label>
@@ -2549,7 +2554,7 @@
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260624-scrollfix"></script>
+<script src="./app.js?v=20260624-datebat"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

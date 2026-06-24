@@ -222,7 +222,7 @@ function initSheets() {
   ensureSheet(ss, SHEET_RESERVATIONS,['ID','Date','Heure','Client_Nom','Client_Contact','Article','Quantite','Prix_Unitaire','Sous_Total_Article','Sous_Total_Vente','Remise','Net_A_Payer','Accompte','Restant','Mode_Depot','Fournisseur_Mobile','Reference','Caissier','Statut','Date_Finalisation','Vente_ID','Attachments_JSON']);
   // Commandes client — mise à jour de l'en-tête si besoin
   const cmdSh = ss.getSheetByName(SHEET_COMMANDES) || ss.insertSheet(SHEET_COMMANDES);
-  cmdSh.getRange(1, 1, 1, 23).setValues([['ID','Date','Caissier','Client_Nom','Client_Contact','Articles','Mode_Livraison','Adresse_Livraison','Frais_Livraison','Date_Livraison','Sous_Total','Remise','Total','Accompte','Restant','Mode_Depot','Fournisseur_Mobile','Reference','Notes','Statut','Date_Finalisation','Vente_ID','Date_Livraison_Prod']]);
+  cmdSh.getRange(1, 1, 1, 24).setValues([['ID','Date','Caissier','Client_Nom','Client_Contact','Articles','Mode_Livraison','Adresse_Livraison','Frais_Livraison','Date_Livraison','Sous_Total','Remise','Total','Accompte','Restant','Mode_Depot','Fournisseur_Mobile','Reference','Notes','Statut','Date_Finalisation','Vente_ID','Date_Livraison_Prod','Date_BAT']]);
 
   // Nouvelles feuilles production
   ensureSheet(ss, SHEET_DOSSIERS,   ['ID','NumeroDossier','Client','Produit','Quantite','Statut','Progression','DateCreation','DateLivraison','Priorite','SourceVente','Notes']);
@@ -814,6 +814,7 @@ function handleGetCommandes() {
         status, statut: rawStatut,
         dateFinalisation: r[20] || null, saleId: r[21] || null,
         dateLivraisonProd: String(r[22]||''),
+        dateBAT: String(r[23]||''),
         photos: []
       };
       order.push(id);
@@ -877,7 +878,8 @@ function handleAddCommande(data) {
     c.depositMethod||'', c.depositProvider||'', c.depositRef||'',
     c.notes||'',
     'En attente', '', '',
-    c.dateLivraisonProd||''
+    c.dateLivraisonProd||'',
+    c.dateBAT||''
   ]);
   return { ok:true, id };
 }
@@ -900,6 +902,7 @@ function handleUpdateCommande(data) {
     if (data.deliveryMode !== undefined)     sh.getRange(i+1, 7).setValue(data.deliveryMode);     // col G = Mode_Livraison
     if (data.dateLivraison !== undefined)     sh.getRange(i+1, 10).setValue(data.dateLivraison);     // col J = Date_Livraison (client)
     if (data.dateLivraisonProd !== undefined) sh.getRange(i+1, 23).setValue(data.dateLivraisonProd); // col W = Date_Livraison_Prod
+    if (data.dateBAT !== undefined)           sh.getRange(i+1, 24).setValue(data.dateBAT);           // col X = Date_BAT
     if (data.fraisLivraison !== undefined)   sh.getRange(i+1, 9).setValue(Number(data.fraisLivraison)||0);  // col I = Frais_Livraison
     if (data.subtotal !== undefined)         sh.getRange(i+1, 11).setValue(Number(data.subtotal)||0);       // col K = Sous_Total
     if (data.total !== undefined)            sh.getRange(i+1, 13).setValue(Number(data.total)||0);          // col M = Total
