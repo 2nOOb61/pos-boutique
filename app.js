@@ -112,7 +112,7 @@ const PAGE_ACCESS = {
   'mon-dashboard':['admin','caissier','commerciale','utilisateur','gestionnaire','comptable'],
   config:         ['admin'],
   users:          ['admin'],
-  attribution:    ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur'],
+  attribution:    ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','commerciale'],
   production:     ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
   messagerie:     ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
 };
@@ -7589,7 +7589,7 @@ function renderDossiers() {
         <div class="kebab-menu" id="kb-dos${d.id}" role="menu">
           <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();selectDossier('${d.id}')">${_kebabIcon('eye')}<span>Ouvrir / attribuer</span></button>
           <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printDossier('${d.id}')">${_kebabIcon('print')}<span>Imprimer le dossier</span></button>
-          <button class="kebab-item danger" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();resetTachesDossier('${d.id}')">${_kebabIcon('reset')}<span>Réinitialiser les tâches</span></button>
+          ${['admin','chef_atelier'].includes(currentUser?.role) ? `<button class="kebab-item danger" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();resetTachesDossier('${d.id}')">${_kebabIcon('reset')}<span>Réinitialiser les tâches</span></button>` : ''}
         </div>
       </div>
     </div>`;
@@ -7910,12 +7910,12 @@ function renderAttrPanel(tachesD, commentsD = []) {
             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
             Imprimer
           </button>
-          <div class="kebab-wrap">
+          ${['admin','chef_atelier'].includes(currentUser?.role) ? `<div class="kebab-wrap">
             <button class="kebab-btn" aria-label="Plus d'actions" aria-haspopup="true" onclick="toggleKebab('attrh${d.id}',event)"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>
             <div class="kebab-menu" id="kb-attrh${d.id}" role="menu">
               <button class="kebab-item danger" role="menuitem" onclick="closeAllKebabs();resetTachesDossier('${d.id}')">${_kebabIcon('reset')}<span>Réinitialiser les tâches</span></button>
             </div>
-          </div>
+          </div>` : ''}
         </div>
       </div>
       <div class="attr-panel-title">${d.produit}</div>
