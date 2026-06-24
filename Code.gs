@@ -16,7 +16,6 @@ const SHEET_COMMANDES    = 'Commandes';
 // Nouvelles feuilles
 const SHEET_DOSSIERS   = 'Dossiers';
 const SHEET_TACHES     = 'Taches';
-const SHEET_OPERATEURS = 'Operateurs';
 const SHEET_JOURNAL    = 'JournalAcces'; // audit log : qui fait quoi et quand
 
 // ── Audit : enregistrement des actions critiques ───────────
@@ -99,8 +98,6 @@ function doPost(e) {
     else if (action === 'saveDossier')       result = handleSaveDossier(data);
     else if (action === 'creerDossierManuel') result = handleCreerDossierManuel(data);
     else if (action === 'saveTacheLibre')    result = handleSaveTacheLibre(data);
-    else if (action === 'getOperateurs')     result = handleGetOperateurs();
-    else if (action === 'saveOperateur')     result = handleSaveOperateur(data);
     else if (action === 'attribuerTache')    result = handleAttribuerTache(data);
     else if (action === 'getTaches')         result = handleGetTaches(data);
     else if (action === 'deleteTache')       result = handleDeleteTache(data);
@@ -144,7 +141,6 @@ function doGet(e) {
       else if (action === 'updateCommande')    result = handleUpdateCommande(data);
       else if (action === 'attribuerTache')    result = handleAttribuerTache(data);
       else if (action === 'pointerAction')     result = handlePointerAction(data);
-      else if (action === 'saveOperateur')     result = handleSaveOperateur(data);
       else if (action === 'deleteTache')       result = handleDeleteTache(data);
       else if (action === 'addComment')        result = handleAddComment(data);
       else if (action === 'saveNotif')         result = handleSaveNotif(data);
@@ -172,7 +168,6 @@ function doGet(e) {
     if (action === 'getReservations') return jsonResp(handleGetReservations());
     if (action === 'getCommandes')    return jsonResp(handleGetCommandes());
     if (action === 'getDossiers')     return jsonResp(handleGetDossiers(e.parameter));
-    if (action === 'getOperateurs')   return jsonResp(handleGetOperateurs());
     if (action === 'getTaches')       return jsonResp(handleGetTaches(e.parameter));
     if (action === 'getDashboard')    return jsonResp(handleGetDashboard());
     if (action === 'getControlPatron') return jsonResp(handleGetControlPatron(e.parameter));
@@ -226,14 +221,6 @@ function initSheets() {
   // Nouvelles feuilles production
   ensureSheet(ss, SHEET_DOSSIERS,   ['ID','NumeroDossier','Client','Produit','Quantite','Statut','Progression','DateCreation','DateLivraison','Priorite','SourceVente','Notes']);
   ensureSheet(ss, SHEET_TACHES,     ['ID','DossierID','NumeroDossier','Etape','EtapeLabel','Operateur','Statut','DateAssignation','DateDebut','DateFin','Commentaire','AssignePar']);
-  ensureSheet(ss, SHEET_OPERATEURS, ['Nom','Role','Actif']);
-
-  const osh = ss.getSheetByName(SHEET_OPERATEURS);
-  if (osh.getLastRow() < 2) {
-    osh.appendRow(['Marie', 'operateur', 'oui']);
-    osh.appendRow(['Jean',  'operateur', 'oui']);
-    osh.appendRow(['Paul',  'operateur', 'oui']);
-  }
 
   return { ok:true, message:'Feuilles initialisées ' };
 }
@@ -984,50 +971,6 @@ function handleSaveDossier(data) {
   } finally {
     try { lock.releaseLock(); } catch(e) {}
   }
-}
-
-// ============================================================
-// OPÉRATEURS
-// ============================================================
-function handleGetOperateurs() {
-  const cache    = CacheService.getScriptCache();
-  const cacheKey = 'operateurs_v1';
-  const cached   = cache.get(cacheKey);
-  if (cached) {
-    try { return JSON.parse(cached); } catch(e) {}
-  }
-  const sh = getSS().getSheetByName(SHEET_OPERATEURS);
-  if (!sh) return { ok:true, operateurs:[] };
-  const rows = sh.getDataRange().getValues();
-  const list = [];
-  for (let i = 1; i < rows.length; i++) {
-    const r = rows[i];
-    if (!r[0] || String(r[2]).toLowerCase() === 'non') continue;
-    list.push({ nom:r[0], role:r[1]||'operateur', username:r[3]||'' });
-  }
-  const result = { ok:true, operateurs:list };
-  try { cache.put(cacheKey, JSON.stringify(result), 300); } catch(e) {}
-  return result;
-}
-
-function handleSaveOperateur(data) {
-  CacheService.getScriptCache().remove('operateurs_v1');
-  const ss  = getSS();
-  const sh  = ensureSheet(ss, SHEET_OPERATEURS, ['Nom','Role','Actif','Username']);
-  const rows = sh.getDataRange().getValues();
-  for (let i = 1; i < rows.length; i++) {
-    if (String(rows[i][0]).trim() === String(data.nom).trim()) {
-      sh.getRange(i+1,1,1,4).setValues([[
-        data.nom,
-        data.role     || 'operateur',
-        'oui',
-        data.username || rows[i][3] || ''
-      ]]);
-      return { ok:true, message:'Opérateur mis à jour' };
-    }
-  }
-  sh.appendRow([data.nom, data.role||'operateur', 'oui', data.username||'']);
-  return { ok:true, message:'Opérateur créé' };
 }
 
 // ============================================================

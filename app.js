@@ -3738,7 +3738,7 @@ async function apiCall(payload) {
   if (!APPS_SCRIPT_URL) return null;
 
   // ── LECTURES & LOGIN : requête GET avec params individuels ─
-  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getDossiers', 'getOperateurs', 'getTaches', 'getDashboard', 'getControlPatron', 'getComments', 'getNotifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles'];
+  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getDossiers', 'getTaches', 'getDashboard', 'getControlPatron', 'getComments', 'getNotifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles'];
   if (getActions.includes(payload.action)) {
     try {
       let url = APPS_SCRIPT_URL + '?action=' + payload.action;
@@ -5554,7 +5554,6 @@ _updateAirtableBtn();
 
 // --- ÉTAT ---
 let dossiers = [];
-let operateurs = [];
 let taches = [];
 // tachesLibres est déclaré avant le bloc INIT (ligne ~4116) pour éviter la TDZ
 let selectedDossier = null;
