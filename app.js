@@ -218,7 +218,7 @@ async function doLogin() {
       // Garantir que label est toujours une vraie valeur (le Sheet peut renvoyer
       // undefined, null, ou la chaîne "undefined" si le champ était vide)
       if (!userInfo.label || userInfo.label === 'undefined') {
-        userInfo.label = userInfo.username || u;
+        userInfo.label = userInfo.nom || userInfo.username || u;
       }
       // Mettre à jour / créer le compte local avec le hash du mot de passe
       // → permet le login offline même après effacement du localStorage
@@ -4004,6 +4004,7 @@ async function loadUsersFromScript() {
       ...r.users.map(su => {
         const local = localUsers.find(lu => lu.username.toLowerCase() === su.username.toLowerCase());
         const patched = { ...su };
+        if (!patched.label && patched.nom) patched.label = patched.nom; // compat ancien champ nom
         if (!patched.pass  && local?.pass)  patched.pass  = local.pass;
         const badLabel = !patched.label || patched.label === 'undefined';
         const goodLocal = local?.label && local.label !== 'undefined';

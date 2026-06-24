@@ -279,7 +279,7 @@ function handleLogin(data) {
         try { sh.getRange(i + 1, 2).setValue(inputHash); } catch(e) {}
       }
       _logAction_('LOGIN_OK', r[0], 'Rôle: ' + r[2]);
-      return { ok:true, user:{ username:r[0], role:r[2], nom:r[3]||r[0] } };
+      return { ok:true, user:{ username:r[0], role:r[2], label:r[3]||r[0] } };
     }
   }
   _logAction_('LOGIN_FAIL', inputUser, 'Tentative échouée');
@@ -587,7 +587,7 @@ function handleGetUsers() {
   const users = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i]; if (!r[0]) continue;
-    users.push({ username:r[0], role:r[2], nom:r[3], actif:String(r[4]||'oui').toLowerCase()!=='non' });
+    users.push({ username:r[0], role:r[2], label:r[3], actif:String(r[4]||'oui').toLowerCase()!=='non' });
   }
   const result = { ok:true, users };
   try { cache.put(cacheKey, JSON.stringify(result), 300); } catch(e) {}
@@ -608,12 +608,12 @@ function handleSaveUser(data) {
   for (let i = 1; i < rows.length; i++) {
     if (String(rows[i][0]).toLowerCase() === String(u.username).toLowerCase()) {
       const storedPwd = pwd || rows[i][1];
-      sh.getRange(i+1,1,1,5).setValues([[u.username, storedPwd, u.role, u.nom||u.username, u.actif!==false?'oui':'non']]);
+      sh.getRange(i+1,1,1,5).setValues([[u.username, storedPwd, u.role, u.label||u.nom||u.username, u.actif!==false?'oui':'non']]);
       _logAction_('USER_UPDATE', data.editedBy||'admin', 'Modifié: ' + u.username + ' rôle:' + u.role);
       return { ok:true };
     }
   }
-  sh.appendRow([u.username, pwd, u.role||'caissier', u.nom||u.username, 'oui']);
+  sh.appendRow([u.username, pwd, u.role||'caissier', u.label||u.nom||u.username, 'oui']);
   _logAction_('USER_CREATE', data.editedBy||'admin', 'Créé: ' + u.username + ' rôle:' + (u.role||'caissier'));
   return { ok:true };
 }
