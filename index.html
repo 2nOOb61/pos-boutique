@@ -42,20 +42,19 @@
 .attr-left { display:flex; flex-direction:column; gap:10px; }
 .attr-right { position:sticky; top:80px; }
 .attr-panel { background:var(--color-surface); border:1px solid var(--color-border); border-radius:14px; overflow:hidden; min-height:200px; }
-/* Le panneau de détail : header fixé, seul le corps défile.
-   Le header (nom client, progression, date livraison) reste toujours
-   visible ; les étapes + commentaires défilent dans le corps. */
+/* Panneau 3 zones : header fixe | étapes défile | commentaires fixe en bas */
 @media(min-width:901px){
-  .attr-right { max-height:calc(100vh - 96px); overflow:hidden; }
-  .attr-panel  { height:100%; max-height:calc(100vh - 96px); display:flex; flex-direction:column; overflow:hidden; }
-  .attr-panel-header { flex-shrink:0; }
-  .attr-panel-body   { flex:1; overflow-y:auto; overflow-x:hidden; padding-bottom:20px; }
+  .attr-right           { max-height:calc(100vh - 96px); overflow:hidden; }
+  .attr-panel           { height:100%; max-height:calc(100vh - 96px); display:flex; flex-direction:column; overflow:hidden; }
+  .attr-panel-header    { flex-shrink:0; }
+  .attr-panel-body      { flex:1; overflow-y:auto; overflow-x:hidden; }
+  .attr-comments-section{ flex-shrink:0; max-height:270px; overflow-y:auto; border-top:1px solid var(--color-border); }
 }
 .dossier-list-wrap { display:flex; flex-direction:column; gap:10px; }
 .dossier-card { background:var(--color-surface); border:1.5px solid var(--color-border); border-radius:12px; padding:14px 16px; cursor:pointer; transition:border-color .15s, box-shadow .15s; }
 .dossier-card:hover { border-color:var(--color-primary); box-shadow:0 2px 8px rgba(26,74,58,.08); }
 .dossier-card--selected { border-color:var(--color-primary); background:var(--color-primary-light); }
-.etape-row-attr { display:flex; align-items:center; gap:10px; padding:10px 16px; border-bottom:1px solid var(--color-border); }
+.etape-row-attr { display:flex; align-items:center; gap:8px; padding:6px 14px; border-bottom:1px solid var(--color-border); }
 .etape-row-attr:last-child { border-bottom:none; }
 .btn-attr-assign { padding:5px 12px; border-radius:7px; background:var(--color-primary-light); color:var(--color-primary); border:1px solid rgba(26,74,58,.2); cursor:pointer; font-size:12px; font-weight:600; transition:.15s; white-space:nowrap; }
 .btn-attr-assign:hover { background:rgba(26,74,58,.15); }
@@ -2535,7 +2534,7 @@
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260624-panel-scroll"></script>
+<script src="./app.js?v=20260624-attr-compact"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

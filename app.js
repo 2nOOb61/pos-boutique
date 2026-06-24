@@ -7968,13 +7968,13 @@ function renderAttrPanel(tachesD, commentsD = []) {
         ? `<span style="font-size:10px;font-weight:700;color:var(--color-success);background:var(--color-success-bg);padding:2px 8px;border-radius:20px;margin-left:6px"> Étape complète</span>`
         : '';
       return `<div class="etape-row-attr">
-        <div style="width:28px;height:28px;border-radius:50%;background:${etapeComplete?'#16a34a':e.color}18;border:1.5px solid ${etapeComplete?'#16a34a':e.color};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;font-weight:700;color:${etapeComplete?'#16a34a':e.color}">${etapeComplete?'':e.icon}</div>
+        <div style="width:20px;height:20px;border-radius:50%;background:${etapeComplete?'#16a34a':e.color}18;border:1.5px solid ${etapeComplete?'#16a34a':e.color};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:9px;font-weight:700;color:${etapeComplete?'#16a34a':e.color}">${etapeComplete?'✓':e.icon}</div>
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">
-            <span style="font-size:13px;font-weight:600;color:var(--color-text-primary)">${e.label}</span>
+            <span style="font-size:12px;font-weight:600;color:var(--color-text-primary)">${e.label}</span>
             ${etapeIcon}
           </div>
-          <div style="font-size:12px;color:var(--color-text-secondary);margin-top:3px;display:flex;flex-wrap:wrap;gap:2px">
+          <div style="font-size:11px;color:var(--color-text-secondary);margin-top:1px;display:flex;flex-wrap:wrap;gap:2px">
             ${operateursHtml}
           </div>
         </div>
@@ -7989,7 +7989,7 @@ function renderAttrPanel(tachesD, commentsD = []) {
     }).join('')}
       </div>
     </div>
-    <div style="border-top:1px solid var(--color-border);padding:14px 18px 24px">
+    <div class="attr-comments-section" style="padding:14px 18px 16px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <div style="font-size:11px;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:.06em;display:flex;align-items:center;gap:6px">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
