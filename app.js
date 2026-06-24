@@ -36,7 +36,7 @@ const APP_VERSION = '2.1.0';
 // Polling notifications — déclarés en tête pour éviter TDZ
 var _notifRetryQueue   = [];
 var _notifPollInterval = null;
-var _notifPopupSince   = 0; // pop-ups uniquement pour les notifs créées après le début de session
+var _notifPopupArmed   = false; // pop-ups activés après le chargement initial (évite le backlog au login ; insensible aux horloges)
 var _notifAudioCtx     = null; // contexte Web Audio pour le son de notification
 var notifications      = (function() {
   try { var r = localStorage.getItem('pos-notifications'); return r ? JSON.parse(r) : []; } catch(e) { return []; }
@@ -271,7 +271,7 @@ async function doLogin() {
     _renderNotifBell();
     showToast(`Bonjour, ${currentUser.label} ! `);
     // Charger les notifications des collègues en arrière-plan + démarrer le polling
-    loadNotifsFromGAS();
+    loadNotifsFromGAS().then(function(){ _notifPopupArmed = true; }); // pop-ups actifs une fois le backlog chargé
     _startNotifPolling();
     // Charger les données depuis le Sheet
     _initDriveFolderUrl();  // Récupérer l'URL du dossier Drive (fallback direct)
@@ -6036,6 +6036,7 @@ function _addNotification({ dossierId, numeroDossier, etapeCode, etapeLabel, ope
   notifications.unshift(notif);
   saveNotifications();
   _renderNotifBell();
+  try { showNotifPopup(notif); _notifSound(); } catch(e) {} // pop-up immédiat pour l'action de l'utilisateur courant
   if (APPS_SCRIPT_URL) {
     apiCall({ action:'saveNotif', ...notif }).catch(() => {
       _notifRetryQueue.push(notif); // retry au prochain poll si échec
@@ -6081,7 +6082,6 @@ async function loadNotifsFromGAS(spawnPopups) {
 
 function _startNotifPolling() {
   if (_notifPollInterval) clearInterval(_notifPollInterval);
-  _notifPopupSince = Date.now(); // ne pop-up que ce qui arrive après le début de session (pas le backlog)
   _notifPollInterval = setInterval(async () => {
     if (document.hidden) return; // ne pas polluer quand l'onglet est en arrière-plan
     _flushNotifRetryQueue();
@@ -6229,10 +6229,10 @@ function _notifSound() {
 
 // Affiche les pop-ups pour les notifs nouvelles pendant la session (pas le backlog, pas les siennes)
 function _spawnNotifPopups(fresh) {
-  if (!Array.isArray(fresh) || !fresh.length) return;
+  if (!_notifPopupArmed || !Array.isArray(fresh) || !fresh.length) return; // pas avant le chargement du backlog
   const myLabel = currentUser?.label || currentUser?.username || '';
   const toShow = fresh
-    .filter(n => n && n.timestamp && new Date(n.timestamp).getTime() > _notifPopupSince && !_sameOp(n.operateur, myLabel))
+    .filter(n => n && !_sameOp(n.operateur, myLabel)) // exclut ses propres actions (déjà pop-uppées localement)
     .sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp))
     .slice(-6); // au plus 6 d'un coup ; le reste reste dans la cloche
   if (!toShow.length) return;
