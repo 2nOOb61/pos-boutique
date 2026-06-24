@@ -299,6 +299,7 @@ async function doLogin() {
         loadUsersFromScript().catch(() => {}),
         loadReservationsFromScript().catch(() => {}),
         loadCommandesFromScript().catch(() => {}),
+        loadModifsFromScript().catch(() => {}),
       ]).then(() => syncPendingOfflineSales().catch(() => {}))
         .then(() => {
           saveData(); // Persister l'état fusionné
@@ -3738,7 +3739,7 @@ async function apiCall(payload) {
   if (!APPS_SCRIPT_URL) return null;
 
   // ── LECTURES & LOGIN : requête GET avec params individuels ─
-  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getDossiers', 'getTaches', 'getDashboard', 'getControlPatron', 'getComments', 'getNotifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles'];
+  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getDossiers', 'getTaches', 'getDashboard', 'getControlPatron', 'getComments', 'getNotifs', 'getModifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles'];
   if (getActions.includes(payload.action)) {
     try {
       let url = APPS_SCRIPT_URL + '?action=' + payload.action;
@@ -5150,7 +5151,7 @@ async function _autoRefreshCommandes() {
   _lastCmdRefresh = now;
   const btn = document.getElementById('cmdRefreshBtn');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Actualisation...'; }
-  try { await loadCommandesFromScript(); }
+  try { await loadCommandesFromScript(); await loadModifsFromScript(); }
   catch(e) { showToast(' Erreur chargement commandes', 'error'); }
   finally {
     if (btn) { btn.disabled = false; btn.textContent = ' Actualiser'; }
@@ -5217,15 +5218,23 @@ function renderCommandes() {
       const _dSvg = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>';
       const printBtn = `<button class="hist-print-btn" onclick="printCommandeTicket(commandes.find(x=>String(x.id)==='${c.id}'))" title="Imprimer le bon de commande">${_pSvg}<span>Imprimer</span></button>`;
       const finalizeBtn = c.status === 'pending' ? `<button class="btn-finalize" onclick="openCmdFinalizeModal('${c.id}')">Finaliser</button>` : '';
-      const kebabItems = `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeAddress('${c.id}')">${_kebabIcon('edit')}<span>Modifier l'adresse</span></button>`
-        + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeFrais('${c.id}')">${_kebabIcon('cash')}<span>Modifier les frais de livraison</span></button>`
-        + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeDateClient('${c.id}')">${_kebabIcon('edit')}<span>Modifier date livraison client</span></button>`
-        + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeDateProd('${c.id}')">${_kebabIcon('edit')}<span>Modifier date production</span></button>`
-        + (c.status === 'pending' ? `<button class="kebab-item danger" role="menuitem" onclick="closeAllKebabs();cancelCommande('${c.id}')">${_kebabIcon('trash')}<span>Annuler la commande</span></button>` : '');
+      // Les commerciaux passent par une demande validée par l'admin ; les autres rôles éditent directement
+      const _isCommercial = currentUser?.role === 'commerciale';
+      const kebabItems = _isCommercial
+        ? `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();requestCommandeModif('${c.id}')">${_kebabIcon('edit')}<span>Demander une modification</span></button>`
+          + (c.status === 'pending' ? `<button class="kebab-item danger" role="menuitem" onclick="closeAllKebabs();requestCommandeCancel('${c.id}')">${_kebabIcon('trash')}<span>Demander l'annulation</span></button>` : '')
+        : `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeAddress('${c.id}')">${_kebabIcon('edit')}<span>Modifier l'adresse</span></button>`
+          + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeFrais('${c.id}')">${_kebabIcon('cash')}<span>Modifier les frais de livraison</span></button>`
+          + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeDateClient('${c.id}')">${_kebabIcon('edit')}<span>Modifier date livraison client</span></button>`
+          + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeDateProd('${c.id}')">${_kebabIcon('edit')}<span>Modifier date production</span></button>`
+          + (c.status === 'pending' ? `<button class="kebab-item danger" role="menuitem" onclick="closeAllKebabs();cancelCommande('${c.id}')">${_kebabIcon('trash')}<span>Annuler la commande</span></button>` : '');
       const kebab = `<div class="kebab-wrap">
              <button class="kebab-btn" aria-label="Plus d'actions" aria-haspopup="true" onclick="toggleKebab('cmd${c.id}',event)">${_dSvg}</button>
              <div class="kebab-menu" id="kb-cmd${c.id}" role="menu">${kebabItems}</div>
            </div>`;
+
+      const _pmod = _pendingModFor(c.id);
+      const modBanner = _pmod ? _buildModBanner(c, _pmod) : '';
 
       return `
       <div class="cmd-card" data-cgrp="${gid}">
@@ -5243,6 +5252,7 @@ function renderCommandes() {
           <span style="color:var(--muted)">Acompte <b style="color:var(--green)">${fmt(c.accompte)}</b></span>
           <span style="color:var(--muted)">Restant <b style="color:${c.status==='pending'?'var(--red)':'var(--muted)'}">${fmt(c.restant)}</b></span>
         </div>
+        ${modBanner}
         <button class="cmd-detail-toggle" id="cmd-det-btn-${c.id}" onclick="toggleCmdDetail('${c.id}')">
           <svg class="hist-chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
           Détails (${itemCount} article${itemCount>1?'s':''})
@@ -5381,10 +5391,9 @@ function _doCmdFinalize(c, method, given, change, provider, ref) {
 // ============================================================
 // COMMANDES — ANNULER
 // ============================================================
-function cancelCommande(id) {
-  const c = commandes.find(x => String(x.id) === String(id));
-  if (!c || c.status !== 'pending') return;
-  if (!confirm(`Annuler la commande #${c.id} de ${c.clientName} ?`)) return;
+// Annulation effective d'une commande (stock + statut + sync + notif). Sans confirmation.
+function _applyCommandeCancel(c) {
+  if (!c) return;
   // Restituer le stock pour les articles en catalogue (identique à cancelReservation)
   (Array.isArray(c.items) ? c.items : []).forEach(function(item) {
     if (item.custom) return;
@@ -5407,8 +5416,222 @@ function cancelCommande(id) {
     operateur:     currentUser?.label || 'Admin',
     message:       `Commande #${c.id} annulée — ${c.clientName}`
   });
-  showToast(`Commande #${c.id} annulée`, 'info');
   _deleteTachesForDossier(c.dossierId);
+}
+
+function cancelCommande(id) {
+  const c = commandes.find(x => String(x.id) === String(id));
+  if (!c || c.status !== 'pending') return;
+  if (!confirm(`Annuler la commande #${c.id} de ${c.clientName} ?`)) return;
+  _applyCommandeCancel(c);
+  showToast(`Commande #${c.id} annulée`, 'info');
+}
+
+// ============================================================
+// COMMANDES — DEMANDES DE MODIFICATION (commercial → validation admin)
+// ============================================================
+function _fmtModDate(iso) {
+  const d = new Date(iso);
+  return isNaN(d) ? '' : d.toLocaleString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
+}
+function _modVal(key, v) {
+  if (CMD_MODIF_NUMKEYS.includes(key)) return fmt(Number(v) || 0);
+  return (v === '' || v == null) ? '—' : String(v);
+}
+
+// Bandeau affiché sur la carte commande quand une demande est en attente
+function _buildModBanner(c, mod) {
+  const isAdmin = currentUser?.role === 'admin';
+  const who = `${mod.auteurLabel || mod.auteur || 'Commercial'} · ${_fmtModDate(mod.timestamp)}`;
+  let detail;
+  if (mod.type === 'cancel') {
+    detail = `<div class="mod-title"> Demande d'annulation</div>${mod.reason ? `<div class="mod-reason">« ${mod.reason} »</div>` : ''}`;
+  } else {
+    const lines = Object.entries(mod.changes || {}).map(([k, v]) =>
+      `<div class="mod-diff"><span class="mod-diff-label">${v.label || k}</span><span class="mod-old">${_modVal(k, v.old)}</span><span class="mod-arrow">→</span><span class="mod-new">${_modVal(k, v.new)}</span></div>`
+    ).join('');
+    detail = `<div class="mod-title"> Modification demandée</div>${mod.reason ? `<div class="mod-reason">« ${mod.reason} »</div>` : ''}<div class="mod-diffs">${lines}</div>`;
+  }
+  const actions = isAdmin
+    ? `<div class="mod-actions">
+         <button class="mod-btn mod-btn-approve" onclick="approveCommandeModif('${mod.id}')">✓ Approuver</button>
+         <button class="mod-btn mod-btn-reject" onclick="rejectCommandeModif('${mod.id}')">✕ Refuser</button>
+       </div>`
+    : `<div class="mod-pending-tag"> En attente de validation admin</div>`;
+  return `<div class="cmd-mod-banner ${mod.type === 'cancel' ? 'cmd-mod-banner--cancel' : ''}">
+    ${detail}
+    <div class="mod-who">${who}</div>
+    ${actions}
+  </div>`;
+}
+
+let _modifCmdId = null;
+
+// Ouvre le formulaire de demande de modification (commercial)
+function requestCommandeModif(id) {
+  const c = commandes.find(x => String(x.id) === String(id));
+  if (!c) { showToast('Commande introuvable', 'error'); return; }
+  _modifCmdId = id;
+  const fields = CMD_MODIF_FIELDS.map(f => {
+    const raw = c[f.key] ?? '';
+    const val = String(raw).replace(/"/g, '&quot;');
+    if (f.type === 'textarea')
+      return `<label class="modif-field"><span>${f.label}</span><textarea id="mf_${f.key}" rows="2">${String(raw)}</textarea></label>`;
+    const inputType = f.type === 'number' ? 'number' : (f.type === 'date' ? 'date' : 'text');
+    return `<label class="modif-field"><span>${f.label}</span><input id="mf_${f.key}" type="${inputType}" value="${val}" ${f.type === 'number' ? 'min="0"' : ''}></label>`;
+  }).join('');
+  const body = document.getElementById('cmdModifBody');
+  if (body) body.innerHTML = fields +
+    `<label class="modif-field"><span>Note pour l'admin (optionnel)</span><textarea id="mf_reason" rows="2" placeholder="Pourquoi cette modification ?"></textarea></label>`;
+  const title = document.getElementById('cmdModifTitle');
+  if (title) title.textContent = `Demande de modification — ${c.clientName || 'commande'}`;
+  openModal('cmdModifModal');
+}
+
+// Envoie la demande : ne garde que les champs réellement modifiés (diff)
+function submitCommandeModif() {
+  const c = commandes.find(x => String(x.id) === String(_modifCmdId));
+  if (!c) { closeModal('cmdModifModal'); return; }
+  const changes = {};
+  CMD_MODIF_FIELDS.forEach(f => {
+    const el = document.getElementById('mf_' + f.key);
+    if (!el) return;
+    let nv, ov;
+    if (f.type === 'number') {
+      nv = Math.max(0, parseFloat(el.value) || 0);
+      ov = Number(c[f.key]) || 0;
+    } else {
+      nv = String(el.value).trim();
+      ov = String(c[f.key] ?? '');
+    }
+    if (String(nv) !== String(ov)) changes[f.key] = { old: ov, new: nv, label: f.label };
+  });
+  if (!Object.keys(changes).length) { showToast('Aucune modification détectée', 'info'); return; }
+  const reason = (document.getElementById('mf_reason')?.value || '').trim();
+  const mod = {
+    id: 'M_' + Date.now(),
+    commandeId: String(c.id),
+    timestamp: new Date().toISOString(),
+    auteur: currentUser?.username || '',
+    auteurLabel: currentUser?.label || currentUser?.username || 'Commercial',
+    type: 'edit',
+    changes,
+    reason,
+    statut: 'pending'
+  };
+  commandeMods = commandeMods.filter(m => !(String(m.commandeId) === String(c.id) && m.statut === 'pending'));
+  commandeMods.unshift(mod);
+  closeModal('cmdModifModal');
+  renderCommandes();
+  if (APPS_SCRIPT_URL) {
+    apiCall({ action: 'saveModif', id: mod.id, commandeId: mod.commandeId, timestamp: mod.timestamp, auteur: mod.auteur, auteurLabel: mod.auteurLabel, type: mod.type, changes: mod.changes, reason: mod.reason })
+      .catch(() => {});
+  }
+  _addNotification({
+    dossierId: c.dossierId || '', numeroDossier: `CMD-${String(c.id).padStart(3,'0')}`,
+    etapeCode: 'MODIF', etapeLabel: 'Demande de modification',
+    operateur: mod.auteurLabel,
+    message: `${mod.auteurLabel} demande une modification sur la commande de ${c.clientName} — validation requise`
+  });
+  showToast('Demande envoyée à l\'admin');
+}
+
+// Demande d'annulation (commercial)
+function requestCommandeCancel(id) {
+  const c = commandes.find(x => String(x.id) === String(id));
+  if (!c || c.status !== 'pending') return;
+  const reason = prompt(`Demander l'annulation de la commande de ${c.clientName} ?\nMotif (visible par l'admin) :`, '');
+  if (reason === null) return;
+  const mod = {
+    id: 'M_' + Date.now(), commandeId: String(c.id), timestamp: new Date().toISOString(),
+    auteur: currentUser?.username || '', auteurLabel: currentUser?.label || currentUser?.username || 'Commercial',
+    type: 'cancel', changes: {}, reason: reason.trim(), statut: 'pending'
+  };
+  commandeMods = commandeMods.filter(m => !(String(m.commandeId) === String(c.id) && m.statut === 'pending'));
+  commandeMods.unshift(mod);
+  renderCommandes();
+  if (APPS_SCRIPT_URL) {
+    apiCall({ action: 'saveModif', id: mod.id, commandeId: mod.commandeId, timestamp: mod.timestamp, auteur: mod.auteur, auteurLabel: mod.auteurLabel, type: mod.type, changes: {}, reason: mod.reason })
+      .catch(() => {});
+  }
+  _addNotification({
+    dossierId: c.dossierId || '', numeroDossier: `CMD-${String(c.id).padStart(3,'0')}`,
+    etapeCode: 'MODIF', etapeLabel: 'Demande d\'annulation',
+    operateur: mod.auteurLabel,
+    message: `${mod.auteurLabel} demande l'annulation de la commande de ${c.clientName} — validation requise`
+  });
+  showToast('Demande d\'annulation envoyée');
+}
+
+// ── Validation admin ───────────────────────────────────────
+function approveCommandeModif(modId) {
+  if (currentUser?.role !== 'admin') { showToast('Réservé à l\'admin', 'error'); return; }
+  const mod = commandeMods.find(m => m.id === modId);
+  if (!mod || mod.statut !== 'pending') return;
+  const c = commandes.find(x => String(x.id) === String(mod.commandeId));
+  if (!c) { showToast('Commande introuvable', 'error'); return; }
+
+  if (mod.type === 'cancel') {
+    _applyCommandeCancel(c);
+  } else {
+    Object.entries(mod.changes || {}).forEach(([k, v]) => { c[k] = v.new; });
+    // Recalcul des montants dérivés (articles inchangés)
+    const itemsSum = (c.items || []).reduce((s, i) => s + (Number(i.qty) || 0) * (Number(i.price) || 0), 0);
+    c.subtotal = itemsSum > 0 ? itemsSum : (Number(c.subtotal) || 0);
+    c.total = Math.max(0, c.subtotal - (Number(c.remise) || 0) + (Number(c.fraisLivraison) || 0));
+    c.restant = Math.max(0, c.total - (Number(c.accompte) || 0));
+    if ('adresseLivraison' in mod.changes) c.deliveryMode = c.adresseLivraison ? 'livraison' : 'retrait';
+    // Répercuter les dates sur le dossier de production lié
+    const dos = dossiers.find(d => d.sourceType === 'commande' && String(d.sourceId) === String(c.id));
+    if (dos) {
+      if ('dateLivraison' in mod.changes)     dos.dateLivraison = c.dateLivraison;
+      if ('dateLivraisonProd' in mod.changes) dos.dateLivraisonProd = c.dateLivraisonProd;
+    }
+    saveData();
+    if (APPS_SCRIPT_URL) {
+      apiCall({ action: 'updateCommande', id: c.id,
+        clientName: c.clientName, clientContact: c.clientContact,
+        adresseLivraison: c.adresseLivraison, deliveryMode: c.deliveryMode,
+        fraisLivraison: c.fraisLivraison, dateLivraison: c.dateLivraison, dateLivraisonProd: c.dateLivraisonProd,
+        remise: c.remise, accompte: c.accompte, notes: c.notes,
+        subtotal: c.subtotal, total: c.total, restant: c.restant
+      }).catch(() => {});
+    }
+  }
+  mod.statut = 'approved';
+  mod.resoluPar = currentUser?.label || 'Admin';
+  mod.resoluLe = new Date().toISOString();
+  renderCommandes();
+  if (APPS_SCRIPT_URL) apiCall({ action: 'resolveModif', id: mod.id, statut: 'approved', resoluPar: mod.resoluPar }).catch(() => {});
+  _addNotification({
+    dossierId: c.dossierId || '', numeroDossier: `CMD-${String(c.id).padStart(3,'0')}`,
+    etapeCode: 'MODIF', etapeLabel: 'Modification validée',
+    operateur: mod.resoluPar,
+    message: `Demande de ${mod.auteurLabel} approuvée sur la commande de ${c.clientName}`
+  });
+  showToast('Modification appliquée');
+}
+
+function rejectCommandeModif(modId) {
+  if (currentUser?.role !== 'admin') { showToast('Réservé à l\'admin', 'error'); return; }
+  const mod = commandeMods.find(m => m.id === modId);
+  if (!mod || mod.statut !== 'pending') return;
+  const c = commandes.find(x => String(x.id) === String(mod.commandeId));
+  const motif = prompt('Motif du refus (optionnel, visible par le commercial) :', '');
+  if (motif === null) return;
+  mod.statut = 'rejected';
+  mod.resoluPar = currentUser?.label || 'Admin';
+  mod.resoluLe = new Date().toISOString();
+  mod.motif = motif.trim();
+  renderCommandes();
+  if (APPS_SCRIPT_URL) apiCall({ action: 'resolveModif', id: mod.id, statut: 'rejected', resoluPar: mod.resoluPar, motif: mod.motif }).catch(() => {});
+  _addNotification({
+    dossierId: c?.dossierId || '', numeroDossier: c ? `CMD-${String(c.id).padStart(3,'0')}` : '',
+    etapeCode: 'MODIF', etapeLabel: 'Modification refusée',
+    operateur: mod.resoluPar,
+    message: `Demande de ${mod.auteurLabel} refusée${mod.motif ? ' — ' + mod.motif : ''}`
+  });
+  showToast('Demande refusée', 'info');
 }
 
 // ============================================================
@@ -5449,6 +5672,36 @@ async function syncCommandeToSheets(cmd) {
 async function syncCmdUpdateToSheets(cmd) {
   if (!APPS_SCRIPT_URL) return;
   await apiCall({ action: 'updateCommande', id: cmd.id, status: cmd.status, dateFinalisation: cmd.dateFinalisation || '', saleId: cmd.saleId || '' });
+}
+
+// ============================================================
+// DEMANDES DE MODIFICATION DE COMMANDE (commerciaux → validation admin)
+// ============================================================
+let commandeMods = []; // demandes récentes (pending / approved / rejected / superseded)
+
+// Champs qu'un commercial peut demander à modifier (avec validation admin)
+const CMD_MODIF_FIELDS = [
+  { key:'clientName',       label:'Nom client',            type:'text' },
+  { key:'clientContact',    label:'Contact',               type:'text' },
+  { key:'accompte',         label:'Acompte (Ar)',          type:'number' },
+  { key:'remise',           label:'Remise (Ar)',           type:'number' },
+  { key:'adresseLivraison', label:'Adresse de livraison',  type:'text' },
+  { key:'fraisLivraison',   label:'Frais de livraison (Ar)',type:'number' },
+  { key:'dateLivraison',    label:'Date livraison client', type:'date' },
+  { key:'dateLivraisonProd',label:'Date production',       type:'date' },
+  { key:'notes',            label:'Notes',                 type:'textarea' },
+];
+const CMD_MODIF_NUMKEYS = ['accompte','remise','fraisLivraison'];
+
+// Demande en attente pour une commande (la plus récente)
+function _pendingModFor(commandeId) {
+  return commandeMods.find(m => String(m.commandeId) === String(commandeId) && m.statut === 'pending');
+}
+
+async function loadModifsFromScript() {
+  if (!APPS_SCRIPT_URL) return;
+  const r = await apiCall({ action: 'getModifs' });
+  if (r && r.ok && Array.isArray(r.modifs)) commandeMods = r.modifs;
 }
 
 async function loadCommandesFromScript() {

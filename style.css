@@ -1264,6 +1264,43 @@ tr:hover td {
 .cmd-status-completed{ background: rgba(26,74,58,0.12);    color: var(--green); }
 .cmd-status-cancelled{ background: rgba(201,73,45,0.12);  color: var(--red); }
 
+/* ── Bandeau "demande de modification en attente" (carte commande) ── */
+.cmd-mod-banner {
+  margin: 10px 0 4px;
+  padding: 10px 12px;
+  background: #fff8ed;
+  border: 1px solid #fed7aa;
+  border-left: 3px solid #e8834a;
+  border-radius: 10px;
+  font-size: 13px;
+}
+.cmd-mod-banner--cancel { background: #fef2f2; border-color: #fecaca; border-left-color: var(--red); }
+.cmd-mod-banner .mod-title { font-weight: 700; color: #b45309; }
+.cmd-mod-banner--cancel .mod-title { color: var(--red); }
+.cmd-mod-banner .mod-reason { font-style: italic; color: var(--muted); margin-top: 2px; }
+.mod-diffs { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
+.mod-diff { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12.5px; }
+.mod-diff-label { font-weight: 600; color: var(--text); min-width: 110px; }
+.mod-old { color: var(--muted); text-decoration: line-through; }
+.mod-arrow { color: var(--accent2); font-weight: 700; }
+.mod-new { color: var(--green); font-weight: 700; }
+.mod-who { font-size: 11px; color: var(--muted); margin-top: 6px; }
+.mod-actions { display: flex; gap: 8px; margin-top: 10px; }
+.mod-btn { padding: 7px 14px; border-radius: 8px; border: none; cursor: pointer; font-size: 12.5px; font-weight: 700; }
+.mod-btn-approve { background: var(--green); color: #fff; }
+.mod-btn-reject  { background: #fff; color: var(--red); border: 1px solid var(--red); }
+.mod-pending-tag { margin-top: 8px; font-size: 11.5px; font-weight: 600; color: #b45309; }
+
+/* ── Formulaire de demande de modification (modal) ── */
+.modif-form { display: flex; flex-direction: column; gap: 11px; max-height: 56vh; overflow-y: auto; padding-right: 4px; }
+.modif-field { display: flex; flex-direction: column; gap: 4px; }
+.modif-field > span { font-size: 12px; font-weight: 600; color: var(--muted); }
+.modif-field input, .modif-field textarea {
+  width: 100%; padding: 9px 11px; border: 1px solid var(--border);
+  border-radius: 9px; font-size: 14px; font-family: inherit; background: #fff; color: var(--text);
+}
+.modif-field textarea { resize: vertical; }
+
 /* Modal commande — grande + scrollable */
 .cmd-modal {
   max-width: 660px !important;

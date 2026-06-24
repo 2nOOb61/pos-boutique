@@ -109,6 +109,9 @@ function doPost(e) {
     else if (action === 'clearAllData')      result = handleClearAllData(data);
     else if (action === 'addComment')        result = handleAddComment(data);
     else if (action === 'saveNotif')         result = handleSaveNotif(data);
+    else if (action === 'saveModif')         result = handleSaveModif(data);
+    else if (action === 'resolveModif')      result = handleResolveModif(data);
+    else if (action === 'getModifs')         result = handleGetModifs(data);
     else if (action === 'saveShopConfig')    result = handleSaveShopConfig(data);
     else if (action === 'saveRythme')        result = handleSaveRythme(data);
     else result = { ok:false, error:'Action inconnue: ' + action };
@@ -144,6 +147,8 @@ function doGet(e) {
       else if (action === 'deleteTache')       result = handleDeleteTache(data);
       else if (action === 'addComment')        result = handleAddComment(data);
       else if (action === 'saveNotif')         result = handleSaveNotif(data);
+      else if (action === 'saveModif')         result = handleSaveModif(data);
+      else if (action === 'resolveModif')      result = handleResolveModif(data);
       else if (action === 'saveShopConfig')    result = handleSaveShopConfig(data);
       else if (action === 'saveRythme')        result = handleSaveRythme(data);
       else if (action === 'clearAllData')      result = handleClearAllData(data);
@@ -174,6 +179,7 @@ function doGet(e) {
     if (action === 'migrateCommandeIds') return jsonResp(migrateCommandeIds());
     if (action === 'getComments')     return jsonResp(handleGetComments(e.parameter));
     if (action === 'getNotifs')       return jsonResp(handleGetNotifs(e.parameter));
+    if (action === 'getModifs')       return jsonResp(handleGetModifs(e.parameter));
     if (action === 'getShopConfig')   return jsonResp(handleGetShopConfig());
     if (action === 'getRythme')       return jsonResp(handleGetRythme());
     if (action === 'initSheets')      return jsonResp(initSheets());
@@ -893,6 +899,11 @@ function handleUpdateCommande(data) {
     if (data.subtotal !== undefined)         sh.getRange(i+1, 11).setValue(Number(data.subtotal)||0);       // col K = Sous_Total
     if (data.total !== undefined)            sh.getRange(i+1, 13).setValue(Number(data.total)||0);          // col M = Total
     if (data.restant !== undefined)          sh.getRange(i+1, 15).setValue(Number(data.restant)||0);        // col O = Restant
+    if (data.clientName !== undefined)       sh.getRange(i+1, 4).setValue(data.clientName);    // col D = Client_Nom
+    if (data.clientContact !== undefined)    sh.getRange(i+1, 5).setValue(data.clientContact); // col E = Client_Contact
+    if (data.remise !== undefined)           sh.getRange(i+1, 12).setValue(Number(data.remise)||0);   // col L = Remise
+    if (data.accompte !== undefined)         sh.getRange(i+1, 14).setValue(Number(data.accompte)||0); // col N = Accompte
+    if (data.notes !== undefined)            sh.getRange(i+1, 19).setValue(data.notes);        // col S = Notes
     updated = true;
   }
   return updated ? { ok:true } : { ok:false, error:'Commande introuvable' };
@@ -1618,6 +1629,76 @@ function handleSaveNotif(data) {
     data.message       || ''
   ]);
   return { ok: true };
+}
+
+// ============================================================
+// MODIFICATIONS COMMANDES — demandes commerciaux + validation admin
+// ============================================================
+const SHEET_MODIFS = 'ModifsCommandes';
+const MODIFS_HEADERS = ['ID','CommandeID','Timestamp','Auteur','AuteurLabel','Type','Changes','Reason','Statut','ResoluPar','ResoluLe','Motif'];
+
+function handleSaveModif(data) {
+  const ss = getSS();
+  const sh = ensureSheet(ss, SHEET_MODIFS, MODIFS_HEADERS);
+  // Une seule demande en attente par commande : marquer les anciennes "superseded"
+  const rows = sh.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][1]) === String(data.commandeId) && String(rows[i][8]) === 'pending') {
+      sh.getRange(i + 1, 9).setValue('superseded');
+    }
+  }
+  sh.appendRow([
+    data.id            || ('M_' + Date.now()),
+    String(data.commandeId || ''),
+    data.timestamp     || new Date().toISOString(),
+    data.auteur        || '',
+    data.auteurLabel   || '',
+    data.type          || 'edit',
+    JSON.stringify(data.changes || {}),
+    data.reason        || '',
+    'pending', '', '', ''
+  ]);
+  return { ok: true };
+}
+
+function handleGetModifs(data) {
+  const ss = getSS();
+  const sh = ensureSheet(ss, SHEET_MODIFS, MODIFS_HEADERS);
+  const lastRow = sh.getLastRow();
+  if (lastRow <= 1) return { ok: true, modifs: [] };
+  const startRow = Math.max(2, lastRow - 299);
+  const rows = sh.getRange(startRow, 1, lastRow - startRow + 1, 12).getValues().filter(r => r[0]);
+  const modifs = rows.map(r => ({
+    id:          String(r[0]),
+    commandeId:  String(r[1]),
+    timestamp:   String(r[2]),
+    auteur:      String(r[3]),
+    auteurLabel: String(r[4]),
+    type:        String(r[5]),
+    changes:     (function(){ try { return JSON.parse(r[6] || '{}'); } catch(e) { return {}; } })(),
+    reason:      String(r[7]),
+    statut:      String(r[8]),
+    resoluPar:   String(r[9]),
+    resoluLe:    String(r[10]),
+    motif:       String(r[11])
+  }));
+  return { ok: true, modifs };
+}
+
+function handleResolveModif(data) {
+  const sh = getSS().getSheetByName(SHEET_MODIFS);
+  if (!sh) return { ok: false, error: 'Feuille ModifsCommandes introuvable' };
+  const rows = sh.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(data.id)) {
+      sh.getRange(i + 1, 9).setValue(data.statut || 'approved');
+      sh.getRange(i + 1, 10).setValue(data.resoluPar || '');
+      sh.getRange(i + 1, 11).setValue(new Date().toISOString());
+      sh.getRange(i + 1, 12).setValue(data.motif || '');
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: 'Demande introuvable' };
 }
 
 // ============================================================

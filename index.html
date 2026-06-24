@@ -2549,7 +2549,7 @@
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260624-prod-collapse"></script>
+<script src="./app.js?v=20260624-modif-validation"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
@@ -2674,6 +2674,24 @@
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
         <button class="btn-logout" onclick="closeModal('pointageModal')">Annuler</button>
         <button class="btn-login" style="width:auto;padding:12px 20px;margin-top:0;background:var(--green)" onclick="confirmPointage()"> Marquer terminé</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ MODAL DEMANDE DE MODIFICATION DE COMMANDE (commercial) ═══ -->
+  <div class="modal-overlay" id="cmdModifModal">
+    <div class="modal" style="max-width:520px">
+      <div class="modal-title">
+        <span id="cmdModifTitle">Demander une modification</span>
+        <button class="modal-close" onclick="closeModal('cmdModifModal')"></button>
+      </div>
+      <div style="padding:9px 12px;background:#fff8ed;border:1px solid #fed7aa;border-radius:8px;margin-bottom:14px;font-size:12px;color:#b45309">
+        Votre demande sera envoyée à l'admin pour validation. La commande n'est pas modifiée tant qu'elle n'est pas approuvée.
+      </div>
+      <div id="cmdModifBody" class="modif-form"></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px">
+        <button class="btn-logout" onclick="closeModal('cmdModifModal')">Annuler</button>
+        <button class="btn-login" style="width:auto;padding:12px 20px;margin-top:0" onclick="submitCommandeModif()">Envoyer la demande</button>
       </div>
     </div>
   </div>
