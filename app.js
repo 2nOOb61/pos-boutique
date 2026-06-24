@@ -7805,6 +7805,17 @@ function _vsRender() {
   _vsBtm.style.height = `${(total - end) * _VS_ROW_H}px`;
   _vsWrap.innerHTML   = _vsData.slice(start, end).map(_renderDossierRow).join('');
 }
+
+// Rendu natif (toutes les lignes) — scroll fluide, hauteurs variables OK.
+// Utilisé en-dessous du seuil de virtualisation (cf. renderDossiers).
+function _vsRenderAll(list) {
+  const outer = document.getElementById('dossierListContainer');
+  if (!outer) return;
+  outer.removeEventListener('scroll', _vsOnScroll); // au cas où un virtual-scroll tournait
+  _vsOuter = null; _vsWrap = null;
+  outer.className = 'dossier-list-wrap';
+  outer.innerHTML = list.map(_renderDossierRow).join('');
+}
 // ────────────────────────────────────────────────────────────────────────────
 
 function _renderDossierRow(d) {
@@ -7915,7 +7926,11 @@ function renderDossiers() {
     return;
   }
 
-  _vsInit(list);
+  // Virtual-scroll réservé aux très longues listes. Les cartes ayant des hauteurs
+  // variables (note de briefing, badges…), le virtual-scroll à hauteur fixe faisait
+  // « voler » le défilement → en-dessous du seuil on rend tout en scroll natif (fluide).
+  if (list.length > 1500) _vsInit(list);
+  else _vsRenderAll(list);
 }
 
 function _renderDossierTabs() {
