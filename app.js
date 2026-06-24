@@ -5563,6 +5563,7 @@ let pendingPointage = null;
 let prodFilter = 'TOUS';
 let opFilterVal = 'TOUS';
 let _prodView   = 'tasks'; // 'tasks' | 'charge'
+let _prodExpanded = new Set(); // dossierId des groupes dépliés (repliés par défaut = vue compacte)
 let attrDateFilter = { mois: '', annee: '' };
 let prodDateFilter = { mois: '', annee: '' };
 
@@ -8804,6 +8805,9 @@ function toggleProdView(mode) {
   // Masquer la mini barre charge en vue charge (redondant)
   const wl = document.getElementById('opWorkloadContainer');
   if (wl) wl.style.display = mode === 'charge' ? 'none' : '';
+  // Le bouton déplier/replier ne concerne que la vue tâches
+  const et = document.getElementById('prodExpandToggle');
+  if (et) et.style.display = mode === 'charge' ? 'none' : '';
   renderTaches();
 }
 
@@ -9164,14 +9168,18 @@ function renderTaches() {
   }
 
   // Section tâches libres
+  const libreOpen = _prodExpanded.has('LIBRE');
   const libreHtml = libreList.length ? `
-    <div class="prod-group" style="border-color:#e9d5ff">
-      <div class="prod-group-header" style="background:#faf5ff">
+    <div class="prod-group ${libreOpen?'prod-group--open':''}" id="pg-LIBRE" style="border-color:#e9d5ff">
+      <div class="prod-group-header" onclick="toggleProdGroup('LIBRE')" style="background:#faf5ff;cursor:pointer">
         <div class="prod-group-left">
           <span style="font-size:14px;color:#7c3aed"></span>
           <span class="prod-group-info" style="color:#7c3aed">Tâches indépendantes</span>
         </div>
-        <span style="background:#f3e8ff;color:#7c3aed;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px">${libreList.length}</span>
+        <div class="prod-group-right">
+          <span style="background:#f3e8ff;color:#7c3aed;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px">${libreList.length}</span>
+          ${_chevSvg('prod-group-chev')}
+        </div>
       </div>
       <div class="prod-group-tasks">${libreList.map(_tacheRow).join('')}</div>
     </div>` : '';
@@ -9193,8 +9201,9 @@ function renderTaches() {
     const borderClr  = isUrgent?'#fca5a5':isHaute?'#fcd34d':'var(--color-border)';
     const doneCount  = g.taches.filter(t=>t.statut==='TERMINE').length;
     const total      = g.taches.length;
-    return `<div class="prod-group" style="border-color:${borderClr}">
-      <div class="prod-group-header">
+    const isOpen     = _prodExpanded.has(dossierId);
+    return `<div class="prod-group ${isOpen?'prod-group--open':''}" id="pg-${dossierId}" style="border-color:${borderClr}">
+      <div class="prod-group-header" onclick="toggleProdGroup('${dossierId}')" style="cursor:pointer">
         <div class="prod-group-left" style="min-width:0">
           <span class="prod-group-num">${g.numeroDossier}</span>
           ${prio}
@@ -9202,14 +9211,48 @@ function renderTaches() {
           ${produit}
           ${d && d.dateLivraisonProd ? _prodDeadlineChip(d.dateLivraisonProd) : ''}
         </div>
-        <span style="font-size:11px;font-weight:600;color:var(--color-text-muted);flex-shrink:0">${doneCount}/${total}</span>
+        <div class="prod-group-right">
+          <span style="font-size:11px;font-weight:600;color:var(--color-text-muted)">${doneCount}/${total}</span>
+          ${_chevSvg('prod-group-chev')}
+        </div>
       </div>
-      <div style="padding:8px 10px 0">${_buildProgressBar(dossierId)}</div>
+      <div class="prod-group-progress">${_buildProgressBar(dossierId)}</div>
       <div class="prod-group-tasks">${g.taches.map(_tacheRow).join('')}</div>
     </div>`;
   }).join('');
 
   container.innerHTML = deadlines + dash + libreHtml + groupsHtml;
+  _syncProdExpandBtn();
+}
+
+// ── Cartes-dossiers repliables (vue compacte production) ────────────────────
+function _chevSvg(cls){
+  return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`;
+}
+
+function toggleProdGroup(id){
+  const g = document.getElementById('pg-' + id);
+  if (!g) return;
+  const open = g.classList.toggle('prod-group--open');
+  if (open) _prodExpanded.add(id); else _prodExpanded.delete(id);
+  _syncProdExpandBtn();
+}
+
+function toggleAllProdGroups(){
+  const ids = [...document.querySelectorAll('.prod-group[id^="pg-"]')].map(el => el.id.slice(3));
+  if (!ids.length) return;
+  const anyCollapsed = ids.some(id => !_prodExpanded.has(id));
+  if (anyCollapsed) ids.forEach(id => _prodExpanded.add(id));
+  else ids.forEach(id => _prodExpanded.delete(id));
+  renderTaches();
+}
+
+function _syncProdExpandBtn(){
+  const lbl = document.getElementById('prodExpandLabel');
+  if (!lbl) return;
+  const ids = [...document.querySelectorAll('.prod-group[id^="pg-"]')].map(el => el.id.slice(3));
+  const allOpen = ids.length > 0 && ids.every(id => _prodExpanded.has(id));
+  lbl.textContent = allOpen ? 'Tout replier' : 'Tout déplier';
 }
 
 async function pointerStart(tacheId) {
