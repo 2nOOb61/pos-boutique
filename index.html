@@ -38,7 +38,11 @@
   .attr-layout.dossier-selected .attr-right { display:block; }
   .btn-back-dossier { display:inline-flex !important; }
 }
-@media(min-width:901px) { .btn-back-dossier { display:none !important; } }
+@media(min-width:901px) {
+  .btn-back-dossier { display:none !important; }
+  #attrLeft { height:calc(100vh - 220px); overflow:hidden; }
+  #dossierListContainer { flex:1; overflow-y:auto; min-height:0; }
+}
 .attr-left { display:flex; flex-direction:column; gap:10px; }
 .attr-right { position:sticky; top:80px; }
 .attr-panel { background:var(--color-surface); border:1px solid var(--color-border); border-radius:14px; overflow:hidden; min-height:200px; }
@@ -467,7 +471,7 @@
 }
 
 /* — Attribution : kebab quick-actions sur les lignes — */
-.attr-left, .dossier-list-wrap { overflow:visible; }
+.dossier-list-wrap { overflow:visible; }
 .dossier-row__kebab { flex-shrink:0; margin-left:2px; }
 .attr-panel-header .kebab-menu { top:38px; }
 
@@ -2534,7 +2538,7 @@
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260624-attr-compact"></script>
+<script src="./app.js?v=20260624-virtual-scroll"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

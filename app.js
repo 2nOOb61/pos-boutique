@@ -7494,6 +7494,122 @@ async function loadDossiers() {
   }
 }
 
+// ── Virtual scroll — liste des dossiers (20 000+ items) ─────────────────
+// Seules les lignes visibles + un buffer sont dans le DOM.
+// Deux spacers (top/bottom) maintiennent la hauteur totale du scrollbar.
+const _VS_ROW_H = 86;   // hauteur estimée par ligne px (contenu + gap 10px)
+const _VS_BUF   = 8;    // lignes de tampon hors viewport
+let _vsData = [], _vsOuter = null, _vsWrap = null, _vsTop = null, _vsBtm = null, _vsRaf = false;
+
+function _vsInit(list) {
+  const outer = document.getElementById('dossierListContainer');
+  if (!outer) return;
+  _vsData  = list;
+  _vsOuter = outer;
+
+  // Nettoyer : on retire l'event listener précédent en remplaçant onscroll
+  outer.innerHTML = '';
+  outer.className = '';
+  outer.onscroll  = null;
+  const fresh = outer.cloneNode(false);
+  outer.parentNode.replaceChild(fresh, outer);
+  _vsOuter = fresh;
+
+  _vsTop  = document.createElement('div');
+  _vsWrap = document.createElement('div');
+  _vsWrap.className = 'dossier-list-wrap';
+  _vsBtm  = document.createElement('div');
+  fresh.appendChild(_vsTop);
+  fresh.appendChild(_vsWrap);
+  fresh.appendChild(_vsBtm);
+
+  fresh.addEventListener('scroll', _vsOnScroll, { passive: true });
+  _vsRender();
+}
+
+function _vsOnScroll() {
+  if (_vsRaf) return;
+  _vsRaf = true;
+  requestAnimationFrame(() => { _vsRaf = false; _vsRender(); });
+}
+
+function _vsRender() {
+  if (!_vsOuter || !_vsWrap) return;
+  const scrollTop = _vsOuter.scrollTop;
+  const viewH     = _vsOuter.clientHeight || 600;
+  const total     = _vsData.length;
+  const start     = Math.max(0, Math.floor(scrollTop / _VS_ROW_H) - _VS_BUF);
+  const end       = Math.min(total, Math.ceil((scrollTop + viewH) / _VS_ROW_H) + _VS_BUF);
+
+  _vsTop.style.height = `${start * _VS_ROW_H}px`;
+  _vsBtm.style.height = `${(total - end) * _VS_ROW_H}px`;
+  _vsWrap.innerHTML   = _vsData.slice(start, end).map(_renderDossierRow).join('');
+}
+// ────────────────────────────────────────────────────────────────────────────
+
+function _renderDossierRow(d) {
+  const _dotsRow = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>';
+  const etape      = ETAPES_CONFIG.find(e => e.code === d.statut);
+  const pct        = d.progression || 0;
+  const isUrgent   = d.priorite === 'Urgente';
+  const isHaute    = d.priorite === 'Haute';
+  const prioColor  = isUrgent ? '#dc2626' : isHaute ? '#d97706' : '#d6d3d1';
+  const pctColor   = pct === 100 ? '#16a34a' : pct > 0 ? '#e8834a' : '#d6d3d1';
+  const isSelected = selectedDossier?.id === d.id;
+  const etapeColor = etape?.color || 'var(--color-primary)';
+  const etapeShort = etape?.short || 'Créé';
+
+  const dTaches  = taches.filter(t => t.dossierId === d.id);
+  const pipeDots = ETAPES_CONFIG.map(e => {
+    const te = dTaches.filter(t => t.etapeCode === e.code);
+    const s  = te.length === 0 ? 'vide'
+      : te.every(t => t.statut === 'TERMINE') ? 'done'
+      : te.some(t  => t.statut === 'EN_COURS') ? 'encours'
+      : 'todo';
+    const bg = s==='done'?'#16a34a':s==='encours'?'#d97706':s==='todo'?'#2563eb':'#e5e3df';
+    return `<span class="dossier-row__pipedot" style="background:${bg}" title="${e.short}"></span>`;
+  }).join('');
+
+  const noteHtml = (function(){
+    const src = d.sourceType==='reservation'
+      ? reservations.find(r => String(r.id)===String(d.sourceId))
+      : commandes.find(c => String(c.id)===String(d.sourceId));
+    return src && src.notes
+      ? `<div style="font-size:10px;color:#b45309;background:#fff8ed;border-radius:5px;padding:2px 6px;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px" title="${src.notes.replace(/"/g,'&quot;')}">✏ ${src.notes}</div>`
+      : '';
+  })();
+
+  return `<div class="dossier-row ${isSelected?'dossier-row--selected':''}" onclick="selectDossier('${d.id}')">
+    <div class="dossier-row__prio" style="background:${prioColor}"></div>
+    <div class="dossier-row__main">
+      <div class="dossier-row__top">
+        <span class="dossier-row__num">${d.numeroDossier}</span>
+        <span style="background:${etapeColor}18;color:${etapeColor};font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;white-space:nowrap">${etapeShort}</span>
+        ${isUrgent?`<span style="background:#fee2e2;color:#dc2626;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px">URGENT</span>`:''}
+        ${isHaute&&!isUrgent?`<span style="background:#fef3c7;color:#d97706;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px">HAUTE</span>`:''}
+      </div>
+      <div class="dossier-row__client">${d.client}</div>
+      <div class="dossier-row__produit">${d.produit} × ${d.quantite}</div>
+      ${noteHtml}
+    </div>
+    <div class="dossier-row__right">
+      <div class="dossier-row__pipe">${pipeDots}</div>
+      <div class="dossier-row__meta">
+        <div class="dossier-row__bar"><div class="dossier-row__bar-fill" style="width:${pct}%;background:${pctColor}"></div></div>
+        <span class="dossier-row__pct" style="color:${pctColor}">${pct}%</span>
+      </div>
+    </div>
+    <div class="kebab-wrap dossier-row__kebab">
+      <button class="kebab-btn" aria-label="Plus d'actions" aria-haspopup="true" onclick="toggleKebab('dos${d.id}',event)">${_dotsRow}</button>
+      <div class="kebab-menu" id="kb-dos${d.id}" role="menu">
+        <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();selectDossier('${d.id}')">${_kebabIcon('eye')}<span>Ouvrir / attribuer</span></button>
+        <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printDossier('${d.id}')">${_kebabIcon('print')}<span>Imprimer le dossier</span></button>
+        ${['admin','chef_atelier'].includes(currentUser?.role) ? `<button class="kebab-item danger" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();resetTachesDossier('${d.id}')">${_kebabIcon('reset')}<span>Réinitialiser les tâches</span></button>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
+
 function renderDossiers() {
   const container = document.getElementById('dossierListContainer');
   if (!container) return;
@@ -7533,67 +7649,13 @@ function renderDossiers() {
   }
 
   // Adapter le container selon le mode
-  container.className = _dossierView === 'card' ? '' : 'dossier-list-wrap';
-
   if (_dossierView === 'card') {
+    container.className = '';
     container.innerHTML = _renderDossierCardGrid(list);
     return;
   }
 
-  const _dotsRow = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>';
-  container.innerHTML = list.map(d => {
-    const etape      = ETAPES_CONFIG.find(e => e.code === d.statut);
-    const pct        = d.progression || 0;
-    const isUrgent   = d.priorite === 'Urgente';
-    const isHaute    = d.priorite === 'Haute';
-    const prioColor  = isUrgent ? '#dc2626' : isHaute ? '#d97706' : '#d6d3d1';
-    const pctColor   = pct === 100 ? '#16a34a' : pct > 0 ? '#e8834a' : '#d6d3d1';
-    const isSelected = selectedDossier?.id === d.id;
-    const etapeColor = etape?.color || 'var(--color-primary)';
-    const etapeShort = etape?.short || 'Créé';
-
-    // Mini pipeline : 8 points colorés selon statut des tâches
-    const dTaches   = taches.filter(t => t.dossierId === d.id);
-    const pipeDots  = ETAPES_CONFIG.map(e => {
-      const te = dTaches.filter(t => t.etapeCode === e.code);
-      const s  = te.length === 0 ? 'vide'
-        : te.every(t => t.statut === 'TERMINE') ? 'done'
-        : te.some(t => t.statut === 'EN_COURS') ? 'encours'
-        : 'todo';
-      const bg = s==='done'?'#16a34a':s==='encours'?'#d97706':s==='todo'?'#2563eb':'#e5e3df';
-      return `<span class="dossier-row__pipedot" style="background:${bg}" title="${e.short}"></span>`;
-    }).join('');
-
-    return `<div class="dossier-row ${isSelected?'dossier-row--selected':''}" onclick="selectDossier('${d.id}')">
-      <div class="dossier-row__prio" style="background:${prioColor}"></div>
-      <div class="dossier-row__main">
-        <div class="dossier-row__top">
-          <span class="dossier-row__num">${d.numeroDossier}</span>
-          <span style="background:${etapeColor}18;color:${etapeColor};font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;white-space:nowrap">${etapeShort}</span>
-          ${isUrgent?`<span style="background:#fee2e2;color:#dc2626;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px">URGENT</span>`:''}
-          ${isHaute&&!isUrgent?`<span style="background:#fef3c7;color:#d97706;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px">HAUTE</span>`:''}
-        </div>
-        <div class="dossier-row__client">${d.client}</div>
-        <div class="dossier-row__produit">${d.produit} × ${d.quantite}</div>
-        ${(function(){const src=d.sourceType==='reservation'?reservations.find(r=>String(r.id)===String(d.sourceId)):commandes.find(c=>String(c.id)===String(d.sourceId));return src&&src.notes?`<div style="font-size:10px;color:#b45309;background:#fff8ed;border-radius:5px;padding:2px 6px;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px" title="${src.notes.replace(/"/g,'&quot;')}">✏ ${src.notes}</div>`:'';})()}
-      </div>
-      <div class="dossier-row__right">
-        <div class="dossier-row__pipe">${pipeDots}</div>
-        <div class="dossier-row__meta">
-          <div class="dossier-row__bar"><div class="dossier-row__bar-fill" style="width:${pct}%;background:${pctColor}"></div></div>
-          <span class="dossier-row__pct" style="color:${pctColor}">${pct}%</span>
-        </div>
-      </div>
-      <div class="kebab-wrap dossier-row__kebab">
-        <button class="kebab-btn" aria-label="Plus d'actions" aria-haspopup="true" onclick="toggleKebab('dos${d.id}',event)">${_dotsRow}</button>
-        <div class="kebab-menu" id="kb-dos${d.id}" role="menu">
-          <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();selectDossier('${d.id}')">${_kebabIcon('eye')}<span>Ouvrir / attribuer</span></button>
-          <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printDossier('${d.id}')">${_kebabIcon('print')}<span>Imprimer le dossier</span></button>
-          ${['admin','chef_atelier'].includes(currentUser?.role) ? `<button class="kebab-item danger" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();resetTachesDossier('${d.id}')">${_kebabIcon('reset')}<span>Réinitialiser les tâches</span></button>` : ''}
-        </div>
-      </div>
-    </div>`;
-  }).join('');
+  _vsInit(list);
 }
 
 function _renderDossierTabs() {
@@ -7770,7 +7832,8 @@ async function selectDossier(id) {
     if (layout) layout.style.gridTemplateColumns = '1fr 420px';
     if (right)  right.style.display = '';
   }
-  renderDossiers();
+  // Mise à jour légère : re-rend seulement la fenêtre visible (évite de reconstruire tout le VS)
+  if (_dossierView === 'card') renderDossiers(); else _vsRender();
   // Mobile : masquer la liste, afficher le panneau détail
   document.querySelector('.attr-layout')?.classList.add('dossier-selected');
 
