@@ -3417,6 +3417,9 @@ function renderUsersPage() {
         ${u.actif !== false
           ? '<span class="badge badge-ok">Actif</span>'
           : '<span class="badge badge-inactive">Inactif</span>'}
+        ${u.hasPwd === false
+          ? '<span class="badge" style="background:#fee2e2;color:#dc2626" title="Ce compte n\'a pas de mot de passe — il ne peut pas se connecter. Cliquez sur Modifier pour en définir un.">⚠ Mot de passe manquant</span>'
+          : ''}
       </div>
       <div class="user-card-actions">
         <button class="btn-edit-user" onclick="openUserModal(${idx})"> Modifier</button>
@@ -3507,9 +3510,12 @@ async function saveUser() {
   saveUsers();
   closeModal('userModal');
   renderUsersPage();
-  // Sync vers Google Sheet — envoyer le mot de passe en clair (server le hashera)
-  const syncIdx = isNew ? localUsers.length - 1 : editingUserId;
-  const syncUser = { ...localUsers[syncIdx], pass: pass || undefined };
+  // Sync vers Google Sheet — mot de passe EN CLAIR sous le champ "password"
+  // (le serveur le hashera, salé). On n'envoie PAS le champ "pass" (hash local
+  // non salé) qui écraserait le mot de passe serveur lors d'une édition sans
+  // changement. Si pass est vide (édition sans changement) → champ omis → serveur garde l'ancien.
+  const base = localUsers[isNew ? localUsers.length - 1 : editingUserId];
+  const syncUser = { username: base.username, role: base.role, label: base.label, actif: base.actif, password: pass || undefined };
   if (syncUser.username) saveUserToScript(syncUser);
 }
 

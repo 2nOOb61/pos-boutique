@@ -261,6 +261,7 @@ function handleLogin(data) {
     const isActif    = String(r[4] || 'oui').trim().toLowerCase() !== 'non';
 
     if (storedUser !== inputUser || !isActif) continue;
+    if (!storedPwd) continue; // compte sans mot de passe défini → connexion impossible (sécurité)
 
     // Hash 64 hex → comparaison sécurisée ; sinon plaintext (migration progressive)
     const isHashed = /^[0-9a-f]{64}$/i.test(storedPwd);
@@ -580,7 +581,7 @@ function handleGetUsers() {
   const users = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i]; if (!r[0]) continue;
-    users.push({ username:r[0], role:r[2], label:r[3], actif:String(r[4]||'oui').toLowerCase()!=='non' });
+    users.push({ username:r[0], role:r[2], label:r[3], actif:String(r[4]||'oui').toLowerCase()!=='non', hasPwd: !!String(r[1]||'').trim() });
   }
   const result = { ok:true, users };
   try { cache.put(cacheKey, JSON.stringify(result), 300); } catch(e) {}
@@ -592,8 +593,12 @@ function handleSaveUser(data) {
   const ss  = getSS();
   const sh  = ss.getSheetByName(SHEET_USERS);
   const u   = data.user;
-  // Hasher le mot de passe s'il est fourni en clair
+  // Hasher le mot de passe s'il est fourni en clair.
+  // Champ attendu = "password". Compat ancien frontend qui envoyait "pass" :
+  // on ne l'accepte QUE s'il est en clair (pas un hash 64-hex), car le hash local
+  // est non salé et écraserait le vrai mot de passe lors d'une édition sans changement.
   let pwd = u.password || '';
+  if (!pwd && u.pass && !/^[0-9a-f]{64}$/i.test(String(u.pass))) pwd = String(u.pass);
   if (pwd && !/^[0-9a-f]{64}$/i.test(pwd)) {
     pwd = _hashPwd_(pwd);
   }
