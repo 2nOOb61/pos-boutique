@@ -5221,8 +5221,20 @@ function renderCommandes() {
 
       const notesHtml = c.notes ? `<div class="cmd-notes"> ${c.notes}</div>` : '';
 
-      const photosHtml = (c.photos||[]).length > 0
-        ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${(c.photos||[]).map(src=>`<img src="${src}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:pointer" onclick="window.open(this.src,'_blank')" />`).join('')}</div>` : '';
+      // Photos locales (base64) + pièces jointes Drive partagées
+      const _cmdAtts = [
+        ...(c.photos||[]).map(src => ({ img:(typeof src==='string'?src:(src&&src.data)||''), href:'', name:'Photo' })),
+        ...(c.attachments||[]).map(a => {
+          const isImg = (a.type||'').startsWith('image/');
+          return { img: isImg ? _driveImgSrc(a) : '', href: a.viewUrl||a.dlUrl||a.data||'', name: a.name||'fichier' };
+        })
+      ].filter(a => a.img || a.href);
+      const photosHtml = _cmdAtts.length
+        ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${_cmdAtts.map(a =>
+            a.img
+              ? `<img src="${a.img}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:pointer" onclick="window.open('${a.href||a.img}','_blank')" title="${a.name}" />`
+              : `<a href="${a.href}" target="_blank" title="${a.name}" style="width:64px;height:64px;border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--accent2);text-decoration:none">${(a.name||'').split('.').pop().toUpperCase()}</a>`
+          ).join('')}</div>` : '';
 
       const itemCount = (c.items||[]).length;
       const _pSvg = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>';
@@ -5674,12 +5686,57 @@ async function syncCommandeToSheets(cmd) {
     depositProvider: cmd.depositProvider,
     depositRef:      cmd.depositRef,
     notes:           cmd.notes,
+    // Pièces jointes déjà sur Drive (metadata seulement, jamais le base64)
+    attachments:     (cmd.attachments || []).filter(a => a && a.fileId),
   };
   const r = await apiCall({ action: 'addCommande', commande: payload });
   if (!r || !r.ok) {
     console.warn('Sync commande échouée:', r?.error || 'Connexion impossible');
     showToast('Commande enregistrée localement — sync GAS échouée', 'warning');
   }
+  // Uploader les photos sur Drive (en arrière-plan) → pièces jointes partagées,
+  // visibles par TOUS les opérateurs sur tous les postes (pas seulement en local).
+  if (cmd.photos && cmd.photos.length) _uploadCommandeAttachments(cmd.id, [...cmd.photos]);
+}
+
+// Upload des photos d'une commande sur Drive → pièces jointes partagées (atelier).
+// Réutilise l'action générique 'uploadFile' (comme réservations/commentaires).
+async function _uploadCommandeAttachments(commandeId, photos) {
+  if (!APPS_SCRIPT_URL || !Array.isArray(photos) || !photos.length) return;
+  const uploaded = [];
+  for (let i = 0; i < photos.length; i++) {
+    const dataUrl = typeof photos[i] === 'string' ? photos[i] : (photos[i] && photos[i].data) || '';
+    if (!dataUrl) continue;
+    const name = `commande-${commandeId}-${i + 1}.jpg`;
+    try {
+      const r = await apiCall({ action:'uploadFile', fileName:name, mimeType:'image/jpeg', base64Data:dataUrl });
+      uploaded.push(r && r.ok
+        ? { name:r.fileName||name, type:'image/jpeg', fileId:r.fileId, viewUrl:r.viewUrl, dlUrl:r.dlUrl }
+        : { name, type:'image/jpeg', data:dataUrl }); // fallback base64 local si l'upload échoue
+    } catch(e) {
+      uploaded.push({ name, type:'image/jpeg', data:dataUrl });
+    }
+  }
+  if (!uploaded.length) return;
+  const cmd = commandes.find(c => String(c.id) === String(commandeId));
+  if (!cmd) return;
+  cmd.attachments = [...(cmd.attachments || []), ...uploaded];
+  // Tout est sur Drive → libérer les copies base64 locales (source de vérité = Drive)
+  if (uploaded.every(a => a.fileId)) {
+    cmd.photos = [];
+    try { localStorage.removeItem(`pos-cmd-photos-${cmd.id}`); } catch(e) {}
+  }
+  saveData();
+  // Rafraîchir les vues éventuellement ouvertes
+  try { renderCommandes(); } catch(e) {}
+  if (selectedDossier && String(selectedDossier.sourceId) === String(cmd.id)) {
+    try { selectDossier(selectedDossier.id); } catch(e) {}
+  }
+  // Persister les metadata Drive dans le Sheet → visibles par tous les postes
+  const driveAtts = cmd.attachments.filter(a => a && a.fileId);
+  if (driveAtts.length) apiCall({ action:'updateCommande', id:cmd.id, attachments:driveAtts }).catch(()=>{});
+  const okCount = uploaded.filter(a => a.fileId).length;
+  if (okCount) showToast(`${okCount} pièce(s) jointe(s) partagée(s) avec l'atelier`);
 }
 
 async function syncCmdUpdateToSheets(cmd) {
@@ -5729,6 +5786,8 @@ async function loadCommandesFromScript() {
       return {
         ...c,
         photos:      (local?.photos?.length      ? local.photos      : c.photos)      || [],
+        // Pièces jointes : GAS (Drive) fait autorité, fallback local si non encore synchro
+        attachments: (c.attachments?.length ? c.attachments : (local?.attachments || [])) || [],
         dossierId: local?.dossierId || c.dossierId || '',
       };
     });
@@ -8190,7 +8249,15 @@ function renderAttrPanel(tachesD, commentsD = []) {
            </div>`
         : '';
 
-      const attachList = (src.attachments || []);
+      // Pièces jointes du dossier = pièces Drive (src.attachments, visibles par tous)
+      // + photos base64 locales legacy/en attente d'upload (src.photos).
+      const attachList = [
+        ...(src.attachments || []),
+        ...((src.photos || []).map((p, pi) => ({
+          name: 'Photo ' + (pi + 1), type: 'image/jpeg',
+          data: (typeof p === 'string' ? p : (p && (p.data || p.url)) || '')
+        })).filter(a => a.data))
+      ];
       const attachRow = attachList.length
         ? `<div style="margin-top:10px">
              <div style="font-size:11px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Pièces jointes (${attachList.length})</div>

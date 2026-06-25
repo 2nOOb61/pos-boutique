@@ -784,6 +784,13 @@ function handleUpdateReservationAttachments(data) {
 // ============================================================
 // COMMANDES — identiques à l'original
 // ============================================================
+// Parse la cellule "Pièces jointes" (JSON d'objets {name,type,fileId,viewUrl,dlUrl})
+function _parseAttachments_(cell) {
+  if (!cell) return [];
+  try { const a = JSON.parse(cell); return Array.isArray(a) ? a : []; }
+  catch (e) { return []; }
+}
+
 function handleGetCommandes() {
   const sh = getSS().getSheetByName(SHEET_COMMANDES);
   if (!sh) return { ok:true, commandes:[] };
@@ -815,6 +822,7 @@ function handleGetCommandes() {
         dateFinalisation: r[20] || null, saleId: r[21] || null,
         dateLivraisonProd: String(r[22]||''),
         dateBAT: String(r[23]||''),
+        attachments: _parseAttachments_(r[24]),
         photos: []
       };
       order.push(id);
@@ -879,7 +887,8 @@ function handleAddCommande(data) {
     c.notes||'',
     'En attente', '', '',
     c.dateLivraisonProd||'',
-    c.dateBAT||''
+    c.dateBAT||'',
+    JSON.stringify(Array.isArray(c.attachments) ? c.attachments : [])
   ]);
   return { ok:true, id };
 }
@@ -912,6 +921,11 @@ function handleUpdateCommande(data) {
     if (data.remise !== undefined)           sh.getRange(i+1, 12).setValue(Number(data.remise)||0);   // col L = Remise
     if (data.accompte !== undefined)         sh.getRange(i+1, 14).setValue(Number(data.accompte)||0); // col N = Accompte
     if (data.notes !== undefined)            sh.getRange(i+1, 19).setValue(data.notes);        // col S = Notes
+    if (data.attachments !== undefined) {                                                      // col Y = Pièces_Jointes (JSON)
+      const need = 25 - sh.getMaxColumns();
+      if (need > 0) sh.insertColumnsAfter(sh.getMaxColumns(), need);
+      sh.getRange(i+1, 25).setValue(JSON.stringify(Array.isArray(data.attachments) ? data.attachments : []));
+    }
     updated = true;
   }
   return updated ? { ok:true } : { ok:false, error:'Commande introuvable' };
