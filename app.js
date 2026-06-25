@@ -5019,12 +5019,16 @@ function selectCmdProvider(p) {
 async function addCmdPhotos(files) {
   if (!files || files.length === 0) return;
   const remaining = 5 - cmdModalPhotos.length;
-  if (remaining <= 0) { showToast('Maximum 5 photos par commande', 'error'); return; }
+  if (remaining <= 0) { showToast('Maximum 5 pièces jointes par commande', 'error'); return; }
   for (const file of Array.from(files).slice(0, remaining)) {
-    if (!file.type.startsWith('image/')) continue;
+    if (file.size > 8 * 1024 * 1024) { showToast(file.name + ' trop volumineux (max 8 Mo)', 'error'); continue; }
     try {
-      const dataUrl = await _resizeImage(file, 600, 600);
-      cmdModalPhotos.push(dataUrl);
+      // Images : compressées (600×600 jpeg). Documents (PDF/Word/Excel) : lus tels quels.
+      const isImg = (file.type || '').startsWith('image/');
+      const data  = isImg
+        ? await _resizeImage(file, 600, 600)
+        : await new Promise((res, rej) => { const r = new FileReader(); r.onload = e => res(e.target.result); r.onerror = rej; r.readAsDataURL(file); });
+      cmdModalPhotos.push({ name: file.name, type: file.type || '', data });
     } catch(e) { showToast('Erreur lecture: ' + file.name, 'error'); }
   }
   renderCmdPhotos();
@@ -5055,11 +5059,24 @@ function _resizeImage(file, maxW, maxH) {
 function renderCmdPhotos() {
   const container = document.getElementById('cmdPhotosPreviews');
   if (!container) return;
-  container.innerHTML = cmdModalPhotos.map((src, i) => `
-    <div style="position:relative;display:inline-block">
-      <img src="${src}" style="width:80px;height:80px;object-fit:cover;border-radius:10px;border:2px solid var(--border)" />
+  container.innerHTML = cmdModalPhotos.map((p, i) => {
+    const isStr = typeof p === 'string';
+    const data  = isStr ? p : (p && p.data) || '';
+    const type  = isStr ? 'image/jpeg' : ((p && p.type) || '');
+    const name  = isStr ? 'Photo' : ((p && p.name) || 'fichier');
+    const isImg = type.startsWith('image/') || isStr; // les anciennes entrées (string) sont des photos
+    const thumb = isImg
+      ? `<img src="${data}" style="width:80px;height:80px;object-fit:cover;border-radius:10px;border:2px solid var(--border)" />`
+      : `<div style="width:80px;height:80px;border-radius:10px;border:2px solid var(--border);background:var(--surface2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--accent2);padding:4px;box-sizing:border-box">
+           <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+           <span style="font-size:9px;font-weight:700;text-transform:uppercase">${name.split('.').pop()}</span>
+           <span style="font-size:8px;color:var(--muted);max-width:72px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name}</span>
+         </div>`;
+    return `<div style="position:relative;display:inline-block">
+      ${thumb}
       <button onclick="removeCmdPhoto(${i})" style="position:absolute;top:-6px;right:-6px;background:var(--red);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;line-height:1">×</button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 function removeCmdPhoto(index) {
@@ -5223,7 +5240,11 @@ function renderCommandes() {
 
       // Photos locales (base64) + pièces jointes Drive partagées
       const _cmdAtts = [
-        ...(c.photos||[]).map(src => ({ img:(typeof src==='string'?src:(src&&src.data)||''), href:'', name:'Photo' })),
+        ...(c.photos||[]).map(src => {
+          if (typeof src === 'string') return { img: src, href: src, name: 'Photo' };
+          const isImg = (src.type||'').startsWith('image/');
+          return { img: isImg ? (src.data||'') : '', href: src.data||'', name: src.name||'fichier' };
+        }),
         ...(c.attachments||[]).map(a => {
           const isImg = (a.type||'').startsWith('image/');
           return { img: isImg ? _driveImgSrc(a) : '', href: a.viewUrl||a.dlUrl||a.data||'', name: a.name||'fichier' };
@@ -5705,16 +5726,21 @@ async function _uploadCommandeAttachments(commandeId, photos) {
   if (!APPS_SCRIPT_URL || !Array.isArray(photos) || !photos.length) return;
   const uploaded = [];
   for (let i = 0; i < photos.length; i++) {
-    const dataUrl = typeof photos[i] === 'string' ? photos[i] : (photos[i] && photos[i].data) || '';
+    const item     = photos[i];
+    const isObj    = item && typeof item === 'object';
+    const dataUrl  = isObj ? (item.data || '') : (typeof item === 'string' ? item : '');
     if (!dataUrl) continue;
-    const name = `commande-${commandeId}-${i + 1}.jpg`;
+    const type     = (isObj && item.type) ? item.type : 'image/jpeg';
+    const origName = (isObj && item.name) ? item.name : '';
+    const ext      = origName.includes('.') ? origName.split('.').pop() : ((type.split('/')[1]) || 'jpg');
+    const name     = `commande-${commandeId}-${i + 1}.${ext}`;
     try {
-      const r = await apiCall({ action:'uploadFile', fileName:name, mimeType:'image/jpeg', base64Data:dataUrl });
+      const r = await apiCall({ action:'uploadFile', fileName:name, mimeType:type, base64Data:dataUrl });
       uploaded.push(r && r.ok
-        ? { name:r.fileName||name, type:'image/jpeg', fileId:r.fileId, viewUrl:r.viewUrl, dlUrl:r.dlUrl }
-        : { name, type:'image/jpeg', data:dataUrl }); // fallback base64 local si l'upload échoue
+        ? { name:r.fileName||name, type, fileId:r.fileId, viewUrl:r.viewUrl, dlUrl:r.dlUrl }
+        : { name, type, data:dataUrl }); // fallback base64 local si l'upload échoue
     } catch(e) {
-      uploaded.push({ name, type:'image/jpeg', data:dataUrl });
+      uploaded.push({ name, type, data:dataUrl });
     }
   }
   if (!uploaded.length) return;
@@ -7168,7 +7194,7 @@ function renderCommentsSection(dossierId, comments) {
         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
         Fichier
       </label>
-      <input id="commentAttachInput" type="file" accept="image/*,.pdf,.doc,.docx" multiple style="display:none" onchange="addCommentAttachment(this.files)" />
+      <input id="commentAttachInput" type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv" multiple style="display:none" onchange="addCommentAttachment(this.files)" />
       <div style="flex:1"></div>
       <button onclick="submitComment('${dossierId}')"
         style="display:inline-flex;align-items:center;gap:5px;padding:7px 16px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0">
@@ -8253,10 +8279,10 @@ function renderAttrPanel(tachesD, commentsD = []) {
       // + photos base64 locales legacy/en attente d'upload (src.photos).
       const attachList = [
         ...(src.attachments || []),
-        ...((src.photos || []).map((p, pi) => ({
-          name: 'Photo ' + (pi + 1), type: 'image/jpeg',
-          data: (typeof p === 'string' ? p : (p && (p.data || p.url)) || '')
-        })).filter(a => a.data))
+        ...((src.photos || []).map((p, pi) => {
+          if (typeof p === 'string') return { name: 'Photo ' + (pi + 1), type: 'image/jpeg', data: p };
+          return { name: (p && p.name) || ('Photo ' + (pi + 1)), type: (p && p.type) || '', data: (p && (p.data || p.url)) || '' };
+        }).filter(a => a.data))
       ];
       const attachRow = attachList.length
         ? `<div style="margin-top:10px">

@@ -1511,8 +1511,31 @@ function handleClearAllData(data) {
 // ============================================================
 // UPLOAD FICHIERS → GOOGLE DRIVE
 // ============================================================
-const ALLOWED_MIMES_  = ['image/jpeg','image/png','image/webp','image/gif','application/pdf'];
-const MAX_FILE_BYTES_ = 5 * 1024 * 1024; // 5 Mo
+const ALLOWED_MIMES_  = [
+  'image/jpeg','image/png','image/webp','image/gif','application/pdf',
+  'application/msword',                                                       // .doc
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',  // .docx
+  'application/vnd.ms-excel',                                                 // .xls
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',        // .xlsx
+  'text/csv'                                                                  // .csv
+];
+const MAX_FILE_BYTES_ = 10 * 1024 * 1024; // 10 Mo
+
+// Déduit le type MIME depuis l'extension du fichier — certains navigateurs n'envoient
+// pas file.type pour les .docx/.xlsx (vide ou "application/octet-stream").
+const EXT_MIMES_ = {
+  jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', webp:'image/webp', gif:'image/gif',
+  pdf:'application/pdf',
+  doc:'application/msword',
+  docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls:'application/vnd.ms-excel',
+  xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  csv:'text/csv'
+};
+function _mimeFromExt_(fileName) {
+  const ext = String(fileName || '').split('.').pop().toLowerCase();
+  return EXT_MIMES_[ext] || '';
+}
 
 function _getPOSAttachmentsFolder() {
   const FOLDER_NAME = 'POS_PiecesJointes';
@@ -1567,21 +1590,26 @@ function handleGetSharedFiles() {
 
 function handleUploadFile(data) {
   try {
-    const mimeType = data.mimeType || 'application/octet-stream';
     const fileName = data.fileName || ('fichier_' + Date.now());
+    // Certains navigateurs n'envoient pas le type MIME des .docx/.xlsx (vide ou
+    // application/octet-stream) → le déduire de l'extension du nom de fichier.
+    let mimeType = data.mimeType || '';
+    if (!mimeType || mimeType === 'application/octet-stream') {
+      mimeType = _mimeFromExt_(fileName) || mimeType || 'application/octet-stream';
+    }
 
     // Validation du type MIME
     if (!ALLOWED_MIMES_.includes(mimeType)) {
-      return { ok:false, error:'Type de fichier non autorisé. Formats acceptés : JPEG, PNG, WebP, GIF, PDF.' };
+      return { ok:false, error:'Type de fichier non autorisé. Formats acceptés : images, PDF, Word, Excel.' };
     }
 
     const base64     = data.base64Data || '';
     const base64Pure = base64.includes(',') ? base64.split(',')[1] : base64;
     const bytes      = Utilities.base64Decode(base64Pure);
 
-    // Validation de la taille (5 Mo max)
+    // Validation de la taille (10 Mo max)
     if (bytes.length > MAX_FILE_BYTES_) {
-      return { ok:false, error:'Fichier trop volumineux (max 5 Mo).' };
+      return { ok:false, error:'Fichier trop volumineux (max 10 Mo).' };
     }
 
     const blob   = Utilities.newBlob(bytes, mimeType, fileName);
