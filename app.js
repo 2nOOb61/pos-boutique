@@ -9106,6 +9106,7 @@ function _renderChargeView() {
   if (!container) return;
 
   const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
+  const canViewAllProd = isAdminOrChef || currentUser?.role === 'commerciale'; // commerciaux : suivi en lecture seule
   const allTaches     = [...taches, ...tachesLibres];
 
   // Construire la map opérateur → leurs tâches
@@ -9118,7 +9119,7 @@ function _renderChargeView() {
 
   // Si pas admin/chef : n'afficher que sa propre carte
   const myLabel = currentUser?.label || currentUser?.username || '';
-  const opKeys  = isAdminOrChef
+  const opKeys  = canViewAllProd
     ? Object.keys(opMap).sort()
     : (opMap[myLabel] ? [myLabel] : []);
 
@@ -9420,26 +9421,28 @@ function renderTaches() {
   const dash          = _buildMonDashboard();
   const deadlines     = _buildProdDeadlines();
   const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
+  // Les commerciaux suivent TOUTE la production en lecture seule (pas d'action — géré par canInteract)
+  const canViewAllProd = isAdminOrChef || currentUser?.role === 'commerciale';
   const myLabel       = currentUser?.label || currentUser?.username || '';
 
   // Peupler le sélecteur d'années depuis les tâches
   _populateYearSel('prodYearSel', [...taches, ...tachesLibres].map(t => t.dateAssignation));
 
-  let dossierList = isAdminOrChef ? taches : taches.filter(t => _sameOp(t.operateur, myLabel));
+  let dossierList = canViewAllProd ? taches : taches.filter(t => _sameOp(t.operateur, myLabel));
   if (prodFilter === 'EN_RETARD') dossierList = dossierList.filter(t => _getTacheRetardInfo(t).isRetard);
   else if (prodFilter !== 'TOUS') dossierList = dossierList.filter(t => t.statut === prodFilter);
   if (prodDateFilter.mois || prodDateFilter.annee)
     dossierList = dossierList.filter(t => _matchDateFilter(t.dateAssignation, prodDateFilter));
 
-  let libreList = isAdminOrChef ? tachesLibres : tachesLibres.filter(t => _sameOp(t.operateur, myLabel));
+  let libreList = canViewAllProd ? tachesLibres : tachesLibres.filter(t => _sameOp(t.operateur, myLabel));
   if (prodFilter === 'EN_RETARD') libreList = [];
   else if (prodFilter !== 'TOUS') libreList = libreList.filter(t => t.statut === prodFilter);
   if (prodDateFilter.mois || prodDateFilter.annee)
     libreList = libreList.filter(t => _matchDateFilter(t.dateAssignation, prodDateFilter));
 
   // Mettre à jour les compteurs dans les boutons filtre (sur données non filtrées par date)
-  const allVisible = [...taches, ...tachesLibres].filter(t => isAdminOrChef || _sameOp(t.operateur, myLabel));
-  const retardCount = taches.filter(t => (isAdminOrChef || _sameOp(t.operateur, myLabel)) && _getTacheRetardInfo(t).isRetard).length;
+  const allVisible = [...taches, ...tachesLibres].filter(t => canViewAllProd || _sameOp(t.operateur, myLabel));
+  const retardCount = taches.filter(t => (canViewAllProd || _sameOp(t.operateur, myLabel)) && _getTacheRetardInfo(t).isRetard).length;
   const _cnt = s => s === 'EN_RETARD' ? retardCount : allVisible.filter(t => s==='TOUS'||t.statut===s).length;
   ['TOUS','A_FAIRE','EN_COURS','TERMINE','EN_RETARD'].forEach(s => {
     const sfx = {'TOUS':'Tous','A_FAIRE':'AFaire','EN_COURS':'EnCours','TERMINE':'Termine','EN_RETARD':'Retard'}[s];
