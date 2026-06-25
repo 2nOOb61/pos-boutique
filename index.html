@@ -1894,6 +1894,26 @@
   </div>
 </div>
 
+<!-- MODAL AUTORISATIONS OPÉRATEUR -->
+<div class="modal-overlay" id="permissionsModal">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-title">
+      <span id="permModalTitle">Autorisations</span>
+      <button class="modal-close" onclick="closeModal('permissionsModal')"></button>
+    </div>
+    <p style="font-size:13px;color:var(--muted);margin:0 0 4px">
+      Activez ou désactivez les pages pour cet opérateur.
+      Sans modification personnalisée, c'est le <strong>rôle</strong> qui détermine l'accès.
+    </p>
+    <div id="permPagesList" style="margin-top:8px"></div>
+    <div class="modal-footer" style="flex-wrap:wrap;gap:8px;margin-top:8px">
+      <button class="btn-secondary" onclick="resetPermissions()" style="flex:1;min-width:120px">↺ Réinitialiser au rôle</button>
+      <button class="btn-secondary" onclick="closeModal('permissionsModal')">Annuler</button>
+      <button class="btn-primary" onclick="savePermissions()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL PRODUIT -->
 <div class="modal-overlay" id="productModal">
   <div class="modal">
@@ -2554,7 +2574,7 @@
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260625-docattach"></script>
+<script src="./app.js?v=20260625-perms"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

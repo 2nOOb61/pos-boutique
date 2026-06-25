@@ -568,6 +568,19 @@ h1, h2, h3,
   .btn-del-user:hover { background:rgba(255,71,87,0.16); }
   .btn-toggle-user { background:var(--surface2); color:var(--muted); }
   .btn-toggle-user:hover { color:var(--text); background:var(--surface3); }
+  .btn-perm-user { background:rgba(99,102,241,0.08); color:#6366f1; }
+  .btn-perm-user:hover { background:rgba(99,102,241,0.16); }
+  /* Badge accès personnalisé */
+  .perm-custom-badge { background:#dbeafe; color:#1d4ed8; }
+  /* Permissions modal */
+  .perm-row { display:flex; align-items:center; justify-content:space-between; padding:11px 0; border-bottom:1px solid var(--border); gap:12px; cursor:pointer; }
+  .perm-row:last-child { border-bottom:none; }
+  .perm-row-locked { opacity:.45; pointer-events:none; }
+  .perm-row-left { display:flex; align-items:center; gap:10px; flex:1; min-width:0; }
+  .perm-label { font-size:14px; font-weight:500; color:var(--text); }
+  .perm-badge { display:inline-block; font-size:10px; padding:1px 6px; border-radius:4px; font-weight:500; }
+  .perm-badge-default { background:#dcfce7; color:#16a34a; }
+  .perm-badge-locked  { background:#fee2e2; color:#dc2626; }
   /* Toggle switch */
   .toggle-wrap { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--muted); }
   .toggle { position:relative; width:40px; height:22px; }

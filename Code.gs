@@ -581,7 +581,8 @@ function handleGetUsers() {
   const users = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i]; if (!r[0]) continue;
-    users.push({ username:r[0], role:r[2], label:r[3], actif:String(r[4]||'oui').toLowerCase()!=='non', hasPwd: !!String(r[1]||'').trim() });
+    let _cp = null; try { if (r[5]) _cp = JSON.parse(r[5]); } catch(e) {}
+    users.push({ username:r[0], role:r[2], label:r[3], actif:String(r[4]||'oui').toLowerCase()!=='non', hasPwd: !!String(r[1]||'').trim(), customPages: _cp });
   }
   const result = { ok:true, users };
   try { cache.put(cacheKey, JSON.stringify(result), 300); } catch(e) {}
@@ -606,12 +607,12 @@ function handleSaveUser(data) {
   for (let i = 1; i < rows.length; i++) {
     if (String(rows[i][0]).toLowerCase() === String(u.username).toLowerCase()) {
       const storedPwd = pwd || rows[i][1];
-      sh.getRange(i+1,1,1,5).setValues([[u.username, storedPwd, u.role, u.label||u.nom||u.username, u.actif!==false?'oui':'non']]);
+      sh.getRange(i+1,1,1,6).setValues([[u.username, storedPwd, u.role, u.label||u.nom||u.username, u.actif!==false?'oui':'non', u.customPages ? JSON.stringify(u.customPages) : '']]);
       _logAction_('USER_UPDATE', data.editedBy||'admin', 'Modifié: ' + u.username + ' rôle:' + u.role);
       return { ok:true };
     }
   }
-  sh.appendRow([u.username, pwd, u.role||'caissier', u.label||u.nom||u.username, 'oui']);
+  sh.appendRow([u.username, pwd, u.role||'caissier', u.label||u.nom||u.username, 'oui', u.customPages ? JSON.stringify(u.customPages) : '']);
   _logAction_('USER_CREATE', data.editedBy||'admin', 'Créé: ' + u.username + ' rôle:' + (u.role||'caissier'));
   return { ok:true };
 }

@@ -103,6 +103,20 @@ const ROLE_ICONS = {
   chef_atelier: '', operateur_prod: '', machiniste: '', pao: '', finition: '', livreur: ''
 };
 
+const PAGE_LABELS = {
+  caisse:          'Caisse / Vente rapide',
+  reservations:    'Réservations',
+  commandes:       'Commandes',
+  stock:           'Stock',
+  stats:           'Statistiques',
+  'mon-dashboard': 'Mon tableau de bord',
+  attribution:     'Attribution / Dossiers',
+  production:      'Production / Tâches',
+  messagerie:      'Messagerie',
+  config:          'Configuration (admin)',
+  users:           'Gestion utilisateurs (admin)',
+};
+
 const PAGE_ACCESS = {
   caisse:         ['admin','caissier','commerciale','utilisateur','gestionnaire'],
   reservations:   ['admin','caissier','commerciale','utilisateur','gestionnaire','comptable'],
@@ -287,7 +301,8 @@ async function doLogin() {
     renderStockTable();
     renderStats();
     // Rediriger vers la première page accessible selon le rôle
-    const startPage = Object.keys(PAGE_ACCESS).find(p => PAGE_ACCESS[p].includes(currentUser.role)) || 'caisse';
+    const _ep0 = _effectivePages(currentUser);
+    const startPage = Object.keys(PAGE_ACCESS).find(p => _ep0.includes(p)) || 'caisse';
     showPage(startPage, null, null);
     if (window.innerWidth <= 768) switchCaisseTab('products');
 
@@ -387,11 +402,11 @@ function showPage(id, btn, bnavBtn) {
   if (id==='messagerie')   { loadMessagerie(); _autoRefreshMessagerie(); }
   if (id==='patron')       { renderControlFinance(); renderPatronDashboard(); _autoRefreshPatron(); }
   if (id==='commandes')    { _ensureDossierLinks(); renderCommandes(); _lastCmdRefresh = 0; _autoRefreshCommandes(); _loadTachesQuietly().then(renderCommandes); }
-  // Garde d'accès par rôle
+  // Garde d'accès (rôle ou overrides personnalisés)
   if (currentUser) {
-    const allowed = PAGE_ACCESS[id];
-    if (allowed && !allowed.includes(currentUser.role)) {
-      const fallback = Object.keys(PAGE_ACCESS).find(p => PAGE_ACCESS[p].includes(currentUser.role)) || 'caisse';
+    const ep = _effectivePages(currentUser);
+    if (PAGE_ACCESS[id] && !ep.includes(id)) {
+      const fallback = Object.keys(PAGE_ACCESS).find(p => ep.includes(p)) || 'caisse';
       showPage(fallback, null, null);
       showToast(' Accès non autorisé pour votre rôle', 'error');
       return;
@@ -3373,20 +3388,34 @@ function loadUsers() {
 }
 
 // ============================================================
-// PERMISSIONS PAR RÔLE
+// PERMISSIONS PAR RÔLE  (+ overrides personnalisés par user)
 // ============================================================
+
+// Retourne la liste effective des pages accessibles pour un utilisateur.
+// Si l'utilisateur a un champ customPages défini, on l'utilise ;
+// sinon on retombe sur PAGE_ACCESS[role].
+function _effectivePages(u) {
+  if (u && Array.isArray(u.customPages) && u.customPages.length > 0) return u.customPages;
+  return u ? Object.keys(PAGE_ACCESS).filter(p => PAGE_ACCESS[p].includes(u.role)) : [];
+}
+
 function applyRolePermissions(role) {
-  // Système data-roles : affiche/masque selon le rôle
+  const ep = currentUser ? _effectivePages(currentUser) : null;
+  // Système data-roles : affiche/masque selon le rôle (ou accès effectif pour les nav-btn)
   document.querySelectorAll('[data-roles]').forEach(el => {
-    const allowed = el.dataset.roles.split(',');
-    el.style.display = allowed.includes(role) ? '' : 'none';
+    const allowed  = el.dataset.roles.split(',');
+    const onclick  = el.getAttribute('onclick') || '';
+    const pageM    = onclick.match(/showPage\(['"]([^'"]+)['"]/);
+    if (ep && pageM) {
+      el.style.display = ep.includes(pageM[1]) ? '' : 'none';
+    } else {
+      el.style.display = allowed.includes(role) ? '' : 'none';
+    }
   });
-  // Compatibilité legacy admin-only
   const isAdmin = role === 'admin';
   document.querySelectorAll('.admin-only').forEach(el => {
     if (!el.hasAttribute('data-roles')) el.style.display = isAdmin ? '' : 'none';
   });
-  // Bouton Google Sheets (admin only)
   const sheetsBtn = document.querySelector('[onclick="openScriptSettings()"]');
   if (sheetsBtn) sheetsBtn.style.display = isAdmin ? '' : 'none';
 }
@@ -3421,9 +3450,13 @@ function renderUsersPage() {
         ${u.hasPwd === false
           ? '<span class="badge" style="background:#fee2e2;color:#dc2626" title="Ce compte n\'a pas de mot de passe — il ne peut pas se connecter. Cliquez sur Modifier pour en définir un.">⚠ Mot de passe manquant</span>'
           : ''}
+        ${Array.isArray(u.customPages) && u.customPages.length
+          ? '<span class="badge perm-custom-badge" title="Accès personnalisés (différents du rôle)">✦ Accès personnalisé</span>'
+          : ''}
       </div>
       <div class="user-card-actions">
         <button class="btn-edit-user" onclick="openUserModal(${idx})"> Modifier</button>
+        <button class="btn-perm-user" onclick="openPermissionsModal(${idx})" title="Gérer les pages accessibles"> Autorisations</button>
         ${!isMe && !isLastAdmin
           ? `<button class="btn-del-user" onclick="deleteUser(${idx})"> Supprimer</button>`
           : `<button class="btn-toggle-user" onclick="toggleUserActive(${idx})" ${isMe?'disabled':''}>
@@ -3518,6 +3551,79 @@ async function saveUser() {
   const base = localUsers[isNew ? localUsers.length - 1 : editingUserId];
   const syncUser = { username: base.username, role: base.role, label: base.label, actif: base.actif, password: pass || undefined };
   if (syncUser.username) saveUserToScript(syncUser);
+}
+
+// ── Personnalisation des autorisations par opérateur ────────
+let _permEditingIdx = null;
+
+function openPermissionsModal(idx) {
+  _permEditingIdx = idx;
+  const u = localUsers[idx];
+  document.getElementById('permModalTitle').textContent = `Autorisations — ${u.label || u.username}`;
+
+  const effectiveP = _effectivePages(u);
+  const rolePages  = Object.keys(PAGE_ACCESS).filter(p => PAGE_ACCESS[p].includes(u.role));
+
+  document.getElementById('permPagesList').innerHTML = Object.keys(PAGE_LABELS).map(pageId => {
+    const isAdminLocked = (pageId === 'config' || pageId === 'users') && u.role !== 'admin';
+    const isChecked     = effectiveP.includes(pageId);
+    const isDefault     = rolePages.includes(pageId);
+    return `<label class="perm-row${isAdminLocked ? ' perm-row-locked' : ''}">
+      <div class="perm-row-left">
+        <div>
+          <div class="perm-label">${PAGE_LABELS[pageId]}</div>
+          <div style="display:flex;gap:4px;margin-top:3px;flex-wrap:wrap">
+            ${isDefault     ? '<span class="perm-badge perm-badge-default">rôle par défaut</span>' : ''}
+            ${isAdminLocked ? '<span class="perm-badge perm-badge-locked">admin seulement</span>' : ''}
+          </div>
+        </div>
+      </div>
+      <label class="toggle" style="flex-shrink:0" onclick="event.stopPropagation()">
+        <input type="checkbox" class="perm-cb" data-page="${pageId}"
+               ${isChecked ? 'checked' : ''} ${isAdminLocked ? 'disabled' : ''} />
+        <span class="toggle-slider"></span>
+      </label>
+    </label>`;
+  }).join('');
+
+  openModal('permissionsModal');
+}
+
+function resetPermissions() {
+  const u = localUsers[_permEditingIdx];
+  const rolePages = Object.keys(PAGE_ACCESS).filter(p => PAGE_ACCESS[p].includes(u.role));
+  document.querySelectorAll('.perm-cb').forEach(cb => {
+    if (!cb.disabled) cb.checked = rolePages.includes(cb.dataset.page);
+  });
+}
+
+async function savePermissions() {
+  const u       = localUsers[_permEditingIdx];
+  const checked = [...document.querySelectorAll('.perm-cb')]
+    .filter(cb => !cb.disabled && cb.checked)
+    .map(cb => cb.dataset.page);
+
+  const rolePages = Object.keys(PAGE_ACCESS).filter(p => PAGE_ACCESS[p].includes(u.role));
+  const isSameAsRole = checked.length === rolePages.length
+    && checked.every(p => rolePages.includes(p))
+    && rolePages.every(p => checked.includes(p));
+
+  u.customPages = isSameAsRole ? null : checked;
+
+  saveUsers();
+  closeModal('permissionsModal');
+  renderUsersPage();
+  showToast(`Autorisations de ${u.label || u.username} mises à jour`);
+
+  // Si c'est l'utilisateur courant → recalculer la nav immédiatement
+  if (currentUser && currentUser.username === u.username) {
+    currentUser.customPages = u.customPages;
+    applyRolePermissions(currentUser.role);
+  }
+
+  if (APPS_SCRIPT_URL) {
+    saveUserToScript({ username: u.username, role: u.role, label: u.label, actif: u.actif, customPages: u.customPages });
+  }
 }
 
 function deleteUser(idx) {
