@@ -6203,6 +6203,7 @@ function _createDossierFromSource(type, source) {
 // n'est pas stockée côté feuille Dossiers : la source de vérité est la commande).
 function _syncDossierDates() {
   if (!Array.isArray(dossiers)) return;
+  const _seq = _buildSeqMaps();
   dossiers.forEach(d => {
     if (!d || !d.sourceType || d.sourceId === undefined || d.sourceId === null) return;
     const src = d.sourceType === 'reservation'
@@ -6216,10 +6217,9 @@ function _syncDossierDates() {
     if (prod) d.dateLivraisonProd = prod;
     if (bat)  d.dateBAT           = bat;
     if (src.caissier) d.caissier  = src.caissier; // commercial créateur (pour l'affichage)
-    // Référence lisible (date/heure) au lieu de l'uid interne — normalise aussi les
-    // anciens dossiers (CMD-<uid>) chargés depuis GAS. N'altère QUE l'affichage.
-    const prefix = d.sourceType === 'reservation' ? 'RES' : 'CMD';
-    const ref = `${prefix}-${_factureNum(src)}`;
+    // Référence SÉQUENTIELLE (CMD-001 / RES-001) au lieu de l'uid interne — cohérente
+    // partout et « qui se suit ». Normalise aussi les anciens dossiers. Affichage seul.
+    const ref = _seqRefOf(d.sourceType, d.sourceId, _seq);
     if (d.numeroDossier !== ref) d.numeroDossier = ref;
   });
 }
@@ -9701,10 +9701,12 @@ const _DELIV_MONEY_ROLES = ['admin','caissier','commerciale','comptable','gestio
 // Liste normalisée des livraisons depuis commandes + réservations (hors annulées).
 function _collectDeliveries() {
   const out = [];
+  const _seq = _buildSeqMaps();
   (Array.isArray(commandes) ? commandes : []).forEach(c => {
     if (!c || c.status === 'cancelled') return;
     out.push({
       kind: 'commande', id: c.id, date: c.date,
+      ref:        _seqRefOf('commande', c.id, _seq),
       client:     c.clientName || c.client || 'Client',
       contact:    c.clientContact || '',
       commercial: _resolveOperatorLabel(c.caissier || ''),
@@ -9722,6 +9724,7 @@ function _collectDeliveries() {
     if (!r || r.status === 'cancelled') return;
     out.push({
       kind: 'reservation', id: r.id, date: r.date,
+      ref:        _seqRefOf('reservation', r.id, _seq),
       client:     r.clientName || 'Client',
       contact:    r.clientContact || '',
       commercial: _resolveOperatorLabel(r.caissier || ''),
@@ -9809,7 +9812,7 @@ function _livRow(x, showMoney, colspan) {
   const chev = '<svg class="pcf-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
   const detail = `<tr class="pcf-detail-row"><td colspan="${colspan}"><div class="pcf-detail ${open ? 'open' : ''}">
       <div class="pcf-detail-grid">
-        ${dt('Référence', (x.kind === 'reservation' ? 'RES' : 'CMD') + '-' + _factureNum(x))}
+        ${dt('Référence', x.ref || ((x.kind === 'reservation' ? 'RES' : 'CMD') + '-' + _factureNum(x)))}
         ${dt('Commercial', x.commercial)}
         ${dt('Contact', x.contact)}
         ${dt('Articles', itemsFull)}
@@ -9973,6 +9976,25 @@ function setFinPay(v)    { _finState.pay = v;    renderFinances(); }
 function setFinSearch(v) { _finState.q = v;      renderFinances(); }
 function toggleFinItem(id) { if (_finItemOpen.has(id)) _finItemOpen.delete(id); else _finItemOpen.add(id); renderFinances(); }
 
+// Numérotation séquentielle STABLE des opérations (par date de création, sur TOUS les
+// enregistrements y compris annulés → ne se décale pas quand on annule/filtre). Partagée
+// par Finances / Attribution / Production / Livraisons → références cohérentes partout.
+function _buildSeqMaps() {
+  const mk = arr => {
+    const m = new Map();
+    (Array.isArray(arr) ? arr : []).slice()
+      .sort((a, b) => (parseSaleDate(a.date) || 0) - (parseSaleDate(b.date) || 0))
+      .forEach((o, i) => m.set(String(o.id), i + 1));
+    return m;
+  };
+  return { cmd: mk(commandes), res: mk(reservations) };
+}
+function _seqRefOf(kind, id, maps) {
+  const m = (kind === 'reservation') ? maps.res : maps.cmd;
+  const n = m.get(String(id));
+  return (kind === 'reservation' ? 'RES' : 'CMD') + '-' + (n ? String(n).padStart(3, '0') : '—');
+}
+
 function _finPeriodRange() {
   const now = new Date();
   if (_finState.period === 'week')  { const f = new Date(now); f.setDate(f.getDate() - 6); f.setHours(0,0,0,0); return { from: f, to: null }; }
@@ -9980,93 +10002,113 @@ function _finPeriodRange() {
   return { from: null, to: null };
 }
 
-// État de livraison d'une commande (dérivé du dossier de production lié).
-function _cmdDelivState(c) {
-  const dos = (Array.isArray(dossiers) ? dossiers : []).find(d => d.sourceType === 'commande' && String(d.sourceId) === String(c.id));
+// État de livraison (commande OU réservation) dérivé du dossier de production lié.
+function _finDelivState(kind, o) {
+  const dos = (Array.isArray(dossiers) ? dossiers : []).find(d => d.sourceType === kind && String(d.sourceId) === String(o.id));
   const prog = dos ? (Number(dos.progression) || 0) : 0;
-  const mode = c.deliveryMode === 'livraison' ? 'Livraison' : 'Retrait';
+  const mode = o.deliveryMode === 'livraison' ? 'Livraison' : 'Retrait';
   let label, color;
-  if (c.status === 'completed' || prog >= 100 || (dos && dos.statut === 'LIVRE')) { label = 'Livrée'; color = '#16a34a'; }
+  if (o.status === 'completed' || prog >= 100 || (dos && dos.statut === 'LIVRE')) { label = 'Livrée'; color = '#16a34a'; }
   else if (prog > 0) { label = 'En production'; color = '#e8834a'; }
   else { label = 'À traiter'; color = '#2563eb'; }
   return { label, color, prog, mode };
 }
 
-// Construit la séquence + le sous-ensemble filtré. seq = numéro 1..N sur TOUTES les
-// commandes non annulées triées par date (stable, indépendant des filtres).
-function _finBuild() {
-  const all = (Array.isArray(commandes) ? commandes : []).filter(c => c && c.status !== 'cancelled');
-  const sorted = all.slice().sort((a, b) => (parseSaleDate(a.date) || 0) - (parseSaleDate(b.date) || 0));
-  const seqMap = new Map();
-  sorted.forEach((c, i) => seqMap.set(String(c.id), i + 1));
-  const { from, to } = _finPeriodRange();
-  const q = (_finState.q || '').trim().toLowerCase();
-  const list = sorted.filter(c => {
-    const d = parseSaleDate(c.date);
-    if (from && d && d < from) return false;
-    if (to && d && d > to) return false;
-    const reste = Number(c.restant) || 0;
-    if (_finState.pay === 'unpaid' && !(reste > 0)) return false;
-    if (_finState.pay === 'paid' && reste > 0) return false;
-    if (q) {
-      const ref = 'cmd-' + String(seqMap.get(String(c.id))).padStart(3, '0');
-      if (!((c.clientName || '') + ' ' + (c.clientContact || '') + ' ' + ref).toLowerCase().includes(q)) return false;
-    }
-    return true;
-  });
-  return { list, seqMap };
+// Entrée normalisée (commande ou réservation) pour le registre financier.
+function _finEntry(kind, o, maps) {
+  return {
+    kind, id: String(o.id), obj: o, date: o.date,
+    ref: _seqRefOf(kind, o.id, maps),
+    client: o.clientName || 'Client', contact: o.clientContact || '',
+    total: Number(o.total) || 0,
+    accompte: Number(o.accompte != null ? o.accompte : o.acompte) || 0,
+    restant: Number(o.restant) || 0,
+    deliveryMode: o.deliveryMode,
+    deliveryDate: kind === 'reservation' ? o.deliveryDate : o.dateLivraison,
+    address: kind === 'reservation' ? o.deliveryAddress : o.adresseLivraison,
+    items: o.items || []
+  };
 }
 
-function _finSeqRef(c, seqMap) { return 'CMD-' + String(seqMap.get(String(c.id)) || 0).padStart(3, '0'); }
+// Construit le registre (commandes + réservations non annulées), trié par date, filtré.
+// La numérotation (_seqRefOf) est globale/stable, indépendante des filtres.
+function _finBuild() {
+  const maps = _buildSeqMaps();
+  let entries = [];
+  (Array.isArray(commandes) ? commandes : []).filter(c => c && c.status !== 'cancelled').forEach(c => entries.push(_finEntry('commande', c, maps)));
+  (Array.isArray(reservations) ? reservations : []).filter(r => r && r.status !== 'cancelled').forEach(r => entries.push(_finEntry('reservation', r, maps)));
+  entries.sort((a, b) => (parseSaleDate(a.date) || 0) - (parseSaleDate(b.date) || 0));
+  const { from, to } = _finPeriodRange();
+  const q = (_finState.q || '').trim().toLowerCase();
+  const list = entries.filter(e => {
+    const d = parseSaleDate(e.date);
+    if (from && d && d < from) return false;
+    if (to && d && d > to) return false;
+    if (_finState.pay === 'unpaid' && !(e.restant > 0)) return false;
+    if (_finState.pay === 'paid' && e.restant > 0) return false;
+    if (q && !((e.client + ' ' + e.contact + ' ' + e.ref).toLowerCase().includes(q))) return false;
+    return true;
+  });
+  return { list };
+}
 
-function _finRow(c, seqMap, colspan) {
-  const id = String(c.id);
-  const open = _finItemOpen.has(id);
-  const seq = String(seqMap.get(id) || 0).padStart(3, '0');
-  const ds = _cmdDelivState(c);
-  const reste = Number(c.restant) || 0;
+function _finPrintArg(e) {
+  return e.kind === 'reservation'
+    ? `printReservationTicket(reservations.find(x=>String(x.id)==='${e.id}'))`
+    : `printCommandeTicket(commandes.find(x=>String(x.id)==='${e.id}'))`;
+}
+
+function _finRow(e, colspan) {
+  const rid = e.kind + '_' + e.id;
+  const open = _finItemOpen.has(rid);
+  const ds = _finDelivState(e.kind, e.obj);
+  const reste = e.restant;
+  const kindColor = e.kind === 'reservation' ? '#e8834a' : '#1a4a3a';
+  const seqNum = (e.ref.split('-')[1] || '');
   const truck = '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>';
   const shop  = '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l1-5h16l1 5"/><path d="M4 9v11a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9"/></svg>';
   const etat = `<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;background:${ds.color}1a;color:${ds.color};white-space:nowrap">${ds.mode === 'Livraison' ? truck : shop} ${ds.mode} · ${ds.label}</span>`;
   const chev = '<svg class="pcf-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
-  const kbid = 'fin' + id;
+  const kbid = 'fin' + rid;
   const dt = (l, v) => v ? `<div class="pcf-dt"><div class="pcf-dt-l">${l}</div><div class="pcf-dt-v" style="font-size:13px">${v}</div></div>` : '';
-  const itemsFull = (c.items || []).map(i => `${i.name} ×${i.qty || 1}`).join(', ') || '—';
+  const itemsFull = (e.items || []).map(i => `${i.name} ×${i.qty || 1}`).join(', ') || '—';
+  const printArg = _finPrintArg(e);
   const detail = `<tr class="pcf-detail-row"><td colspan="${colspan}"><div class="pcf-detail ${open ? 'open' : ''}">
       <div class="pcf-detail-grid">
-        ${dt('Réf. facture', c.numeroDossier || ('CMD-' + _factureNum(c)))}
-        ${dt('Contact', c.clientContact)}
+        ${dt('Type', e.kind === 'reservation' ? 'Réservation' : 'Commande')}
+        ${dt('Réf. facture', e.obj.numeroDossier || (e.ref))}
+        ${dt('Contact', e.contact)}
         ${dt('Articles', itemsFull)}
-        ${c.deliveryMode === 'livraison' ? dt('Adresse', c.adresseLivraison || '—') : dt('Mode', 'Retrait boutique')}
-        ${dt('Livraison client', _dispDate(c.dateLivraison))}
+        ${e.deliveryMode === 'livraison' ? dt('Adresse', e.address || '—') : dt('Mode', 'Retrait boutique')}
+        ${dt('Livraison client', _dispDate(e.deliveryDate))}
         ${dt('Avancement', ds.prog + ' %')}
       </div>
       <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
-        <button class="deliv-open-btn" onclick="event.stopPropagation();printCommandeTicket(commandes.find(x=>String(x.id)==='${id}'))">Imprimer la facture</button>
-        <button class="pcf-export-btn" onclick="event.stopPropagation();showPage('commandes')">Voir dans Commandes</button>
+        <button class="deliv-open-btn" onclick="event.stopPropagation();${printArg}">Imprimer la facture</button>
+        <button class="pcf-export-btn" onclick="event.stopPropagation();showPage('${e.kind === 'reservation' ? 'reservations' : 'commandes'}')">Voir le détail</button>
       </div>
     </div></td></tr>`;
-  return `<tr class="pcf-row ${open ? 'open' : ''}" onclick="toggleFinItem('${id}')">
+  return `<tr class="pcf-row ${open ? 'open' : ''}" onclick="toggleFinItem('${rid}')">
     <td class="pcf-c-main" data-label="N°">
       <div style="display:flex;align-items:center;gap:9px;min-width:0">
         ${chev}
-        <span class="pcf-rank" style="background:#1a4a3a14;color:#1a4a3a">${seq}</span>
+        <span class="pcf-rank" style="background:${kindColor}1a;color:${kindColor}">${seqNum}</span>
         <div style="min-width:0">
-          <div class="pcf-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.clientName || 'Client'}</div>
-          <div style="font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums">${_finSeqRef(c, seqMap)}</div>
+          <div class="pcf-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e.client}</div>
+          <div style="font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums">${e.ref}</div>
         </div>
       </div>
     </td>
     <td data-label="État">${etat}</td>
-    <td class="pcf-num" data-label="Total engagé">${fmt(c.total)}</td>
-    <td class="pcf-num" data-label="Acompte" style="color:#16a34a">${fmt(c.accompte)}</td>
+    <td class="pcf-num" data-label="Total engagé">${fmt(e.total)}</td>
+    <td class="pcf-num" data-label="Acompte" style="color:#16a34a">${fmt(e.accompte)}</td>
     <td class="pcf-num" data-label="Restant" style="${reste > 0 ? 'color:#dc2626;font-weight:800' : 'color:var(--muted)'}">${fmt(reste)}</td>
     <td class="pcf-c-act" onclick="event.stopPropagation()">
       <div class="kebab-wrap" style="display:inline-block;vertical-align:middle">
         <button class="kebab-btn" aria-label="Plus d'actions" onclick="toggleKebab('${kbid}',event)"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>
         <div class="kebab-menu" id="kb-${kbid}" role="menu">
-          <button class="kebab-item" role="menuitem" onclick="closeAllKebabs();printCommandeTicket(commandes.find(x=>String(x.id)==='${id}'))">${_kebabIcon('print')}<span>Imprimer la facture</span></button>
-          <button class="kebab-item" role="menuitem" onclick="closeAllKebabs();showPage('commandes')">${_kebabIcon('eye')}<span>Voir dans Commandes</span></button>
+          <button class="kebab-item" role="menuitem" onclick="closeAllKebabs();${printArg}">${_kebabIcon('print')}<span>Imprimer la facture</span></button>
+          <button class="kebab-item" role="menuitem" onclick="closeAllKebabs();showPage('${e.kind === 'reservation' ? 'reservations' : 'commandes'}')">${_kebabIcon('eye')}<span>Voir le détail</span></button>
         </div>
       </div>
     </td>
@@ -10077,11 +10119,11 @@ function renderFinances() {
   const root = document.getElementById('financesContent');
   if (!root) return;
   const colspan = 6;
-  const { list, seqMap } = _finBuild();
+  const { list } = _finBuild();
 
-  const tEng = list.reduce((s, c) => s + (Number(c.total) || 0), 0);
-  const tAcc = list.reduce((s, c) => s + (Number(c.accompte) || 0), 0);
-  const tRes = list.reduce((s, c) => s + (Number(c.restant) || 0), 0);
+  const tEng = list.reduce((s, e) => s + e.total, 0);
+  const tAcc = list.reduce((s, e) => s + e.accompte, 0);
+  const tRes = list.reduce((s, e) => s + e.restant, 0);
   const rate = tEng > 0 ? Math.round(tAcc / tEng * 100) : 0;
   const nb = list.length;
   const panier = nb ? Math.round(tEng / nb) : 0;
@@ -10095,9 +10137,9 @@ function renderFinances() {
     </div>
     <div class="pcf-hero">
       <div>
-        <div class="pcf-hero-label">Total engagé · ${nb} commande(s)</div>
+        <div class="pcf-hero-label">Total engagé · ${nb} opération(s)</div>
         <div class="pcf-hero-val">${fmt(tEng)}</div>
-        <div class="pcf-hero-meta">Panier moyen ${fmt(panier)}</div>
+        <div class="pcf-hero-meta">Panier moyen ${fmt(panier)} · commandes + réservations</div>
       </div>
       <div class="pcf-gauge">
         <div class="pcf-gauge-top"><span>Taux d'encaissement</span><strong>${rate}%</strong></div>
@@ -10109,21 +10151,21 @@ function renderFinances() {
       </div>
     </div>
     <div class="pcf-kpis">
-      <div class="pcf-kpi" style="--kc:#1a4a3a"><div class="pcf-kpi-label">Total engagé</div><div class="pcf-kpi-val">${fmt(tEng)}</div><div class="pcf-kpi-sub">${nb} commande(s)</div></div>
+      <div class="pcf-kpi" style="--kc:#1a4a3a"><div class="pcf-kpi-label">Total engagé</div><div class="pcf-kpi-val">${fmt(tEng)}</div><div class="pcf-kpi-sub">${nb} opération(s)</div></div>
       <div class="pcf-kpi" style="--kc:#16a34a"><div class="pcf-kpi-label">Acompte reçu</div><div class="pcf-kpi-val" style="color:#16a34a">${fmt(tAcc)}</div><div class="pcf-kpi-sub">${rate}% encaissé</div></div>
-      <div class="pcf-kpi" style="--kc:#dc2626"><div class="pcf-kpi-label">Restant à percevoir</div><div class="pcf-kpi-val" style="color:#dc2626">${fmt(tRes)}</div><div class="pcf-kpi-sub">${list.filter(c => (Number(c.restant)||0) > 0).length} à solder</div></div>
-      <div class="pcf-kpi" style="--kc:#2563eb"><div class="pcf-kpi-label">Panier moyen</div><div class="pcf-kpi-val">${fmt(panier)}</div><div class="pcf-kpi-sub">par commande</div></div>
+      <div class="pcf-kpi" style="--kc:#dc2626"><div class="pcf-kpi-label">Restant à percevoir</div><div class="pcf-kpi-val" style="color:#dc2626">${fmt(tRes)}</div><div class="pcf-kpi-sub">${list.filter(e => e.restant > 0).length} à solder</div></div>
+      <div class="pcf-kpi" style="--kc:#2563eb"><div class="pcf-kpi-label">Panier moyen</div><div class="pcf-kpi-val">${fmt(panier)}</div><div class="pcf-kpi-sub">par opération</div></div>
     </div>`;
 
   if (!list.length) {
-    html += `<div class="pcf-empty">Aucune commande sur cette période.</div>`;
+    html += `<div class="pcf-empty">Aucune opération sur cette période.</div>`;
     root.innerHTML = html;
     return;
   }
 
   // Groupes par jour (ordre chronologique croissant — les N° se suivent de haut en bas)
   const groups = {}; const order = [];
-  list.forEach(c => { const k = _histDayKey(c.date); if (!groups[k]) { groups[k] = { date: c.date, rows: [], eng: 0, acc: 0, res: 0 }; order.push(k); } const g = groups[k]; g.rows.push(c); g.eng += Number(c.total) || 0; g.acc += Number(c.accompte) || 0; g.res += Number(c.restant) || 0; });
+  list.forEach(e => { const k = _histDayKey(e.date); if (!groups[k]) { groups[k] = { date: e.date, rows: [], eng: 0, acc: 0, res: 0 }; order.push(k); } const g = groups[k]; g.rows.push(e); g.eng += e.total; g.acc += e.accompte; g.res += e.restant; });
   order.sort((a, b) => (parseSaleDate(groups[a].date) || 0) - (parseSaleDate(groups[b].date) || 0));
 
   html += order.map(k => {
@@ -10131,12 +10173,12 @@ function renderFinances() {
     return `<div class="pcf-card">
       <div class="pcf-card-head">
         <div class="ic" style="background:#1a4a3a14;color:#1a4a3a"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
-        <div style="flex:1;min-width:0"><div class="pcf-card-title">${_histDayLabel(g.date)}</div><div class="pcf-card-sub">${g.rows.length} commande(s) · engagé ${fmt(g.eng)} · reste ${fmt(g.res)}</div></div>
+        <div style="flex:1;min-width:0"><div class="pcf-card-title">${_histDayLabel(g.date)}</div><div class="pcf-card-sub">${g.rows.length} opération(s) · engagé ${fmt(g.eng)} · reste ${fmt(g.res)}</div></div>
         <span class="pcf-card-badge" style="background:#1a4a3a14;color:#1a4a3a">${fmt(g.eng)}</span>
       </div>
       <table class="pcf-table">
         <thead><tr><th>N° / Client</th><th>État livraison</th><th class="pcf-num">Total engagé</th><th class="pcf-num">Acompte</th><th class="pcf-num">Restant</th><th></th></tr></thead>
-        <tbody>${g.rows.map(c => _finRow(c, seqMap, colspan)).join('')}</tbody>
+        <tbody>${g.rows.map(e => _finRow(e, colspan)).join('')}</tbody>
       </table>
     </div>`;
   }).join('');
@@ -10146,20 +10188,20 @@ function renderFinances() {
 
 // Impression A4 du registre financier (réutilise la fenêtre report de la vue patron).
 function printFinances() {
-  const { list, seqMap } = _finBuild();
-  if (!list.length) { showToast('Aucune commande à imprimer', 'error'); return; }
-  const tEng = list.reduce((s, c) => s + (Number(c.total) || 0), 0);
-  const tAcc = list.reduce((s, c) => s + (Number(c.accompte) || 0), 0);
-  const tRes = list.reduce((s, c) => s + (Number(c.restant) || 0), 0);
+  const { list } = _finBuild();
+  if (!list.length) { showToast('Aucune opération à imprimer', 'error'); return; }
+  const tEng = list.reduce((s, e) => s + e.total, 0);
+  const tAcc = list.reduce((s, e) => s + e.accompte, 0);
+  const tRes = list.reduce((s, e) => s + e.restant, 0);
   const shop = (shopConfig && shopConfig.name) || 'FOREVER MG';
-  const periodLbl = _finState.period === 'week' ? '7 derniers jours' : _finState.period === 'month' ? 'Ce mois' : 'Toutes les commandes';
+  const periodLbl = _finState.period === 'week' ? '7 derniers jours' : _finState.period === 'month' ? 'Ce mois' : 'Toutes les opérations';
 
   const groups = {}; const order = [];
-  list.forEach(c => { const k = _histDayKey(c.date); if (!groups[k]) { groups[k] = { date: c.date, rows: [], eng: 0, acc: 0, res: 0 }; order.push(k); } const g = groups[k]; g.rows.push(c); g.eng += Number(c.total) || 0; g.acc += Number(c.accompte) || 0; g.res += Number(c.restant) || 0; });
+  list.forEach(e => { const k = _histDayKey(e.date); if (!groups[k]) { groups[k] = { date: e.date, rows: [], eng: 0, acc: 0, res: 0 }; order.push(k); } const g = groups[k]; g.rows.push(e); g.eng += e.total; g.acc += e.accompte; g.res += e.restant; });
   order.sort((a, b) => (parseSaleDate(groups[a].date) || 0) - (parseSaleDate(groups[b].date) || 0));
 
-  let body = `<h1>${shop} — Suivi financier des commandes</h1>
-    <div class="sub">${periodLbl} · ${list.length} commande(s) · édité le ${new Date().toLocaleDateString('fr-FR')} ${new Date().toLocaleTimeString('fr-FR')}</div>
+  let body = `<h1>${shop} — Suivi financier</h1>
+    <div class="sub">${periodLbl} · ${list.length} opération(s) (commandes + réservations) · édité le ${new Date().toLocaleDateString('fr-FR')} ${new Date().toLocaleTimeString('fr-FR')}</div>
     <div class="kpis">
       <div class="kpi"><div class="l">Total engagé</div><div class="v">${fmt(tEng)}</div></div>
       <div class="kpi"><div class="l">Acompte reçu</div><div class="v g">${fmt(tAcc)}</div></div>
@@ -10168,16 +10210,15 @@ function printFinances() {
 
   body += order.map(k => {
     const g = groups[k];
-    const rows = g.rows.map(c => {
-      const ds = _cmdDelivState(c);
-      const reste = Number(c.restant) || 0;
+    const rows = g.rows.map(e => {
+      const ds = _finDelivState(e.kind, e.obj);
       return `<tr>
-        <td>${_finSeqRef(c, seqMap)}</td>
-        <td>${c.clientName || 'Client'}</td>
+        <td>${e.ref}</td>
+        <td>${e.client}</td>
         <td>${ds.mode} · ${ds.label}</td>
-        <td class="r">${fmt(c.total)}</td>
-        <td class="r g">${fmt(c.accompte)}</td>
-        <td class="r ${reste > 0 ? 'rd' : 'muted'}">${fmt(reste)}</td>
+        <td class="r">${fmt(e.total)}</td>
+        <td class="r g">${fmt(e.accompte)}</td>
+        <td class="r ${e.restant > 0 ? 'rd' : 'muted'}">${fmt(e.restant)}</td>
       </tr>`;
     }).join('');
     return `<h2>${_histDayLabel(g.date)} — engagé ${fmt(g.eng)} · acompte ${fmt(g.acc)} · reste ${fmt(g.res)}</h2>
