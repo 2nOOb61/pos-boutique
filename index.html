@@ -672,13 +672,6 @@
       <button class="btn-logout btn-sync-desktop" onclick="openScriptSettings()" title="Configurer Apps Script" aria-label="Configurer Google Sheets" style="border-color:rgba(26,74,58,0.3);color:var(--accent)">Google Sheets</button>
       <button class="btn-logout btn-sync-desktop" onclick="openAirtableSettings()" title="Configurer Airtable" id="btnAirtable" style="border-color:rgba(232,131,74,0.4);color:var(--accent2)">Airtable</button>
       <span id="pendingBadge" title="Ventes en attente de sync" role="button" tabindex="0" aria-live="polite" style="display:none;background:var(--red);color:#fff;border-radius:20px;padding:3px 10px;font-size:12px;font-weight:700;cursor:pointer" onclick="syncPendingOfflineSales()" onkeydown="if(event.key==='Enter')syncPendingOfflineSales()"><span id="pendingCount">0</span> en attente</span>
-      <!-- Livraisons -->
-      <div class="notif-bell-wrap">
-        <button class="notif-bell-btn" id="delivBtn" onclick="toggleDeliveryDrawer()" title="Livraisons à venir" aria-label="Livraisons">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
-          <span class="notif-badge" id="delivBadge" style="display:none">0</span>
-        </button>
-      </div>
       <!-- Cloche notifications -->
       <div class="notif-bell-wrap">
         <button class="notif-bell-btn" id="notifBellBtn" onclick="toggleNotifPanel()" title="Notifications d'avancement">
@@ -713,6 +706,10 @@
         <button class="nav-btn sidebar-btn" data-roles="admin,caissier,gestionnaire,comptable,livreur" onclick="showPage('commandes',this)" aria-label="Commandes">
           <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></span>
           <span class="sidebar-label">Commandes <span id="navCmdBadge" style="display:none;background:#ED6F2C;color:#fff;border-radius:20px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:2px" aria-live="polite">0</span></span>
+        </button>
+        <button class="nav-btn sidebar-btn" data-roles="admin,caissier,commerciale,gestionnaire,comptable,livreur,chef_atelier,operateur_prod,machiniste,pao,finition" onclick="showPage('livraisons',this)" aria-label="Livraisons">
+          <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></span>
+          <span class="sidebar-label">Livraisons <span id="navDelivBadge" style="display:none;background:var(--red);color:#fff;border-radius:20px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:2px" aria-live="polite">0</span></span>
         </button>
         <button class="nav-btn sidebar-btn" data-roles="admin,gestionnaire" onclick="showPage('stock',this)" aria-label="Stock">
           <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg></span>
@@ -1446,6 +1443,23 @@
       <div id="configArticlesGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-top:16px"></div>
     </div>
 
+  </div>
+
+  <!-- ═══════════════════════════════════════════
+       PAGE LIVRAISONS
+       ═══════════════════════════════════════════ -->
+  <div class="page" id="page-livraisons" data-roles="admin,caissier,commerciale,gestionnaire,comptable,livreur,chef_atelier,operateur_prod,machiniste,pao,finition">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:18px">
+      <div>
+        <h1 style="font-size:21px;font-weight:800;color:var(--text);margin:0">Livraisons</h1>
+        <p style="font-size:13px;color:var(--muted);margin:3px 0 0">Toutes les livraisons à venir, regroupées par date d'échéance</p>
+      </div>
+      <div class="search-wrap" style="max-width:300px;flex:1;min-width:180px">
+        <span class="search-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
+        <input class="search-input" id="livSearch" placeholder="Rechercher client, article, commercial..." oninput="setDelivSearch(this.value)" aria-label="Rechercher une livraison" autocomplete="off" />
+      </div>
+    </div>
+    <div id="livraisonsContent"></div>
   </div>
 
   <!-- ═══════════════════════════════════════════
@@ -2628,21 +2642,7 @@
 
 <div id="toast-container"></div>
 
-<!-- DRAWER LIVRAISONS -->
-<div class="deliv-overlay" id="delivOverlay" onclick="closeDeliveryDrawer()"></div>
-<aside class="deliv-drawer" id="delivDrawer" aria-label="Livraisons" aria-hidden="true">
-  <div class="deliv-head">
-    <span class="deliv-head-title">
-      <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
-      Livraisons
-    </span>
-    <button class="deliv-close" onclick="closeDeliveryDrawer()" aria-label="Fermer">&times;</button>
-  </div>
-  <div class="deliv-controls" id="delivControls"></div>
-  <div class="deliv-body" id="delivBody"></div>
-</aside>
-
-<script src="./app.js?v=20260629-dedupdoss"></script>
+<script src="./app.js?v=20260629-livpage"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

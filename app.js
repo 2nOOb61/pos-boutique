@@ -121,6 +121,7 @@ const PAGE_ACCESS = {
   caisse:         ['admin','caissier','commerciale','utilisateur','gestionnaire'],
   reservations:   ['admin','caissier','commerciale','utilisateur','gestionnaire','comptable'],
   commandes:      ['admin','caissier','commerciale','gestionnaire','comptable','livreur'],
+  livraisons:     ['admin','caissier','commerciale','gestionnaire','comptable','livreur','chef_atelier','operateur_prod','machiniste','pao','finition'],
   stock:          ['admin','gestionnaire'],
   stats:          ['admin','comptable'],
   'mon-dashboard':['admin','caissier','commerciale','utilisateur','gestionnaire','comptable'],
@@ -402,6 +403,7 @@ function showPage(id, btn, bnavBtn) {
   if (id==='messagerie')   { loadMessagerie(); _autoRefreshMessagerie(); }
   if (id==='patron')       { renderControlFinance(); renderPatronDashboard(); _autoRefreshPatron(); }
   if (id==='commandes')    { _ensureDossierLinks(); renderCommandes(); _lastCmdRefresh = 0; _autoRefreshCommandes(); _loadTachesQuietly().then(renderCommandes); }
+  if (id==='livraisons')   { renderLivraisons(); if (APPS_SCRIPT_URL) Promise.all([loadCommandesFromScript(), loadReservationsFromScript()]).then(() => { updateDeliveryBadge(); renderLivraisons(); }).catch(()=>{}); }
   // Garde d'accès (rôle ou overrides personnalisés)
   if (currentUser) {
     const ep = _effectivePages(currentUser);
@@ -9662,10 +9664,12 @@ function _resolveOperatorLabel(who) {
 }
 
 // ============================================================
-// DRAWER LIVRAISONS — vue agrégée de toutes les livraisons (commandes +
-// réservations) regroupées par date (client ou production). Lecture seule.
+// PAGE LIVRAISONS (sidebar gauche) — vue agrégée commandes + réservations,
+// regroupée par date. UX : hiérarchie (hero + KPIs), scanabilité (groupes
+// repliables colorés), progressive disclosure (ligne → détail), kebab menu,
+// table responsive → cartes mobile (pcf-*), 80/20 (action « Ouvrir » directe).
 // ============================================================
-let _delivState = { groupBy: 'client', mode: 'all', scope: 'upcoming' };
+let _delivState = { groupBy: 'client', mode: 'all', scope: 'upcoming', q: '' };
 let _delivGroupCollapsed = new Set();
 let _delivItemOpen = new Set();
 
@@ -9728,28 +9732,14 @@ function _delivDateLabel(iso) {
   return { label, tag, cls, sort: d.getTime() };
 }
 
-function toggleDeliveryDrawer() {
-  const dr = document.getElementById('delivDrawer');
-  if (!dr) return;
-  if (dr.classList.contains('open')) { closeDeliveryDrawer(); return; }
-  renderDeliveryDrawer();
-  dr.classList.add('open');
-  dr.setAttribute('aria-hidden', 'false');
-  const ov = document.getElementById('delivOverlay'); if (ov) ov.classList.add('open');
-}
-function closeDeliveryDrawer() {
-  const dr = document.getElementById('delivDrawer');
-  if (dr) { dr.classList.remove('open'); dr.setAttribute('aria-hidden', 'true'); }
-  const ov = document.getElementById('delivOverlay'); if (ov) ov.classList.remove('open');
-}
-function setDelivGroupBy(v) { _delivState.groupBy = v; renderDeliveryDrawer(); }
-function setDelivMode(v)    { _delivState.mode = v;    renderDeliveryDrawer(); }
-function setDelivScope(v)   { _delivState.scope = v;   renderDeliveryDrawer(); }
-function toggleDelivGroup(gid) { if (_delivGroupCollapsed.has(gid)) _delivGroupCollapsed.delete(gid); else _delivGroupCollapsed.add(gid); renderDeliveryDrawer(); }
-function toggleDelivItem(id)   { if (_delivItemOpen.has(id)) _delivItemOpen.delete(id); else _delivItemOpen.add(id); renderDeliveryDrawer(); }
+function setDelivGroupBy(v) { _delivState.groupBy = v; renderLivraisons(); }
+function setDelivMode(v)    { _delivState.mode = v;    renderLivraisons(); }
+function setDelivScope(v)   { _delivState.scope = v;   renderLivraisons(); }
+function setDelivSearch(v)  { _delivState.q = v;       renderLivraisons(); }
+function toggleDelivGroup(gid) { if (_delivGroupCollapsed.has(gid)) _delivGroupCollapsed.delete(gid); else _delivGroupCollapsed.add(gid); renderLivraisons(); }
+function toggleDelivItem(id)   { if (_delivItemOpen.has(id)) _delivItemOpen.delete(id); else _delivItemOpen.add(id); renderLivraisons(); }
 
 async function _openDeliverySource(kind, id, dossierId) {
-  closeDeliveryDrawer();
   const ep = (typeof _effectivePages === 'function') ? _effectivePages(currentUser) : [];
   if (dossierId && ep.includes('attribution')) { try { await openAttribForDossier(dossierId); } catch(e){} return; }
   if (kind === 'commande'    && ep.includes('commandes'))    { showPage('commandes', null, null);    return; }
@@ -9757,99 +9747,181 @@ async function _openDeliverySource(kind, id, dossierId) {
   if (ep.includes('production')) showPage('production', null, null);
 }
 
-function _delivItemRow(x, showMoney) {
+// Copie un récap texte de la livraison dans le presse-papier (action secondaire kebab).
+function _livCopy(kind, id) {
+  const x = _collectDeliveries().find(d => d.kind === kind && String(d.id) === String(id));
+  if (!x) return;
+  const showMoney = _DELIV_MONEY_ROLES.includes(currentUser?.role);
+  const txt = [
+    (kind === 'reservation' ? 'Réservation' : 'Commande') + ' — ' + x.client,
+    x.contact ? 'Contact : ' + x.contact : '',
+    'Articles : ' + ((x.items || []).map(i => `${i.name} ×${i.qty || 1}`).join(', ') || '—'),
+    x.mode === 'livraison' ? 'Livraison : ' + (x.address || '—') : 'Retrait boutique',
+    _dispDate(x.dateClient) ? 'Livraison client : ' + _dispDate(x.dateClient) : '',
+    _dispDate(x.dateProd)   ? 'Production : '      + _dispDate(x.dateProd)   : '',
+    x.commercial ? 'Commercial : ' + x.commercial : '',
+    showMoney ? 'Total : ' + fmt(x.total) : ''
+  ].filter(Boolean).join('\n');
+  if (navigator.clipboard && navigator.clipboard.writeText)
+    navigator.clipboard.writeText(txt).then(() => showToast('Récap copié')).catch(() => showToast('Copie impossible', 'error'));
+  else showToast('Copie non supportée', 'error');
+}
+
+// Une ligne de livraison = ligne de table (desktop) / carte (mobile) + ligne détail repliable.
+function _livRow(x, showMoney, colspan) {
   const itemId = x.kind + '_' + x.id;
-  const open = _delivItemOpen.has(itemId);
-  const itemsFull = (x.items || []).map(i => `${i.name} ×${i.qty || 1}`).join(', ') || '—';
-  const first = (x.items || [])[0];
+  const open   = _delivItemOpen.has(itemId);
+  const first  = (x.items || [])[0];
   const shortItems = !(x.items || []).length ? '—'
-    : (x.items.length === 1 ? `${first.name} ×${first.qty || 1}` : `${first.name} +${x.items.length - 1}`);
+    : (x.items.length === 1 ? `${first.name} ×${first.qty || 1}` : `${first.name} +${x.items.length - 1} art.`);
+  const itemsFull = (x.items || []).map(i => `${i.name} ×${i.qty || 1}`).join(', ') || '—';
   const truck = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>';
   const shop  = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l1-5h16l1 5"/><path d="M4 9v11a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9"/></svg>';
   const modeBadge = x.mode === 'livraison'
     ? `<span class="deliv-mode liv">${truck} Livraison</span>`
     : `<span class="deliv-mode ret">${shop} Retrait</span>`;
-  const typeBadge = `<span class="deliv-type">${x.kind === 'reservation' ? 'Réservation' : 'Commande'}</span>`;
-  const detail = open ? `<div class="deliv-item-detail">
-      ${x.commercial ? `<div class="deliv-d-row"><span>Commercial</span><strong>${x.commercial}</strong></div>` : ''}
-      ${x.contact ? `<div class="deliv-d-row"><span>Contact</span><strong>${x.contact}</strong></div>` : ''}
-      <div class="deliv-d-row"><span>Articles</span><strong>${itemsFull}</strong></div>
-      ${x.address ? `<div class="deliv-d-row"><span>Adresse</span><strong>${x.address}</strong></div>` : ''}
-      ${showMoney ? `<div class="deliv-d-row"><span>Total</span><strong>${fmt(x.total)}</strong></div>` : ''}
-      <div class="deliv-d-actions">
-        <button class="deliv-open-btn" onclick="event.stopPropagation();_openDeliverySource('${x.kind}','${x.id}','${x.dossierId}')">Ouvrir</button>
+  const typeLabel = x.kind === 'reservation' ? 'Réservation' : 'Commande';
+  const kbid = 'liv' + itemId;
+  const dt = (l, v) => v ? `<div class="pcf-dt"><div class="pcf-dt-l">${l}</div><div class="pcf-dt-v" style="font-size:13px">${v}</div></div>` : '';
+  const chev = '<svg class="pcf-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
+  const detail = `<tr class="pcf-detail-row"><td colspan="${colspan}"><div class="pcf-detail ${open ? 'open' : ''}">
+      <div class="pcf-detail-grid">
+        ${dt('Référence', typeLabel + ' #' + x.id)}
+        ${dt('Commercial', x.commercial)}
+        ${dt('Contact', x.contact)}
+        ${dt('Articles', itemsFull)}
+        ${x.mode === 'livraison' ? dt('Adresse', x.address || '—') : dt('Mode', 'Retrait boutique')}
+        ${dt('Livraison client', _dispDate(x.dateClient))}
+        ${dt('Date production', _dispDate(x.dateProd))}
+        ${showMoney ? dt('Total', fmt(x.total)) : ''}
       </div>
-    </div>` : '';
-  return `<div class="deliv-item">
-    <div class="deliv-item-head" onclick="toggleDelivItem('${itemId}')">
-      <div class="deliv-item-main">
-        <div class="deliv-item-client">${x.client}</div>
-        <div class="deliv-item-sub">${shortItems}${x.commercial ? ' · ' + x.commercial : ''}</div>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="deliv-open-btn" onclick="event.stopPropagation();_openDeliverySource('${x.kind}','${x.id}','${x.dossierId}')">Ouvrir le dossier</button>
+        <button class="pcf-export-btn" onclick="event.stopPropagation();_livCopy('${x.kind}','${x.id}')">Copier le récap</button>
       </div>
-      <div class="deliv-item-badges">${modeBadge}${typeBadge}</div>
-    </div>
-    ${detail}
-  </div>`;
+    </div></td></tr>`;
+  return `<tr class="pcf-row ${open ? 'open' : ''}" onclick="toggleDelivItem('${itemId}')">
+    <td class="pcf-c-main" data-label="Client">
+      <div style="display:flex;align-items:center;gap:9px;min-width:0">
+        ${chev}
+        <div style="min-width:0">
+          <div class="pcf-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${x.client}</div>
+          <div style="font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em">${typeLabel}</div>
+        </div>
+      </div>
+    </td>
+    <td data-label="Articles" style="color:var(--muted)">${shortItems}</td>
+    <td data-label="Mode">${modeBadge}</td>
+    <td data-label="Commercial">${x.commercial || '—'}</td>
+    ${showMoney ? `<td class="pcf-num" data-label="Total">${fmt(x.total)}</td>` : ''}
+    <td class="pcf-c-act" onclick="event.stopPropagation()">
+      <button class="deliv-open-btn" onclick="_openDeliverySource('${x.kind}','${x.id}','${x.dossierId}')">Ouvrir</button>
+      <div class="kebab-wrap" style="display:inline-block;vertical-align:middle">
+        <button class="kebab-btn" aria-label="Plus d'actions" aria-haspopup="true" onclick="toggleKebab('${kbid}',event)"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>
+        <div class="kebab-menu" id="kb-${kbid}" role="menu">
+          <button class="kebab-item" role="menuitem" onclick="closeAllKebabs();_openDeliverySource('${x.kind}','${x.id}','${x.dossierId}')">${_kebabIcon('eye')}<span>Ouvrir le dossier</span></button>
+          <button class="kebab-item" role="menuitem" onclick="closeAllKebabs();_livCopy('${x.kind}','${x.id}')">${_kebabIcon('edit')}<span>Copier le récap</span></button>
+        </div>
+      </div>
+    </td>
+  </tr>${detail}`;
 }
 
-function renderDeliveryDrawer() {
-  const body  = document.getElementById('delivBody');
-  const ctrls = document.getElementById('delivControls');
-  if (!body) return;
+function renderLivraisons() {
+  const root = document.getElementById('livraisonsContent');
+  if (!root) return;
   const showMoney = _DELIV_MONEY_ROLES.includes(currentUser?.role);
+  const colspan = showMoney ? 6 : 5;
 
-  if (ctrls) {
-    const seg = (val, cur, label, fn) => `<button class="deliv-seg ${cur === val ? 'active' : ''}" onclick="${fn}('${val}')">${label}</button>`;
-    ctrls.innerHTML = `
-      <div class="deliv-seg-row"><span class="deliv-seg-lbl">Date</span><div class="deliv-seg-group">
-        ${seg('client', _delivState.groupBy, 'Client', 'setDelivGroupBy')}
-        ${seg('prod', _delivState.groupBy, 'Production', 'setDelivGroupBy')}
-      </div></div>
-      <div class="deliv-seg-row"><span class="deliv-seg-lbl">Type</span><div class="deliv-seg-group">
-        ${seg('all', _delivState.mode, 'Tous', 'setDelivMode')}
-        ${seg('livraison', _delivState.mode, 'Livraison', 'setDelivMode')}
-        ${seg('retrait', _delivState.mode, 'Retrait', 'setDelivMode')}
-      </div></div>
-      <div class="deliv-seg-row"><span class="deliv-seg-lbl">Statut</span><div class="deliv-seg-group">
-        ${seg('upcoming', _delivState.scope, 'En cours', 'setDelivScope')}
-        ${seg('all', _delivState.scope, 'Toutes', 'setDelivScope')}
-      </div></div>`;
-  }
-
-  let list = _collectDeliveries();
+  const all = _collectDeliveries();
+  let list = all.slice();
   if (_delivState.scope === 'upcoming') list = list.filter(x => x.status === 'pending');
   if (_delivState.mode !== 'all')       list = list.filter(x => x.mode === _delivState.mode);
+  const q = (_delivState.q || '').trim().toLowerCase();
+  if (q) list = list.filter(x => (x.client + ' ' + (x.commercial || '') + ' ' + (x.items || []).map(i => i.name).join(' ') + ' ' + (x.address || '')).toLowerCase().includes(q));
+
+  // KPIs (Information Hierarchy / 80-20) — sur les livraisons en cours datées
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  let late = 0, todayN = 0, week = 0, totalP = 0;
+  all.filter(x => x.status === 'pending').forEach(x => {
+    totalP++;
+    const iso = (_delivState.groupBy === 'prod' ? x.dateProd : x.dateClient) || x.dateClient || x.dateProd;
+    if (!iso) return;
+    const d = new Date(iso + 'T00:00:00'); if (isNaN(d.getTime())) return;
+    const diff = Math.round((d - today) / 86400000);
+    if (diff < 0) late++; else if (diff === 0) todayN++; else if (diff <= 7) week++;
+  });
+  const urgent = late + todayN;
+  const pct = totalP ? Math.round(urgent / totalP * 100) : 0;
+
+  const seg = (val, cur, label, fn) => `<button class="pcf-seg ${cur === val ? 'active' : ''}" onclick="${fn}('${val}')">${label}</button>`;
+  const truckBig = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>';
+
+  let html = `
+    <div class="pcf-hero">
+      <div>
+        <div class="pcf-hero-label">Livraisons en cours</div>
+        <div class="pcf-hero-val">${totalP}</div>
+        <div class="pcf-hero-meta">${late} en retard · ${todayN} aujourd'hui — par date ${_delivState.groupBy === 'prod' ? 'production' : 'client'}</div>
+      </div>
+      <div class="pcf-gauge">
+        <div class="pcf-gauge-top"><span>À traiter en priorité</span><strong>${urgent}</strong></div>
+        <div class="pcf-gauge-bar"><div class="pcf-gauge-fill" style="width:${pct}%"></div></div>
+        <div class="pcf-gauge-legend">
+          <span><i class="pcf-dot" style="background:#ff8f8f"></i>Retard <b>${late}</b></span>
+          <span><i class="pcf-dot" style="background:#ffd98a"></i>Aujourd'hui <b>${todayN}</b></span>
+          <span><i class="pcf-dot" style="background:#bfe3d4"></i>≤ 7 jours <b>${week}</b></span>
+        </div>
+      </div>
+    </div>
+    <div class="pcf-kpis">
+      <div class="pcf-kpi" style="--kc:#dc2626"><div class="pcf-kpi-label">En retard</div><div class="pcf-kpi-val" style="color:#dc2626">${late}</div><div class="pcf-kpi-sub">à livrer d'urgence</div></div>
+      <div class="pcf-kpi" style="--kc:#e8834a"><div class="pcf-kpi-label">Aujourd'hui</div><div class="pcf-kpi-val">${todayN}</div><div class="pcf-kpi-sub">échéance du jour</div></div>
+      <div class="pcf-kpi" style="--kc:#1a4a3a"><div class="pcf-kpi-label">Sous 7 jours</div><div class="pcf-kpi-val">${week}</div><div class="pcf-kpi-sub">semaine à venir</div></div>
+      <div class="pcf-kpi" style="--kc:#2563eb"><div class="pcf-kpi-label">Total en cours</div><div class="pcf-kpi-val">${totalP}</div><div class="pcf-kpi-sub">livraisons actives</div></div>
+    </div>
+    <div class="pcf-toolbar">
+      <div class="pcf-segs">${seg('client', _delivState.groupBy, 'Date client', 'setDelivGroupBy')}${seg('prod', _delivState.groupBy, 'Date prod', 'setDelivGroupBy')}</div>
+      <div class="pcf-segs">${seg('all', _delivState.mode, 'Tous', 'setDelivMode')}${seg('livraison', _delivState.mode, 'Livraison', 'setDelivMode')}${seg('retrait', _delivState.mode, 'Retrait', 'setDelivMode')}</div>
+      <div class="pcf-segs">${seg('upcoming', _delivState.scope, 'En cours', 'setDelivScope')}${seg('all', _delivState.scope, 'Toutes', 'setDelivScope')}</div>
+    </div>`;
 
   if (!list.length) {
-    body.innerHTML = `<div class="deliv-empty">Aucune livraison${_delivState.scope === 'upcoming' ? ' en cours' : ''}</div>`;
+    html += `<div class="pcf-empty">Aucune livraison${q ? ` pour « ${q} »` : (_delivState.scope === 'upcoming' ? ' en cours' : '')}.</div>`;
+    root.innerHTML = html;
     return;
   }
 
   const groups = {};
-  list.forEach(x => {
-    const key = (_delivState.groupBy === 'prod' ? x.dateProd : x.dateClient) || '';
-    (groups[key] = groups[key] || []).push(x);
-  });
+  list.forEach(x => { const k = (_delivState.groupBy === 'prod' ? x.dateProd : x.dateClient) || ''; (groups[k] = groups[k] || []).push(x); });
   const keys = Object.keys(groups).map(k => ({ k, ..._delivDateLabel(k) })).sort((a, b) => a.sort - b.sort);
 
-  body.innerHTML = keys.map(g => {
+  html += keys.map(g => {
     const items = groups[g.k].sort((a, b) => String(a.client).localeCompare(String(b.client)));
-    const gid = 'dg_' + (g.k || 'none');
+    const gid = 'lvg_' + (g.k || 'none');
     const collapsed = _delivGroupCollapsed.has(gid);
-    const hdr = `<button class="deliv-group-head ${g.cls}" onclick="toggleDelivGroup('${gid}')">
-      <svg class="deliv-chev ${collapsed ? '' : 'open'}" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-      <span class="deliv-group-label">${g.label}</span>
-      ${g.tag ? `<span class="deliv-group-tag ${g.cls}">${g.tag}</span>` : ''}
-      <span class="deliv-group-count">${items.length}</span>
-    </button>`;
-    const rows = collapsed ? '' : items.map(x => _delivItemRow(x, showMoney)).join('');
-    return `<div class="deliv-group">${hdr}${rows}</div>`;
+    const col = g.cls === 'late' ? '#dc2626' : g.cls === 'soon' ? '#c2410c' : '#1a4a3a';
+    const gchev = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted);transition:transform .2s;transform:rotate(${collapsed ? '-90deg' : '0deg'})"><polyline points="6 9 12 15 18 9"/></svg>`;
+    return `<div class="pcf-card">
+      <div class="pcf-card-head" style="cursor:pointer" onclick="toggleDelivGroup('${gid}')">
+        <div class="ic" style="background:${col}1a;color:${col}">${truckBig}</div>
+        <div style="flex:1;min-width:0"><div class="pcf-card-title">${g.label}</div><div class="pcf-card-sub">${items.length} livraison(s)</div></div>
+        ${g.tag ? `<span class="pcf-card-badge" style="background:${col}1a;color:${col}">${g.tag}</span>` : ''}
+        ${gchev}
+      </div>
+      ${collapsed ? '' : `<table class="pcf-table">
+        <thead><tr><th>Client</th><th>Articles</th><th>Mode</th><th>Commercial</th>${showMoney ? '<th class="pcf-num">Total</th>' : ''}<th></th></tr></thead>
+        <tbody>${items.map(x => _livRow(x, showMoney, colspan)).join('')}</tbody>
+      </table>`}
+    </div>`;
   }).join('');
+
+  root.innerHTML = html;
 }
 
-// Badge du bouton Livraisons : nb de livraisons en cours dues sous 1 jour (retard/auj./demain).
+// Badge nav Livraisons : nb de livraisons en cours dues sous 1 jour (retard/auj./demain).
 function updateDeliveryBadge() {
-  const badge = document.getElementById('delivBadge');
+  const badge = document.getElementById('navDelivBadge');
   if (!badge) return;
   const today = new Date(); today.setHours(0,0,0,0);
   let urgent = 0;
