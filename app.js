@@ -10150,7 +10150,10 @@ function renderFinances() {
     <div class="pcf-toolbar">
       <div class="pcf-segs">${seg('all', _finState.period, 'Tout', 'setFinPeriod')}${seg('month', _finState.period, 'Ce mois', 'setFinPeriod')}${seg('week', _finState.period, '7 jours', 'setFinPeriod')}</div>
       <div class="pcf-segs">${seg('all', _finState.pay, 'Toutes', 'setFinPay')}${seg('unpaid', _finState.pay, 'À solder', 'setFinPay')}${seg('paid', _finState.pay, 'Soldées', 'setFinPay')}</div>
-      <div class="pcf-tools"><button class="pcf-export-btn" onclick="printFinances()"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>Imprimer</button></div>
+      <div class="pcf-tools">
+        <button class="pcf-export-btn" onclick="printFicheSortie()"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Fiche de sortie</button>
+        <button class="pcf-export-btn" onclick="printFinances()"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>Imprimer</button>
+      </div>
     </div>
     <div class="pcf-hero">
       <div>
@@ -10249,6 +10252,73 @@ function printFinances() {
     <div class="foot">Document interne — suivi manuel des encaissements</div>`;
 
   _pcfOpenReportWindow(body, 'Suivi financier');
+}
+
+// Impression « FICHE DE SORTIE » (registre manuel paiements/livraison, format paysage A4).
+// Pré-remplit ce qu'on connaît (N° séquentiel, Client, Total, Avance date+mode+montant) ;
+// laisse vides les colonnes à remplir à la main (Reste à payer par mode, Livreur, Date de
+// sortie, Remarque, Donneur, Récept.).
+function printFicheSortie() {
+  const { list } = _finBuild();
+  if (!list.length) { showToast('Aucune opération à imprimer', 'error'); return; }
+  const shop = (shopConfig && shopConfig.name) || 'FOREVER MG';
+  const periodLbl = _finState.period === 'week' ? '7 derniers jours' : _finState.period === 'month' ? 'Ce mois' : 'Toutes les opérations';
+
+  const rows = list.map((e, i) => {
+    const m  = e.obj.depositMethod === 'mobile' ? 'mobile' : e.obj.depositMethod === 'cheque' ? 'cheque' : 'cash';
+    const av = e.accompte;
+    const dateAv = av > 0 ? (parseSaleDate(e.date) || new Date()).toLocaleDateString('fr-FR') : '';
+    return `<tr>
+      <td class="c b">${i + 1}</td>
+      <td>${e.client}<div class="ref">${e.ref}</div></td>
+      <td class="r b">${fmt(e.total)}</td>
+      <td class="c">${dateAv}</td>
+      <td class="r">${m === 'cash'   && av ? fmt(av) : ''}</td>
+      <td class="r">${m === 'mobile' && av ? fmt(av) : ''}</td>
+      <td class="r">${m === 'cheque' && av ? fmt(av) : ''}</td>
+      <td></td><td></td><td></td>
+      <td></td><td></td><td></td><td></td><td></td>
+    </tr>`;
+  }).join('');
+
+  const w = window.open('', '_blank', 'width=1200,height=900');
+  if (!w) { alert("Impression bloquée : autorisez les fenêtres pop-up pour ce site, puis réessayez."); return; }
+  setTimeout(() => {
+    w.document.write(`<html><head><meta charset="utf-8"><title>Fiche de sortie</title><style>
+      @page{size:A4 landscape;margin:8mm}
+      *{box-sizing:border-box}
+      body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;font-size:10px}
+      h1{font-size:15px;margin:0}
+      .sub{color:#555;font-size:10px;margin:2px 0 8px}
+      table{width:100%;border-collapse:collapse;table-layout:fixed}
+      th,td{border:1px solid #555;padding:3px 4px;vertical-align:top;word-wrap:break-word}
+      th{background:#e9e9e9;font-size:8.5px;text-transform:uppercase;text-align:center}
+      td{height:30px}
+      .c{text-align:center}.r{text-align:right;white-space:nowrap}.b{font-weight:bold}
+      .ref{font-size:8px;color:#777;margin-top:1px}
+      @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+    </style></head><body onload="window.print()">
+      <h1>${shop} — FICHE DE SORTIE</h1>
+      <div class="sub">${periodLbl} · ${list.length} opération(s) · édité le ${new Date().toLocaleDateString('fr-FR')} ${new Date().toLocaleTimeString('fr-FR')}</div>
+      <table>
+        <colgroup><col style="width:3%"><col style="width:13%"><col style="width:8%"><col style="width:7%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:8%"><col style="width:7%"><col style="width:8%"><col style="width:6%"><col style="width:6%"></colgroup>
+        <thead>
+          <tr>
+            <th rowspan="2">N°</th><th rowspan="2">Client</th><th rowspan="2">Total</th>
+            <th colspan="4">Avance</th>
+            <th colspan="3">Reste à payer</th>
+            <th rowspan="2">Livreur</th><th rowspan="2">Date de sortie</th><th rowspan="2">Remarque</th><th rowspan="2">Donneur</th><th rowspan="2">Récept.</th>
+          </tr>
+          <tr>
+            <th>Date</th><th>Espèce</th><th>Mobile M</th><th>Chèque</th>
+            <th>Espèce</th><th>Mobile M</th><th>Chèque</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </body></html>`);
+    w.document.close();
+  }, 200);
 }
 
 function _prodDeadlineChip(ymd) {
