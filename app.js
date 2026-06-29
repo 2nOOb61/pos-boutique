@@ -121,7 +121,7 @@ const PAGE_ACCESS = {
   caisse:         ['admin','caissier','commerciale','utilisateur','gestionnaire'],
   reservations:   ['admin','caissier','commerciale','utilisateur','gestionnaire','comptable'],
   commandes:      ['admin','caissier','commerciale','gestionnaire','comptable','livreur'],
-  livraisons:     ['admin','caissier','commerciale','gestionnaire','comptable','livreur','chef_atelier','operateur_prod','machiniste','pao','finition'],
+  livraisons:     ['admin','caissier','commerciale','gestionnaire','comptable','livreur','chef_atelier','operateur_prod','machiniste','finition'],
   stock:          ['admin','gestionnaire'],
   stats:          ['admin','comptable'],
   finances:       ['admin','comptable','gestionnaire'],
