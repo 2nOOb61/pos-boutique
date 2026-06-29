@@ -8247,7 +8247,8 @@ function _renderDossierCardGrid(list) {
     // Date livraison
     let dateHtml = '';
     if (d.dateLivraison) {
-      const dlDate = new Date(d.dateLivraison.split('/').reverse().join('-'));
+      const _iso   = _toIsoDate(d.dateLivraison);
+      const dlDate = new Date(_iso + 'T00:00:00');
       const today  = new Date(); today.setHours(0,0,0,0);
       const diff   = Math.round((dlDate - today) / 86400000);
       const isLate = diff < 0;
@@ -8255,9 +8256,10 @@ function _renderDossierCardGrid(list) {
         ? `${Math.abs(diff)}j de retard`
         : diff === 0 ? 'Aujourd\'hui !'
         : `${diff}j restants`;
+      const _disp  = isNaN(dlDate.getTime()) ? d.dateLivraison : dlDate.toLocaleDateString('fr-FR');
       dateHtml = `<span class="dossier-card-v2__date ${isLate?'dossier-card-v2__date--late':''}">
         <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-        ${d.dateLivraison} · ${txt}
+        ${_disp} · ${txt}
       </span>`;
     } else {
       dateHtml = `<span class="dossier-card-v2__date">
@@ -8478,6 +8480,11 @@ function renderAttrPanel(tachesD, commentsD = []) {
         <span style="font-size:12px;font-weight:700;color:#1d4ed8">BAT : ${new Date(d.dateBAT+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'2-digit',month:'short'})}</span>
         ${(()=>{const dd=_daysUntil(d.dateBAT);return dd==null?'':`<span style="font-size:11px;font-weight:800;color:${dd<0?'#dc2626':dd<=2?'#e8834a':'#1a4a3a'}">${dd<0?Math.abs(dd)+'j de retard':dd===0?"aujourd'hui":dd===1?'demain':dd+'j restants'}</span>`;})()}
       </div>` : ''}
+      ${(() => { const _ldc = _toIsoDate(d.dateLivraison); return _ldc ? `<div style="margin-top:9px;margin-right:6px;display:inline-flex;align-items:center;gap:7px;padding:6px 11px;border-radius:9px;background:#e8f4f0;border:1px solid rgba(26,74,58,.25)">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#1a4a3a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        <span style="font-size:12px;font-weight:700;color:#1a4a3a">Livraison client : ${new Date(_ldc+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'2-digit',month:'short'})}</span>
+        ${(()=>{const dd=_daysUntil(_ldc);return dd==null?'':`<span style="font-size:11px;font-weight:800;color:${dd<0?'#dc2626':dd<=2?'#e8834a':'#1a4a3a'}">${dd<0?Math.abs(dd)+'j de retard':dd===0?"aujourd'hui":dd===1?'demain':dd+'j restants'}</span>`;})()}
+      </div>` : ''; })()}
       ${d.dateLivraisonProd ? `<div style="margin-top:9px;display:inline-flex;align-items:center;gap:7px;padding:6px 11px;border-radius:9px;background:#fff0e6;border:1px solid rgba(232,131,74,.3)">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#e8834a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
         <span style="font-size:12px;font-weight:700;color:#c2410c">Livraison production : ${new Date(d.dateLivraisonProd+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'2-digit',month:'short'})}</span>
@@ -9530,10 +9537,22 @@ function _cleanDate(v) {
 // ── Échéances de livraison PRODUCTION (vue partagée — visible par TOUS les opérateurs) ──
 function _daysUntil(ymd) {
   if (!ymd) return null;
-  const d = new Date(ymd + 'T00:00:00');
+  const d = new Date(_toIsoDate(ymd) + 'T00:00:00');
   if (isNaN(d.getTime())) return null;
   const today = new Date(); today.setHours(0,0,0,0);
   return Math.round((d - today) / 86400000);
+}
+
+// Normalise une date vers le format ISO 'AAAA-MM-JJ' (laisse l'ISO intact,
+// convertit 'JJ/MM/AAAA' → ISO). Les dates de livraison peuvent arriver dans
+// les deux formats selon la source (commande/réservation = ISO, dossiers GAS = JJ/MM/AAAA).
+function _toIsoDate(v) {
+  if (!v) return '';
+  const s = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  return s;
 }
 
 function _prodDeadlineChip(ymd) {
