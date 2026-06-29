@@ -792,6 +792,22 @@ function _parseAttachments_(cell) {
   catch (e) { return []; }
 }
 
+// Formate une cellule de date en ISO 'yyyy-MM-dd'. Les cellules saisies via
+// <input type="date"> ('2026-06-28') sont auto-converties en objets Date par Sheets
+// (à minuit dans le fuseau du classeur) ; un simple String() renverrait une chaîne
+// longue type "Sun Jun 28 2026 21:00:00 GMT+0000" — impossible à reparser côté front,
+// et décalée d'un jour si on la lit en UTC. On formate donc avec le fuseau du classeur
+// (round-trip exact). Si la cellule est déjà une chaîne (anciennes lignes texte), on la
+// renvoie telle quelle.
+function _fmtDateCell_(v) {
+  if (v === '' || v === null || v === undefined) return '';
+  if (Object.prototype.toString.call(v) === '[object Date]') {
+    if (isNaN(v.getTime())) return '';
+    return Utilities.formatDate(v, getSS().getSpreadsheetTimeZone(), 'yyyy-MM-dd');
+  }
+  return String(v);
+}
+
 function handleGetCommandes() {
   const sh = getSS().getSheetByName(SHEET_COMMANDES);
   if (!sh) return { ok:true, commandes:[] };
@@ -814,15 +830,15 @@ function handleGetCommandes() {
         clientName: String(r[3]||''), clientContact: String(r[4]||''),
         items: [],
         deliveryMode: String(r[6]||'retrait'), adresseLivraison: String(r[7]||''),
-        fraisLivraison: Number(r[8])||0, dateLivraison: String(r[9]||''),
+        fraisLivraison: Number(r[8])||0, dateLivraison: _fmtDateCell_(r[9]),
         subtotal: Number(r[10])||0, remise: Number(r[11])||0,
         total: Number(r[12])||0, accompte: Number(r[13])||0, restant: Number(r[14])||0,
         depositMethod: String(r[15]||''), depositProvider: String(r[16]||''), depositRef: String(r[17]||''),
         notes: String(r[18]||''),
         status, statut: rawStatut,
         dateFinalisation: r[20] || null, saleId: r[21] || null,
-        dateLivraisonProd: String(r[22]||''),
-        dateBAT: String(r[23]||''),
+        dateLivraisonProd: _fmtDateCell_(r[22]),
+        dateBAT: _fmtDateCell_(r[23]),
         attachments: _parseAttachments_(r[24]),
         photos: []
       };

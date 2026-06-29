@@ -5338,9 +5338,9 @@ function renderCommandes() {
       const deliveryHtml = (c.adresseLivraison || c.dateLivraison || c.dateBAT || c.dateLivraisonProd) ? `
         <div class="cmd-card-delivery">
           ${c.adresseLivraison ? ` ${c.adresseLivraison}` : ''}
-          ${c.dateLivraison ? ` &nbsp; Client : <strong>${new Date(c.dateLivraison+'T00:00:00').toLocaleDateString('fr-FR')}</strong>` : ''}
-          ${c.dateBAT ? ` &nbsp; <span style="color:#2563eb">BAT : <strong>${new Date(c.dateBAT+'T00:00:00').toLocaleDateString('fr-FR')}</strong></span>` : ''}
-          ${c.dateLivraisonProd ? ` &nbsp; <span style="color:#e8834a">Production : <strong>${new Date(c.dateLivraisonProd+'T00:00:00').toLocaleDateString('fr-FR')}</strong></span>` : ''}
+          ${_dispDate(c.dateLivraison) ? ` &nbsp; Client : <strong>${_dispDate(c.dateLivraison)}</strong>` : ''}
+          ${_dispDate(c.dateBAT) ? ` &nbsp; <span style="color:#2563eb">BAT : <strong>${_dispDate(c.dateBAT)}</strong></span>` : ''}
+          ${_dispDate(c.dateLivraisonProd) ? ` &nbsp; <span style="color:#e8834a">Production : <strong>${_dispDate(c.dateLivraisonProd)}</strong></span>` : ''}
         </div>` : '';
 
       const notesHtml = c.notes ? `<div class="cmd-notes"> ${c.notes}</div>` : '';
@@ -8493,21 +8493,21 @@ function renderAttrPanel(tachesD, commentsD = []) {
         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="#1a4a3a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         <span style="font-size:11px;color:var(--color-text-secondary)">Commercial : <strong style="color:#1a4a3a;font-weight:700">${_commercial}</strong></span>
       </div>` : ''}
-      ${d.dateBAT ? `<div style="margin-top:9px;margin-right:6px;display:inline-flex;align-items:center;gap:7px;padding:6px 11px;border-radius:9px;background:#eaf1fb;border:1px solid rgba(37,99,235,.3)">
+      ${(() => { const _bat = _toIsoDate(d.dateBAT); return _bat ? `<div style="margin-top:9px;margin-right:6px;display:inline-flex;align-items:center;gap:7px;padding:6px 11px;border-radius:9px;background:#eaf1fb;border:1px solid rgba(37,99,235,.3)">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg>
-        <span style="font-size:12px;font-weight:700;color:#1d4ed8">BAT : ${new Date(d.dateBAT+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'2-digit',month:'short'})}</span>
-        ${(()=>{const dd=_daysUntil(d.dateBAT);return dd==null?'':`<span style="font-size:11px;font-weight:800;color:${dd<0?'#dc2626':dd<=2?'#e8834a':'#1a4a3a'}">${dd<0?Math.abs(dd)+'j de retard':dd===0?"aujourd'hui":dd===1?'demain':dd+'j restants'}</span>`;})()}
-      </div>` : ''}
+        <span style="font-size:12px;font-weight:700;color:#1d4ed8">BAT : ${new Date(_bat+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'2-digit',month:'short'})}</span>
+        ${(()=>{const dd=_daysUntil(_bat);return dd==null?'':`<span style="font-size:11px;font-weight:800;color:${dd<0?'#dc2626':dd<=2?'#e8834a':'#1a4a3a'}">${dd<0?Math.abs(dd)+'j de retard':dd===0?"aujourd'hui":dd===1?'demain':dd+'j restants'}</span>`;})()}
+      </div>` : ''; })()}
       ${(() => { const _ldc = _toIsoDate(d.dateLivraison); return _ldc ? `<div style="margin-top:9px;margin-right:6px;display:inline-flex;align-items:center;gap:7px;padding:6px 11px;border-radius:9px;background:#e8f4f0;border:1px solid rgba(26,74,58,.25)">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#1a4a3a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
         <span style="font-size:12px;font-weight:700;color:#1a4a3a">Livraison client : ${new Date(_ldc+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'2-digit',month:'short'})}</span>
         ${(()=>{const dd=_daysUntil(_ldc);return dd==null?'':`<span style="font-size:11px;font-weight:800;color:${dd<0?'#dc2626':dd<=2?'#e8834a':'#1a4a3a'}">${dd<0?Math.abs(dd)+'j de retard':dd===0?"aujourd'hui":dd===1?'demain':dd+'j restants'}</span>`;})()}
       </div>` : ''; })()}
-      ${d.dateLivraisonProd ? `<div style="margin-top:9px;display:inline-flex;align-items:center;gap:7px;padding:6px 11px;border-radius:9px;background:#fff0e6;border:1px solid rgba(232,131,74,.3)">
+      ${(() => { const _prd = _toIsoDate(d.dateLivraisonProd); return _prd ? `<div style="margin-top:9px;display:inline-flex;align-items:center;gap:7px;padding:6px 11px;border-radius:9px;background:#fff0e6;border:1px solid rgba(232,131,74,.3)">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#e8834a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
-        <span style="font-size:12px;font-weight:700;color:#c2410c">Livraison production : ${new Date(d.dateLivraisonProd+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'2-digit',month:'short'})}</span>
-        ${(()=>{const dd=_daysUntil(d.dateLivraisonProd);return dd==null?'':`<span style="font-size:11px;font-weight:800;color:${dd<0?'#dc2626':dd<=2?'#e8834a':'#1a4a3a'}">${dd<0?Math.abs(dd)+'j de retard':dd===0?"aujourd'hui":dd===1?'demain':dd+'j restants'}</span>`;})()}
-      </div>` : ''}
+        <span style="font-size:12px;font-weight:700;color:#c2410c">Livraison production : ${new Date(_prd+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'2-digit',month:'short'})}</span>
+        ${(()=>{const dd=_daysUntil(_prd);return dd==null?'':`<span style="font-size:11px;font-weight:800;color:${dd<0?'#dc2626':dd<=2?'#e8834a':'#1a4a3a'}">${dd<0?Math.abs(dd)+'j de retard':dd===0?"aujourd'hui":dd===1?'demain':dd+'j restants'}</span>`;})()}
+      </div>` : ''; })()}
       <div style="margin-top:10px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
           <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted)">Progression</span>
@@ -9570,7 +9570,19 @@ function _toIsoDate(v) {
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
   const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
   if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  // Chaîne Date JS héritée du cache (ex. "Sun Jun 28 2026 21:00:00 GMT+0000") :
+  // non convertible côté front sans le fuseau d'origine (risque de décalage d'un jour).
+  // Le backend renvoie désormais de l'ISO → on masque plutôt que d'afficher "Invalid Date".
+  if (/GMT|[A-Za-z]{3}\s+[A-Za-z]{3}\s+\d/.test(s)) return '';
   return s;
+}
+
+// Affiche une date (quelle que soit sa source) au format fr-FR, ou '' si illisible.
+function _dispDate(v) {
+  const iso = _toIsoDate(v);
+  if (!iso) return '';
+  const d = new Date(iso + 'T00:00:00');
+  return isNaN(d.getTime()) ? '' : d.toLocaleDateString('fr-FR');
 }
 
 // Résout le nom affichable d'un opérateur/commercial à partir d'un identifiant
