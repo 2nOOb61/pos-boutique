@@ -6150,7 +6150,8 @@ function _createDossierFromSource(type, source) {
   const quantite = (source.items||[]).reduce((s,i) => s + (i.qty||1), 0);
   const dossier  = {
     id: dossierId,
-    numeroDossier: `${prefix}-${String(source.id).padStart(3,'0')}`,
+    // Référence LISIBLE dérivée de la date (= n° de facture du ticket), pas de l'uid interne.
+    numeroDossier: `${prefix}-${_factureNum(source)}`,
     client:      source.clientName,
     produit,
     quantite,
@@ -6198,6 +6199,11 @@ function _syncDossierDates() {
     if (prod) d.dateLivraisonProd = prod;
     if (bat)  d.dateBAT           = bat;
     if (src.caissier) d.caissier  = src.caissier; // commercial créateur (pour l'affichage)
+    // Référence lisible (date/heure) au lieu de l'uid interne — normalise aussi les
+    // anciens dossiers (CMD-<uid>) chargés depuis GAS. N'altère QUE l'affichage.
+    const prefix = d.sourceType === 'reservation' ? 'RES' : 'CMD';
+    const ref = `${prefix}-${_factureNum(src)}`;
+    if (d.numeroDossier !== ref) d.numeroDossier = ref;
   });
 }
 
@@ -9681,7 +9687,7 @@ function _collectDeliveries() {
   (Array.isArray(commandes) ? commandes : []).forEach(c => {
     if (!c || c.status === 'cancelled') return;
     out.push({
-      kind: 'commande', id: c.id,
+      kind: 'commande', id: c.id, date: c.date,
       client:     c.clientName || c.client || 'Client',
       contact:    c.clientContact || '',
       commercial: _resolveOperatorLabel(c.caissier || ''),
@@ -9698,7 +9704,7 @@ function _collectDeliveries() {
   (Array.isArray(reservations) ? reservations : []).forEach(r => {
     if (!r || r.status === 'cancelled') return;
     out.push({
-      kind: 'reservation', id: r.id,
+      kind: 'reservation', id: r.id, date: r.date,
       client:     r.clientName || 'Client',
       contact:    r.clientContact || '',
       commercial: _resolveOperatorLabel(r.caissier || ''),
@@ -9786,7 +9792,7 @@ function _livRow(x, showMoney, colspan) {
   const chev = '<svg class="pcf-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
   const detail = `<tr class="pcf-detail-row"><td colspan="${colspan}"><div class="pcf-detail ${open ? 'open' : ''}">
       <div class="pcf-detail-grid">
-        ${dt('Référence', typeLabel + ' #' + x.id)}
+        ${dt('Référence', (x.kind === 'reservation' ? 'RES' : 'CMD') + '-' + _factureNum(x))}
         ${dt('Commercial', x.commercial)}
         ${dt('Contact', x.contact)}
         ${dt('Articles', itemsFull)}
