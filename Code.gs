@@ -818,7 +818,11 @@ function _fmtDateCell_(v) {
     if (isNaN(v.getTime())) return '';
     return Utilities.formatDate(v, getSS().getSpreadsheetTimeZone(), 'yyyy-MM-dd');
   }
-  return String(v);
+  var s = String(v).trim();
+  // Anciennes cellules texte 'dd/MM/yyyy' → ISO (sortie uniforme yyyy-MM-dd)
+  var m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2);
+  return s;
 }
 
 // Variante affichage français 'dd/MM/yyyy' (mêmes garanties : fuseau du classeur,
