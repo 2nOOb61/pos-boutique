@@ -6130,12 +6130,14 @@ function renderRythmeConfig() {
 // ============================================================
 
 function _createDossierFromSource(type, source) {
-  // ID stable unique par session (inclut la date → évite collision entre navigateurs)
   const dossierId = _stableDossierId(type, source);
   const oldId     = `D_${type.toUpperCase()}_${source.id}`; // ancien format (rétrocompat)
-  const existing  = dossiers.find(d => d.id === dossierId || d.id === oldId);
+  const wantKey   = type + ':' + String(source.id);
+  // Réutiliser TOUT dossier existant représentant la même source (id canonique, ancien
+  // format, OU id basé sur la date hérité via _dossierSourceKey) → empêche les doublons.
+  const existing  = dossiers.find(d =>
+    d.id === dossierId || d.id === oldId || _dossierSourceKey(d) === wantKey);
   if (existing) {
-    if (existing.id === oldId) existing.id = dossierId; // migration vers le nouveau format
     // Restaurer sourceType/sourceId absents sur les dossiers chargés depuis GAS
     if (!existing.sourceType) existing.sourceType = type;
     if (existing.sourceId === undefined || existing.sourceId === null) existing.sourceId = source.id;
@@ -6197,29 +6199,77 @@ function _syncDossierDates() {
   });
 }
 
-// Génère un dossierId stable et unique basé sur l'ID + date de création.
-// Déterministe : se recalcule identiquement depuis les données GAS après restauration.
-// Unique : deux réservations avec le même ID mais des dates différentes ont des dossierId distincts.
+// Génère un dossierId stable basé UNIQUEMENT sur l'id de la source.
+// ⚠️ Ne PLUS inclure la date : `source.date` perd ses millisecondes après un aller-retour
+// GAS (le Sheet stocke à la seconde) → `getTime()` changeait → 2 ids pour la même commande
+// → DOUBLONS de dossiers. Les ids source sont désormais uniques (`_genUid`), donc l'id seul
+// suffit. Voir _dossierSourceKey / _dedupDossiers pour la réconciliation des anciens doublons.
 function _stableDossierId(type, source) {
   const prefix = type === 'commande' ? 'CMD' : 'RES';
-  const datePart = source.date
-    ? String(new Date(source.date).getTime()).slice(-9)
-    : String(source.id).padStart(9, '0');
-  return `D_${prefix}_${source.id}_${datePart}`;
+  return `D_${prefix}_${source.id}`;
+}
+
+// Clé d'identité de la SOURCE d'un dossier (commande/réservation) — quelle que soit la
+// provenance/format de son id. Permet de détecter qu'un dossier représente la même
+// commande qu'un autre (id canonique, ancien format, ou id basé sur la date hérité).
+function _dossierSourceKey(d) {
+  if (!d) return null;
+  if (d.sourceType && d.sourceId !== undefined && d.sourceId !== null && d.sourceId !== '')
+    return d.sourceType + ':' + String(d.sourceId);
+  const sv = String(d.sourceVente || '');
+  let m = sv.match(/Commande\s*#?\s*(\S+)/i);   if (m) return 'commande:' + m[1];
+  m = sv.match(/R[ée]servation\s*#?\s*(\S+)/i); if (m) return 'reservation:' + m[1];
+  return null;
+}
+
+// Fusionne les dossiers en double (même source) déjà présents en mémoire (typiquement
+// hérités de GAS avec des ids basés sur la date). Conserve le plus avancé et re-pointe
+// ses tâches vers le dossier conservé pour ne RIEN perdre.
+function _dedupDossiers() {
+  if (!Array.isArray(dossiers) || dossiers.length < 2) return;
+  const byKey = new Map();
+  const remap = {};
+  const out = [];
+  for (const d of dossiers) {
+    if (!d) continue;
+    const key = _dossierSourceKey(d) || ('id:' + String(d.id));
+    const kept = byKey.get(key);
+    if (!kept) { byKey.set(key, d); out.push(d); continue; }
+    // doublon de la même source → garder le plus avancé, re-mapper l'autre
+    if ((Number(d.progression) || 0) > (Number(kept.progression) || 0)) {
+      kept.progression = d.progression; kept.statut = d.statut;
+    }
+    if (String(d.id) !== String(kept.id)) remap[d.id] = kept.id;
+  }
+  if (Object.keys(remap).length) {
+    if (Array.isArray(taches)) taches.forEach(t => { if (t && remap[t.dossierId]) t.dossierId = remap[t.dossierId]; });
+    dossiers = out;
+  }
 }
 
 function _ensureDossierLinks() {
   let needsSave = false;
   commandes.forEach(c => {
-    const stable = _stableDossierId('commande', c);
-    if (c.dossierId !== stable) { c.dossierId = stable; needsSave = true; }
-    if (c.status === 'pending') _createDossierFromSource('commande', c);
+    if (c.status === 'pending') {
+      // Pointer la commande vers l'id RÉEL du dossier (réutilisé si déjà présent) — évite
+      // de référencer un id recalculé alors qu'un dossier d'un autre format existe déjà.
+      const dos = _createDossierFromSource('commande', c);
+      if (dos && c.dossierId !== dos.id) { c.dossierId = dos.id; needsSave = true; }
+    } else {
+      const stable = _stableDossierId('commande', c);
+      if (c.dossierId !== stable) { c.dossierId = stable; needsSave = true; }
+    }
   });
   reservations.forEach(r => {
-    const stable = _stableDossierId('reservation', r);
-    if (r.dossierId !== stable) { r.dossierId = stable; needsSave = true; }
-    if (r.status === 'pending') _createDossierFromSource('reservation', r);
+    if (r.status === 'pending') {
+      const dos = _createDossierFromSource('reservation', r);
+      if (dos && r.dossierId !== dos.id) { r.dossierId = dos.id; needsSave = true; }
+    } else {
+      const stable = _stableDossierId('reservation', r);
+      if (r.dossierId !== stable) { r.dossierId = stable; needsSave = true; }
+    }
   });
+  _dedupDossiers(); // fusionne les doublons hérités (mêmes source) + re-pointe les tâches
   if (needsSave) saveData(); // persiste les nouveaux dossierId migrés
 }
 
@@ -6282,18 +6332,19 @@ async function resetTachesDossier(dossierId) {
 }
 
 function _purgeOrphanTaches() {
-  // Accepter les deux formats d'ID (ancien + nouveau stable) pour rétrocompatibilité
-  const validIds = new Set([
-    ...reservations.filter(r => r.status === 'pending').flatMap(r => [
-      `D_RESERVATION_${r.id}`,
-      _stableDossierId('reservation', r)
-    ]),
-    ...commandes.filter(c => c.status === 'pending').flatMap(c => [
-      `D_COMMANDE_${c.id}`,
-      _stableDossierId('commande', c)
-    ]),
-    'LIBRE'
-  ]);
+  // Base : les ids des dossiers RÉELLEMENT présents (couvre tous les formats hérités,
+  // y compris les ids basés sur la date) → ne JAMAIS purger une tâche d'un dossier existant.
+  const validIds = new Set(Array.isArray(dossiers) ? dossiers.map(d => d.id) : []);
+  validIds.add('LIBRE');
+  // + recomputés depuis les sources (résilience si les dossiers GAS n'ont pas chargé)
+  reservations.filter(r => r.status === 'pending').forEach(r => {
+    validIds.add(`D_RESERVATION_${r.id}`);
+    validIds.add(_stableDossierId('reservation', r));
+  });
+  commandes.filter(c => c.status === 'pending').forEach(c => {
+    validIds.add(`D_COMMANDE_${c.id}`);
+    validIds.add(_stableDossierId('commande', c));
+  });
   const before = taches.length;
   taches = taches.filter(t => t.dossierId === 'LIBRE' || validIds.has(t.dossierId));
   if (taches.length < before) {
