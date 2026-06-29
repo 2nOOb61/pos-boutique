@@ -703,7 +703,13 @@ function selectProvider(p) {
   const map = {'MVola':'provMvola','Airtel Money':'provAirtel','Orange Money':'provOrange','Bmoov':'provBmoov'};
   document.getElementById(map[p]).classList.add('active');
 }
+let _confirmingPayment = false;
 function confirmPayment() {
+  // P0 : anti double-soumission (double-clic / Entrée répétée) — empêche la vente fantôme/doublée
+  if (_confirmingPayment) return;
+  if (!Array.isArray(cart) || cart.length === 0) { showToast('Le panier est vide.', 'error'); return; }
+  _confirmingPayment = true;
+  try {
   const net = getNetTotal();
   const rem = getRemise();
   const acc = getAccompte();
@@ -736,9 +742,11 @@ function confirmPayment() {
     // provider = banque, ref = numéro du chèque (réutilise le schéma de vente)
     recordSale(totalWithDelivery, 'cheque', due, 0, bank, number, rem, acc, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate, clientType, clientCompany);
   } else {
-    const ref = document.getElementById('mobileRef').value.trim();
+    let ref = document.getElementById('mobileRef').value.trim();
+    if (!ref) ref = 'INT-' + Date.now(); // P1 : référence interne si non saisie (réconciliation)
     recordSale(totalWithDelivery, 'mobile', due, 0, selectedProvider, ref, rem, acc, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate, clientType, clientCompany);
   }
+  } finally { _confirmingPayment = false; }
 }
 function recordSale(total, method, given, change, provider, ref, remise=0, accompte=0, clientName='', clientContact='', deliveryMode='retrait', deliveryAddress='', deliveryFee=0, deliveryDate='', clientType='particulier', clientCompany='') {
   // Vérification stock local avant de valider

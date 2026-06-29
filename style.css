@@ -268,7 +268,7 @@ h1, h2, h3,
     box-shadow:var(--shadow);
   }
   .filter-input:focus { border-color:var(--accent); }
-  .stock-table-wrap { background:var(--surface); border:1px solid var(--border); border-radius:18px; overflow:hidden; box-shadow:var(--shadow); }
+  .stock-table-wrap { background:var(--surface); border:1px solid var(--border); border-radius:18px; overflow:hidden; overflow-x:auto; box-shadow:var(--shadow); }
   table { width:100%; border-collapse:collapse; }
   th { padding:14px 16px; text-align:left; font-size:12px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.5px; border-bottom:1px solid var(--border); background:var(--surface2); }
   td { padding:13px 16px; font-size:14px; border-bottom:1px solid var(--border); }
@@ -322,13 +322,13 @@ h1, h2, h3,
   .bar-item { flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; height:100%; justify-content:flex-end; }
   .bar { width:100%; border-radius:6px 6px 0 0; background:var(--accent); min-height:4px; transition:.6s; }
   .bar-label { font-size:10px; color:var(--muted); }
-  .history-table-wrap { background:var(--surface); border:1px solid var(--border); border-radius:18px; overflow:hidden; box-shadow:var(--shadow); }
+  .history-table-wrap { background:var(--surface); border:1px solid var(--border); border-radius:18px; overflow:hidden; overflow-x:auto; box-shadow:var(--shadow); }
 
   /* ===== MEILLEURES VENTES ===== */
   .bs-period-bar { display:flex; background:var(--surface2); border-radius:12px; padding:4px; border:1px solid var(--border); margin-bottom:14px; }
   .bs-tab { flex:1; padding:9px 6px; border:none; background:none; color:var(--muted); cursor:pointer; font-size:13px; font-weight:600; border-radius:9px; transition:.2s; }
   .bs-tab.active { background:var(--surface); color:var(--accent); box-shadow:0 2px 8px rgba(0,0,0,.18); }
-  .bs-table-wrap { background:var(--surface); border:1px solid var(--border); border-radius:16px; overflow:hidden; box-shadow:var(--shadow); }
+  .bs-table-wrap { background:var(--surface); border:1px solid var(--border); border-radius:16px; overflow:hidden; overflow-x:auto; box-shadow:var(--shadow); }
   .bs-table-wrap table { width:100%; border-collapse:collapse; }
   .bs-table-wrap table th { background:var(--surface2); color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.5px; padding:10px 12px; text-align:left; font-weight:600; }
   .bs-table-wrap table td { padding:10px 12px; border-top:1px solid var(--border); font-size:13px; vertical-align:middle; }
