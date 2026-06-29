@@ -719,6 +719,10 @@
           <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span>
           <span class="sidebar-label">Statistiques</span>
         </button>
+        <button class="nav-btn sidebar-btn" data-roles="admin,comptable,gestionnaire" onclick="showPage('finances',this)" aria-label="Finances">
+          <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span>
+          <span class="sidebar-label">Finances</span>
+        </button>
         <button class="nav-btn sidebar-btn" data-roles="admin" onclick="showPage('config',this)" aria-label="Configuration">
           <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
           <span class="sidebar-label">Configuration</span>
@@ -1443,6 +1447,23 @@
       <div id="configArticlesGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-top:16px"></div>
     </div>
 
+  </div>
+
+  <!-- ═══════════════════════════════════════════
+       PAGE FINANCES
+       ═══════════════════════════════════════════ -->
+  <div class="page" id="page-finances" data-roles="admin,comptable,gestionnaire">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:18px">
+      <div>
+        <h1 style="font-size:21px;font-weight:800;color:var(--text);margin:0">Finances — suivi des commandes</h1>
+        <p style="font-size:13px;color:var(--muted);margin:3px 0 0">Total engagé, acompte reçu et restant à percevoir · références séquentielles</p>
+      </div>
+      <div class="search-wrap" style="max-width:300px;flex:1;min-width:180px">
+        <span class="search-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
+        <input class="search-input" id="finSearch" placeholder="Rechercher client, N°..." oninput="setFinSearch(this.value)" aria-label="Rechercher une commande" autocomplete="off" />
+      </div>
+    </div>
+    <div id="financesContent"></div>
   </div>
 
   <!-- ═══════════════════════════════════════════
@@ -2642,7 +2663,7 @@
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260629-datelive"></script>
+<script src="./app.js?v=20260629-finances"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

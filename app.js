@@ -124,6 +124,7 @@ const PAGE_ACCESS = {
   livraisons:     ['admin','caissier','commerciale','gestionnaire','comptable','livreur','chef_atelier','operateur_prod','machiniste','pao','finition'],
   stock:          ['admin','gestionnaire'],
   stats:          ['admin','comptable'],
+  finances:       ['admin','comptable','gestionnaire'],
   'mon-dashboard':['admin','caissier','commerciale','utilisateur','gestionnaire','comptable'],
   config:         ['admin'],
   users:          ['admin'],
@@ -404,6 +405,7 @@ function showPage(id, btn, bnavBtn) {
   if (id==='patron')       { renderControlFinance(); renderPatronDashboard(); _autoRefreshPatron(); }
   if (id==='commandes')    { _ensureDossierLinks(); renderCommandes(); _lastCmdRefresh = 0; _autoRefreshCommandes(); _loadTachesQuietly().then(renderCommandes); }
   if (id==='livraisons')   { renderLivraisons(); if (APPS_SCRIPT_URL) Promise.all([loadCommandesFromScript(), loadReservationsFromScript()]).then(() => { updateDeliveryBadge(); renderLivraisons(); }).catch(()=>{}); }
+  if (id==='finances')     { _ensureDossierLinks(); renderFinances(); if (APPS_SCRIPT_URL) loadCommandesFromScript().then(() => { _ensureDossierLinks(); renderFinances(); }).catch(()=>{}); }
   // Garde d'accès (rôle ou overrides personnalisés)
   if (currentUser) {
     const ep = _effectivePages(currentUser);
@@ -9956,6 +9958,239 @@ function updateDeliveryBadge() {
   });
   if (urgent > 0) { badge.textContent = urgent; badge.style.display = ''; }
   else badge.style.display = 'none';
+}
+
+// ============================================================
+// PAGE FINANCES — registre de toutes les commandes (engagé / acompte / restant),
+// numéros séquentiels (références qui se suivent), groupé par date, état de
+// livraison, impression A4. UX pcf-* (hero/KPIs, scanabilité, disclosure, kebab,
+// table responsive → cartes mobile, 80/20).
+// ============================================================
+let _finState = { period: 'all', pay: 'all', q: '' };
+let _finItemOpen = new Set();
+function setFinPeriod(v) { _finState.period = v; renderFinances(); }
+function setFinPay(v)    { _finState.pay = v;    renderFinances(); }
+function setFinSearch(v) { _finState.q = v;      renderFinances(); }
+function toggleFinItem(id) { if (_finItemOpen.has(id)) _finItemOpen.delete(id); else _finItemOpen.add(id); renderFinances(); }
+
+function _finPeriodRange() {
+  const now = new Date();
+  if (_finState.period === 'week')  { const f = new Date(now); f.setDate(f.getDate() - 6); f.setHours(0,0,0,0); return { from: f, to: null }; }
+  if (_finState.period === 'month') { return { from: new Date(now.getFullYear(), now.getMonth(), 1), to: null }; }
+  return { from: null, to: null };
+}
+
+// État de livraison d'une commande (dérivé du dossier de production lié).
+function _cmdDelivState(c) {
+  const dos = (Array.isArray(dossiers) ? dossiers : []).find(d => d.sourceType === 'commande' && String(d.sourceId) === String(c.id));
+  const prog = dos ? (Number(dos.progression) || 0) : 0;
+  const mode = c.deliveryMode === 'livraison' ? 'Livraison' : 'Retrait';
+  let label, color;
+  if (c.status === 'completed' || prog >= 100 || (dos && dos.statut === 'LIVRE')) { label = 'Livrée'; color = '#16a34a'; }
+  else if (prog > 0) { label = 'En production'; color = '#e8834a'; }
+  else { label = 'À traiter'; color = '#2563eb'; }
+  return { label, color, prog, mode };
+}
+
+// Construit la séquence + le sous-ensemble filtré. seq = numéro 1..N sur TOUTES les
+// commandes non annulées triées par date (stable, indépendant des filtres).
+function _finBuild() {
+  const all = (Array.isArray(commandes) ? commandes : []).filter(c => c && c.status !== 'cancelled');
+  const sorted = all.slice().sort((a, b) => (parseSaleDate(a.date) || 0) - (parseSaleDate(b.date) || 0));
+  const seqMap = new Map();
+  sorted.forEach((c, i) => seqMap.set(String(c.id), i + 1));
+  const { from, to } = _finPeriodRange();
+  const q = (_finState.q || '').trim().toLowerCase();
+  const list = sorted.filter(c => {
+    const d = parseSaleDate(c.date);
+    if (from && d && d < from) return false;
+    if (to && d && d > to) return false;
+    const reste = Number(c.restant) || 0;
+    if (_finState.pay === 'unpaid' && !(reste > 0)) return false;
+    if (_finState.pay === 'paid' && reste > 0) return false;
+    if (q) {
+      const ref = 'cmd-' + String(seqMap.get(String(c.id))).padStart(3, '0');
+      if (!((c.clientName || '') + ' ' + (c.clientContact || '') + ' ' + ref).toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
+  return { list, seqMap };
+}
+
+function _finSeqRef(c, seqMap) { return 'CMD-' + String(seqMap.get(String(c.id)) || 0).padStart(3, '0'); }
+
+function _finRow(c, seqMap, colspan) {
+  const id = String(c.id);
+  const open = _finItemOpen.has(id);
+  const seq = String(seqMap.get(id) || 0).padStart(3, '0');
+  const ds = _cmdDelivState(c);
+  const reste = Number(c.restant) || 0;
+  const truck = '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>';
+  const shop  = '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l1-5h16l1 5"/><path d="M4 9v11a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9"/></svg>';
+  const etat = `<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:8px;background:${ds.color}1a;color:${ds.color};white-space:nowrap">${ds.mode === 'Livraison' ? truck : shop} ${ds.mode} · ${ds.label}</span>`;
+  const chev = '<svg class="pcf-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
+  const kbid = 'fin' + id;
+  const dt = (l, v) => v ? `<div class="pcf-dt"><div class="pcf-dt-l">${l}</div><div class="pcf-dt-v" style="font-size:13px">${v}</div></div>` : '';
+  const itemsFull = (c.items || []).map(i => `${i.name} ×${i.qty || 1}`).join(', ') || '—';
+  const detail = `<tr class="pcf-detail-row"><td colspan="${colspan}"><div class="pcf-detail ${open ? 'open' : ''}">
+      <div class="pcf-detail-grid">
+        ${dt('Réf. facture', c.numeroDossier || ('CMD-' + _factureNum(c)))}
+        ${dt('Contact', c.clientContact)}
+        ${dt('Articles', itemsFull)}
+        ${c.deliveryMode === 'livraison' ? dt('Adresse', c.adresseLivraison || '—') : dt('Mode', 'Retrait boutique')}
+        ${dt('Livraison client', _dispDate(c.dateLivraison))}
+        ${dt('Avancement', ds.prog + ' %')}
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="deliv-open-btn" onclick="event.stopPropagation();printCommandeTicket(commandes.find(x=>String(x.id)==='${id}'))">Imprimer la facture</button>
+        <button class="pcf-export-btn" onclick="event.stopPropagation();showPage('commandes')">Voir dans Commandes</button>
+      </div>
+    </div></td></tr>`;
+  return `<tr class="pcf-row ${open ? 'open' : ''}" onclick="toggleFinItem('${id}')">
+    <td class="pcf-c-main" data-label="N°">
+      <div style="display:flex;align-items:center;gap:9px;min-width:0">
+        ${chev}
+        <span class="pcf-rank" style="background:#1a4a3a14;color:#1a4a3a">${seq}</span>
+        <div style="min-width:0">
+          <div class="pcf-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.clientName || 'Client'}</div>
+          <div style="font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums">${_finSeqRef(c, seqMap)}</div>
+        </div>
+      </div>
+    </td>
+    <td data-label="État">${etat}</td>
+    <td class="pcf-num" data-label="Total engagé">${fmt(c.total)}</td>
+    <td class="pcf-num" data-label="Acompte" style="color:#16a34a">${fmt(c.accompte)}</td>
+    <td class="pcf-num" data-label="Restant" style="${reste > 0 ? 'color:#dc2626;font-weight:800' : 'color:var(--muted)'}">${fmt(reste)}</td>
+    <td class="pcf-c-act" onclick="event.stopPropagation()">
+      <div class="kebab-wrap" style="display:inline-block;vertical-align:middle">
+        <button class="kebab-btn" aria-label="Plus d'actions" onclick="toggleKebab('${kbid}',event)"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>
+        <div class="kebab-menu" id="kb-${kbid}" role="menu">
+          <button class="kebab-item" role="menuitem" onclick="closeAllKebabs();printCommandeTicket(commandes.find(x=>String(x.id)==='${id}'))">${_kebabIcon('print')}<span>Imprimer la facture</span></button>
+          <button class="kebab-item" role="menuitem" onclick="closeAllKebabs();showPage('commandes')">${_kebabIcon('eye')}<span>Voir dans Commandes</span></button>
+        </div>
+      </div>
+    </td>
+  </tr>${detail}`;
+}
+
+function renderFinances() {
+  const root = document.getElementById('financesContent');
+  if (!root) return;
+  const colspan = 6;
+  const { list, seqMap } = _finBuild();
+
+  const tEng = list.reduce((s, c) => s + (Number(c.total) || 0), 0);
+  const tAcc = list.reduce((s, c) => s + (Number(c.accompte) || 0), 0);
+  const tRes = list.reduce((s, c) => s + (Number(c.restant) || 0), 0);
+  const rate = tEng > 0 ? Math.round(tAcc / tEng * 100) : 0;
+  const nb = list.length;
+  const panier = nb ? Math.round(tEng / nb) : 0;
+
+  const seg = (val, cur, label, fn) => `<button class="pcf-seg ${cur === val ? 'active' : ''}" onclick="${fn}('${val}')">${label}</button>`;
+  let html = `
+    <div class="pcf-toolbar">
+      <div class="pcf-segs">${seg('all', _finState.period, 'Tout', 'setFinPeriod')}${seg('month', _finState.period, 'Ce mois', 'setFinPeriod')}${seg('week', _finState.period, '7 jours', 'setFinPeriod')}</div>
+      <div class="pcf-segs">${seg('all', _finState.pay, 'Toutes', 'setFinPay')}${seg('unpaid', _finState.pay, 'À solder', 'setFinPay')}${seg('paid', _finState.pay, 'Soldées', 'setFinPay')}</div>
+      <div class="pcf-tools"><button class="pcf-export-btn" onclick="printFinances()"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>Imprimer</button></div>
+    </div>
+    <div class="pcf-hero">
+      <div>
+        <div class="pcf-hero-label">Total engagé · ${nb} commande(s)</div>
+        <div class="pcf-hero-val">${fmt(tEng)}</div>
+        <div class="pcf-hero-meta">Panier moyen ${fmt(panier)}</div>
+      </div>
+      <div class="pcf-gauge">
+        <div class="pcf-gauge-top"><span>Taux d'encaissement</span><strong>${rate}%</strong></div>
+        <div class="pcf-gauge-bar"><div class="pcf-gauge-fill" style="width:${rate}%"></div></div>
+        <div class="pcf-gauge-legend">
+          <span><i class="pcf-dot" style="background:#bfe3d4"></i>Encaissé <b>${fmt(tAcc)}</b></span>
+          <span><i class="pcf-dot" style="background:#ff8f8f"></i>À percevoir <b>${fmt(tRes)}</b></span>
+        </div>
+      </div>
+    </div>
+    <div class="pcf-kpis">
+      <div class="pcf-kpi" style="--kc:#1a4a3a"><div class="pcf-kpi-label">Total engagé</div><div class="pcf-kpi-val">${fmt(tEng)}</div><div class="pcf-kpi-sub">${nb} commande(s)</div></div>
+      <div class="pcf-kpi" style="--kc:#16a34a"><div class="pcf-kpi-label">Acompte reçu</div><div class="pcf-kpi-val" style="color:#16a34a">${fmt(tAcc)}</div><div class="pcf-kpi-sub">${rate}% encaissé</div></div>
+      <div class="pcf-kpi" style="--kc:#dc2626"><div class="pcf-kpi-label">Restant à percevoir</div><div class="pcf-kpi-val" style="color:#dc2626">${fmt(tRes)}</div><div class="pcf-kpi-sub">${list.filter(c => (Number(c.restant)||0) > 0).length} à solder</div></div>
+      <div class="pcf-kpi" style="--kc:#2563eb"><div class="pcf-kpi-label">Panier moyen</div><div class="pcf-kpi-val">${fmt(panier)}</div><div class="pcf-kpi-sub">par commande</div></div>
+    </div>`;
+
+  if (!list.length) {
+    html += `<div class="pcf-empty">Aucune commande sur cette période.</div>`;
+    root.innerHTML = html;
+    return;
+  }
+
+  // Groupes par jour (ordre chronologique croissant — les N° se suivent de haut en bas)
+  const groups = {}; const order = [];
+  list.forEach(c => { const k = _histDayKey(c.date); if (!groups[k]) { groups[k] = { date: c.date, rows: [], eng: 0, acc: 0, res: 0 }; order.push(k); } const g = groups[k]; g.rows.push(c); g.eng += Number(c.total) || 0; g.acc += Number(c.accompte) || 0; g.res += Number(c.restant) || 0; });
+  order.sort((a, b) => (parseSaleDate(groups[a].date) || 0) - (parseSaleDate(groups[b].date) || 0));
+
+  html += order.map(k => {
+    const g = groups[k];
+    return `<div class="pcf-card">
+      <div class="pcf-card-head">
+        <div class="ic" style="background:#1a4a3a14;color:#1a4a3a"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div>
+        <div style="flex:1;min-width:0"><div class="pcf-card-title">${_histDayLabel(g.date)}</div><div class="pcf-card-sub">${g.rows.length} commande(s) · engagé ${fmt(g.eng)} · reste ${fmt(g.res)}</div></div>
+        <span class="pcf-card-badge" style="background:#1a4a3a14;color:#1a4a3a">${fmt(g.eng)}</span>
+      </div>
+      <table class="pcf-table">
+        <thead><tr><th>N° / Client</th><th>État livraison</th><th class="pcf-num">Total engagé</th><th class="pcf-num">Acompte</th><th class="pcf-num">Restant</th><th></th></tr></thead>
+        <tbody>${g.rows.map(c => _finRow(c, seqMap, colspan)).join('')}</tbody>
+      </table>
+    </div>`;
+  }).join('');
+
+  root.innerHTML = html;
+}
+
+// Impression A4 du registre financier (réutilise la fenêtre report de la vue patron).
+function printFinances() {
+  const { list, seqMap } = _finBuild();
+  if (!list.length) { showToast('Aucune commande à imprimer', 'error'); return; }
+  const tEng = list.reduce((s, c) => s + (Number(c.total) || 0), 0);
+  const tAcc = list.reduce((s, c) => s + (Number(c.accompte) || 0), 0);
+  const tRes = list.reduce((s, c) => s + (Number(c.restant) || 0), 0);
+  const shop = (shopConfig && shopConfig.name) || 'FOREVER MG';
+  const periodLbl = _finState.period === 'week' ? '7 derniers jours' : _finState.period === 'month' ? 'Ce mois' : 'Toutes les commandes';
+
+  const groups = {}; const order = [];
+  list.forEach(c => { const k = _histDayKey(c.date); if (!groups[k]) { groups[k] = { date: c.date, rows: [], eng: 0, acc: 0, res: 0 }; order.push(k); } const g = groups[k]; g.rows.push(c); g.eng += Number(c.total) || 0; g.acc += Number(c.accompte) || 0; g.res += Number(c.restant) || 0; });
+  order.sort((a, b) => (parseSaleDate(groups[a].date) || 0) - (parseSaleDate(groups[b].date) || 0));
+
+  let body = `<h1>${shop} — Suivi financier des commandes</h1>
+    <div class="sub">${periodLbl} · ${list.length} commande(s) · édité le ${new Date().toLocaleDateString('fr-FR')} ${new Date().toLocaleTimeString('fr-FR')}</div>
+    <div class="kpis">
+      <div class="kpi"><div class="l">Total engagé</div><div class="v">${fmt(tEng)}</div></div>
+      <div class="kpi"><div class="l">Acompte reçu</div><div class="v g">${fmt(tAcc)}</div></div>
+      <div class="kpi"><div class="l">Restant à percevoir</div><div class="v rd">${fmt(tRes)}</div></div>
+    </div>`;
+
+  body += order.map(k => {
+    const g = groups[k];
+    const rows = g.rows.map(c => {
+      const ds = _cmdDelivState(c);
+      const reste = Number(c.restant) || 0;
+      return `<tr>
+        <td>${_finSeqRef(c, seqMap)}</td>
+        <td>${c.clientName || 'Client'}</td>
+        <td>${ds.mode} · ${ds.label}</td>
+        <td class="r">${fmt(c.total)}</td>
+        <td class="r g">${fmt(c.accompte)}</td>
+        <td class="r ${reste > 0 ? 'rd' : 'muted'}">${fmt(reste)}</td>
+      </tr>`;
+    }).join('');
+    return `<h2>${_histDayLabel(g.date)} — engagé ${fmt(g.eng)} · acompte ${fmt(g.acc)} · reste ${fmt(g.res)}</h2>
+      <table><thead><tr><th>N°</th><th>Client</th><th>État livraison</th><th class="r">Total engagé</th><th class="r">Acompte</th><th class="r">Restant</th></tr></thead>
+      <tbody>${rows}</tbody></table>`;
+  }).join('');
+
+  body += `<table style="margin-top:14px"><tbody><tr style="font-weight:bold;border-top:2px solid #1a4a3a">
+    <td>TOTAL GÉNÉRAL</td><td></td><td></td>
+    <td class="r">${fmt(tEng)}</td><td class="r g">${fmt(tAcc)}</td><td class="r rd">${fmt(tRes)}</td></tr></tbody></table>
+    <div class="foot">Document interne — suivi manuel des encaissements</div>`;
+
+  _pcfOpenReportWindow(body, 'Suivi financier');
 }
 
 function _prodDeadlineChip(ymd) {
