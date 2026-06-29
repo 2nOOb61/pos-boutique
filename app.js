@@ -862,6 +862,7 @@ function setResDeliveryMode(mode) {
   if (btnL) { btnL.style.background = isLiv?'#e8834a':'#fff'; btnL.style.color = isLiv?'#fff':'#78716c'; btnL.style.borderColor = isLiv?'#e8834a':'#e5e3df'; }
   const fields = document.getElementById('resDeliveryFields');
   if (fields) fields.style.display = isLiv ? 'block' : 'none';
+  updateResTotals();
 }
 
 function setCmdDeliveryMode(mode) {
@@ -925,11 +926,21 @@ function renderResAttachments() {
   }).join('');
 }
 
-function updateResRestant() {
-  const net = getNetTotal();
-  const acc = Math.max(0, parseFloat(document.getElementById('resAccompte').value) || 0);
-  document.getElementById('resRestantLabel').textContent = fmt(Math.max(0, net - acc));
+// Frais de livraison saisis (comptés seulement si mode livraison actif).
+function _resFee() {
+  const isLiv = document.getElementById('resBtnModeLivraison')?.style.background === 'rgb(232, 131, 74)';
+  return isLiv ? (parseFloat(document.getElementById('resDeliveryFee')?.value) || 0) : 0;
 }
+// NET À PAYER réservation = articles − remise + frais de livraison (comme les commandes).
+function _resNetTotal() { return getNetTotal() + _resFee(); }
+
+function updateResTotals() {
+  const net = _resNetTotal();
+  const acc = Math.max(0, parseFloat(document.getElementById('resAccompte')?.value) || 0);
+  const rt = document.getElementById('resTotal');        if (rt) rt.textContent = fmt(net);
+  const rr = document.getElementById('resRestantLabel');  if (rr) rr.textContent = fmt(Math.max(0, net - acc));
+}
+function updateResRestant() { updateResTotals(); }
 
 function switchResPayTab(mode) {
   resPaymentMode = mode;
@@ -963,7 +974,7 @@ function confirmReservation() {
 
   if (!clientName) { showToast('Le nom du client est obligatoire !', 'error'); return; }
   if (acc <= 0)    { showToast('L\'acompte doit être supérieur à 0 !', 'error'); return; }
-  if (acc > net)   { showToast('L\'acompte ne peut pas dépasser le total !', 'error'); return; }
+  if (acc > _resNetTotal()) { showToast('L\'acompte ne peut pas dépasser le total !', 'error'); return; }
 
   // Type client
   const isResCorp     = document.getElementById('resBtnCorporate')?.style.background === 'rgb(37, 99, 235)';
@@ -993,7 +1004,8 @@ function confirmReservation() {
 function saveReservation(accompte, depositMethod, given, change, provider, ref, clientName, clientContact, deliveryMode='retrait', deliveryAddress='', deliveryFee=0, deliveryDate='', clientType='particulier', clientCompany='', notes='') {
   const subtotal = getSubtotal();
   const remise   = getRemise();
-  const total    = getNetTotal();
+  // NET À PAYER = articles − remise + frais de livraison (uniformisé avec les commandes)
+  const total    = getNetTotal() + (deliveryMode === 'livraison' ? (Number(deliveryFee) || 0) : 0);
   const restant  = Math.max(0, total - accompte);
 
   // Réduire le stock (article mis de côté)
@@ -1499,6 +1511,7 @@ function printReservationTicket(res) {
     <hr style="${st.sepLight}"/>
     ${tc.ticketShowSubtotal !== false ? `<div class="row"><span>Sous-total</span><span>${fmt(res.subtotal)}</span></div>` : ''}
     ${res.remise>0 ? `<div class="row"><span>Remise</span><span>-${fmt(res.remise)}</span></div>` : ''}
+    ${Number(res.deliveryFee)>0 ? `<div class="row"><span>Frais de livraison</span><span>+${fmt(res.deliveryFee)}</span></div>` : ''}
     <div style="background:${st.color}18;border:1px solid ${st.color};border-radius:4px;padding:4px 6px;margin:4px 0">
       <div class="row bold" style="color:${st.color}"><span>TOTAL A PAYER</span><span>${fmt(res.total)}</span></div>
     </div>

@@ -2245,7 +2245,7 @@
       <div style="display:flex;gap:8px">
         <div class="form-group" style="flex:1;margin-bottom:0">
           <label>Frais de livraison (Ar)</label>
-          <input id="resDeliveryFee" type="number" placeholder="0" min="0" />
+          <input id="resDeliveryFee" type="number" placeholder="0" min="0" oninput="updateResTotals()" />
         </div>
         <div class="form-group" style="flex:1;margin-bottom:0">
           <label>Date souhaitée</label>
@@ -2663,7 +2663,7 @@
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260629-acompte"></script>
+<script src="./app.js?v=20260629-resfrais"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
