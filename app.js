@@ -3699,6 +3699,7 @@ async function syncPendingOfflineSales() {
 }
 
 function updatePendingBadge() {
+  try { updateDeliveryBadge(); } catch(e) {}
   const pending = JSON.parse(localStorage.getItem('pos-pending-sales') || '[]');
   const badge = document.getElementById('pendingBadge');
   if (!badge) return;
@@ -6175,6 +6176,7 @@ function _syncDossierDates() {
     if (cli)  d.dateLivraison     = cli;
     if (prod) d.dateLivraisonProd = prod;
     if (bat)  d.dateBAT           = bat;
+    if (src.caissier) d.caissier  = src.caissier; // commercial créateur (pour l'affichage)
   });
 }
 
@@ -8442,6 +8444,14 @@ function renderAttrPanel(tachesD, commentsD = []) {
   const pct       = d.progression || 0;
   const pctColor  = pct===100?'var(--color-success)':pct>0?'var(--color-secondary)':'var(--color-text-muted)';
 
+  // Commercial créateur du dossier (depuis la commande/réservation source)
+  const _src = (d.sourceType && d.sourceId)
+    ? (d.sourceType === 'reservation'
+        ? reservations.find(r => String(r.id) === String(d.sourceId))
+        : commandes.find(c => String(c.id) === String(d.sourceId)))
+    : null;
+  const _commercial = _resolveOperatorLabel((_src && _src.caissier) || d.caissier || '');
+
   panel.innerHTML = `
     <div class="attr-panel-header">
       <button class="btn-back-dossier" onclick="backToDossierList()" style="display:none;align-items:center;gap:4px;padding:5px 10px;border-radius:7px;background:var(--color-primary-light);color:var(--color-primary);border:1px solid rgba(26,74,58,.2);cursor:pointer;font-size:12px;font-weight:600;margin-bottom:10px">
@@ -8475,6 +8485,10 @@ function renderAttrPanel(tachesD, commentsD = []) {
         <span style="color:var(--color-border)">·</span>
         <span style="background:${prioBg};color:${prioColor};font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px">${d.priorite}</span>
       </div>
+      ${_commercial ? `<div style="margin-top:8px;display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:9px;background:var(--color-primary-light);border:1px solid rgba(26,74,58,.2)">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="#1a4a3a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <span style="font-size:11px;color:var(--color-text-secondary)">Commercial : <strong style="color:#1a4a3a;font-weight:700">${_commercial}</strong></span>
+      </div>` : ''}
       ${d.dateBAT ? `<div style="margin-top:9px;margin-right:6px;display:inline-flex;align-items:center;gap:7px;padding:6px 11px;border-radius:9px;background:#eaf1fb;border:1px solid rgba(37,99,235,.3)">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg>
         <span style="font-size:12px;font-weight:700;color:#1d4ed8">BAT : ${new Date(d.dateBAT+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'2-digit',month:'short'})}</span>
@@ -9553,6 +9567,222 @@ function _toIsoDate(v) {
   const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
   if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
   return s;
+}
+
+// Résout le nom affichable d'un opérateur/commercial à partir d'un identifiant
+// stocké (qui peut être un username OU un label selon la source). Retourne le
+// label utilisateur si trouvé, sinon la valeur d'origine.
+function _resolveOperatorLabel(who) {
+  if (!who) return '';
+  const s = String(who).trim().toLowerCase();
+  const u = (typeof localUsers !== 'undefined' ? localUsers : []).find(x =>
+    String(x.username || '').trim().toLowerCase() === s ||
+    String(x.label    || '').trim().toLowerCase() === s);
+  return u ? (u.label || u.username || who) : who;
+}
+
+// ============================================================
+// DRAWER LIVRAISONS — vue agrégée de toutes les livraisons (commandes +
+// réservations) regroupées par date (client ou production). Lecture seule.
+// ============================================================
+let _delivState = { groupBy: 'client', mode: 'all', scope: 'upcoming' };
+let _delivGroupCollapsed = new Set();
+let _delivItemOpen = new Set();
+
+const _DELIV_MONEY_ROLES = ['admin','caissier','commerciale','comptable','gestionnaire'];
+
+// Liste normalisée des livraisons depuis commandes + réservations (hors annulées).
+function _collectDeliveries() {
+  const out = [];
+  (Array.isArray(commandes) ? commandes : []).forEach(c => {
+    if (!c || c.status === 'cancelled') return;
+    out.push({
+      kind: 'commande', id: c.id,
+      client:     c.clientName || c.client || 'Client',
+      contact:    c.clientContact || '',
+      commercial: _resolveOperatorLabel(c.caissier || ''),
+      items:      c.items || [],
+      total:      Number(c.total) || 0,
+      status:     c.status,
+      mode:       c.deliveryMode === 'livraison' ? 'livraison' : 'retrait',
+      address:    c.adresseLivraison || '',
+      dateClient: _toIsoDate(c.dateLivraison || ''),
+      dateProd:   _toIsoDate(c.dateLivraisonProd || ''),
+      dossierId:  c.dossierId || ''
+    });
+  });
+  (Array.isArray(reservations) ? reservations : []).forEach(r => {
+    if (!r || r.status === 'cancelled') return;
+    out.push({
+      kind: 'reservation', id: r.id,
+      client:     r.clientName || 'Client',
+      contact:    r.clientContact || '',
+      commercial: _resolveOperatorLabel(r.caissier || ''),
+      items:      r.items || [],
+      total:      Number(r.total) || 0,
+      status:     r.status,
+      mode:       r.deliveryMode === 'livraison' ? 'livraison' : 'retrait',
+      address:    r.deliveryAddress || '',
+      dateClient: _toIsoDate(r.deliveryDate || ''),
+      dateProd:   '',
+      dossierId:  r.dossierId || ''
+    });
+  });
+  return out;
+}
+
+// Libellé + métadonnées d'un groupe-date pour le drawer.
+function _delivDateLabel(iso) {
+  if (!iso) return { label: 'Sans date de livraison', tag: '', cls: 'none', sort: 9e15 };
+  const d = new Date(iso + 'T00:00:00');
+  if (isNaN(d.getTime())) return { label: iso, tag: '', cls: 'none', sort: 9e15 - 1 };
+  const today = new Date(); today.setHours(0,0,0,0);
+  const diff = Math.round((d - today) / 86400000);
+  const base = d.toLocaleDateString('fr-FR', { weekday:'long', day:'2-digit', month:'long' });
+  let label = base.charAt(0).toUpperCase() + base.slice(1);
+  if (diff === 0)      label = "Aujourd'hui · " + label;
+  else if (diff === 1) label = 'Demain · ' + label;
+  else if (diff === -1)label = 'Hier · ' + label;
+  const tag = diff < 0 ? Math.abs(diff)+'j de retard' : diff === 0 ? "aujourd'hui" : diff === 1 ? 'demain' : diff+'j';
+  const cls = diff < 0 ? 'late' : diff <= 2 ? 'soon' : 'ok';
+  return { label, tag, cls, sort: d.getTime() };
+}
+
+function toggleDeliveryDrawer() {
+  const dr = document.getElementById('delivDrawer');
+  if (!dr) return;
+  if (dr.classList.contains('open')) { closeDeliveryDrawer(); return; }
+  renderDeliveryDrawer();
+  dr.classList.add('open');
+  dr.setAttribute('aria-hidden', 'false');
+  const ov = document.getElementById('delivOverlay'); if (ov) ov.classList.add('open');
+}
+function closeDeliveryDrawer() {
+  const dr = document.getElementById('delivDrawer');
+  if (dr) { dr.classList.remove('open'); dr.setAttribute('aria-hidden', 'true'); }
+  const ov = document.getElementById('delivOverlay'); if (ov) ov.classList.remove('open');
+}
+function setDelivGroupBy(v) { _delivState.groupBy = v; renderDeliveryDrawer(); }
+function setDelivMode(v)    { _delivState.mode = v;    renderDeliveryDrawer(); }
+function setDelivScope(v)   { _delivState.scope = v;   renderDeliveryDrawer(); }
+function toggleDelivGroup(gid) { if (_delivGroupCollapsed.has(gid)) _delivGroupCollapsed.delete(gid); else _delivGroupCollapsed.add(gid); renderDeliveryDrawer(); }
+function toggleDelivItem(id)   { if (_delivItemOpen.has(id)) _delivItemOpen.delete(id); else _delivItemOpen.add(id); renderDeliveryDrawer(); }
+
+async function _openDeliverySource(kind, id, dossierId) {
+  closeDeliveryDrawer();
+  const ep = (typeof _effectivePages === 'function') ? _effectivePages(currentUser) : [];
+  if (dossierId && ep.includes('attribution')) { try { await openAttribForDossier(dossierId); } catch(e){} return; }
+  if (kind === 'commande'    && ep.includes('commandes'))    { showPage('commandes', null, null);    return; }
+  if (kind === 'reservation' && ep.includes('reservations')) { showPage('reservations', null, null); return; }
+  if (ep.includes('production')) showPage('production', null, null);
+}
+
+function _delivItemRow(x, showMoney) {
+  const itemId = x.kind + '_' + x.id;
+  const open = _delivItemOpen.has(itemId);
+  const itemsFull = (x.items || []).map(i => `${i.name} ×${i.qty || 1}`).join(', ') || '—';
+  const first = (x.items || [])[0];
+  const shortItems = !(x.items || []).length ? '—'
+    : (x.items.length === 1 ? `${first.name} ×${first.qty || 1}` : `${first.name} +${x.items.length - 1}`);
+  const truck = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>';
+  const shop  = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l1-5h16l1 5"/><path d="M4 9v11a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9"/></svg>';
+  const modeBadge = x.mode === 'livraison'
+    ? `<span class="deliv-mode liv">${truck} Livraison</span>`
+    : `<span class="deliv-mode ret">${shop} Retrait</span>`;
+  const typeBadge = `<span class="deliv-type">${x.kind === 'reservation' ? 'Réservation' : 'Commande'}</span>`;
+  const detail = open ? `<div class="deliv-item-detail">
+      ${x.commercial ? `<div class="deliv-d-row"><span>Commercial</span><strong>${x.commercial}</strong></div>` : ''}
+      ${x.contact ? `<div class="deliv-d-row"><span>Contact</span><strong>${x.contact}</strong></div>` : ''}
+      <div class="deliv-d-row"><span>Articles</span><strong>${itemsFull}</strong></div>
+      ${x.address ? `<div class="deliv-d-row"><span>Adresse</span><strong>${x.address}</strong></div>` : ''}
+      ${showMoney ? `<div class="deliv-d-row"><span>Total</span><strong>${fmt(x.total)}</strong></div>` : ''}
+      <div class="deliv-d-actions">
+        <button class="deliv-open-btn" onclick="event.stopPropagation();_openDeliverySource('${x.kind}','${x.id}','${x.dossierId}')">Ouvrir</button>
+      </div>
+    </div>` : '';
+  return `<div class="deliv-item">
+    <div class="deliv-item-head" onclick="toggleDelivItem('${itemId}')">
+      <div class="deliv-item-main">
+        <div class="deliv-item-client">${x.client}</div>
+        <div class="deliv-item-sub">${shortItems}${x.commercial ? ' · ' + x.commercial : ''}</div>
+      </div>
+      <div class="deliv-item-badges">${modeBadge}${typeBadge}</div>
+    </div>
+    ${detail}
+  </div>`;
+}
+
+function renderDeliveryDrawer() {
+  const body  = document.getElementById('delivBody');
+  const ctrls = document.getElementById('delivControls');
+  if (!body) return;
+  const showMoney = _DELIV_MONEY_ROLES.includes(currentUser?.role);
+
+  if (ctrls) {
+    const seg = (val, cur, label, fn) => `<button class="deliv-seg ${cur === val ? 'active' : ''}" onclick="${fn}('${val}')">${label}</button>`;
+    ctrls.innerHTML = `
+      <div class="deliv-seg-row"><span class="deliv-seg-lbl">Date</span><div class="deliv-seg-group">
+        ${seg('client', _delivState.groupBy, 'Client', 'setDelivGroupBy')}
+        ${seg('prod', _delivState.groupBy, 'Production', 'setDelivGroupBy')}
+      </div></div>
+      <div class="deliv-seg-row"><span class="deliv-seg-lbl">Type</span><div class="deliv-seg-group">
+        ${seg('all', _delivState.mode, 'Tous', 'setDelivMode')}
+        ${seg('livraison', _delivState.mode, 'Livraison', 'setDelivMode')}
+        ${seg('retrait', _delivState.mode, 'Retrait', 'setDelivMode')}
+      </div></div>
+      <div class="deliv-seg-row"><span class="deliv-seg-lbl">Statut</span><div class="deliv-seg-group">
+        ${seg('upcoming', _delivState.scope, 'En cours', 'setDelivScope')}
+        ${seg('all', _delivState.scope, 'Toutes', 'setDelivScope')}
+      </div></div>`;
+  }
+
+  let list = _collectDeliveries();
+  if (_delivState.scope === 'upcoming') list = list.filter(x => x.status === 'pending');
+  if (_delivState.mode !== 'all')       list = list.filter(x => x.mode === _delivState.mode);
+
+  if (!list.length) {
+    body.innerHTML = `<div class="deliv-empty">Aucune livraison${_delivState.scope === 'upcoming' ? ' en cours' : ''}</div>`;
+    return;
+  }
+
+  const groups = {};
+  list.forEach(x => {
+    const key = (_delivState.groupBy === 'prod' ? x.dateProd : x.dateClient) || '';
+    (groups[key] = groups[key] || []).push(x);
+  });
+  const keys = Object.keys(groups).map(k => ({ k, ..._delivDateLabel(k) })).sort((a, b) => a.sort - b.sort);
+
+  body.innerHTML = keys.map(g => {
+    const items = groups[g.k].sort((a, b) => String(a.client).localeCompare(String(b.client)));
+    const gid = 'dg_' + (g.k || 'none');
+    const collapsed = _delivGroupCollapsed.has(gid);
+    const hdr = `<button class="deliv-group-head ${g.cls}" onclick="toggleDelivGroup('${gid}')">
+      <svg class="deliv-chev ${collapsed ? '' : 'open'}" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      <span class="deliv-group-label">${g.label}</span>
+      ${g.tag ? `<span class="deliv-group-tag ${g.cls}">${g.tag}</span>` : ''}
+      <span class="deliv-group-count">${items.length}</span>
+    </button>`;
+    const rows = collapsed ? '' : items.map(x => _delivItemRow(x, showMoney)).join('');
+    return `<div class="deliv-group">${hdr}${rows}</div>`;
+  }).join('');
+}
+
+// Badge du bouton Livraisons : nb de livraisons en cours dues sous 1 jour (retard/auj./demain).
+function updateDeliveryBadge() {
+  const badge = document.getElementById('delivBadge');
+  if (!badge) return;
+  const today = new Date(); today.setHours(0,0,0,0);
+  let urgent = 0;
+  _collectDeliveries().forEach(x => {
+    if (x.status !== 'pending') return;
+    const iso = x.dateClient || x.dateProd;
+    if (!iso) return;
+    const d = new Date(iso + 'T00:00:00');
+    if (isNaN(d.getTime())) return;
+    if (Math.round((d - today) / 86400000) <= 1) urgent++;
+  });
+  if (urgent > 0) { badge.textContent = urgent; badge.style.display = ''; }
+  else badge.style.display = 'none';
 }
 
 function _prodDeadlineChip(ymd) {
