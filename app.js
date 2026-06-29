@@ -2447,11 +2447,13 @@ function _editCommandeDate(id, field, label) {
   const val = v.trim();
   if (val && !/^\d{4}-\d{2}-\d{2}$/.test(val)) { showToast('Format attendu : AAAA-MM-JJ', 'error'); return; }
   c[field] = val;
+  c._dateEditedAt = Date.now(); // protège l'édition d'un écrasement par un reload GAS périmé
   // Répercuter sur le dossier lié → visible dans la vue Production
   const dos = dossiers.find(d => d.sourceType === 'commande' && String(d.sourceId) === String(c.id));
   if (dos) dos[field] = val;
   saveData();
   renderCommandes();
+  try { renderLivraisons(); } catch(e) {} // mise à jour immédiate de la page Livraisons
   if (APPS_SCRIPT_URL) {
     const payload = { action:'updateCommande', id: c.id };
     payload[field] = val;
@@ -3875,6 +3877,9 @@ async function apiCall(payload) {
       if (payload.operateur) url += '&operateur=' + encodeURIComponent(payload.operateur);
       if (payload.from != null) url += '&from=' + encodeURIComponent(payload.from);
       if (payload.to   != null) url += '&to='   + encodeURIComponent(payload.to);
+      // Cache-buster : GAS edge-cache les GET ~15 s → renverrait des données périmées
+      // juste après une écriture (ex. date modifiée). URL unique = réponse fraîche.
+      url += '&_cb=' + Date.now();
       const res  = await fetch(url);
       const text = await res.text();
       try { return JSON.parse(text); }
@@ -5746,6 +5751,7 @@ function approveCommandeModif(modId) {
     _applyCommandeCancel(c);
   } else {
     Object.entries(mod.changes || {}).forEach(([k, v]) => { c[k] = v.new; });
+    if ('dateLivraison' in mod.changes || 'dateLivraisonProd' in mod.changes) c._dateEditedAt = Date.now();
     // Recalcul des montants dérivés (articles inchangés)
     const itemsSum = (c.items || []).reduce((s, i) => s + (Number(i.qty) || 0) * (Number(i.price) || 0), 0);
     c.subtotal = itemsSum > 0 ? itemsSum : (Number(c.subtotal) || 0);
@@ -5935,12 +5941,21 @@ async function loadCommandesFromScript() {
     // Réinjecter photos et dossierId locaux (GAS ne les stocke pas)
     const merged = r.commandes.map(c => {
       const local = commandes.find(lc => String(lc.id) === String(c.id));
+      // Édition de date très récente non encore propagée (GAS peut renvoyer l'ancienne
+      // valeur le temps que l'écriture + l'edge-cache se règlent) → garder le local 20 s.
+      const freshEdit = local && local._dateEditedAt && (Date.now() - local._dateEditedAt < 20000);
       return {
         ...c,
         photos:      (local?.photos?.length      ? local.photos      : c.photos)      || [],
         // Pièces jointes : GAS (Drive) fait autorité, fallback local si non encore synchro
         attachments: (c.attachments?.length ? c.attachments : (local?.attachments || [])) || [],
         dossierId: local?.dossierId || c.dossierId || '',
+        ...(freshEdit ? {
+          dateLivraison:     local.dateLivraison,
+          dateLivraisonProd: local.dateLivraisonProd,
+          dateBAT:           local.dateBAT,
+          _dateEditedAt:     local._dateEditedAt
+        } : {}),
       };
     });
     commandes = [...merged, ...localOnly];
