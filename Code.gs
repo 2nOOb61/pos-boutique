@@ -821,6 +821,17 @@ function _fmtDateCell_(v) {
   return String(v);
 }
 
+// Variante affichage français 'dd/MM/yyyy' (mêmes garanties : fuseau du classeur,
+// robuste si la cellule est déjà une chaîne). Pour les dates informatives (création).
+function _fmtDateFr_(v) {
+  if (v === '' || v === null || v === undefined) return '';
+  if (Object.prototype.toString.call(v) === '[object Date]') {
+    if (isNaN(v.getTime())) return '';
+    return Utilities.formatDate(v, getSS().getSpreadsheetTimeZone(), 'dd/MM/yyyy');
+  }
+  return String(v);
+}
+
 function handleGetCommandes() {
   const sh = getSS().getSheetByName(SHEET_COMMANDES);
   if (!sh) return { ok:true, commandes:[] };
@@ -976,12 +987,11 @@ function handleGetDossiers(data) {
   const nRows  = lastRow - start + 1;
   const rows   = sh.getRange(start, 1, nRows, 12).getValues();
 
-  const tz   = Session.getScriptTimeZone();
   let list   = [];
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i]; if (!r[0]) continue;
-    const dc = r[7] ? Utilities.formatDate(new Date(r[7]), tz, 'dd/MM/yyyy') : '';
-    const dl = r[8] ? Utilities.formatDate(new Date(r[8]), tz, 'dd/MM/yyyy') : '';
+    const dc = _fmtDateFr_(r[7]);    // création : affichage dd/MM/yyyy (fuseau classeur)
+    const dl = _fmtDateCell_(r[8]);  // livraison : ISO yyyy-MM-dd (harmonisé commandes/réservations)
     list.push({ id:r[0], numeroDossier:r[1], client:r[2], produit:r[3],
       quantite:Number(r[4]), statut:r[5], progression:Number(r[6]),
       dateCreation:dc, dateLivraison:dl, priorite:r[9], sourceVente:r[10], notes:r[11] });
