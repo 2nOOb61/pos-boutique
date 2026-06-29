@@ -5237,9 +5237,11 @@ function saveCommande() {
 
   const subtotal = cmdModalItems.reduce((s, i) => s + ((i.qty||1) * (i.price||0)), 0);
   const total    = Math.max(0, subtotal - remise);
-  const restant  = Math.max(0, total - accompte);
+  const netTotal = total + fraisLiv; // NET À PAYER = articles − remise + frais de livraison
+  const restant  = Math.max(0, netTotal - accompte);
 
-  if (accompte > total) { showToast("L'acompte ne peut pas dépasser le total !", 'error'); return; }
+  // Comparer l'acompte au NET À PAYER (frais de livraison inclus), pas au sous-total
+  if (accompte > netTotal) { showToast("L'acompte ne peut pas dépasser le total !", 'error'); return; }
 
   let depositProvider = '', depositRef = '';
   if (accompte > 0) {
@@ -5266,7 +5268,7 @@ function saveCommande() {
     items:            cmdModalItems.map(i => ({ name: i.name.trim(), qty: i.qty, price: i.price, custom: !!i.custom })),
     notes,
     photos:           [...cmdModalPhotos],
-    subtotal, remise, total: total + fraisLiv, accompte, restant: Math.max(0, total + fraisLiv - accompte),
+    subtotal, remise, total: netTotal, accompte, restant,
     depositMethod:    cmdPayMode,
     depositProvider, depositRef,
     status:           'pending',
