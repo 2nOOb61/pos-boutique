@@ -219,7 +219,7 @@ function initSheets() {
     const col = Math.max(resHeaders.length, 21) + 1;
     resSh.getRange(1, col).setValue('Attachments_JSON');
   }
-  ensureSheet(ss, SHEET_RESERVATIONS,['ID','Date','Heure','Client_Nom','Client_Contact','Article','Quantite','Prix_Unitaire','Sous_Total_Article','Sous_Total_Vente','Remise','Net_A_Payer','Accompte','Restant','Mode_Depot','Fournisseur_Mobile','Reference','Caissier','Statut','Date_Finalisation','Vente_ID','Attachments_JSON']);
+  ensureSheet(ss, SHEET_RESERVATIONS,['ID','Date','Heure','Client_Nom','Client_Contact','Article','Quantite','Prix_Unitaire','Sous_Total_Article','Sous_Total_Vente','Remise','Net_A_Payer','Accompte','Restant','Mode_Depot','Fournisseur_Mobile','Reference','Caissier','Statut','Date_Finalisation','Vente_ID','Attachments_JSON','Mode_Livraison','Adresse_Livraison','Frais_Livraison','Date_Livraison']);
   // Commandes client — mise à jour de l'en-tête si besoin
   const cmdSh = ss.getSheetByName(SHEET_COMMANDES) || ss.insertSheet(SHEET_COMMANDES);
   cmdSh.getRange(1, 1, 1, 24).setValues([['ID','Date','Caissier','Client_Nom','Client_Contact','Articles','Mode_Livraison','Adresse_Livraison','Frais_Livraison','Date_Livraison','Sous_Total','Remise','Total','Accompte','Restant','Mode_Depot','Fournisseur_Mobile','Reference','Notes','Statut','Date_Finalisation','Vente_ID','Date_Livraison_Prod','Date_BAT']]);
@@ -680,6 +680,10 @@ function handleGetReservations() {
         attachments:    (function() {
           try { return r[21] ? JSON.parse(String(r[21])) : []; } catch(e) { return []; }
         })(),
+        deliveryMode:    String(r[22] || 'retrait'),
+        deliveryAddress: String(r[23] || ''),
+        deliveryFee:     Number(r[24]) || 0,
+        deliveryDate:    _fmtDateCell_(r[25]),
       };
       order.push(id);
     }
@@ -718,6 +722,13 @@ function handleAddReservation(data) {
   const reference    = r.depositRef      || '';
   const caissier     = r.caissier        || '';
   const items        = Array.isArray(r.items) ? r.items : [];
+  // Infos livraison (cols 23-26, ajoutées) — migration auto si l'ancienne feuille s'arrête à 22
+  const need = 26 - sh.getMaxColumns();
+  if (need > 0) sh.insertColumnsAfter(sh.getMaxColumns(), need);
+  const delivMode = r.deliveryMode    || 'retrait';
+  const delivAddr = r.deliveryAddress || '';
+  const delivFee  = Number(r.deliveryFee) || 0;
+  const delivDate = r.deliveryDate    || '';
 
   // Métadonnées pièces jointes (fileId/URL Drive uniquement, pas de base64)
   var attachMeta = JSON.stringify(
@@ -730,7 +741,8 @@ function handleAddReservation(data) {
     // Aucun article — une ligne de repli
     sh.appendRow([id, dateStr, heureStr, clientNom, clientTel,
       '', 0, 0, 0, total, remise, total, accompte, restant,
-      modeDepot, fournisseur, reference, caissier, 'En attente', '', '', attachMeta]);
+      modeDepot, fournisseur, reference, caissier, 'En attente', '', '', attachMeta,
+      delivMode, delivAddr, delivFee, delivDate]);
   } else {
     // Une ligne par article — Attachments_JSON uniquement sur la première ligne
     items.forEach(function(item, idx) {
@@ -739,7 +751,8 @@ function handleAddReservation(data) {
         item.name || '', Number(item.qty) || 1, Number(item.price) || 0,
         sousTotal, total, remise, total, accompte, restant,
         modeDepot, fournisseur, reference, caissier, 'En attente', '', '',
-        idx === 0 ? attachMeta : '']);
+        idx === 0 ? attachMeta : '',
+        delivMode, delivAddr, delivFee, delivDate]);
     });
   }
   return { ok:true, id };

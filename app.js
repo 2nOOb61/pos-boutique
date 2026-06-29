@@ -4166,11 +4166,16 @@ async function loadReservationsFromScript() {
   const localOnly = reservations.filter(res => !sheetIds.has(String(res.id)));
   const mergedFromSheet = deduped.map(res => {
     const local = reservations.find(lr => String(lr.id) === String(res.id));
-    // Préserver les attachments et dossierId locaux que GAS ne connaît pas
+    // Préserver les attachments et dossierId locaux que GAS ne connaît pas ;
+    // pour les anciennes réservations (colonnes livraison vides côté GAS), garder le local
     return {
       ...res,
       attachments: (local?.attachments?.length ? local.attachments : res.attachments) || [],
       dossierId:   local?.dossierId || res.dossierId || '',
+      deliveryMode:    res.deliveryMode    || local?.deliveryMode    || 'retrait',
+      deliveryAddress: res.deliveryAddress || local?.deliveryAddress || '',
+      deliveryFee:     res.deliveryFee     || local?.deliveryFee     || 0,
+      deliveryDate:    res.deliveryDate    || local?.deliveryDate    || '',
     };
   });
   reservations = [...mergedFromSheet, ...localOnly];
