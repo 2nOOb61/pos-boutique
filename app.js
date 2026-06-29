@@ -5369,10 +5369,14 @@ function renderCommandes() {
       const _dSvg = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>';
       const printBtn = `<button class="hist-print-btn" onclick="printCommandeTicket(commandes.find(x=>String(x.id)==='${c.id}'))" title="Imprimer le bon de commande">${_pSvg}<span>Imprimer</span></button>`;
       const finalizeBtn = c.status === 'pending' ? `<button class="btn-finalize" onclick="openCmdFinalizeModal('${c.id}')">Finaliser</button>` : '';
-      // Les commerciaux passent par une demande validée par l'admin ; les autres rôles éditent directement
+      // Les commerciaux éditent les DATES directement (planification, effet immédiat) ;
+      // les champs sensibles (montants, articles) passent par une demande validée par l'admin.
       const _isCommercial = currentUser?.role === 'commerciale';
       const kebabItems = _isCommercial
-        ? `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();requestCommandeModif('${c.id}')">${_kebabIcon('edit')}<span>Demander une modification</span></button>`
+        ? `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeDateClient('${c.id}')">${_kebabIcon('edit')}<span>Modifier date livraison client</span></button>`
+          + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeDateBAT('${c.id}')">${_kebabIcon('edit')}<span>Modifier date BAT</span></button>`
+          + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeDateProd('${c.id}')">${_kebabIcon('edit')}<span>Modifier date production</span></button>`
+          + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();requestCommandeModif('${c.id}')">${_kebabIcon('edit')}<span>Demander une modification (montants…)</span></button>`
           + (c.status === 'pending' ? `<button class="kebab-item danger" role="menuitem" onclick="closeAllKebabs();requestCommandeCancel('${c.id}')">${_kebabIcon('trash')}<span>Demander l'annulation</span></button>` : '')
         : `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeAddress('${c.id}')">${_kebabIcon('edit')}<span>Modifier l'adresse</span></button>`
           + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeFrais('${c.id}')">${_kebabIcon('cash')}<span>Modifier les frais de livraison</span></button>`
