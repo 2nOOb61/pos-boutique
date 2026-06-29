@@ -177,6 +177,7 @@ function doGet(e) {
     if (action === 'getDashboard')    return jsonResp(handleGetDashboard());
     if (action === 'getControlPatron') return jsonResp(handleGetControlPatron(e.parameter));
     if (action === 'migrateCommandeIds') return jsonResp(migrateCommandeIds());
+    if (action === 'migrateDedupDossiers') return jsonResp(migrateDedupDossiers());
     if (action === 'getComments')     return jsonResp(handleGetComments(e.parameter));
     if (action === 'getNotifs')       return jsonResp(handleGetNotifs(e.parameter));
     if (action === 'getModifs')       return jsonResp(handleGetModifs(e.parameter));
@@ -907,6 +908,79 @@ function migrateCommandeIds() {
     }
   }
   return { ok:true, fixed:fixed, total:idCells.length };
+}
+
+// Migration : supprime les lignes de dossiers EN DOUBLE (même source commande/réservation),
+// héritées des anciens ids basés sur la date. Conserve le dossier le plus avancé (progression
+// max) et RE-POINTE d'abord les tâches vers lui (aucune perte). Idempotente.
+// Route GET ?action=migrateDedupDossiers. ⚠️ Faire un backup avant (?action=runBackupNow).
+function migrateDedupDossiers() {
+  const ss  = getSS();
+  const shD = ss.getSheetByName(SHEET_DOSSIERS);
+  if (!shD) return { ok:false, error:'Feuille Dossiers introuvable' };
+  const lastRow = shD.getLastRow();
+  if (lastRow < 2) return { ok:true, removed:0, total:0 };
+
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    const rows = shD.getDataRange().getValues(); // [0] = en-tête
+
+    // Clé d'identité de la source d'une ligne dossier (col 11 = SourceVente)
+    function srcKey(r) {
+      const sv = String(r[10] || '');
+      let m = sv.match(/Commande\s*#?\s*(\S+)/i);    if (m) return 'commande:' + m[1];
+      m = sv.match(/R[ée]servation\s*#?\s*(\S+)/i);  if (m) return 'reservation:' + m[1];
+      return null; // pas de source identifiable (ventes comptant, manuel…) → ne pas toucher
+    }
+
+    const groups = {};
+    for (let i = 1; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r[0]) continue;
+      const k = srcKey(r);
+      if (!k) continue;
+      (groups[k] = groups[k] || []).push({ row: i + 1, id: String(r[0]), prog: Number(r[6]) || 0 });
+    }
+
+    const remap = {};        // id supprimé → id conservé
+    const rowsToDelete = [];  // numéros de ligne (base 1)
+    Object.keys(groups).forEach(function(k) {
+      const g = groups[k];
+      if (g.length < 2) return;
+      let keep = g[0];
+      g.forEach(function(x) { if (x.prog > keep.prog) keep = x; });
+      g.forEach(function(x) {
+        if (x.row === keep.row) return;
+        remap[x.id] = keep.id;
+        rowsToDelete.push(x.row);
+      });
+    });
+
+    if (!rowsToDelete.length) return { ok:true, removed:0, total:lastRow - 1, remapped:0 };
+
+    // 1) Re-pointer les tâches (col 2 = DossierID) vers le dossier conservé
+    let tachesRepointed = 0;
+    const shT = ss.getSheetByName(SHEET_TACHES);
+    if (shT && shT.getLastRow() > 1) {
+      const tRange = shT.getRange(2, 2, shT.getLastRow() - 1, 1);
+      const tVals  = tRange.getValues();
+      let changed = false;
+      for (let i = 0; i < tVals.length; i++) {
+        const cur = String(tVals[i][0] || '');
+        if (remap[cur]) { tVals[i][0] = remap[cur]; changed = true; tachesRepointed++; }
+      }
+      if (changed) tRange.setValues(tVals);
+    }
+
+    // 2) Supprimer les lignes en double (du bas vers le haut pour préserver les indices)
+    rowsToDelete.sort(function(a, b) { return b - a; }).forEach(function(rn) { shD.deleteRow(rn); });
+
+    CacheService.getScriptCache().remove('dashboard_v1');
+    return { ok:true, removed:rowsToDelete.length, total:lastRow - 1, remapped:tachesRepointed, groupes:Object.keys(remap).length };
+  } finally {
+    try { lock.releaseLock(); } catch(e) {}
+  }
 }
 
 function handleAddCommande(data) {
