@@ -9986,9 +9986,12 @@ function updateDeliveryBadge() {
 // livraison, impression A4. UX pcf-* (hero/KPIs, scanabilité, disclosure, kebab,
 // table responsive → cartes mobile, 80/20).
 // ============================================================
-let _finState = { period: 'all', pay: 'all', q: '' };
+let _finState = { period: 'all', pay: 'all', q: '', from: '', to: '' };
 let _finItemOpen = new Set();
-function setFinPeriod(v) { _finState.period = v; renderFinances(); }
+function setFinPeriod(v) { _finState.period = v; _finState.from = ''; _finState.to = ''; renderFinances(); }
+function setFinFrom(v)   { _finState.from = v; _finState.period = null; renderFinances(); }
+function setFinTo(v)     { _finState.to = v;   _finState.period = null; renderFinances(); }
+function setFinClearDates() { _finState.from = ''; _finState.to = ''; _finState.period = 'all'; renderFinances(); }
 function setFinPay(v)    { _finState.pay = v;    renderFinances(); }
 function setFinSearch(v) { _finState.q = v;      renderFinances(); }
 function toggleFinItem(id) { if (_finItemOpen.has(id)) _finItemOpen.delete(id); else _finItemOpen.add(id); renderFinances(); }
@@ -10013,10 +10016,27 @@ function _seqRefOf(kind, id, maps) {
 }
 
 function _finPeriodRange() {
+  // Plage de dates personnalisée (Du / Au) prioritaire sur les périodes prédéfinies.
+  if (_finState.from || _finState.to) {
+    return {
+      from: _finState.from ? new Date(_finState.from + 'T00:00:00') : null,
+      to:   _finState.to   ? new Date(_finState.to   + 'T23:59:59') : null
+    };
+  }
   const now = new Date();
   if (_finState.period === 'week')  { const f = new Date(now); f.setDate(f.getDate() - 6); f.setHours(0,0,0,0); return { from: f, to: null }; }
   if (_finState.period === 'month') { return { from: new Date(now.getFullYear(), now.getMonth(), 1), to: null }; }
   return { from: null, to: null };
+}
+
+// Libellé de la période courante (pour l'en-tête des impressions).
+function _finPeriodLabel() {
+  if (_finState.from || _finState.to) {
+    const f = _finState.from ? new Date(_finState.from + 'T00:00:00').toLocaleDateString('fr-FR') : '…';
+    const t = _finState.to   ? new Date(_finState.to   + 'T00:00:00').toLocaleDateString('fr-FR') : "aujourd'hui";
+    return `Du ${f} au ${t}`;
+  }
+  return _finState.period === 'week' ? '7 derniers jours' : _finState.period === 'month' ? 'Ce mois' : 'Toutes les opérations';
 }
 
 // État de livraison (commande OU réservation) dérivé du dossier de production lié.
@@ -10149,6 +10169,13 @@ function renderFinances() {
   let html = `
     <div class="pcf-toolbar">
       <div class="pcf-segs">${seg('all', _finState.period, 'Tout', 'setFinPeriod')}${seg('month', _finState.period, 'Ce mois', 'setFinPeriod')}${seg('week', _finState.period, '7 jours', 'setFinPeriod')}</div>
+      <div class="pcf-segs" style="gap:7px;align-items:center;padding:4px 9px">
+        <span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)">Du</span>
+        <input type="date" value="${_finState.from || ''}" onchange="setFinFrom(this.value)" style="border:none;background:transparent;font-size:12px;font-weight:600;color:var(--text);font-family:inherit;outline:none;width:122px" />
+        <span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)">Au</span>
+        <input type="date" value="${_finState.to || ''}" onchange="setFinTo(this.value)" style="border:none;background:transparent;font-size:12px;font-weight:600;color:var(--text);font-family:inherit;outline:none;width:122px" />
+        ${(_finState.from || _finState.to) ? `<button onclick="setFinClearDates()" title="Effacer la plage de dates" style="border:none;background:var(--surface);color:var(--muted);cursor:pointer;font-size:15px;line-height:1;padding:2px 7px;border-radius:6px">×</button>` : ''}
+      </div>
       <div class="pcf-segs">${seg('all', _finState.pay, 'Toutes', 'setFinPay')}${seg('unpaid', _finState.pay, 'À solder', 'setFinPay')}${seg('paid', _finState.pay, 'Soldées', 'setFinPay')}</div>
       <div class="pcf-tools">
         <button class="pcf-export-btn" onclick="printFicheSortie()"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Fiche de sortie</button>
@@ -10214,7 +10241,7 @@ function printFinances() {
   const tAcc = list.reduce((s, e) => s + e.accompte, 0);
   const tRes = list.reduce((s, e) => s + e.restant, 0);
   const shop = (shopConfig && shopConfig.name) || 'FOREVER MG';
-  const periodLbl = _finState.period === 'week' ? '7 derniers jours' : _finState.period === 'month' ? 'Ce mois' : 'Toutes les opérations';
+  const periodLbl = _finPeriodLabel();
 
   const groups = {}; const order = [];
   list.forEach(e => { const k = _histDayKey(e.date); if (!groups[k]) { groups[k] = { date: e.date, rows: [], eng: 0, acc: 0, res: 0 }; order.push(k); } const g = groups[k]; g.rows.push(e); g.eng += e.total; g.acc += e.accompte; g.res += e.restant; });
@@ -10262,7 +10289,7 @@ function printFicheSortie() {
   const { list } = _finBuild();
   if (!list.length) { showToast('Aucune opération à imprimer', 'error'); return; }
   const shop = (shopConfig && shopConfig.name) || 'FOREVER MG';
-  const periodLbl = _finState.period === 'week' ? '7 derniers jours' : _finState.period === 'month' ? 'Ce mois' : 'Toutes les opérations';
+  const periodLbl = _finPeriodLabel();
 
   const rows = list.map((e, i) => {
     const m  = e.obj.depositMethod === 'mobile' ? 'mobile' : e.obj.depositMethod === 'cheque' ? 'cheque' : 'cash';
