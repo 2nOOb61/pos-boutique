@@ -180,6 +180,11 @@ function _payLabel(s) {
 }
 // Comparaison insensible à la casse et aux espaces — utilisée pour matcher les opérateurs
 function _sameOp(a, b) { return (a||'').trim().toLowerCase() === (b||'').trim().toLowerCase(); }
+// Cloisonnement Production / Attribution : seuls admin, chef d'atelier et commercial
+// (suivi global, lecture seule) voient le travail de TOUS les opérateurs. Les autres
+// (operateur_prod, machiniste, pao, finition, livreur…) ne voient que LE LEUR.
+function _canSeeAllOps() { return ['admin','chef_atelier','commerciale'].includes(currentUser?.role); }
+function _myOpLabel() { return currentUser?.label || currentUser?.username || ''; }
 function now() { return new Date().toLocaleString('fr-MG'); }
 
 // ── Sécurité : protection XSS pour les données utilisateur ──
@@ -6523,7 +6528,7 @@ function showDossierReadOnly(d) {
       <span style="width:10px;height:10px;border-radius:50%;background:${col(s.status)};flex-shrink:0"></span>
       <span style="flex:1;font-size:13px;color:var(--color-text-primary)">${s.e.label}</span>
       <span style="font-size:11px;font-weight:600;color:${col(s.status)}">${s.status==='TERMINE'?'Terminé':s.status==='EN_COURS'?'En cours':s.status==='A_FAIRE'?'À faire':'—'}</span>
-      ${s.te.length ? `<span style="font-size:11px;color:var(--color-text-muted)">${s.te.map(t=>t.operateur).filter(Boolean).join(', ')}</span>` : ''}
+      ${s.te.length ? `<span style="font-size:11px;color:var(--color-text-muted)">${(_canSeeAllOps() ? s.te.map(t=>t.operateur) : s.te.map(t=>_sameOp(t.operateur,_myOpLabel())?t.operateur:'Opérateur')).filter(Boolean).join(', ')}</span>` : ''}
     </div>`).join('');
 
   let overlay = document.getElementById('dossierReadOnlyModal');
@@ -7188,8 +7193,8 @@ function printAttributionReport() {
                    : anneeLabel ? anneeLabel
                    : 'Tous les dossiers';
 
-  // Filtrer la liste visible
-  const list = dossiers.filter(d => _matchDateFilter(d.dateCreation, attrDateFilter));
+  // Filtrer la liste visible (+ cloisonnement : un opérateur ne voit que ses dossiers)
+  const list = _attribVisibleDossiers().filter(d => _matchDateFilter(d.dateCreation, attrDateFilter));
 
   // KPI
   const total    = list.length;
@@ -7218,7 +7223,8 @@ function printAttributionReport() {
       : `<span class="badge badge-blue">${pct}%</span>`;
     // Tâches du dossier
     const dTaches = taches.filter(t => t.dossierId === d.id);
-    const ops = [...new Set(dTaches.map(t => t.operateur).filter(Boolean))].join(', ') || '—';
+    const _opsSrc = _canSeeAllOps() ? dTaches : dTaches.filter(t => _sameOp(t.operateur, _myOpLabel()));
+    const ops = [...new Set(_opsSrc.map(t => t.operateur).filter(Boolean))].join(', ') || '—';
     return `<tr>
       <td><strong>${d.numeroDossier}</strong></td>
       <td>${d.client || '—'}</td>
@@ -8248,6 +8254,14 @@ function _renderDossierRow(d) {
   </div>`;
 }
 
+// Cloisonnement Attribution : la liste des dossiers visibles par l'utilisateur courant.
+// admin / chef / commercial → tous ; opérateur → uniquement ceux où il a une tâche.
+function _attribVisibleDossiers() {
+  if (_canSeeAllOps()) return dossiers;
+  const my = _myOpLabel();
+  return dossiers.filter(d => taches.some(t => t.dossierId === d.id && _sameOp(t.operateur, my)));
+}
+
 function renderDossiers() {
   const container = document.getElementById('dossierListContainer');
   if (!container) return;
@@ -8261,9 +8275,10 @@ function renderDossiers() {
 
   // Filtre recherche client-side
   const search = (document.getElementById('dossierSearchInput')?.value || '').toLowerCase().trim();
-  let list = dossiers;
+  // Cloisonnement : un opérateur ne voit que les dossiers où il a une tâche assignée
+  let list = _attribVisibleDossiers();
   if (search) {
-    list = dossiers.filter(d =>
+    list = list.filter(d =>
       (d.numeroDossier || '').toLowerCase().includes(search) ||
       (d.client || '').toLowerCase().includes(search) ||
       (d.produit || '').toLowerCase().includes(search)
@@ -8313,10 +8328,11 @@ function _renderDossierTabs() {
     { val:'PRODUCTION', label:'Production' },
     { val:'FINITION',   label:'Finition' },
   ];
+  const _visibles = _attribVisibleDossiers();
   const counts = {};
-  dossiers.forEach(d => { counts[d.statut] = (counts[d.statut]||0)+1; });
+  _visibles.forEach(d => { counts[d.statut] = (counts[d.statut]||0)+1; });
   el.innerHTML = tabDefs.map(t => {
-    const count  = t.val === 'TOUS' ? dossiers.length : (counts[t.val] || 0);
+    const count  = t.val === 'TOUS' ? _visibles.length : (counts[t.val] || 0);
     const active = selVal === t.val;
     return `<button class="dossier-tab ${active?'dossier-tab--active':''}" onclick="setDossierTab('${t.val}')">
       ${t.label}<span class="dossier-tab__count">${count}</span>
@@ -8386,7 +8402,8 @@ function _renderDossierCardGrid(list) {
       const ic        = s==='done'?'':s==='encours'?'▶':s==='todo'?'●':'';
       const lineColor = s==='done'?'#16a34a30':'#e5e3df';
       const labelColor = s==='done'?'#16a34a':s==='encours'?'#d97706':s==='todo'?'#2563eb':'#c2bdb8';
-      const ops = te.map(t => t.operateur).join(',');
+      // Cloisonnement : un opérateur ne voit que son propre nom sous les étapes
+      const ops = (_canSeeAllOps() ? te : te.filter(t => _sameOp(t.operateur, _myOpLabel()))).map(t => t.operateur).join(',');
       return { e, s, dotBg, dotBorder, dotColor, ic, lineColor, labelColor, ops, i };
     });
 
@@ -8691,6 +8708,9 @@ function renderAttrPanel(tachesD, commentsD = []) {
       const ROLE_ETAPE_MAP = { pao:'PAO', operateur_prod:'PRODUCTION', machiniste:'PRODUCTION', finition:'FINITION', livreur:'LIVRE' };
       const userEtape = ROLE_ETAPE_MAP[currentUser_role];
       const canSelfAssign = !canAssign && !etapeComplete && !alreadySelfAssigned && userEtape === e.code;
+      // Cloisonnement : un opérateur ne voit que son propre nom ; le travail des
+      // collègues garde son badge de statut (utile pour le déblocage) mais sans nom.
+      const _seeAllOps = _canSeeAllOps();
       const operateursHtml = tachesEtape.length
         ? tachesEtape.map(t => {
             const badge = t.statut==='TERMINE'
@@ -8698,7 +8718,8 @@ function renderAttrPanel(tachesD, commentsD = []) {
               : t.statut==='EN_COURS'
               ? `<span class="prod-badge" style="background:var(--color-warning-bg);color:var(--color-warning)">En cours</span>`
               : `<span class="prod-badge" style="background:var(--color-info-bg);color:var(--color-info)">Assigné</span>`;
-            return `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:6px;margin-bottom:2px">${t.operateur} ${badge}</span>`;
+            const _name = (_seeAllOps || _sameOp(t.operateur, currentUser?.label)) ? t.operateur : 'Opérateur';
+            return `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:6px;margin-bottom:2px">${_name} ${badge}</span>`;
           }).join('')
         : '<em style="color:var(--color-text-muted)">Non assigné</em>';
       const etapeIcon = etapeComplete
@@ -8787,7 +8808,8 @@ function printDossier(dossierId) {
     const statusColor = done ? '#16a34a' : inProgress ? '#d97706' : assigned ? '#2563eb' : '#a8a29e';
     const statusBg    = done ? '#dcfce7'  : inProgress ? '#fef3c7'  : assigned ? '#dbeafe'  : '#f5f5f4';
     const statusLabel = done ? 'Terminé'  : inProgress ? 'En cours' : assigned ? 'Assigné'  : 'Non assigné';
-    const ops = te.map(t => t.operateur).join(', ') || '—';
+    // Cloisonnement : impression côté opérateur n'affiche que son nom
+    const ops = (_canSeeAllOps() ? te : te.filter(t => _sameOp(t.operateur, _myOpLabel()))).map(t => t.operateur).join(', ') || '—';
     return `
       <tr>
         <td style="padding:7px 10px;border-bottom:1px solid #e5e3df;font-size:11pt;font-weight:600;color:#1c1917">${e.label}</td>
