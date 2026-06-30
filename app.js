@@ -5689,6 +5689,7 @@ function _fmtModDate(iso) {
   return isNaN(d) ? '' : d.toLocaleString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
 }
 function _modVal(key, v) {
+  if (key === 'depositMethod') return _depositLabel(v);
   if (CMD_MODIF_NUMKEYS.includes(key)) return fmt(Number(v) || 0);
   return (v === '' || v == null) ? '—' : String(v);
 }
@@ -5731,6 +5732,11 @@ function requestCommandeModif(id) {
     const val = String(raw).replace(/"/g, '&quot;');
     if (f.type === 'textarea')
       return `<label class="modif-field"><span>${f.label}</span><textarea id="mf_${f.key}" rows="2">${String(raw)}</textarea></label>`;
+    if (f.type === 'select') {
+      const opts = [['','— Non défini']].concat(f.options || [])
+        .map(([ov, ol]) => `<option value="${ov}" ${String(raw) === String(ov) ? 'selected' : ''}>${ol}</option>`).join('');
+      return `<label class="modif-field"><span>${f.label}</span><select id="mf_${f.key}">${opts}</select></label>`;
+    }
     const inputType = f.type === 'number' ? 'number' : (f.type === 'date' ? 'date' : 'text');
     return `<label class="modif-field"><span>${f.label}</span><input id="mf_${f.key}" type="${inputType}" value="${val}" ${f.type === 'number' ? 'min="0"' : ''}></label>`;
   }).join('');
@@ -5848,7 +5854,7 @@ function approveCommandeModif(modId) {
         clientName: c.clientName, clientContact: c.clientContact,
         adresseLivraison: c.adresseLivraison, deliveryMode: c.deliveryMode,
         fraisLivraison: c.fraisLivraison, dateLivraison: c.dateLivraison, dateLivraisonProd: c.dateLivraisonProd, dateBAT: c.dateBAT,
-        remise: c.remise, accompte: c.accompte, notes: c.notes,
+        remise: c.remise, accompte: c.accompte, notes: c.notes, depositMethod: c.depositMethod,
         subtotal: c.subtotal, total: c.total, restant: c.restant
       }).catch(() => {});
     }
@@ -5986,10 +5992,13 @@ async function syncCmdUpdateToSheets(cmd) {
 let commandeMods = []; // demandes récentes (pending / approved / rejected / superseded)
 
 // Champs qu'un commercial peut demander à modifier (avec validation admin)
+const _DEPOSIT_METHOD_OPTS = [['cash','Espèces'],['mobile','Mobile Money'],['cheque','Chèque']];
+function _depositLabel(v){ const o = _DEPOSIT_METHOD_OPTS.find(x => x[0] === v); return o ? o[1] : (v ? String(v) : '—'); }
 const CMD_MODIF_FIELDS = [
   { key:'clientName',       label:'Nom client',            type:'text' },
   { key:'clientContact',    label:'Contact',               type:'text' },
   { key:'accompte',         label:'Acompte (Ar)',          type:'number' },
+  { key:'depositMethod',    label:'Mode de paiement acompte', type:'select', options:_DEPOSIT_METHOD_OPTS },
   { key:'remise',           label:'Remise (Ar)',           type:'number' },
   { key:'adresseLivraison', label:'Adresse de livraison',  type:'text' },
   { key:'fraisLivraison',   label:'Frais de livraison (Ar)',type:'number' },

@@ -1063,6 +1063,7 @@ function handleUpdateCommande(data) {
     if (data.clientContact !== undefined)    sh.getRange(i+1, 5).setValue(data.clientContact); // col E = Client_Contact
     if (data.remise !== undefined)           sh.getRange(i+1, 12).setValue(Number(data.remise)||0);   // col L = Remise
     if (data.accompte !== undefined)         sh.getRange(i+1, 14).setValue(Number(data.accompte)||0); // col N = Accompte
+    if (data.depositMethod !== undefined)    sh.getRange(i+1, 16).setValue(data.depositMethod);  // col P = Mode_Paiement (acompte)
     if (data.notes !== undefined)            sh.getRange(i+1, 19).setValue(data.notes);        // col S = Notes
     if (data.attachments !== undefined) {                                                      // col Y = Pièces_Jointes (JSON)
       const need = 25 - sh.getMaxColumns();

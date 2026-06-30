@@ -1308,7 +1308,7 @@ tr:hover td {
 .modif-form { display: flex; flex-direction: column; gap: 11px; max-height: 56vh; overflow-y: auto; padding-right: 4px; }
 .modif-field { display: flex; flex-direction: column; gap: 4px; }
 .modif-field > span { font-size: 12px; font-weight: 600; color: var(--muted); }
-.modif-field input, .modif-field textarea {
+.modif-field input, .modif-field textarea, .modif-field select {
   width: 100%; padding: 9px 11px; border: 1px solid var(--border);
   border-radius: 9px; font-size: 14px; font-family: inherit; background: #fff; color: var(--text);
 }
