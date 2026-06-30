@@ -10277,7 +10277,7 @@ function printFicheSortie() {
       <td class="r">${m === 'mobile' && av ? fmt(av) : ''}</td>
       <td class="r">${m === 'cheque' && av ? fmt(av) : ''}</td>
       <td></td><td></td><td></td>
-      <td></td><td></td><td></td><td></td><td></td>
+      <td></td><td class="c">${_dispDate(e.deliveryDate)}</td><td></td><td></td><td></td>
     </tr>`;
   }).join('');
 
