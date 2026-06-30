@@ -997,6 +997,9 @@
     .kebab-btn:hover{background:var(--surface3,var(--surface2));color:var(--text)}
     .kebab-menu{position:absolute;right:0;top:42px;min-width:190px;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.22);padding:6px;z-index:50;display:none}
     .kebab-menu.open{display:block}
+    /* Carte/ligne dont le menu kebab est ouvert : élevée au-dessus des suivantes
+       (les cartes ont un backdrop-filter => contexte d'empilement qui piège le dropdown) */
+    .kebab-elevated{position:relative;z-index:1000}
     .kebab-item{display:flex;align-items:center;gap:9px;width:100%;min-height:40px;padding:9px 11px;border:none;background:none;color:var(--text);font-size:13px;text-align:left;border-radius:8px;cursor:pointer}
     .kebab-item:hover{background:var(--surface2)}
     .kebab-item.danger{color:var(--red)}
@@ -2665,7 +2668,7 @@
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260630-edititems"></script>
+<script src="./app.js?v=20260630-kebabz"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

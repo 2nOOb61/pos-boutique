@@ -2487,14 +2487,25 @@ function _editCommandeDate(id, field, label) {
 function editCommandeDateClient(id){ _editCommandeDate(id, 'dateLivraison',     'Date de livraison client'); }
 function editCommandeDateProd(id){   _editCommandeDate(id, 'dateLivraisonProd', 'Date de livraison production'); }
 function editCommandeDateBAT(id){     _editCommandeDate(id, 'dateBAT',           'Date de BAT'); }
-function closeAllKebabs(){ document.querySelectorAll('.kebab-menu.open').forEach(m=>m.classList.remove('open')); }
+function closeAllKebabs(){
+  document.querySelectorAll('.kebab-menu.open').forEach(m=>m.classList.remove('open'));
+  // Rétablir l'empilement normal des cartes/lignes précédemment élevées
+  document.querySelectorAll('.kebab-elevated').forEach(el=>el.classList.remove('kebab-elevated'));
+}
 function toggleKebab(uid, ev){
   if(ev) ev.stopPropagation();
   const m=document.getElementById('kb-'+uid);
   if(!m) return;
   const wasOpen=m.classList.contains('open');
   closeAllKebabs();
-  if(!wasOpen) m.classList.add('open');
+  if(!wasOpen){
+    m.classList.add('open');
+    // Les cartes ont un `backdrop-filter`/`transform` → chacune crée un contexte
+    // d'empilement, donc le menu (position:absolute) est « piégé » derrière la carte
+    // suivante. On élève la carte hôte au-dessus des suivantes le temps de l'ouverture.
+    const host = m.closest('.cmd-card,.res-card,.user-card,.stat-card,.dossier-row,.dossier-card-v2,.pcf-card,.pcf-row,.hist-card,.hist-row,.pt-item,.prod-group,.deliv-item,tr,li') || m.parentElement;
+    if(host) host.classList.add('kebab-elevated');
+  }
 }
 document.addEventListener('click', closeAllKebabs);
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeAllKebabs(); });
