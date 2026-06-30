@@ -9256,6 +9256,10 @@ function setProdFilter(f, btn) {
 
 function _buildProgressBar(dossierId) {
   const dt = taches.filter(t => t.dossierId === dossierId);
+  // Cloisonnement : un opérateur ne voit que SON nom sous les étapes du pipeline.
+  // admin / chef d'atelier / commercial (suivi global) voient tous les opérateurs.
+  const _canSeeAllOps = ['admin','chef_atelier','commerciale'].includes(currentUser?.role);
+  const _myLabel = currentUser?.label || currentUser?.username || '';
   let doneCount = 0;
   const steps = ETAPES_CONFIG.map(e => {
     const te = dt.filter(t => t.etapeCode === e.code);
@@ -9273,7 +9277,8 @@ function _buildProgressBar(dossierId) {
   const lc  = s => s==='TERMINE'?'#16a34a30':'#e5e3df';
   const ic  = s => s==='TERMINE'?'':s==='EN_COURS'?'▶':s==='A_FAIRE'?'●':'';
   const ops = s => {
-    const t0 = dt.filter(t => t.etapeCode === s.code);
+    let t0 = dt.filter(t => t.etapeCode === s.code);
+    if (!_canSeeAllOps) t0 = t0.filter(t => _sameOp(t.operateur, _myLabel));
     if (!t0.length) return '';
     return `<div style="font-size:9px;color:var(--color-text-muted);margin-top:2px;text-align:center;max-width:44px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t0.map(t=>t.operateur).join(',')}</div>`;
   };
@@ -10425,15 +10430,21 @@ function _prodDeadlineChip(ymd) {
 // page Production pour tous les rôles → chaque opérateur voit l'échéancier de l'atelier.
 function _buildProdDeadlines() {
   if (!Array.isArray(dossiers)) return '';
+  // Cloisonnement : un opérateur ne voit QUE les échéances des dossiers où il a une tâche
+  // (et seulement son nom). admin / chef d'atelier / commercial voient toutes les échéances.
+  const _canSeeAll = ['admin','chef_atelier','commerciale'].includes(currentUser?.role);
+  const _myLabel   = currentUser?.label || currentUser?.username || '';
   const rows = dossiers
     .filter(d => d && d.dateLivraisonProd)
+    .filter(d => _canSeeAll || taches.some(t => t.dossierId === d.id && _sameOp(t.operateur, _myLabel)))
     .map(d => {
       const dt = taches.filter(t => t.dossierId === d.id);
       let done = 0;
       ETAPES_CONFIG.forEach(e => { const te = dt.filter(t => t.etapeCode === e.code); if (te.length && te.every(t => t.statut === 'TERMINE')) done++; });
       const pct  = dt.length ? Math.round(done / ETAPES_CONFIG.length * 100) : (d.progression || 0);
       const days = _daysUntil(d.dateLivraisonProd);
-      const ops  = [...new Set(dt.map(t => t.operateur).filter(Boolean))];
+      const opsSrc = _canSeeAll ? dt : dt.filter(t => _sameOp(t.operateur, _myLabel));
+      const ops  = [...new Set(opsSrc.map(t => t.operateur).filter(Boolean))];
       return { d, pct, days, ops };
     })
     .filter(x => x.pct < 100 && x.d.statut !== 'LIVRE')
