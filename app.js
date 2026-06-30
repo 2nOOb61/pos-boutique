@@ -9457,6 +9457,7 @@ function _buildMonDashboard() {
       <div class="mon-task-card__num">${t.dossierId==='LIBRE'?'Tâche libre':(t.numeroDossier||'')}</div>
       <div class="mon-task-card__etape" style="color:${etape.color}">${etape.label}</div>
       <div class="mon-task-card__status" style="color:${sColor}">${sTxt}</div>
+      ${isEC?_chronoBadge(t,'mon'):''}
       ${btn}
     </div>`;
   }).join('');
@@ -9474,6 +9475,107 @@ function _buildMonDashboard() {
     </div>
     <div class="mon-dashboard-cards">${cards}</div>
   </div>`;
+}
+
+// ============================================================
+// CHRONOMÈTRE & TEMPS DE PRODUCTION PAR OPÉRATEUR
+// ============================================================
+// Parse une date de tâche → ms epoch. Gère les formats GAS ("dd/MM/yyyy HH:mm"),
+// toLocaleString fr-FR ("dd/MM/yyyy, HH:mm:ss" ou "dd/MM/yyyy HH:mm:ss"),
+// date seule ("dd/MM/yyyy") et ISO. Renvoie null si illisible.
+function _parseTacheTs(s) {
+  if (s == null) return null;
+  if (typeof s === 'number') return s;
+  s = String(s).trim();
+  if (!s) return null;
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) { const d = new Date(s); return isNaN(d) ? null : d.getTime(); }
+  const m = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[,\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (!m) return null;
+  const d = new Date(+m[3], +m[2] - 1, +m[1], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
+  return isNaN(d) ? null : d.getTime();
+}
+function _tacheStartMs(t) {
+  if (t && typeof t.startTs === 'number') return t.startTs;
+  return _parseTacheTs(t && t.dateDebut);
+}
+function _tacheEndMs(t) {
+  if (t && typeof t.endTs === 'number') return t.endTs;
+  return _parseTacheTs(t && t.dateFin);
+}
+// Durée de production d'une tâche (ms). En cours = maintenant − début ; terminée = fin − début.
+function _tacheDureeMs(t, now) {
+  now = now || Date.now();
+  const s = _tacheStartMs(t);
+  if (!s) return 0;
+  if (t.statut === 'EN_COURS') return Math.max(0, now - s);
+  if (t.statut === 'TERMINE') { const e = _tacheEndMs(t); return (e && e > s) ? e - s : 0; }
+  return 0;
+}
+// Format durée longue (KPI) : "1h 23m", "12m 05s", "45s".
+function _fmtDuree(ms) {
+  if (!ms || ms < 0) ms = 0;
+  const tot = Math.floor(ms / 1000);
+  const h = Math.floor(tot / 3600), m = Math.floor((tot % 3600) / 60), s = tot % 60;
+  if (h > 0) return h + 'h ' + String(m).padStart(2, '0') + 'm';
+  if (m > 0) return m + 'm ' + String(s).padStart(2, '0') + 's';
+  return s + 's';
+}
+// Format chrono live : "1:23:45" / "12:05".
+function _fmtChrono(ms) {
+  if (!ms || ms < 0) ms = 0;
+  const tot = Math.floor(ms / 1000);
+  const h = Math.floor(tot / 3600), m = Math.floor((tot % 3600) / 60), s = tot % 60;
+  const mm = String(m).padStart(2, '0'), ss = String(s).padStart(2, '0');
+  return h > 0 ? h + ':' + mm + ':' + ss : mm + ':' + ss;
+}
+// Temps de production cumulé par opérateur (toutes tâches chargées). Map label → ms.
+function _operatorTimes(now) {
+  now = now || Date.now();
+  const map = {};
+  const all = (taches || []).concat(tachesLibres || []);
+  for (const t of all) {
+    const op = (t.operateur || '').trim();
+    if (!op) continue;
+    const d = _tacheDureeMs(t, now);
+    if (d <= 0) continue;
+    map[op] = (map[op] || 0) + d;
+  }
+  return map;
+}
+// Badge chronomètre HTML pour une tâche en cours (mis à jour par _chronoTick).
+function _chronoBadge(t, variant) {
+  const s = _tacheStartMs(t);
+  if (!s) return '';
+  const cls = variant ? ' prod-chrono--' + variant : '';
+  return `<span class="prod-chrono${cls}" data-chrono-start="${s}" title="Temps écoulé depuis le démarrage">${_fmtChrono(Date.now() - s)}</span>`;
+}
+// Tick global (1s) : met à jour les chronos de carte + les temps opérateurs du KPI.
+let _chronoTimer = null;
+function _hasRunningTache() {
+  return (taches || []).some(t => t.statut === 'EN_COURS')
+      || (tachesLibres || []).some(t => t.statut === 'EN_COURS');
+}
+function _chronoTick() {
+  const now = Date.now();
+  const chronos = document.querySelectorAll('.prod-chrono[data-chrono-start]');
+  chronos.forEach(el => {
+    const s = +el.getAttribute('data-chrono-start');
+    if (s) el.textContent = _fmtChrono(now - s);
+  });
+  const opCells = document.querySelectorAll('.op-prodtime[data-op-label]');
+  if (opCells.length) {
+    const times = _operatorTimes(now);
+    opCells.forEach(el => {
+      const lbl = el.getAttribute('data-op-label');
+      el.textContent = _fmtDuree(times[lbl] || 0);
+    });
+  }
+  if (!chronos.length && !_hasRunningTache()) { clearInterval(_chronoTimer); _chronoTimer = null; }
+}
+function _ensureChronoTick() {
+  if (_chronoTimer) return;
+  if (!_hasRunningTache()) return;
+  _chronoTimer = setInterval(_chronoTick, 1000);
 }
 
 function _tacheRow(t) {
@@ -9566,7 +9668,7 @@ function _tacheRow(t) {
       <div class="tache-card__body" onclick="togglePtDetail('${t.id}')">
         <div class="pt-head">
           <span class="tache-card__label" style="color:${etape.color}">${isLibre?t.titre:t.etapeLabel}</span>
-          ${prioBadge}${retardChip}${clientChip}
+          ${prioBadge}${retardChip}${clientChip}${isEC?_chronoBadge(t):''}
           <svg class="pt-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
         </div>
         <div class="tache-card__sub">${subLine}</div>
@@ -9714,6 +9816,7 @@ function _renderChargeView() {
         <span class="charge-task-etape" style="color:${etape.color}">${etape.label}${isUrgent?'&nbsp;<span style="color:var(--color-danger);font-size:9px;font-weight:800">⬤</span>':''}</span>
         ${clientLbl}
         <span class="charge-task-num">${t.dossierId==='LIBRE'?'Libre':(t.numeroDossier||'')}</span>
+        ${isEC?_chronoBadge(t,'charge'):''}
         ${btn}
       </div>`;
     }).join('');
@@ -9782,6 +9885,7 @@ function _renderChargeView() {
   }).join('');
 
   container.innerHTML = kpiHtml + `<div class="charge-grid">${cards}</div>`;
+  _ensureChronoTick();
 }
 
 function _buildOpWorkload() {
@@ -10643,6 +10747,7 @@ function renderTaches() {
       </div>
       <p style="font-size:13px;font-weight:500;color:var(--color-text-secondary)">Aucune tâche${prodFilter!=='TOUS'?' dans ce filtre':''}</p>
     </div>`;
+    _ensureChronoTick();
     return;
   }
 
@@ -10702,6 +10807,7 @@ function renderTaches() {
 
   container.innerHTML = deadlines + dash + libreHtml + groupsHtml;
   _syncProdExpandBtn();
+  _ensureChronoTick();
 }
 
 // ── Cartes-dossiers repliables (vue compacte production) ────────────────────
@@ -10760,7 +10866,7 @@ async function pointerStart(tacheId) {
   if (APPS_SCRIPT_URL && !isLibre) { r = await apiCall({ action:'pointerAction', tacheId, action_:'START' }); }
   else { r = { ok:true }; }
   if (r && r.ok) {
-    if (t) { t.statut = 'EN_COURS'; t.dateDebut = new Date().toLocaleString('fr-FR'); }
+    if (t) { t.statut = 'EN_COURS'; t.dateDebut = new Date().toLocaleString('fr-FR'); t.startTs = Date.now(); delete t.endTs; }
     if (isLibre) saveTachesLibres(); else saveTaches();
     // Notification de début de tâche visible par tous
     _addNotification({
@@ -10804,7 +10910,7 @@ async function confirmPointage() {
   else { r = { ok:true }; }
   if (r && r.ok) {
     const t = isLibre ? tachesLibres.find(x => x.id === tacheId) : taches.find(x => x.id === tacheId);
-    if (t) { t.statut = 'TERMINE'; t.dateFin = new Date().toLocaleDateString('fr-FR'); t.commentaire = comment || t.commentaire; }
+    if (t) { t.statut = 'TERMINE'; t.dateFin = new Date().toLocaleString('fr-FR'); t.endTs = Date.now(); t.commentaire = comment || t.commentaire; }
     if (isLibre) saveTachesLibres(); else saveTaches();
 
     // Vérifier si le dossier est maintenant complet à 100%
@@ -10867,6 +10973,7 @@ function renderProdKpis(data) {
   const block = document.getElementById('prodStatsBlock');
   if (!block) return;
   const { dossiers:d, operateurs:ops } = data;
+  const opTimes = _operatorTimes();
   block.innerHTML = `
     <div style="margin-top:24px;padding-top:24px;border-top:1px solid var(--color-border)">
       <h2 style="font-size:15px;font-weight:700;color:var(--color-text-primary);margin-bottom:14px">Production</h2>
@@ -10886,19 +10993,22 @@ function renderProdKpis(data) {
               <th style="text-align:center;padding:8px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-muted)">À faire</th>
               <th style="text-align:center;padding:8px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-muted)">En cours</th>
               <th style="text-align:center;padding:8px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-muted)">Terminé</th>
+              <th style="text-align:right;padding:8px 12px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--color-text-muted)" title="Temps de production cumulé (tâches terminées + en cours)">Temps prod</th>
             </tr></thead>
             <tbody>
               ${ops.map(o=>`<tr style="border-bottom:1px solid var(--color-border)">
-                <td style="padding:8px 12px;font-size:13px;font-weight:600;color:var(--color-text-primary)">${o.nom}</td>
+                <td style="padding:8px 12px;font-size:13px;font-weight:600;color:var(--color-text-primary)">${o.nom}${o.enCours?' <span style="color:var(--color-warning);font-size:10px" title="A une tâche en cours">●</span>':''}</td>
                 <td style="padding:8px 12px;text-align:center"><span class="prod-badge" style="background:var(--color-info-bg);color:var(--color-info)">${o.aFaire}</span></td>
                 <td style="padding:8px 12px;text-align:center"><span class="prod-badge" style="background:var(--color-warning-bg);color:var(--color-warning)">${o.enCours}</span></td>
                 <td style="padding:8px 12px;text-align:center"><span class="prod-badge" style="background:var(--color-success-bg);color:var(--color-success)">${o.termine}</span></td>
+                <td style="padding:8px 12px;text-align:right;font-size:13px"><span class="op-prodtime" data-op-label="${o.nom}">${_fmtDuree(opTimes[o.nom]||0)}</span></td>
               </tr>`).join('')}
             </tbody>
           </table>
         </div>
       </div>` : ''}
     </div>`;
+  _ensureChronoTick();
 }
 
 // ============================================================

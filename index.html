@@ -459,6 +459,13 @@
 .tache-card__body { cursor:pointer; user-select:none; }
 .pt-retard { font-size:10px; font-weight:800; color:#dc2626; background:#fee2e2; border:1px solid #fca5a5; padding:2px 7px; border-radius:6px; white-space:nowrap; flex-shrink:0; }
 .pt-client { font-size:10px; font-weight:700; color:#1a4a3a; background:#e8f4f0; border:1px solid #b7ddd0; padding:2px 8px; border-radius:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:160px; flex-shrink:1; }
+/* Chronomètre live d'une tâche en cours */
+.prod-chrono { display:inline-flex; align-items:center; gap:3px; font-size:10px; font-weight:800; font-variant-numeric:tabular-nums; color:#b45309; background:#fef3c7; border:1px solid #fcd34d; padding:2px 8px; border-radius:6px; white-space:nowrap; flex-shrink:0; letter-spacing:.3px; }
+.prod-chrono::before { content:''; width:6px; height:6px; border-radius:50%; background:#d97706; animation:chronoPulse 1s ease-in-out infinite; }
+@keyframes chronoPulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.35;transform:scale(.7)} }
+.prod-chrono--mon { width:100%; justify-content:center; margin:4px 0 2px; padding:4px; font-size:12px; }
+.prod-chrono--charge { font-size:9px; padding:1px 6px; margin-left:auto; }
+.op-prodtime { font-variant-numeric:tabular-nums; font-weight:700; color:var(--color-primary); }
 .pt-detail { display:none; margin:-1px 6px 7px 46px; padding:11px 13px; background:var(--color-bg); border:1px solid var(--color-border); border-radius:10px; }
 .pt-item.open .pt-detail { display:block; }
 .pt-detail-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(118px,1fr)); gap:8px; }
@@ -2668,7 +2675,7 @@
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260630-kebabz"></script>
+<script src="./app.js?v=20260630-chrono"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
