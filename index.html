@@ -466,6 +466,20 @@
 .prod-chrono--mon { width:100%; justify-content:center; margin:4px 0 2px; padding:4px; font-size:12px; }
 .prod-chrono--charge { font-size:9px; padding:1px 6px; margin-left:auto; }
 .op-prodtime { font-variant-numeric:tabular-nums; font-weight:700; color:var(--color-primary); }
+/* Sous-table du détail Performance opérateurs */
+.perf-subtable { width:100%; border-collapse:collapse; font-size:12px; background:var(--surface,#fff); border-radius:8px; overflow:hidden; }
+.perf-subtable th { text-align:left; font-size:9.5px; font-weight:800; text-transform:uppercase; letter-spacing:.04em; color:var(--muted,#78716c); padding:7px 9px; border-bottom:1px solid var(--border,#e5e3df); background:rgba(0,0,0,.02); }
+.perf-subtable td { padding:7px 9px; border-bottom:1px solid var(--border,#f0efed); vertical-align:middle; }
+.perf-subtable .pcf-num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.perf-subtable tr:last-child td { border-bottom:none; }
+@media (max-width:760px){
+  .perf-subtable thead { display:none; }
+  .perf-subtable, .perf-subtable tbody, .perf-subtable tr, .perf-subtable td { display:block; width:100%; }
+  .perf-subtable tr { border:1px solid var(--border,#e5e3df); border-radius:10px; margin-bottom:8px; padding:6px 4px; }
+  .perf-subtable td { border:none; padding:4px 10px; display:flex; justify-content:space-between; gap:12px; text-align:right; }
+  .perf-subtable td::before { content:attr(data-label); font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.03em; color:var(--muted,#78716c); text-align:left; }
+  .perf-subtable .pcf-num { text-align:right; }
+}
 .pt-detail { display:none; margin:-1px 6px 7px 46px; padding:11px 13px; background:var(--color-bg); border:1px solid var(--color-border); border-radius:10px; }
 .pt-item.open .pt-detail { display:block; }
 .pt-detail-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(118px,1fr)); gap:8px; }
@@ -747,6 +761,10 @@
         <button class="nav-btn sidebar-btn" data-roles="admin,chef_atelier,operateur_prod,machiniste,pao,finition,livreur,caissier,commerciale,utilisateur,gestionnaire,comptable" onclick="showPage('production',this)" aria-label="Production">
           <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg></span>
           <span class="sidebar-label">Production</span>
+        </button>
+        <button class="nav-btn sidebar-btn" data-roles="admin,chef_atelier,gestionnaire" onclick="showPage('perf',this)" aria-label="Performance opérateurs">
+          <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>
+          <span class="sidebar-label">Performance</span>
         </button>
         <button class="nav-btn sidebar-btn" data-roles="admin,chef_atelier,operateur_prod,machiniste,pao,finition,livreur,caissier,commerciale,utilisateur,gestionnaire,comptable" onclick="showPage('messagerie',this)" aria-label="Messagerie">
           <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
@@ -1476,6 +1494,21 @@
       </div>
     </div>
     <div id="financesContent"></div>
+  </div>
+
+  <!-- PERFORMANCE / ÉVALUATION OPÉRATEURS -->
+  <div class="page" id="page-perf" data-roles="admin,chef_atelier,gestionnaire">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:18px">
+      <div>
+        <h1 style="font-size:21px;font-weight:800;color:var(--text);margin:0">Performance opérateurs</h1>
+        <p style="font-size:13px;color:var(--muted);margin:3px 0 0">Temps de démarrage et d'exécution par tâche attribuée · pour évaluation</p>
+      </div>
+      <div class="search-wrap" style="max-width:300px;flex:1;min-width:180px">
+        <span class="search-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
+        <input class="search-input" id="perfSearch" placeholder="Rechercher un opérateur..." oninput="setPerfSearch(this.value)" aria-label="Rechercher un opérateur" autocomplete="off" />
+      </div>
+    </div>
+    <div id="perfContent"></div>
   </div>
 
   <!-- ═══════════════════════════════════════════
@@ -2675,7 +2708,7 @@
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260630-chrono"></script>
+<script src="./app.js?v=20260630-perf"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

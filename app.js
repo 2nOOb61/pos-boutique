@@ -127,6 +127,7 @@ const PAGE_ACCESS = {
   stock:          ['admin','gestionnaire'],
   stats:          ['admin','comptable'],
   finances:       ['admin','comptable','gestionnaire'],
+  perf:           ['admin','chef_atelier','gestionnaire'],
   'mon-dashboard':['admin','caissier','commerciale','utilisateur','gestionnaire','comptable'],
   config:         ['admin'],
   users:          ['admin'],
@@ -413,6 +414,7 @@ function showPage(id, btn, bnavBtn) {
   if (id==='commandes')    { _ensureDossierLinks(); renderCommandes(); _lastCmdRefresh = 0; _autoRefreshCommandes(); _loadTachesQuietly().then(renderCommandes); }
   if (id==='livraisons')   { renderLivraisons(); if (APPS_SCRIPT_URL) Promise.all([loadCommandesFromScript(), loadReservationsFromScript()]).then(() => { updateDeliveryBadge(); renderLivraisons(); }).catch(()=>{}); }
   if (id==='finances')     { _ensureDossierLinks(); renderFinances(); if (APPS_SCRIPT_URL) loadCommandesFromScript().then(() => { _ensureDossierLinks(); renderFinances(); }).catch(()=>{}); }
+  if (id==='perf')         { _ensureDossierLinks(); renderPerf(); if (APPS_SCRIPT_URL) _loadTachesQuietly().then(() => { _ensureDossierLinks(); renderPerf(); }).catch(()=>{}); }
   // Garde d'accès (rôle ou overrides personnalisés)
   if (currentUser) {
     const ep = _effectivePages(currentUser);
@@ -10619,6 +10621,316 @@ function printFicheSortie() {
     </body></html>`);
     w.document.close();
   }, 200);
+}
+
+// ============================================================
+// PERFORMANCE / ÉVALUATION OPÉRATEURS — page dédiée (design system pcf-*)
+// Mesure, par tâche attribuée : le délai de démarrage (attribution → début)
+// et la durée d'exécution (début → fin). Agrégé par opérateur, imprimable.
+// ============================================================
+let _perfState = { period: 'all', search: '', from: '', to: '' };
+let _perfOpen  = new Set();
+let _perfLast  = null;
+
+function setPerfPeriod(p) { _perfState.period = p; if (p !== 'range') { _perfState.from = ''; _perfState.to = ''; } renderPerf(); }
+function setPerfFrom(v)   { _perfState.from = v; _perfState.period = 'range'; renderPerf(); }
+function setPerfTo(v)     { _perfState.to = v; _perfState.period = 'range'; renderPerf(); }
+function setPerfClearDates(){ _perfState.from = ''; _perfState.to = ''; _perfState.period = 'all'; renderPerf(); }
+function setPerfSearch(v) { _perfState.search = v; renderPerf(); }
+function togglePerfOp(key){ if (_perfOpen.has(key)) _perfOpen.delete(key); else _perfOpen.add(key); renderPerf(); }
+
+// Format d'un délai/durée pouvant dépasser l'heure ou le jour.
+function _fmtDelai(ms) {
+  if (ms == null) return '—';
+  if (ms < 0) ms = 0;
+  const tot = Math.floor(ms / 1000);
+  const d = Math.floor(tot / 86400), h = Math.floor((tot % 86400) / 3600), m = Math.floor((tot % 3600) / 60), s = tot % 60;
+  if (d > 0) return d + 'j ' + h + 'h';
+  if (h > 0) return h + 'h ' + String(m).padStart(2, '0') + 'm';
+  if (m > 0) return m + 'm ' + String(s).padStart(2, '0') + 's';
+  return s + 's';
+}
+function _perfPeriodLabel() {
+  if (_perfState.from || _perfState.to) return 'Du ' + (_perfState.from || '…') + ' au ' + (_perfState.to || '…');
+  return { all: 'Tout l\'historique', month: 'Ce mois-ci', week: '7 derniers jours' }[_perfState.period] || 'Tout l\'historique';
+}
+
+function _perfBuild() {
+  const now = Date.now();
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const inPeriod = (ts) => {
+    if (_perfState.from || _perfState.to) {
+      if (ts == null) return false;
+      const d = new Date(ts);
+      if (_perfState.from && d < new Date(_perfState.from + 'T00:00:00')) return false;
+      if (_perfState.to   && d > new Date(_perfState.to   + 'T23:59:59')) return false;
+      return true;
+    }
+    if (_perfState.period === 'all') return true;
+    if (ts == null) return false;
+    if (_perfState.period === 'week')  return ts >= today.getTime() - 6 * 86400000;
+    if (_perfState.period === 'month') { const d = new Date(ts), n = new Date(); return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth(); }
+    return true;
+  };
+
+  const map = {};
+  const all = (taches || []).concat(tachesLibres || []);
+  for (const t of all) {
+    const opRaw = (t.operateur || '').trim();
+    if (!opRaw) continue;
+    const aMs = _parseTacheTs(t.dateAssignation);
+    if (!inPeriod(aMs)) continue;
+    const sMs = _tacheStartMs(t);
+    const eMs = _tacheEndMs(t);
+    const started = t.statut === 'EN_COURS' || t.statut === 'TERMINE';
+    const done = t.statut === 'TERMINE';
+    const startDelay = (started && aMs && sMs && sMs >= aMs) ? sMs - aMs : null;
+    const exec = done ? ((sMs && eMs && eMs >= sMs) ? eMs - sMs : null)
+                      : (t.statut === 'EN_COURS' && sMs ? now - sMs : null);
+    const key = _pcfSlug(_resolveOperatorLabel(opRaw)) || _pcfSlug(opRaw);
+    if (!map[key]) map[key] = { key, nom: _resolveOperatorLabel(opRaw), raw: opRaw,
+      nbAssigned: 0, nbStarted: 0, nbDone: 0, nbEnCours: 0,
+      sumDelay: 0, nDelay: 0, sumExec: 0, nExec: 0, totalTime: 0, tasks: [] };
+    const o = map[key];
+    o.nbAssigned++;
+    if (started) o.nbStarted++;
+    if (done) o.nbDone++;
+    if (t.statut === 'EN_COURS') o.nbEnCours++;
+    if (startDelay != null) { o.sumDelay += startDelay; o.nDelay++; }
+    if (done && exec != null) { o.sumExec += exec; o.nExec++; }
+    o.totalTime += _tacheDureeMs(t, now);
+    const dos = t.dossierId === 'LIBRE' ? null : dossiers.find(x => x.id === t.dossierId);
+    o.tasks.push({ t, aMs, sMs, eMs, started, done, startDelay, exec, statut: t.statut,
+      label: t.dossierId === 'LIBRE' ? (t.titre || 'Tâche libre') : (t.etapeLabel || t.etapeCode || 'Tâche'),
+      num: t.dossierId === 'LIBRE' ? 'Libre' : (t.numeroDossier || ''),
+      client: (dos && dos.client) || '' });
+  }
+
+  let ops = Object.values(map);
+  const q = (_perfState.search || '').trim().toLowerCase();
+  if (q) ops = ops.filter(o => o.nom.toLowerCase().includes(q) || o.raw.toLowerCase().includes(q));
+  ops.forEach(o => {
+    o.avgDelay = o.nDelay ? o.sumDelay / o.nDelay : null;
+    o.avgExec  = o.nExec  ? o.sumExec  / o.nExec  : null;
+    o.tasks.sort((a, b) => (b.aMs || 0) - (a.aMs || 0));
+  });
+  ops.sort((a, b) => (b.nbDone - a.nbDone) || ((a.avgExec == null ? Infinity : a.avgExec) - (b.avgExec == null ? Infinity : b.avgExec)));
+
+  const totals = ops.reduce((s, o) => {
+    s.nbAssigned += o.nbAssigned; s.nbDone += o.nbDone; s.nbEnCours += o.nbEnCours;
+    s.sumDelay += o.sumDelay; s.nDelay += o.nDelay; s.sumExec += o.sumExec; s.nExec += o.nExec; s.totalTime += o.totalTime;
+    return s;
+  }, { nbAssigned: 0, nbDone: 0, nbEnCours: 0, sumDelay: 0, nDelay: 0, sumExec: 0, nExec: 0, totalTime: 0 });
+  totals.avgDelay = totals.nDelay ? totals.sumDelay / totals.nDelay : null;
+  totals.avgExec  = totals.nExec  ? totals.sumExec  / totals.nExec  : null;
+  return { ops, totals };
+}
+
+function renderPerf() {
+  const root = document.getElementById('perfContent');
+  if (!root) return;
+  const { ops, totals } = _perfBuild();
+  _perfLast = { ops, totals, periodLabel: _perfPeriodLabel() };
+
+  const rate = totals.nbAssigned > 0 ? Math.round(totals.nbDone / totals.nbAssigned * 100) : 0;
+  const fastest = ops.filter(o => o.avgExec != null).sort((a, b) => a.avgExec - b.avgExec)[0];
+
+  const seg = (val, label) => `<button class="pcf-seg ${_perfState.period === val ? 'active' : ''}" onclick="setPerfPeriod('${val}')">${label}</button>`;
+  let html = `
+    <div class="pcf-toolbar">
+      <div class="pcf-segs">${seg('all', 'Tout')}${seg('month', 'Ce mois')}${seg('week', '7 jours')}</div>
+      <div class="pcf-segs" style="gap:7px;align-items:center;padding:4px 9px">
+        <span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)">Du</span>
+        <input type="date" value="${_perfState.from || ''}" onchange="setPerfFrom(this.value)" style="border:none;background:transparent;font-size:12px;font-weight:600;color:var(--text);font-family:inherit;outline:none;width:122px" />
+        <span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)">Au</span>
+        <input type="date" value="${_perfState.to || ''}" onchange="setPerfTo(this.value)" style="border:none;background:transparent;font-size:12px;font-weight:600;color:var(--text);font-family:inherit;outline:none;width:122px" />
+        ${(_perfState.from || _perfState.to) ? `<button onclick="setPerfClearDates()" title="Effacer la plage" style="border:none;background:var(--surface);color:var(--muted);cursor:pointer;font-size:15px;line-height:1;padding:2px 7px;border-radius:6px">×</button>` : ''}
+      </div>
+      <div class="pcf-tools">
+        <button class="pcf-export-btn" onclick="printPerf()"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>Imprimer le bilan</button>
+      </div>
+    </div>
+    <div class="pcf-hero">
+      <div>
+        <div class="pcf-hero-label">Durée moyenne d'exécution · ${totals.nbDone} tâche(s) terminée(s)</div>
+        <div class="pcf-hero-val">${totals.avgExec != null ? _fmtDelai(totals.avgExec) : '—'}</div>
+        <div class="pcf-hero-meta">Délai moyen de démarrage ${totals.avgDelay != null ? _fmtDelai(totals.avgDelay) : '—'} · ${ops.length} opérateur(s)</div>
+      </div>
+      <div class="pcf-gauge">
+        <div class="pcf-gauge-top"><span>Taux de réalisation</span><strong>${rate}%</strong></div>
+        <div class="pcf-gauge-bar"><div class="pcf-gauge-fill" style="width:${rate}%"></div></div>
+        <div class="pcf-gauge-legend">
+          <span><i class="pcf-dot" style="background:#bfe3d4"></i>Terminées <b>${totals.nbDone}</b></span>
+          <span><i class="pcf-dot" style="background:#fcd34d"></i>En cours <b>${totals.nbEnCours}</b></span>
+        </div>
+      </div>
+    </div>
+    <div class="pcf-kpis">
+      ${_pcfKpi('Délai moyen de démarrage', totals.avgDelay != null ? _fmtDelai(totals.avgDelay) : '—', 'attribution → début', '#2563eb')}
+      ${_pcfKpi('Durée moyenne d\'exécution', totals.avgExec != null ? _fmtDelai(totals.avgExec) : '—', 'début → fin', '#1a4a3a')}
+      ${_pcfKpi('Tâches terminées', String(totals.nbDone), totals.nbAssigned + ' attribuée(s)', '#16a34a')}
+      ${_pcfKpi('Plus rapide', fastest ? fastest.nom : '—', fastest ? 'exéc. moy. ' + _fmtDelai(fastest.avgExec) : 'aucune donnée', '#7c3aed')}
+    </div>`;
+
+  if (!ops.length) {
+    html += `<div class="pcf-empty">Aucune tâche attribuée sur cette période.</div>`;
+    root.innerHTML = html;
+    return;
+  }
+
+  html += `<div class="pcf-card">
+    <div class="pcf-card-head">
+      <div class="ic" style="background:#1a4a3a14;color:#1a4a3a">${_pcfIcon('users')}</div>
+      <div style="flex:1;min-width:0"><div class="pcf-card-title">Performance par opérateur</div><div class="pcf-card-sub">${_perfPeriodLabel()} · cliquez une ligne pour le détail des tâches</div></div>
+    </div>
+    <table class="pcf-table">
+      <thead><tr><th>Opérateur</th><th class="pcf-num">Terminées</th><th class="pcf-num">Démarrage moy.</th><th class="pcf-num">Exécution moy.</th><th class="pcf-num">Temps total</th><th></th></tr></thead>
+      <tbody>${ops.map((o, i) => _perfOpRow(o, i)).join('')}</tbody>
+    </table>
+  </div>`;
+
+  root.innerHTML = html;
+  _ensureChronoTick();
+}
+
+function _perfOpRow(o, idx) {
+  const open = _perfOpen.has(o.key);
+  const chev = '<svg class="pcf-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
+  const rankColor = idx === 0 ? '#16a34a' : idx === 1 ? '#2563eb' : idx === 2 ? '#7c3aed' : '#78716c';
+  const avatar = (o.nom || '?').charAt(0).toUpperCase();
+  const kbid = 'perf' + o.key;
+  const dot = o.nbEnCours ? ' <span style="color:#d97706;font-size:11px" title="A une tâche en cours">●</span>' : '';
+
+  // Détail repliable — tableau des tâches de l'opérateur (Progressive Disclosure)
+  const taskRows = o.tasks.map(tk => {
+    const st = tk.statut === 'TERMINE' ? { c: '#16a34a', l: 'Terminée' }
+            : tk.statut === 'EN_COURS' ? { c: '#d97706', l: 'En cours' }
+            : { c: '#78716c', l: 'À faire' };
+    const execCell = tk.statut === 'EN_COURS'
+      ? _chronoBadge(tk.t)
+      : (tk.exec != null ? _fmtDelai(tk.exec) : '—');
+    return `<tr>
+      <td data-label="Tâche"><div style="font-weight:700">${tk.label}</div><div style="font-size:10.5px;color:var(--muted)">${tk.num}${tk.client ? ' · ' + tk.client : ''}</div></td>
+      <td data-label="Assignée" style="font-size:11.5px">${tk.t.dateAssignation || '—'}</td>
+      <td class="pcf-num" data-label="Démarrage" style="color:#2563eb">${tk.startDelay != null ? _fmtDelai(tk.startDelay) : (tk.started ? '—' : 'pas démarrée')}</td>
+      <td class="pcf-num" data-label="Exécution" style="color:#1a4a3a;font-weight:700">${execCell}</td>
+      <td data-label="Statut"><span style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:8px;background:${st.c}1a;color:${st.c};white-space:nowrap">${st.l}</span></td>
+    </tr>`;
+  }).join('');
+
+  const detail = `<tr class="pcf-detail-row"><td colspan="6"><div class="pcf-detail ${open ? 'open' : ''}">
+      <div style="overflow-x:auto"><table class="perf-subtable">
+        <thead><tr><th>Tâche</th><th>Assignée le</th><th class="pcf-num">Délai démarrage</th><th class="pcf-num">Durée exécution</th><th>Statut</th></tr></thead>
+        <tbody>${taskRows || `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:14px">Aucune tâche</td></tr>`}</tbody>
+      </table></div>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="deliv-open-btn" onclick="event.stopPropagation();printPerfOp('${o.key}')">Imprimer la fiche d'évaluation</button>
+        <button class="pcf-export-btn" onclick="event.stopPropagation();_perfCopyOp('${o.key}')">Copier le récap</button>
+      </div>
+    </div></td></tr>`;
+
+  return `<tr class="pcf-row ${open ? 'open' : ''}" onclick="togglePerfOp('${o.key}')">
+    <td class="pcf-c-main" data-label="Opérateur">
+      <div style="display:flex;align-items:center;gap:9px;min-width:0">
+        ${chev}
+        <span class="pcf-rank" style="background:${rankColor}1a;color:${rankColor}">${avatar}</span>
+        <div style="min-width:0">
+          <div class="pcf-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${o.nom}${dot}</div>
+          <div style="font-size:10.5px;color:var(--muted)">${o.nbAssigned} attribuée(s) · ${o.nbEnCours} en cours</div>
+        </div>
+      </div>
+    </td>
+    <td class="pcf-num" data-label="Terminées">${o.nbDone}</td>
+    <td class="pcf-num" data-label="Démarrage moy." style="color:#2563eb">${o.avgDelay != null ? _fmtDelai(o.avgDelay) : '—'}</td>
+    <td class="pcf-num" data-label="Exécution moy." style="color:#1a4a3a;font-weight:700">${o.avgExec != null ? _fmtDelai(o.avgExec) : '—'}</td>
+    <td class="pcf-num" data-label="Temps total"><span class="op-prodtime" data-op-label="${o.raw}">${_fmtDuree(o.totalTime)}</span></td>
+    <td class="pcf-c-act" onclick="event.stopPropagation()">
+      <div class="kebab-wrap" style="display:inline-block;vertical-align:middle">
+        <button class="kebab-btn" aria-label="Plus d'actions" onclick="toggleKebab('${kbid}',event)"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>
+        <div class="kebab-menu" id="kb-${kbid}" role="menu">
+          <button class="kebab-item" role="menuitem" onclick="closeAllKebabs();printPerfOp('${o.key}')">${_kebabIcon('print')}<span>Imprimer la fiche</span></button>
+          <button class="kebab-item" role="menuitem" onclick="closeAllKebabs();_perfCopyOp('${o.key}')">${_kebabIcon('eye')}<span>Copier le récap</span></button>
+        </div>
+      </div>
+    </td>
+  </tr>${detail}`;
+}
+
+function _perfCopyOp(key) {
+  const o = (_perfLast && _perfLast.ops || []).find(x => x.key === key);
+  if (!o) return;
+  _pcfCopy(`Évaluation opérateur : ${o.nom}\nPériode : ${_perfPeriodLabel()}\n`
+    + `Tâches attribuées : ${o.nbAssigned}\nTerminées : ${o.nbDone}\nEn cours : ${o.nbEnCours}\n`
+    + `Délai moyen de démarrage : ${o.avgDelay != null ? _fmtDelai(o.avgDelay) : '—'}\n`
+    + `Durée moyenne d'exécution : ${o.avgExec != null ? _fmtDelai(o.avgExec) : '—'}\n`
+    + `Temps de production total : ${_fmtDuree(o.totalTime)}`);
+}
+
+// Impression — bilan global (tous opérateurs).
+function printPerf() {
+  const { ops, totals } = _perfBuild();
+  if (!ops.length) { showToast('Aucune tâche à imprimer', 'error'); return; }
+  const shop = (typeof shopConfig !== 'undefined' && shopConfig && shopConfig.name) || 'FOREVER MG';
+  const esc = _cfEsc;
+  const rows = ops.map((o, i) => `<tr>
+    <td class="c">${i + 1}</td><td>${esc(o.nom)}</td>
+    <td class="c">${o.nbAssigned}</td><td class="c">${o.nbDone}</td><td class="c">${o.nbEnCours}</td>
+    <td class="r">${o.avgDelay != null ? _fmtDelai(o.avgDelay) : '—'}</td>
+    <td class="r">${o.avgExec != null ? _fmtDelai(o.avgExec) : '—'}</td>
+    <td class="r">${_fmtDuree(o.totalTime)}</td>
+  </tr>`).join('');
+  const body = `
+    <h1>${esc(shop)} — Bilan de performance opérateurs</h1>
+    <div class="sub">${esc(_perfPeriodLabel())} · ${ops.length} opérateur(s) · édité le ${new Date().toLocaleDateString('fr-FR')} ${new Date().toLocaleTimeString('fr-FR')}</div>
+    <div class="kpis">
+      <div class="kpi"><div class="l">Délai moyen démarrage</div><div class="v">${totals.avgDelay != null ? _fmtDelai(totals.avgDelay) : '—'}</div></div>
+      <div class="kpi"><div class="l">Durée moyenne exécution</div><div class="v g">${totals.avgExec != null ? _fmtDelai(totals.avgExec) : '—'}</div></div>
+      <div class="kpi"><div class="l">Tâches terminées</div><div class="v">${totals.nbDone} / ${totals.nbAssigned}</div></div>
+    </div>
+    <h2>Classement par opérateur</h2>
+    <table><thead><tr><th class="c">#</th><th>Opérateur</th><th class="c">Attribuées</th><th class="c">Terminées</th><th class="c">En cours</th><th class="r">Démarrage moy.</th><th class="r">Exécution moy.</th><th class="r">Temps total</th></tr></thead>
+    <tbody>${rows}</tbody></table>
+    <div class="foot">Indicateurs : « démarrage » = délai entre l'attribution et le début · « exécution » = durée entre le début et la fin de la tâche.</div>`;
+  _pcfOpenReportWindow(body, 'Bilan performance — ' + _perfPeriodLabel());
+}
+
+// Impression — fiche d'évaluation détaillée d'UN opérateur (toutes ses tâches).
+function printPerfOp(key) {
+  const { ops } = _perfBuild();
+  const o = ops.find(x => x.key === key);
+  if (!o) { showToast('Opérateur introuvable', 'error'); return; }
+  const shop = (typeof shopConfig !== 'undefined' && shopConfig && shopConfig.name) || 'FOREVER MG';
+  const esc = _cfEsc;
+  const rows = o.tasks.map(tk => {
+    const stl = tk.statut === 'TERMINE' ? 'Terminée' : tk.statut === 'EN_COURS' ? 'En cours' : 'À faire';
+    return `<tr>
+      <td>${esc(tk.label)}<div style="font-size:9px;color:#999">${esc(tk.num)}${tk.client ? ' · ' + esc(tk.client) : ''}</div></td>
+      <td class="c">${esc(tk.t.dateAssignation || '—')}</td>
+      <td class="c">${esc(tk.t.dateDebut || '—')}</td>
+      <td class="c">${esc(tk.t.dateFin || '—')}</td>
+      <td class="r">${tk.startDelay != null ? _fmtDelai(tk.startDelay) : '—'}</td>
+      <td class="r">${tk.exec != null ? _fmtDelai(tk.exec) : '—'}</td>
+      <td class="c">${stl}</td>
+    </tr>`;
+  }).join('');
+  const body = `
+    <h1>${esc(shop)} — Fiche d'évaluation</h1>
+    <div class="sub">Opérateur : <b>${esc(o.nom)}</b> · ${esc(_perfPeriodLabel())} · édité le ${new Date().toLocaleDateString('fr-FR')} ${new Date().toLocaleTimeString('fr-FR')}</div>
+    <div class="kpis">
+      <div class="kpi"><div class="l">Tâches attribuées</div><div class="v">${o.nbAssigned}</div></div>
+      <div class="kpi"><div class="l">Terminées</div><div class="v g">${o.nbDone}</div></div>
+      <div class="kpi"><div class="l">Délai moyen démarrage</div><div class="v">${o.avgDelay != null ? _fmtDelai(o.avgDelay) : '—'}</div></div>
+      <div class="kpi"><div class="l">Durée moyenne exécution</div><div class="v">${o.avgExec != null ? _fmtDelai(o.avgExec) : '—'}</div></div>
+    </div>
+    <h2>Détail des tâches</h2>
+    <table><thead><tr><th>Tâche</th><th class="c">Assignée</th><th class="c">Démarrée</th><th class="c">Terminée</th><th class="r">Délai démar.</th><th class="r">Durée exéc.</th><th class="c">Statut</th></tr></thead>
+    <tbody>${rows || '<tr><td colspan="7" class="c muted">Aucune tâche</td></tr>'}</tbody></table>
+    <div style="margin-top:26px;display:flex;gap:40px">
+      <div style="flex:1">Appréciation : <div style="border-bottom:1px solid #999;height:18px;margin-top:18px"></div><div style="border-bottom:1px solid #999;height:18px;margin-top:14px"></div></div>
+      <div style="width:200px">Signature responsable :<div style="border:1px solid #999;height:60px;margin-top:6px;border-radius:4px"></div></div>
+    </div>
+    <div class="foot">« Démarrage » = délai attribution → début · « Exécution » = durée début → fin.</div>`;
+  _pcfOpenReportWindow(body, 'Fiche évaluation — ' + o.nom);
 }
 
 function _prodDeadlineChip(ymd) {
