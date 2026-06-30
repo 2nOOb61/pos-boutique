@@ -8401,14 +8401,20 @@ function _renderDossierTabs() {
   const el = document.getElementById('dossierStatusTabs');
   if (!el) return;
   const selVal = document.getElementById('dossierFilterSel')?.value || 'TOUS';
+  // Onglets de filtre = ordre du pipeline (cf. ETAPES_CONFIG). On filtre sur d.statut
+  // (qui avance via majProgressionDossier_ backend). LIVRE volontairement absent (vue Terminés).
   const tabDefs = [
-    { val:'TOUS',       label:'Tous' },
-    { val:'CREE',       label:'Créés' },
-    { val:'PAO',        label:'PAO' },
-    { val:'BAT',        label:'BAT' },
-    { val:'ACHAT',      label:'Achat' },
-    { val:'PRODUCTION', label:'Production' },
-    { val:'FINITION',   label:'Finition' },
+    { val:'TOUS',          label:'Tous' },
+    { val:'CREE',          label:'Créés' },
+    { val:'VALID_CMD',     label:'Valid. cmd' },
+    { val:'PAO',           label:'PAO' },
+    { val:'RETOUR_CLIENT', label:'Valid. 1' },
+    { val:'MODIFICATIONS', label:'Modifs' },
+    { val:'VALID_CLIENT2', label:'Valid. 2' },
+    { val:'BAT',           label:'BAT' },
+    { val:'ACHAT',         label:'Achat' },
+    { val:'PRODUCTION',    label:'Production' },
+    { val:'FINITION',      label:'Finition' },
   ];
   const _visibles = _attribVisibleDossiers();
   const counts = {};
@@ -8786,10 +8792,18 @@ function renderAttrPanel(tachesD, commentsD = []) {
       const canAssign = ['admin','chef_atelier'].includes(currentUser_role);
       const etapeComplete = tachesEtape.length > 0 && tachesEtape.every(t => t.statut === 'TERMINE');
       const alreadySelfAssigned = tachesEtape.some(t => _sameOp(t.operateur, currentUser?.label));
-      // Seul le rôle correspondant à l'étape peut s'auto-assigner
-      const ROLE_ETAPE_MAP = { pao:'PAO', operateur_prod:'PRODUCTION', machiniste:'PRODUCTION', finition:'FINITION', livreur:'LIVRE' };
-      const userEtape = ROLE_ETAPE_MAP[currentUser_role];
-      const canSelfAssign = !canAssign && !etapeComplete && !alreadySelfAssigned && userEtape === e.code;
+      // Étapes qu'un rôle peut s'auto-assigner (le BAT physique = PAO+prod+finition,
+      // donc partagé par ces 3 rôles). Un rôle peut couvrir plusieurs étapes du flux.
+      const ROLE_ETAPE_MAP = {
+        commerciale:    ['VALID_CMD','RETOUR_CLIENT','VALID_CLIENT2'],
+        pao:            ['PAO','MODIFICATIONS','BAT'],
+        operateur_prod: ['PRODUCTION','BAT'],
+        machiniste:     ['PRODUCTION','BAT'],
+        finition:       ['FINITION','BAT'],
+        livreur:        ['LIVRE'],
+      };
+      const userEtapes = ROLE_ETAPE_MAP[currentUser_role] || [];
+      const canSelfAssign = !canAssign && !etapeComplete && !alreadySelfAssigned && userEtapes.includes(e.code);
       // Cloisonnement : un opérateur ne voit que son propre nom ; le travail des
       // collègues garde son badge de statut (utile pour le déblocage) mais sans nom.
       const _seeAllOps = _canSeeAllOps();
