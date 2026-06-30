@@ -32,15 +32,20 @@ function _logAction_(action, user, detail) {
 }
 
 // Étapes de production
+// ⚠️ L'ORDRE doit rester IDENTIQUE à ETAPES_CONFIG (app.js) : majProgressionDossier_
+// fait avancer le statut du dossier vers ETAPES_PROD[idx+1] quand une tâche se termine.
+// Codes = clés persistées dans la feuille Taches : ne jamais renommer un code existant.
 const ETAPES_PROD = [
-  { code:'ACHAT',         label:'Achat matières',    progress:12  },
-  { code:'PAO',           label:'PAO / Conception',  progress:25  },
-  { code:'BAT',           label:'BAT physique',       progress:38  },
-  { code:'RETOUR_CLIENT', label:'Retour client',      progress:50  },
-  { code:'MODIFICATIONS', label:'Modifications',      progress:62  },
-  { code:'PRODUCTION',    label:'Opérateur machine',  progress:75  },
-  { code:'FINITION',      label:'Finition',           progress:90  },
-  { code:'LIVRE',         label:'Livraison',          progress:100 },
+  { code:'VALID_CMD',     label:'Validation commande (commerciale)', progress:10  },
+  { code:'PAO',           label:'Conception / Simulation (PAO)',     progress:20  },
+  { code:'RETOUR_CLIENT', label:'Validation client (commerciale)',   progress:30  },
+  { code:'MODIFICATIONS', label:'Modifications (PAO)',               progress:40  },
+  { code:'VALID_CLIENT2', label:'Validation client (commerciale)',   progress:50  },
+  { code:'BAT',           label:'BAT physique (PAO+prod+finition)',  progress:60  },
+  { code:'ACHAT',         label:'Achat (si besoin acheteur)',        progress:70  },
+  { code:'PRODUCTION',    label:'Production (machine / impression / laser)', progress:80 },
+  { code:'FINITION',      label:'Finition',                          progress:90  },
+  { code:'LIVRE',         label:'Livraison',                         progress:100 },
 ];
 
 // ── Sécurité : hashage SHA-256 des mots de passe ──────────

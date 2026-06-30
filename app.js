@@ -43,11 +43,13 @@ var notifications      = (function() {
 }());
 
 var RYTHME_DEFAULTS = {
-  ACHAT:         1440,  // 24h
-  PAO:           480,   // 8h
-  BAT:           240,   // 4h
-  RETOUR_CLIENT: 2880,  // 48h
+  VALID_CMD:     120,   // 2h  — validation commande (commerciale)
+  PAO:           480,   // 8h  — conception / simulation
+  RETOUR_CLIENT: 2880,  // 48h — 1re validation client
   MODIFICATIONS: 240,   // 4h
+  VALID_CLIENT2: 2880,  // 48h — 2e validation client
+  BAT:           240,   // 4h  — BAT physique
+  ACHAT:         1440,  // 24h — achat (si besoin)
   PRODUCTION:    480,   // 8h
   FINITION:      240,   // 4h
   LIVRE:         480,   // 8h
@@ -6219,15 +6221,21 @@ let _prodExpanded = new Set(); // dossierId des groupes dépliés (repliés par 
 let attrDateFilter = { mois: '', annee: '' };
 let prodDateFilter = { mois: '', annee: '' };
 
+// Pipeline de production — l'ORDRE de ce tableau pilote tout l'affichage du flux.
+// Les `code` sont des clés persistées dans les tâches (t.etapeCode) et la feuille
+// Taches : ne JAMAIS renommer un code existant (orphelinerait les tâches). On peut
+// réordonner et ajouter librement (etapeCode = texte libre côté backend).
 const ETAPES_CONFIG = [
-  { code:'ACHAT',         label:'Achat (si besoin)',  short:'Achat',   color:'#d97706', icon:'1' },
-  { code:'PAO',           label:'PAO / Conception',  short:'PAO',     color:'#6c63ff', icon:'2' },
-  { code:'BAT',           label:'BAT physique',       short:'BAT',     color:'#2563eb', icon:'3' },
-  { code:'RETOUR_CLIENT', label:'Retour client',      short:'Retour',  color:'#0891b2', icon:'4' },
-  { code:'MODIFICATIONS', label:'Modifications',      short:'Modifs',  color:'#7c3aed', icon:'5' },
-  { code:'PRODUCTION',    label:'Opérateur machine',  short:'Machine', color:'#e8834a', icon:'6' },
-  { code:'FINITION',      label:'Finition',           short:'Finition',color:'#1a4a3a', icon:'7' },
-  { code:'LIVRE',         label:'Livraison',          short:'Livré',   color:'#16a34a', icon:'8' },
+  { code:'VALID_CMD',     label:'Validation commande (commerciale)', short:'Valid. cmd', color:'#0d9488', icon:'1'  },
+  { code:'PAO',           label:'Conception / Simulation (PAO)',     short:'PAO',        color:'#6c63ff', icon:'2'  },
+  { code:'RETOUR_CLIENT', label:'Validation client (commerciale)',   short:'Valid. 1',   color:'#0891b2', icon:'3'  },
+  { code:'MODIFICATIONS', label:'Modifications (PAO)',               short:'Modifs',     color:'#7c3aed', icon:'4'  },
+  { code:'VALID_CLIENT2', label:'Validation client (commerciale)',   short:'Valid. 2',   color:'#0e7490', icon:'5'  },
+  { code:'BAT',           label:'BAT physique (PAO+prod+finition)',  short:'BAT',        color:'#2563eb', icon:'6'  },
+  { code:'ACHAT',         label:'Achat (si besoin acheteur)',        short:'Achat',      color:'#d97706', icon:'7'  },
+  { code:'PRODUCTION',    label:'Production (machine / impression / laser)', short:'Machine', color:'#e8834a', icon:'8' },
+  { code:'FINITION',      label:'Finition',                          short:'Finition',   color:'#1a4a3a', icon:'9'  },
+  { code:'LIVRE',         label:'Livraison',                         short:'Livré',      color:'#16a34a', icon:'10' },
 ];
 
 // ============================================================
@@ -6277,16 +6285,8 @@ function _getTacheRetardInfo(t) {
 function renderRythmeConfig() {
   const container = document.getElementById('rythmeConfigContainer');
   if (!container) return;
-  const steps = [
-    { code:'ACHAT',         label:'Achat (si besoin)',  color:'#d97706' },
-    { code:'PAO',           label:'PAO / Conception',   color:'#6c63ff' },
-    { code:'BAT',           label:'BAT physique',       color:'#2563eb' },
-    { code:'RETOUR_CLIENT', label:'Retour client',      color:'#0891b2' },
-    { code:'MODIFICATIONS', label:'Modifications',      color:'#7c3aed' },
-    { code:'PRODUCTION',    label:'Opérateur machine',  color:'#e8834a' },
-    { code:'FINITION',      label:'Finition',           color:'#1a4a3a' },
-    { code:'LIVRE',         label:'Livraison',          color:'#16a34a' },
-  ];
+  // Dérivé d'ETAPES_CONFIG (source de vérité unique) → reste aligné sur le pipeline.
+  const steps = ETAPES_CONFIG.map(e => ({ code:e.code, label:e.label, color:e.color }));
   container.innerHTML = steps.map(e => {
     const delai = rythmeProduction[e.code] ?? RYTHME_DEFAULTS[e.code] ?? 8;
     return `<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #f0eeeb">
