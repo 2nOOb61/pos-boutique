@@ -97,6 +97,7 @@ function doPost(e) {
     // Nouveaux modules
     else if (action === 'getDossiers')       result = handleGetDossiers(data);
     else if (action === 'saveDossier')       result = handleSaveDossier(data);
+    else if (action === 'updateDossier')     result = handleUpdateDossier(data);
     else if (action === 'creerDossierManuel') result = handleCreerDossierManuel(data);
     else if (action === 'saveTacheLibre')    result = handleSaveTacheLibre(data);
     else if (action === 'attribuerTache')    result = handleAttribuerTache(data);
@@ -144,6 +145,7 @@ function doGet(e) {
       else if (action === 'updateReservationAttachments') result = handleUpdateReservationAttachments(data);
       else if (action === 'addCommande')       result = handleAddCommande(data);
       else if (action === 'updateCommande')    result = handleUpdateCommande(data);
+      else if (action === 'updateDossier')     result = handleUpdateDossier(data);
       else if (action === 'attribuerTache')    result = handleAttribuerTache(data);
       else if (action === 'pointerAction')     result = handlePointerAction(data);
       else if (action === 'deleteTache')       result = handleDeleteTache(data);
@@ -1059,6 +1061,11 @@ function handleUpdateCommande(data) {
     if (data.subtotal !== undefined)         sh.getRange(i+1, 11).setValue(Number(data.subtotal)||0);       // col K = Sous_Total
     if (data.total !== undefined)            sh.getRange(i+1, 13).setValue(Number(data.total)||0);          // col M = Total
     if (data.restant !== undefined)          sh.getRange(i+1, 15).setValue(Number(data.restant)||0);        // col O = Restant
+    if (data.items !== undefined) {                                                          // col F = Articles ("nom×qty@prix|…")
+      const _arts = (Array.isArray(data.items) ? data.items : [])
+        .map(it => `${it.name||'?'}×${Math.round(Number(it.qty)||1)}@${Math.round(Number(it.price)||0)}`).join('|');
+      sh.getRange(i+1, 6).setValue(_arts);
+    }
     if (data.clientName !== undefined)       sh.getRange(i+1, 4).setValue(data.clientName);    // col D = Client_Nom
     if (data.clientContact !== undefined)    sh.getRange(i+1, 5).setValue(data.clientContact); // col E = Client_Contact
     if (data.remise !== undefined)           sh.getRange(i+1, 12).setValue(Number(data.remise)||0);   // col L = Remise
@@ -1147,6 +1154,25 @@ function handleSaveDossier(data) {
   } finally {
     try { lock.releaseLock(); } catch(e) {}
   }
+}
+
+// Mise à jour ciblée d'un dossier existant (client / produit / quantité / date livraison).
+// Utilisé quand un admin approuve une correction d'articles d'une commande.
+function handleUpdateDossier(data) {
+  const sh = getSS().getSheetByName(SHEET_DOSSIERS);
+  if (!sh) return { ok:false, error:'Feuille Dossiers introuvable' };
+  const rows = sh.getDataRange().getValues();
+  let updated = false;
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) !== String(data.id)) continue;
+    if (data.client        !== undefined) sh.getRange(i+1, 3).setValue(data.client);          // col C = Client
+    if (data.produit       !== undefined) sh.getRange(i+1, 4).setValue(data.produit);         // col D = Produit
+    if (data.quantite      !== undefined) sh.getRange(i+1, 5).setValue(Number(data.quantite)||0); // col E = Quantite
+    if (data.dateLivraison !== undefined) sh.getRange(i+1, 9).setValue(data.dateLivraison);   // col I = DateLivraison
+    updated = true;
+  }
+  if (updated) CacheService.getScriptCache().remove('dashboard_v1');
+  return updated ? { ok:true } : { ok:false, error:'Dossier introuvable' };
 }
 
 // ============================================================

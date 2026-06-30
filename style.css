@@ -1313,6 +1313,12 @@ tr:hover td {
   border-radius: 9px; font-size: 14px; font-family: inherit; background: #fff; color: var(--text);
 }
 .modif-field textarea { resize: vertical; }
+.mf-item-row { display: grid; grid-template-columns: 1fr 58px 88px 30px; gap: 6px; margin-bottom: 6px; align-items: center; }
+.mf-item-row input { padding: 7px 8px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; font-family: inherit; background: #fff; color: var(--text); width: 100%; }
+.mf-item-del { background: #fee2e2; color: #dc2626; border: none; border-radius: 8px; height: 32px; cursor: pointer; font-size: 17px; font-weight: 700; line-height: 1; }
+.mf-add-item { margin-top: 4px; background: #e8f4f0; color: #1a4a3a; border: 1px dashed #b7ddd0; border-radius: 8px; padding: 7px 10px; cursor: pointer; font-size: 12px; font-weight: 600; }
+.mf-items-total { margin-top: 8px; font-size: 12px; color: var(--muted); }
+.mod-diff--items { flex-direction: column; align-items: flex-start; gap: 2px; }
 
 /* Modal commande — grande + scrollable */
 .cmd-modal {

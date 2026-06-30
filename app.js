@@ -5702,8 +5702,13 @@ function _buildModBanner(c, mod) {
   if (mod.type === 'cancel') {
     detail = `<div class="mod-title"> Demande d'annulation</div>${mod.reason ? `<div class="mod-reason">« ${mod.reason} »</div>` : ''}`;
   } else {
+    const _fmtItems = arr => (Array.isArray(arr) && arr.length)
+      ? arr.map(i => `${i.name} ×${i.qty} @ ${fmt(i.price)}`).join('<br>')
+      : '—';
     const lines = Object.entries(mod.changes || {}).map(([k, v]) =>
-      `<div class="mod-diff"><span class="mod-diff-label">${v.label || k}</span><span class="mod-old">${_modVal(k, v.old)}</span><span class="mod-arrow">→</span><span class="mod-new">${_modVal(k, v.new)}</span></div>`
+      k === 'items'
+        ? `<div class="mod-diff mod-diff--items"><span class="mod-diff-label">${v.label || 'Articles'}</span><div class="mod-old">${_fmtItems(v.old)}</div><span class="mod-arrow">→</span><div class="mod-new">${_fmtItems(v.new)}</div></div>`
+        : `<div class="mod-diff"><span class="mod-diff-label">${v.label || k}</span><span class="mod-old">${_modVal(k, v.old)}</span><span class="mod-arrow">→</span><span class="mod-new">${_modVal(k, v.new)}</span></div>`
     ).join('');
     detail = `<div class="mod-title"> Modification demandée</div>${mod.reason ? `<div class="mod-reason">« ${mod.reason} »</div>` : ''}<div class="mod-diffs">${lines}</div>`;
   }
@@ -5740,13 +5745,52 @@ function requestCommandeModif(id) {
     const inputType = f.type === 'number' ? 'number' : (f.type === 'date' ? 'date' : 'text');
     return `<label class="modif-field"><span>${f.label}</span><input id="mf_${f.key}" type="${inputType}" value="${val}" ${f.type === 'number' ? 'min="0"' : ''}></label>`;
   }).join('');
+  // Édition des articles (corriger la saisie : libellé / qté / prix unitaire)
+  _modifItems = (c.items || []).map(i => ({ name: i.name || '', qty: Math.round(Number(i.qty) || 0), price: Math.round(Number(i.price) || 0) }));
+  const itemsSection =
+    `<div class="modif-field">
+       <span>Articles — corriger qté / prix / libellé</span>
+       <div id="mf_items"></div>
+       <button type="button" class="mf-add-item" onclick="_modifAddItem()">+ Ajouter un article</button>
+       <div class="mf-items-total">Sous-total calculé : <strong id="mf_items_sum">0</strong> Ar</div>
+     </div>`;
   const body = document.getElementById('cmdModifBody');
-  if (body) body.innerHTML = fields +
+  if (body) body.innerHTML = fields + itemsSection +
     `<label class="modif-field"><span>Note pour l'admin (optionnel)</span><textarea id="mf_reason" rows="2" placeholder="Pourquoi cette modification ?"></textarea></label>`;
+  _renderModifItems();
   const title = document.getElementById('cmdModifTitle');
   if (title) title.textContent = `Demande de modification — ${c.clientName || 'commande'}`;
   openModal('cmdModifModal');
 }
+
+// ── Édition des lignes d'articles dans la demande de modification ──
+let _modifItems = [];
+function _renderModifItems() {
+  const wrap = document.getElementById('mf_items');
+  if (!wrap) return;
+  wrap.innerHTML = _modifItems.length
+    ? _modifItems.map((it, idx) => `
+      <div class="mf-item-row">
+        <input class="mf-item-name" type="text" value="${String(it.name).replace(/"/g,'&quot;')}" placeholder="Article" oninput="_modifItemChange(${idx},'name',this.value)">
+        <input class="mf-item-qty" type="number" min="0" value="${it.qty}" title="Quantité" oninput="_modifItemChange(${idx},'qty',this.value)">
+        <input class="mf-item-price" type="number" min="0" value="${it.price}" title="Prix unitaire (Ar)" oninput="_modifItemChange(${idx},'price',this.value)">
+        <button type="button" class="mf-item-del" onclick="_modifRemoveItem(${idx})" title="Supprimer l'article">×</button>
+      </div>`).join('')
+    : '<div style="font-size:12px;color:var(--muted);padding:4px 0">Aucun article</div>';
+  _modifUpdateItemsSum();
+}
+function _modifUpdateItemsSum() {
+  const sum = _modifItems.reduce((s, i) => s + (Number(i.qty) || 0) * (Number(i.price) || 0), 0);
+  const el = document.getElementById('mf_items_sum');
+  if (el) el.textContent = fmt(sum);
+}
+function _modifItemChange(idx, key, val) {
+  if (!_modifItems[idx]) return;
+  _modifItems[idx][key] = key === 'name' ? val : Math.max(0, Math.round(parseFloat(val) || 0));
+  _modifUpdateItemsSum(); // pas de re-render → garde le focus dans le champ
+}
+function _modifAddItem() { _modifItems.push({ name: '', qty: 1, price: 0 }); _renderModifItems(); }
+function _modifRemoveItem(idx) { _modifItems.splice(idx, 1); _renderModifItems(); }
 
 // Envoie la demande : ne garde que les champs réellement modifiés (diff)
 function submitCommandeModif() {
@@ -5766,6 +5810,13 @@ function submitCommandeModif() {
     }
     if (String(nv) !== String(ov)) changes[f.key] = { old: ov, new: nv, label: f.label };
   });
+  // Diff des articles (libellé / qté / prix)
+  const _normItems = arr => (arr || []).map(i => ({ name: String(i.name).trim(), qty: Math.round(Number(i.qty) || 0), price: Math.round(Number(i.price) || 0) })).filter(i => i.name);
+  const newItems = _normItems(_modifItems);
+  const oldItems = _normItems(c.items);
+  if (JSON.stringify(newItems) !== JSON.stringify(oldItems)) {
+    changes.items = { old: oldItems, new: newItems, label: 'Articles' };
+  }
   if (!Object.keys(changes).length) { showToast('Aucune modification détectée', 'info'); return; }
   const reason = (document.getElementById('mf_reason')?.value || '').trim();
   const mod = {
@@ -5842,11 +5893,19 @@ function approveCommandeModif(modId) {
     c.total = Math.max(0, c.subtotal - (Number(c.remise) || 0) + (Number(c.fraisLivraison) || 0));
     c.restant = Math.max(0, c.total - (Number(c.accompte) || 0));
     if ('adresseLivraison' in mod.changes) c.deliveryMode = c.adresseLivraison ? 'livraison' : 'retrait';
-    // Répercuter les dates sur le dossier de production lié
+    // Répercuter les dates / articles / client sur le dossier de production lié
     const dos = dossiers.find(d => d.sourceType === 'commande' && String(d.sourceId) === String(c.id));
     if (dos) {
       if ('dateLivraison' in mod.changes)     dos.dateLivraison = c.dateLivraison;
       if ('dateLivraisonProd' in mod.changes) dos.dateLivraisonProd = c.dateLivraisonProd;
+      if ('clientName' in mod.changes)        dos.client = c.clientName;
+      if ('items' in mod.changes) {
+        dos.produit  = (c.items || []).map(i => i.name).join(', ') || 'Articles';
+        dos.quantite = (c.items || []).reduce((s, i) => s + (Number(i.qty) || 1), 0);
+      }
+      if (APPS_SCRIPT_URL && ('items' in mod.changes || 'clientName' in mod.changes || 'dateLivraison' in mod.changes)) {
+        apiCall({ action: 'updateDossier', id: dos.id, client: dos.client, produit: dos.produit, quantite: dos.quantite, dateLivraison: dos.dateLivraison }).catch(() => {});
+      }
     }
     saveData();
     if (APPS_SCRIPT_URL) {
@@ -5855,6 +5914,7 @@ function approveCommandeModif(modId) {
         adresseLivraison: c.adresseLivraison, deliveryMode: c.deliveryMode,
         fraisLivraison: c.fraisLivraison, dateLivraison: c.dateLivraison, dateLivraisonProd: c.dateLivraisonProd, dateBAT: c.dateBAT,
         remise: c.remise, accompte: c.accompte, notes: c.notes, depositMethod: c.depositMethod,
+        items: ('items' in (mod.changes||{})) ? c.items : undefined,
         subtotal: c.subtotal, total: c.total, restant: c.restant
       }).catch(() => {});
     }
