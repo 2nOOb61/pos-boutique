@@ -9374,6 +9374,9 @@ function _tacheRow(t) {
   const etape   = isLibre
     ? { color:'#7c3aed', icon:'', label:t.titre||'Tâche libre', short:'Libre' }
     : (ETAPES_CONFIG.find(e => e.code === t.etapeCode) || { color:'#888', icon:'?', label:t.etapeLabel, short:'?' });
+  // Nom du client du dossier — visibilité directe pour l'opérateur sur chaque tâche
+  const _dosT       = isLibre ? null : dossiers.find(x => x.id === t.dossierId);
+  const clientName  = _dosT?.client || '';
   const isEC   = t.statut === 'EN_COURS';
   const isDone = t.statut === 'TERMINE';
   const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
@@ -9419,6 +9422,8 @@ function _tacheRow(t) {
   const prioBadge = isLibre && t.priorite && t.priorite!=='Normale'
     ? `<span style="font-size:9px;font-weight:700;color:${prioColor};background:${t.priorite==='Urgente'?'var(--color-danger-bg)':'var(--color-warning-bg)'};padding:1px 5px;border-radius:6px;margin-left:4px">${t.priorite}</span>` : '';
 
+  const clientChip = clientName
+    ? `<span class="pt-client" title="Client : ${clientName}">👤 ${clientName}</span>` : '';
   const subLine = isLibre
     ? `${t.operateur}${t.echeance?' · Échéance : <strong>'+new Date(t.echeance+'T00:00:00').toLocaleDateString('fr-FR')+'</strong>':''}`
     : `${t.operateur} · ${isEC?'Démarré '+t.dateDebut:isDone?'Terminé '+t.dateFin:'Assigné '+t.dateAssignation}`;
@@ -9436,6 +9441,7 @@ function _tacheRow(t) {
   const detail = `
       <div class="pt-detail">
         <div class="pt-detail-grid">
+          ${!isLibre?_dt('Client', clientName||'—'):''}
           ${_dt('Opérateur', t.operateur||'—')}
           ${!isLibre?_dt('Dossier', t.numeroDossier||t.dossierId):''}
           ${_dt('Assigné le', t.dateAssignation)}
@@ -9453,7 +9459,7 @@ function _tacheRow(t) {
       <div class="tache-card__body" onclick="togglePtDetail('${t.id}')">
         <div class="pt-head">
           <span class="tache-card__label" style="color:${etape.color}">${isLibre?t.titre:t.etapeLabel}</span>
-          ${prioBadge}${retardChip}
+          ${prioBadge}${retardChip}${clientChip}
           <svg class="pt-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
         </div>
         <div class="tache-card__sub">${subLine}</div>
@@ -9595,9 +9601,11 @@ function _renderChargeView() {
         : t.statut === 'A_FAIRE' && (isAdminOrChef || _sameOp(op, myLabel))
           ? `<button class="charge-task-btn" onclick="pointerStart('${t.id}'); event.stopPropagation();" style="background:var(--color-primary-light);color:var(--color-primary)">▶</button>`
           : '';
+      const clientLbl = d?.client ? `<span class="charge-task-client" title="Client : ${d.client}">${d.client}</span>` : '';
       return `<div class="charge-task-row ${isEC?'charge-task-row--encours':''} ${isDone?'charge-task-row--done':''}" onclick="openAttribForDossier('${t.dossierId}')">
         <span class="charge-task-dot" style="background:${dotBg}"></span>
         <span class="charge-task-etape" style="color:${etape.color}">${etape.label}${isUrgent?'&nbsp;<span style="color:var(--color-danger);font-size:9px;font-weight:800">⬤</span>':''}</span>
+        ${clientLbl}
         <span class="charge-task-num">${t.dossierId==='LIBRE'?'Libre':(t.numeroDossier||'')}</span>
         ${btn}
       </div>`;
