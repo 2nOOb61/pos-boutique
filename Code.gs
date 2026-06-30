@@ -182,6 +182,8 @@ function doGet(e) {
     if (action === 'getControlPatron') return jsonResp(handleGetControlPatron(e.parameter));
     if (action === 'migrateCommandeIds') return jsonResp(migrateCommandeIds());
     if (action === 'migrateDedupDossiers') return jsonResp(migrateDedupDossiers());
+    if (action === 'diagCommandeErrors') return jsonResp(diagCommandeErrors());
+    if (action === 'fixCommandeErrors')  return jsonResp(fixCommandeErrors());
     if (action === 'getComments')     return jsonResp(handleGetComments(e.parameter));
     if (action === 'getNotifs')       return jsonResp(handleGetNotifs(e.parameter));
     if (action === 'getModifs')       return jsonResp(handleGetModifs(e.parameter));
@@ -911,6 +913,61 @@ function handleGetCommandes() {
   return { ok:true, commandes: order.map(id => map[id]).reverse() };
 }
 
+// Détecte les cellules en erreur (#ERROR!, #REF!…) de la feuille Commandes + leur formule
+// (lecture seule — sert à comprendre la source avant de corriger). Route ?action=diagCommandeErrors
+var _CELL_ERR_RE_ = /^#(ERROR!|REF!|N\/A|VALUE!|NAME\?|DIV\/0!|NUM!|NULL!)/;
+function diagCommandeErrors() {
+  const sh = getSS().getSheetByName(SHEET_COMMANDES);
+  if (!sh) return { ok:false, error:'Feuille Commandes introuvable' };
+  const lastRow = sh.getLastRow(), lastCol = sh.getLastColumn();
+  if (lastRow < 2) return { ok:true, count:0, cells:[] };
+  const vals = sh.getRange(1,1,lastRow,lastCol).getValues();
+  const fmls = sh.getRange(1,1,lastRow,lastCol).getFormulas();
+  const out = [];
+  for (let r = 1; r < lastRow; r++) {
+    for (let c = 0; c < lastCol; c++) {
+      const v = vals[r][c];
+      if (typeof v === 'string' && _CELL_ERR_RE_.test(v)) {
+        out.push({ row:r+1, col:c+1, id:vals[r][0], display:v, formula:fmls[r][c] || '' });
+      }
+    }
+  }
+  return { ok:true, count:out.length, cells:out.slice(0,200) };
+}
+
+// Corrige les cellules en erreur : récupère la valeur depuis la formule (=261… -> 261…),
+// force le format TEXTE pour éviter une ré-interprétation en formule, sinon vide la cellule.
+// Route ?action=fixCommandeErrors (idempotente). ⚠️ backup conseillé (?action=runBackupNow).
+function fixCommandeErrors() {
+  const sh = getSS().getSheetByName(SHEET_COMMANDES);
+  if (!sh) return { ok:false, error:'Feuille Commandes introuvable' };
+  const lastRow = sh.getLastRow(), lastCol = sh.getLastColumn();
+  if (lastRow < 2) return { ok:true, fixed:0, report:[] };
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    const vals = sh.getRange(1,1,lastRow,lastCol).getValues();
+    const fmls = sh.getRange(1,1,lastRow,lastCol).getFormulas();
+    let fixed = 0; const report = [];
+    for (let r = 1; r < lastRow; r++) {
+      for (let c = 0; c < lastCol; c++) {
+        const v = vals[r][c];
+        if (typeof v !== 'string' || !_CELL_ERR_RE_.test(v)) continue;
+        // getFormulas renvoie le texte saisi avec son préfixe (ex. "+261 34…").
+        // On garde +/-/@ (légitimes dans un n° de tél / email) et on ne retire que le "=".
+        const f = fmls[r][c] || '';
+        const recovered = !f ? '' : (f.charAt(0) === '=' ? f.slice(1) : f);
+        const cell = sh.getRange(r+1, c+1);
+        cell.setNumberFormat('@'); // texte → "=…" n'est plus interprété comme formule
+        cell.setValue(recovered);
+        report.push({ row:r+1, col:c+1, id:vals[r][0], was:v, now:recovered });
+        fixed++;
+      }
+    }
+    return { ok:true, fixed, report:report.slice(0,200) };
+  } finally { try { lock.releaseLock(); } catch(e) {} }
+}
+
 // Migration unique : rend uniques les ids de commandes en double (collisions inter-postes)
 function migrateCommandeIds() {
   const sh = getSS().getSheetByName(SHEET_COMMANDES);
@@ -1035,7 +1092,19 @@ function handleAddCommande(data) {
     c.dateBAT||'',
     JSON.stringify(Array.isArray(c.attachments) ? c.attachments : [])
   ]);
+  // Forcer nom + contact en TEXTE (un contact "+261 34…" serait sinon évalué en formule → #ERROR!)
+  const _r = sh.getLastRow();
+  _setTextCell_(sh, _r, 4, c.clientName||'');
+  _setTextCell_(sh, _r, 5, c.clientContact||'');
   return { ok:true, id };
+}
+
+// Écrit une valeur en cellule TEXTE (format @) → un libellé commençant par "+", "=",
+// "-" ou "@" (ex. numéro "+261 34…") n'est plus interprété comme une formule par Sheets.
+function _setTextCell_(sh, row, col, val) {
+  const cell = sh.getRange(row, col);
+  cell.setNumberFormat('@');
+  cell.setValue(val == null ? '' : String(val));
 }
 
 function handleUpdateCommande(data) {
@@ -1066,8 +1135,8 @@ function handleUpdateCommande(data) {
         .map(it => `${it.name||'?'}×${Math.round(Number(it.qty)||1)}@${Math.round(Number(it.price)||0)}`).join('|');
       sh.getRange(i+1, 6).setValue(_arts);
     }
-    if (data.clientName !== undefined)       sh.getRange(i+1, 4).setValue(data.clientName);    // col D = Client_Nom
-    if (data.clientContact !== undefined)    sh.getRange(i+1, 5).setValue(data.clientContact); // col E = Client_Contact
+    if (data.clientName !== undefined)       _setTextCell_(sh, i+1, 4, data.clientName);    // col D = Client_Nom (texte)
+    if (data.clientContact !== undefined)    _setTextCell_(sh, i+1, 5, data.clientContact); // col E = Client_Contact (texte : évite #ERROR! sur "+261…")
     if (data.remise !== undefined)           sh.getRange(i+1, 12).setValue(Number(data.remise)||0);   // col L = Remise
     if (data.accompte !== undefined)         sh.getRange(i+1, 14).setValue(Number(data.accompte)||0); // col N = Accompte
     if (data.depositMethod !== undefined)    sh.getRange(i+1, 16).setValue(data.depositMethod);  // col P = Mode_Paiement (acompte)
