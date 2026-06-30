@@ -82,6 +82,7 @@ function doPost(e) {
     else if (action === 'saveProduct')       result = handleSaveProduct(data);
     else if (action === 'deleteProduct')     result = handleDeleteProduct(data);
     else if (action === 'addSale')           result = handleAddSale(data);
+    else if (action === 'deleteSale')        result = handleDeleteSale(data);
     else if (action === 'stockMove')         result = handleStockMove(data);
     else if (action === 'getSales')          result = handleGetSales(data);
     else if (action === 'getUsers')          result = handleGetUsers();
@@ -132,6 +133,7 @@ function doGet(e) {
       const action = data.action;
       let result;
       if      (action === 'addSale')           result = handleAddSale(data);
+      else if (action === 'deleteSale')        result = handleDeleteSale(data);
       else if (action === 'saveProduct')       result = handleSaveProduct(data);
       else if (action === 'deleteProduct')     result = handleDeleteProduct(data);
       else if (action === 'stockMove')         result = handleStockMove(data);
@@ -385,6 +387,28 @@ function handleAddSale(data) {
     'ID:' + sale.id + ' Total:' + sale.total + ' Articles:' + sale.items.length);
   CacheService.getScriptCache().remove('dashboard_v1'); // invalider le dashboard
   return { ok:true, saleId:sale.id };
+}
+
+// Supprime toutes les lignes de la vente `id` (multi-lignes/article) de la feuille Ventes.
+// Utilisé par la « dé-finalisation » admin d'une commande (corriger une facture finalisée
+// par erreur sans laisser de doublon dans Ventes). Sous lock, du bas vers le haut.
+function handleDeleteSale(data) {
+  const id = String((data && data.id) || '');
+  if (!id) return { ok:false, error:'id manquant' };
+  const sh = getSS().getSheetByName(SHEET_SALES);
+  if (!sh) return { ok:false, error:'Feuille Ventes introuvable' };
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(8000);
+    const rows = sh.getDataRange().getValues();
+    let deleted = 0;
+    for (let i = rows.length - 1; i >= 1; i--) {
+      if (String(rows[i][0]) === id) { sh.deleteRow(i + 1); deleted++; }
+    }
+    _logAction_('VENTE_SUPPR', (data && data.by) || 'admin', 'ID:' + id + ' lignes:' + deleted);
+    CacheService.getScriptCache().remove('dashboard_v1');
+    return { ok:true, deleted };
+  } finally { try { lock.releaseLock(); } catch(e) {} }
 }
 
 function creerDossiersFromVente_(ss, sale) {

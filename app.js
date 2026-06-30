@@ -5408,25 +5408,37 @@ function renderCommandes() {
       const _dSvg = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>';
       const printBtn = `<button class="hist-print-btn" onclick="printCommandeTicket(commandes.find(x=>String(x.id)==='${c.id}'))" title="Imprimer le bon de commande">${_pSvg}<span>Imprimer</span></button>`;
       const finalizeBtn = c.status === 'pending' ? `<button class="btn-finalize" onclick="openCmdFinalizeModal('${c.id}')">Finaliser</button>` : '';
-      // Les commerciaux éditent les DATES directement (planification, effet immédiat) ;
-      // les champs sensibles (montants, articles) passent par une demande validée par l'admin.
+      // Règles de modification :
+      //  • Facture FINALISÉE → réservée à l'ADMIN (édition + « Dé-finaliser pour corriger »).
+      //  • En cours, commercial → dates directes + demande validée admin pour les montants.
+      //  • En cours, autres rôles → édition directe.
       const _isCommercial = currentUser?.role === 'commerciale';
-      const kebabItems = _isCommercial
-        ? `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeDateClient('${c.id}')">${_kebabIcon('edit')}<span>Modifier date livraison client</span></button>`
-          + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeDateBAT('${c.id}')">${_kebabIcon('edit')}<span>Modifier date BAT</span></button>`
-          + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeDateProd('${c.id}')">${_kebabIcon('edit')}<span>Modifier date production</span></button>`
+      const _isAdmin      = currentUser?.role === 'admin';
+      const _editDates =
+          `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeDateClient('${c.id}')">${_kebabIcon('edit')}<span>Modifier date livraison client</span></button>`
+        + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeDateBAT('${c.id}')">${_kebabIcon('edit')}<span>Modifier date BAT</span></button>`
+        + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeDateProd('${c.id}')">${_kebabIcon('edit')}<span>Modifier date production</span></button>`;
+      const _editFull =
+          `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeAddress('${c.id}')">${_kebabIcon('edit')}<span>Modifier l'adresse</span></button>`
+        + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeFrais('${c.id}')">${_kebabIcon('cash')}<span>Modifier les frais de livraison</span></button>`
+        + _editDates;
+      let kebabItems;
+      if (c.status === 'completed') {
+        kebabItems = _isAdmin
+          ? _editFull + `<button class="kebab-item danger" role="menuitem" onclick="closeAllKebabs();definaliserCommande('${c.id}')">${_kebabIcon('reset')}<span>Dé-finaliser (corriger)</span></button>`
+          : '';
+      } else if (_isCommercial) {
+        kebabItems = _editDates
           + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();requestCommandeModif('${c.id}')">${_kebabIcon('edit')}<span>Demander une modification (montants…)</span></button>`
-          + (c.status === 'pending' ? `<button class="kebab-item danger" role="menuitem" onclick="closeAllKebabs();requestCommandeCancel('${c.id}')">${_kebabIcon('trash')}<span>Demander l'annulation</span></button>` : '')
-        : `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeAddress('${c.id}')">${_kebabIcon('edit')}<span>Modifier l'adresse</span></button>`
-          + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeFrais('${c.id}')">${_kebabIcon('cash')}<span>Modifier les frais de livraison</span></button>`
-          + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeDateClient('${c.id}')">${_kebabIcon('edit')}<span>Modifier date livraison client</span></button>`
-          + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeDateBAT('${c.id}')">${_kebabIcon('edit')}<span>Modifier date BAT</span></button>`
-          + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeDateProd('${c.id}')">${_kebabIcon('edit')}<span>Modifier date production</span></button>`
+          + (c.status === 'pending' ? `<button class="kebab-item danger" role="menuitem" onclick="closeAllKebabs();requestCommandeCancel('${c.id}')">${_kebabIcon('trash')}<span>Demander l'annulation</span></button>` : '');
+      } else {
+        kebabItems = _editFull
           + (c.status === 'pending' ? `<button class="kebab-item danger" role="menuitem" onclick="closeAllKebabs();cancelCommande('${c.id}')">${_kebabIcon('trash')}<span>Annuler la commande</span></button>` : '');
-      const kebab = `<div class="kebab-wrap">
+      }
+      const kebab = kebabItems ? `<div class="kebab-wrap">
              <button class="kebab-btn" aria-label="Plus d'actions" aria-haspopup="true" onclick="toggleKebab('cmd${c.id}',event)">${_dSvg}</button>
              <div class="kebab-menu" id="kb-cmd${c.id}" role="menu">${kebabItems}</div>
-           </div>`;
+           </div>` : '';
 
       const _pmod = _pendingModFor(c.id);
       const modBanner = _pmod ? _buildModBanner(c, _pmod) : '';
@@ -5581,6 +5593,48 @@ function _doCmdFinalize(c, method, given, change, provider, ref) {
   showToast(` Vente #${sale.id} enregistrée — Commande #${c.id} livrée !`);
   renderCommandes();
   updateCmdBadge();
+}
+
+// ── Dé-finaliser une commande (ADMIN uniquement) ───────────────────────────
+// Corrige une facture finalisée par erreur : supprime la vente liée (local + GAS),
+// restitue le stock, repasse la commande en « en cours » pour pouvoir la corriger
+// puis la re-finaliser proprement.
+function definaliserCommande(id) {
+  if (currentUser?.role !== 'admin') { showToast('Réservé à l\'administrateur', 'error'); return; }
+  const c = commandes.find(x => String(x.id) === String(id));
+  if (!c || c.status !== 'completed') { showToast('Commande non finalisée', 'error'); return; }
+  if (!confirm(`Dé-finaliser la commande de ${c.clientName || 'client'} ?\n\nLa vente liée sera supprimée et la commande repassera en « en cours » pour correction. Vous pourrez ensuite la re-finaliser.`)) return;
+
+  const saleId = c.saleId;
+  if (saleId != null && saleId !== '') {
+    // Restituer le stock déduit à la finalisation
+    const sale = sales.find(s => String(s.id) === String(saleId));
+    if (sale && Array.isArray(sale.items)) {
+      sale.items.forEach(item => {
+        if (item.custom) return;
+        const p = products.find(pr => pr.name === item.name);
+        if (p) p.stock = (Number(p.stock) || 0) + (Number(item.qty) || 0);
+      });
+    }
+    sales = sales.filter(s => String(s.id) !== String(saleId));
+    if (APPS_SCRIPT_URL) apiCall({ action: 'deleteSale', id: saleId, by: currentUser?.username || 'admin' }).catch(() => {});
+  }
+
+  c.status = 'pending';
+  c.dateFinalisation = null;
+  c.saleId = null;
+  c._dateEditedAt = Date.now();
+  saveData();
+  renderProducts(); renderStockTable(); renderStats(); renderCommandes(); updateCmdBadge();
+  try { renderFinances(); } catch(e) {}
+  syncCmdUpdateToSheets(c);
+  _addNotification({
+    dossierId: c.dossierId || '', numeroDossier: c.numeroDossier || `CMD-${c.id}`,
+    etapeCode: 'MODIF', etapeLabel: 'Facture dé-finalisée',
+    operateur: currentUser?.label || 'Admin',
+    message: `Facture de ${c.clientName} dé-finalisée par l'admin pour correction`
+  });
+  showToast('Commande dé-finalisée — corrigez puis re-finalisez');
 }
 
 // ============================================================
