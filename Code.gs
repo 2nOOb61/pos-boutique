@@ -1436,9 +1436,29 @@ function handleDeleteTache(data) {
   const sh = getSS().getSheetByName(SHEET_TACHES);
   const rows = sh.getDataRange().getValues();
   for (let i = rows.length-1; i >= 1; i--) {
-    if (rows[i][0]===data.id) { sh.deleteRow(i+1); return {ok:true}; }
+    if (rows[i][0]===data.id) {
+      // Nettoyer les fichiers Drive référencés par la tâche (photos des tâches libres)
+      // AVANT de supprimer la ligne — sinon ils resteraient orphelins dans POS_PiecesJointes.
+      _deleteTacheDriveFiles_(rows[i][14]);
+      sh.deleteRow(i+1);
+      return {ok:true};
+    }
   }
   return { ok:false, error:'Tâche introuvable' };
+}
+
+// Supprime (best-effort) les fichiers Drive dont les métadonnées sont stockées dans la
+// colonne Photos (JSON). Silencieux : un fichier déjà supprimé ne doit pas bloquer la suppression.
+function _deleteTacheDriveFiles_(photosCell) {
+  if (!photosCell) return;
+  let photos;
+  try { photos = JSON.parse(photosCell); } catch (e) { return; }
+  if (!Array.isArray(photos)) return;
+  photos.forEach(function(p) {
+    const fileId = p && p.fileId;
+    if (!fileId) return;
+    try { DriveApp.getFileById(fileId).setTrashed(true); } catch (e) { /* déjà supprimé/introuvable */ }
+  });
 }
 
 // ============================================================

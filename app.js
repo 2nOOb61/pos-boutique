@@ -36,6 +36,9 @@ const APP_VERSION = '2.1.0';
 // Polling notifications — déclarés en tête pour éviter TDZ
 var _notifRetryQueue   = [];
 var _notifPollInterval = null;
+// File de reprise : uploads Drive des photos de tâches libres échoués (réseau/GAS down).
+// Persistée en localStorage → survit au rechargement, vidangée par _startNotifPolling.
+var _tlPhotoQueue = (function(){ try { return JSON.parse(localStorage.getItem('pos-tl-photo-queue')||'[]'); } catch(e){ return []; } })();
 var _notifPopupArmed   = false; // pop-ups activés après le chargement initial (évite le backlog au login ; insensible aux horloges)
 var _notifAudioCtx     = null; // contexte Web Audio pour le son de notification
 var notifications      = (function() {
@@ -6822,6 +6825,7 @@ function _startNotifPolling() {
   _notifPollInterval = setInterval(async () => {
     if (document.hidden) return; // ne pas polluer quand l'onglet est en arrière-plan
     _flushNotifRetryQueue();
+    _flushTlPhotoQueue();
     const newCount = await loadNotifsFromGAS(true);
     if (newCount > 0 && document.getElementById('notifPanel')?.classList.contains('open')) {
       _renderNotifPanelList(); // rafraîchit le panneau si ouvert
@@ -7153,41 +7157,82 @@ function saveTacheLibre() {
   closeModal('tacheLibreModal');
   showToast(`${createdTasks.length} tâche(s) indépendante(s) créée(s)`);
   renderTaches();
-  // Upload des photos sur Drive (une seule fois, partagé) puis persistance des URLs
-  if (APPS_SCRIPT_URL && photos.length) _uploadAndSyncTacheLibrePhotos(createdTasks, photos);
+  // Upload des photos sur Drive (une seule fois, partagé) puis persistance des URLs.
+  // En cas d'échec (réseau/GAS down) → file de reprise persistante (voir _flushTlPhotoQueue).
+  if (APPS_SCRIPT_URL && photos.length) {
+    _uploadAndSyncTacheLibrePhotos(createdTasks, photos).then(ok => {
+      if (!ok) _enqueueTlPhotoJob(createdTasks.map(t => t.id), photos);
+    });
+  }
 }
 
 // Upload les photos d'une tâche libre sur Drive (via l'action générique 'uploadFile',
-// même infra que les pièces jointes de commande) et renvoie les métadonnées Drive
-// {name,type,fileId,viewUrl,dlUrl} — petites, stockables dans la cellule Photos du Sheet.
+// même infra que les pièces jointes de commande). Renvoie { uploaded, allOk } :
+// - uploaded : métadonnées Drive {name,type,fileId,viewUrl,dlUrl} (petites, stockables au Sheet)
+// - allOk    : true seulement si TOUTES les photos ont été traitées (aucun échec réseau)
 async function _uploadTacheLibrePhotos(photos) {
-  if (!APPS_SCRIPT_URL || !Array.isArray(photos) || !photos.length) return null;
+  if (!APPS_SCRIPT_URL || !Array.isArray(photos) || !photos.length) return { uploaded:[], allOk:false };
   const uploaded = [];
+  let allOk = true;
   for (let i = 0; i < photos.length; i++) {
     const item    = photos[i];
     const dataUrl = typeof item === 'string' ? item : (item && item.data) || '';
     // Déjà une métadonnée Drive (re-sync) → conserver telle quelle
     if (item && typeof item === 'object' && item.fileId) { uploaded.push(item); continue; }
-    if (!dataUrl || dataUrl.indexOf('data:') !== 0) continue;
+    if (!dataUrl || dataUrl.indexOf('data:') !== 0) continue; // entrée invalide → ignorée (pas un échec)
     const type = (dataUrl.split(';')[0].split(':')[1]) || 'image/jpeg';
     const ext  = (type.split('/')[1] || 'jpg');
     const name = `tachelibre-${Date.now()}-${i + 1}.${ext}`;
     try {
       const r = await apiCall({ action:'uploadFile', fileName:name, mimeType:type, base64Data:dataUrl });
       if (r && r.ok) uploaded.push({ name:r.fileName || name, type, fileId:r.fileId, viewUrl:r.viewUrl, dlUrl:r.dlUrl });
-    } catch(e) { /* photo ignorée si l'upload échoue — reste en base64 local */ }
+      else allOk = false; // GAS a répondu KO → à reprendre
+    } catch(e) { allOk = false; } // réseau KO → à reprendre
   }
-  return uploaded.length ? uploaded : null;
+  return { uploaded, allOk };
 }
 
 // Après création : upload Drive + remplace le base64 local par les URLs + persiste au Sheet.
+// Retourne true si tout a réussi, false si une reprise est nécessaire (base64 conservé en local).
 async function _uploadAndSyncTacheLibrePhotos(tasks, photos) {
-  const uploaded = await _uploadTacheLibrePhotos(photos);
-  if (!uploaded || !uploaded.length) return;
+  const { uploaded, allOk } = await _uploadTacheLibrePhotos(photos);
+  // On ne bascule sur Drive que si TOUTES les photos ont été uploadées (évite un état mixte)
+  if (!allOk || !uploaded.length) return false;
   tasks.forEach(t => { t.photos = uploaded; }); // source de vérité = Drive (libère le base64)
   saveTachesLibres();
   try { renderTaches(); } catch(e) {}
-  tasks.forEach(t => apiCall({ action:'setTacheLibrePhotos', tacheId:t.id, photos:uploaded }).catch(() => {}));
+  // Persister les URLs dans le Sheet ; si un setTacheLibrePhotos échoue, on signale une reprise
+  const results = await Promise.all(tasks.map(t =>
+    apiCall({ action:'setTacheLibrePhotos', tacheId:t.id, photos:uploaded })
+      .then(r => r && r.ok).catch(() => false)
+  ));
+  return results.every(Boolean);
+}
+
+// ── File de reprise des uploads photos (tâches libres) ──
+function _saveTlPhotoQueue() {
+  try { localStorage.setItem('pos-tl-photo-queue', JSON.stringify(_tlPhotoQueue)); } catch(e) {}
+}
+
+function _enqueueTlPhotoJob(ids, photos) {
+  if (!ids || !ids.length || !photos || !photos.length) return;
+  _tlPhotoQueue.push({ ids, photos, ts: Date.now() });
+  if (_tlPhotoQueue.length > 20) _tlPhotoQueue = _tlPhotoQueue.slice(-20); // borne mémoire
+  _saveTlPhotoQueue();
+}
+
+// Rejoue les jobs d'upload en attente. Appelée par le polling 30s + au retour de connexion.
+async function _flushTlPhotoQueue() {
+  if (!APPS_SCRIPT_URL || !_tlPhotoQueue.length) return;
+  const jobs = _tlPhotoQueue.splice(0);
+  _saveTlPhotoQueue();
+  for (const job of jobs) {
+    // Retrouver les tâches encore présentes (certaines ont pu être supprimées entre-temps)
+    const tasks = (job.ids || []).map(id => tachesLibres.find(t => t.id === id)).filter(Boolean);
+    if (!tasks.length) continue; // toutes supprimées → job abandonné
+    const ok = await _uploadAndSyncTacheLibrePhotos(tasks, job.photos);
+    if (!ok) { _tlPhotoQueue.push(job); _saveTlPhotoQueue(); } // toujours KO → remettre en file
+  }
 }
 
 // <img> pour une photo de tâche libre — gère les 2 formats : chaîne base64 (local/legacy)
