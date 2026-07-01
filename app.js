@@ -6222,6 +6222,7 @@ let prodFilter = 'TOUS';
 let opFilterVal = 'TOUS';
 let _prodView   = 'tasks'; // 'tasks' | 'charge'
 let _prodExpanded = new Set(); // dossierId des groupes dépliés (repliés par défaut = vue compacte)
+let _opWorkloadOpen = false; // section "Charge opérateurs" repliée par défaut (vue compacte)
 let attrDateFilter = { mois: '', annee: '' };
 let prodDateFilter = { mois: '', annee: '' };
 
@@ -9781,6 +9782,11 @@ function _ensureChronoTick() {
   _chronoTimer = setInterval(_chronoTick, 1000);
 }
 
+// En-tête du tableau compact des travaux (une instance par groupe-dossier).
+const _PT_THEAD = `<tr>
+  <th>Étape</th><th>Client</th><th>Opérateur</th><th>Statut</th><th></th>
+</tr>`;
+
 function _tacheRow(t) {
   const isLibre = t.dossierId === 'LIBRE';
   const etape   = isLibre
@@ -9835,15 +9841,13 @@ function _tacheRow(t) {
     ? `<span style="font-size:9px;font-weight:700;color:${prioColor};background:${t.priorite==='Urgente'?'var(--color-danger-bg)':'var(--color-warning-bg)'};padding:1px 5px;border-radius:6px;margin-left:4px">${t.priorite}</span>` : '';
 
   const clientChip = clientName
-    ? `<span class="pt-client" title="Client : ${clientName}">👤 ${clientName}</span>` : '';
+    ? `<span class="pt-client" title="Client : ${clientName}">👤 ${clientName}</span>` : '<span style="color:var(--color-text-muted)">—</span>';
+  // Ligne de date : l'opérateur a désormais sa propre colonne, pas besoin de le répéter ici.
   const subLine = isLibre
-    ? `${t.operateur}${t.echeance?' · Échéance : <strong>'+new Date(t.echeance+'T00:00:00').toLocaleDateString('fr-FR')+'</strong>':''}`
-    : `${t.operateur} · ${isEC?'Démarré '+t.dateDebut:isDone?'Terminé '+t.dateFin:'Assigné '+t.dateAssignation}`;
+    ? (t.echeance ? 'Échéance : <strong>'+new Date(t.echeance+'T00:00:00').toLocaleDateString('fr-FR')+'</strong>' : '')
+    : (isEC ? 'Démarré '+t.dateDebut : isDone ? 'Terminé '+t.dateFin : 'Assigné '+t.dateAssignation);
 
   const retardInfo   = _getTacheRetardInfo(t);
-  const retardBadge  = retardInfo.isRetard
-    ? `<span style="font-size:10px;font-weight:700;color:#dc2626;background:#fee2e2;padding:3px 8px;border-radius:6px;white-space:nowrap;border:1px solid #fca5a5;flex-shrink:0" title="Délai dépassé de ${retardInfo.depassement}mn"> EN RETARD +${retardInfo.depassement}mn</span>`
-    : '';
   const retardStyle  = retardInfo.isRetard ? 'border-left:3px solid #dc2626;' : '';
 
   // — Détail repliable (Progressive Disclosure) —
@@ -9851,40 +9855,42 @@ function _tacheRow(t) {
   const retardChip = retardInfo.isRetard
     ? `<span class="pt-retard" title="Délai dépassé de ${retardInfo.depassement}mn">+${retardInfo.depassement}mn</span>` : '';
   const detail = `
-      <div class="pt-detail">
-        <div class="pt-detail-grid">
-          ${!isLibre?_dt('Client', clientName||'—'):''}
-          ${_dt('Opérateur', t.operateur||'—')}
-          ${!isLibre?_dt('Dossier', t.numeroDossier||t.dossierId):''}
-          ${_dt('Assigné le', t.dateAssignation)}
-          ${_dt('Démarré le', t.dateDebut)}
-          ${_dt('Terminé le', t.dateFin)}
-          ${retardInfo.isRetard?_dt('Retard', '+'+retardInfo.depassement+' mn'):''}
-        </div>
-        ${t.commentaire?`<div class="pt-note">${t.commentaire}</div>`:''}
-        ${isLibre&&t.photos?.length?`<div class="pt-photos">${t.photos.map(_tacheLibrePhotoImg).join('')}</div>`:''}
-      </div>`;
-
-  return `<div class="pt-item" id="pti-${t.id}">
-    <div class="tache-card ${isEC?'tache-card--encours':''} ${isDone?'tache-card--done':''}" style="${retardStyle}">
-      <div class="tache-card__icon" style="background:${etape.color}15;border-color:${etape.color};color:${etape.color}">${etape.icon}</div>
-      <div class="tache-card__body" onclick="togglePtDetail('${t.id}')">
-        <div class="pt-head">
-          <span class="tache-card__label" style="color:${etape.color}">${isLibre?(t.titre||t.etapeLabel):t.etapeLabel}</span>
-          ${prioBadge}${retardChip}${clientChip}${isEC?_chronoBadge(t):''}
-          <svg class="pt-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-        </div>
-        <div class="tache-card__sub">${subLine}</div>
+      <div class="pt-detail-grid">
+        ${!isLibre?_dt('Client', clientName||'—'):''}
+        ${_dt('Opérateur', t.operateur||'—')}
+        ${!isLibre?_dt('Dossier', t.numeroDossier||t.dossierId):''}
+        ${_dt('Assigné le', t.dateAssignation)}
+        ${_dt('Démarré le', t.dateDebut)}
+        ${_dt('Terminé le', t.dateFin)}
+        ${retardInfo.isRetard?_dt('Retard', '+'+retardInfo.depassement+' mn'):''}
       </div>
-      <div class="tache-card__actions">${actions}${kebab}</div>
-    </div>
-    ${detail}
-  </div>`;
+      ${t.commentaire?`<div class="pt-note">${t.commentaire}</div>`:''}
+      ${isLibre&&t.photos?.length?`<div class="pt-photos">${t.photos.map(_tacheLibrePhotoImg).join('')}</div>`:''}`;
+
+  return `<tr class="pt-row ${isEC?'pt-row--encours':''} ${isDone?'pt-row--done':''}" id="ptr-${t.id}" onclick="togglePtDetail('${t.id}')">
+    <td class="pt-td-etape" data-label="Étape" style="${retardStyle}">
+      <span class="tache-card__icon" style="background:${etape.color}15;border-color:${etape.color};color:${etape.color}">${etape.icon}</span>
+      <span class="pt-td-label" style="color:${etape.color}">${isLibre?(t.titre||t.etapeLabel):t.etapeLabel}</span>
+      ${prioBadge}
+      <svg class="pt-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+    </td>
+    <td class="pt-td-client" data-label="Client">${clientChip}</td>
+    <td class="pt-td-op" data-label="Opérateur">
+      <div class="pt-td-op-name">${t.operateur||'—'}</div>
+      ${subLine?`<div class="tache-card__sub">${subLine}</div>`:''}
+    </td>
+    <td class="pt-td-status" data-label="Statut">${retardChip}${isEC?_chronoBadge(t):''}</td>
+    <td class="pt-td-action" data-label="Action" onclick="event.stopPropagation()">${actions}${kebab}</td>
+  </tr>
+  <tr class="pt-detail-row"><td colspan="5"><div class="pt-detail" id="ptd-${t.id}">${detail}</div></td></tr>`;
 }
 
 function togglePtDetail(id){
-  const el = document.getElementById('pti-' + id);
-  if (el) el.classList.toggle('open');
+  const row = document.getElementById('ptr-' + id);
+  const det = document.getElementById('ptd-' + id);
+  if (!det) return;
+  const open = det.classList.toggle('open');
+  if (row) row.classList.toggle('open', open);
 }
 
 function toggleProdView(mode) {
@@ -10105,7 +10111,10 @@ function _buildOpWorkload() {
   if (!ops.length) return '';
   const maxCount = Math.max(...ops.map(([,v]) => v.aFaire + v.enCours), 1);
 
-  const cards = ops.sort((a,b) => (b[1].aFaire+b[1].enCours)-(a[1].aFaire+a[1].enCours)).map(([name, v]) => {
+  const sorted = ops.sort((a,b) => (b[1].aFaire+b[1].enCours)-(a[1].aFaire+a[1].enCours));
+  const overloadedCount = sorted.filter(([,v]) => Math.round((v.aFaire+v.enCours) / maxCount * 100) >= 85).length;
+
+  const cards = sorted.map(([name, v]) => {
     const total      = v.aFaire + v.enCours;
     const pct        = Math.round(total / maxCount * 100);
     const overloaded = pct >= 85;
@@ -10119,10 +10128,24 @@ function _buildOpWorkload() {
     </div>`;
   }).join('');
 
-  return `<div class="op-workload-section">
-    <div class="op-workload-title">Charge opérateurs</div>
+  const summary = overloadedCount
+    ? `<span class="op-workload-summary op-workload-summary--warn">${overloadedCount} en surcharge</span>`
+    : `<span class="op-workload-summary">${sorted.length} opérateur${sorted.length>1?'s':''} actifs</span>`;
+
+  return `<div class="op-workload-section ${_opWorkloadOpen?'op-workload-section--open':''}">
+    <button class="op-workload-toggle" onclick="toggleOpWorkload()" aria-expanded="${_opWorkloadOpen}">
+      <span class="op-workload-title">Charge opérateurs</span>
+      ${summary}
+      ${_chevSvg('op-workload-toggle-chev')}
+    </button>
     <div class="op-workload-row">${cards}</div>
   </div>`;
+}
+
+function toggleOpWorkload(){
+  _opWorkloadOpen = !_opWorkloadOpen;
+  const wl = document.getElementById('opWorkloadContainer');
+  if (wl) wl.innerHTML = _buildOpWorkload();
 }
 
 // Évite d'afficher « 01/01/1970 » (epoch 0 = date absente) : renvoie '' si la date est
@@ -11283,7 +11306,7 @@ function renderTaches() {
           ${_chevSvg('prod-group-chev')}
         </div>
       </div>
-      <div class="prod-group-tasks">${libreList.map(_tacheRow).join('')}</div>
+      <div class="prod-group-tasks"><table class="prod-task-table"><thead>${_PT_THEAD}</thead><tbody>${libreList.map(_tacheRow).join('')}</tbody></table></div>
     </div>` : '';
 
   // Grouper par dossier
@@ -11318,8 +11341,8 @@ function renderTaches() {
           ${_chevSvg('prod-group-chev')}
         </div>
       </div>
-      <div class="prod-group-progress">${_buildProgressBar(dossierId)}</div>
-      <div class="prod-group-tasks">${g.taches.map(_tacheRow).join('')}</div>
+      ${isOpen ? `<div class="prod-group-progress">${_buildProgressBar(dossierId)}</div>` : ''}
+      <div class="prod-group-tasks"><table class="prod-task-table"><thead>${_PT_THEAD}</thead><tbody>${g.taches.map(_tacheRow).join('')}</tbody></table></div>
     </div>`;
   }).join('');
 
@@ -11338,6 +11361,12 @@ function toggleProdGroup(id){
   if (!g) return;
   const open = g.classList.toggle('prod-group--open');
   if (open) _prodExpanded.add(id); else _prodExpanded.delete(id);
+  // Pipeline complet : généré à la demande dès la 1ère ouverture (panneau détail au clic),
+  // plutôt qu'à chaque rendu — évite de le calculer/afficher pour des dossiers repliés.
+  if (open && id !== 'LIBRE' && !g.querySelector('.prod-group-progress')) {
+    const tasksWrap = g.querySelector('.prod-group-tasks');
+    if (tasksWrap) tasksWrap.insertAdjacentHTML('beforebegin', `<div class="prod-group-progress">${_buildProgressBar(id)}</div>`);
+  }
   _syncProdExpandBtn();
 }
 

@@ -72,6 +72,8 @@
 .prod-filter-btn { padding:7px 14px; border-radius:8px; border:1.5px solid var(--color-border); background:var(--color-surface); color:var(--color-text-secondary); cursor:pointer; font-size:13px; font-weight:500; transition:.15s; }
 .prod-filter-btn:hover { border-color:var(--color-primary); color:var(--color-primary); }
 .prod-filter-btn--active { background:var(--color-primary-light); border-color:rgba(26,74,58,.3); color:var(--color-primary); font-weight:600; }
+/* Filtres Production : restent visibles pendant le défilement de la liste */
+.prod-filters-sticky { position:sticky; top:0; z-index:15; background:var(--color-bg); padding-top:4px; margin-top:-4px; box-shadow:0 8px 8px -8px rgba(0,0,0,.08); }
 .prod-badge { display:inline-block; padding:2px 9px; border-radius:20px; font-size:11px; font-weight:600; }
 .select-input { padding:8px 12px; border-radius:8px; border:1px solid var(--color-border); background:var(--color-surface); color:var(--color-text-primary); font-size:13px; font-family:'DM Sans',sans-serif; cursor:pointer; outline:none; }
 .select-input:focus { border-color:var(--color-primary); }
@@ -288,10 +290,16 @@
   .pcf-detail{ margin:0 12px 12px; border-radius:12px; }
 }
 
-/* ══ PRODUCTION — Operator workload bar ══ */
-.op-workload-section { margin-bottom:16px; }
-.op-workload-title { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--color-text-muted); margin-bottom:8px; }
-.op-workload-row { display:flex; gap:7px; flex-wrap:wrap; }
+/* ══ PRODUCTION — Operator workload bar (repliable, compact par défaut) ══ */
+.op-workload-section { margin-bottom:16px; background:var(--color-surface); border:1.5px solid var(--color-border); border-radius:10px; padding:9px 12px; }
+.op-workload-toggle { display:flex; align-items:center; gap:8px; width:100%; background:none; border:none; padding:0; margin:0; cursor:pointer; font-family:inherit; text-align:left; }
+.op-workload-title { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--color-text-muted); }
+.op-workload-summary { font-size:11px; font-weight:600; color:var(--color-text-secondary); margin-left:auto; }
+.op-workload-summary--warn { color:var(--color-danger); }
+.op-workload-toggle-chev { width:14px; height:14px; flex-shrink:0; color:var(--color-text-muted); transition:transform .2s; }
+.op-workload-section--open .op-workload-toggle-chev { transform:rotate(180deg); }
+.op-workload-row { display:none; gap:7px; flex-wrap:wrap; margin-top:10px; }
+.op-workload-section--open .op-workload-row { display:flex; }
 .op-workload-card { background:var(--color-surface); border:1.5px solid var(--color-border); border-radius:10px; padding:10px 12px; min-width:100px; flex:1; max-width:160px; }
 .op-workload-card--overloaded { border-color:#fca5a5; background:#fff9f9; }
 .op-workload-card__avatar { width:28px; height:28px; border-radius:50%; background:var(--color-primary); display:flex; align-items:center; justify-content:center; color:#fff; font-size:11px; font-weight:700; margin-bottom:6px; }
@@ -315,19 +323,15 @@
 .prod-group-right { display:flex; align-items:center; gap:8px; flex-shrink:0; }
 .prod-group-chev { width:15px; height:15px; color:var(--color-text-muted); transition:transform .2s; }
 .prod-group--open .prod-group-chev { transform:rotate(180deg); }
-/* Replié (défaut) : on masque les tâches, on laisse l'en-tête + la barre de progression */
+/* Replié (défaut) : seul l'en-tête reste visible. Le pipeline complet n'est
+   généré qu'à la 1ère ouverture (toggleProdGroup / isOpen dans app.js) puis
+   simplement masqué/réaffiché ici au fil des repli/dépli suivants. */
 .prod-group:not(.prod-group--open) .prod-group-tasks { display:none; }
-.prod-group:not(.prod-group--open) .prod-group-progress { padding-bottom:10px; }
+.prod-group:not(.prod-group--open) .prod-group-progress { display:none; }
 
-/* ══ PRODUCTION — Task card (remplace tache-row) ══ */
-.tache-card { display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:8px; border:1.5px solid var(--color-border); background:var(--color-surface); transition:border-color .15s; }
-.tache-card--encours { border-color:var(--color-warning); background:var(--color-warning-bg); }
-.tache-card--done { opacity:.5; }
+/* ══ PRODUCTION — Task table (remplace tache-row) ══ */
 .tache-card__icon { width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:11px; font-weight:800; border:1.5px solid transparent; }
-.tache-card__body { flex:1; min-width:0; }
-.tache-card__label { font-size:12px; font-weight:700; margin-bottom:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.tache-card__sub { font-size:11px; color:var(--color-text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.tache-card__actions { display:flex; align-items:center; gap:5px; flex-shrink:0; }
+.tache-card__sub { font-size:11px; color:var(--color-text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:1px; }
 .btn-prod-start { padding:6px 12px; border-radius:7px; background:var(--color-primary-light); color:var(--color-primary); border:1px solid rgba(26,74,58,.2); cursor:pointer; font-size:11px; font-weight:600; transition:.15s; white-space:nowrap; }
 .btn-prod-start:hover { background:rgba(26,74,58,.15); }
 .btn-prod-done { padding:6px 12px; border-radius:7px; background:var(--color-success-bg); color:var(--color-success); border:1px solid rgba(22,163,74,.2); cursor:pointer; font-size:11px; font-weight:600; transition:.15s; white-space:nowrap; }
@@ -449,14 +453,23 @@
 .prod-group { overflow:visible; }
 .prod-group-header { border-top-left-radius:12px; border-top-right-radius:12px; }
 
-/* — Production : tâche v2 = en-tête scannable + détail repliable — */
-.pt-item { border-radius:9px; }
-.pt-item .tache-card { position:relative; }
-.pt-head { display:flex; align-items:center; gap:6px; min-width:0; }
-.pt-head .tache-card__label { flex:0 1 auto; min-width:0; }
+/* — Production : tableau compact des travaux (une ligne = une tâche) — */
+.prod-task-table { width:100%; border-collapse:collapse; }
+.prod-task-table thead th { text-align:left; font-size:9.5px; font-weight:800; text-transform:uppercase; letter-spacing:.04em; color:var(--color-text-muted); padding:4px 8px; border-bottom:1px solid var(--color-border); }
+.prod-task-table tbody td { padding:6px 8px; border-bottom:1px solid var(--color-border); vertical-align:middle; font-size:12px; }
+.prod-task-table tbody tr:last-child td { border-bottom:none; }
+.pt-row { cursor:pointer; user-select:none; transition:background .15s; }
+.pt-row:hover { background:var(--color-bg); }
+.pt-row--encours { background:var(--color-warning-bg); }
+.pt-row--done { opacity:.55; }
+.pt-td-etape { display:flex; align-items:center; gap:8px; min-width:0; }
+.pt-td-label { font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pt-td-op-name { font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pt-td-status { white-space:nowrap; }
+.pt-td-action { display:flex; align-items:center; gap:5px; justify-content:flex-end; white-space:nowrap; }
 .pt-chev { width:13px; height:13px; flex-shrink:0; margin-left:auto; color:var(--color-text-muted); transition:transform .2s; }
-.pt-item.open .pt-chev { transform:rotate(90deg); }
-.tache-card__body { cursor:pointer; user-select:none; }
+.pt-row.open .pt-chev { transform:rotate(90deg); }
+.pt-detail-row > td { padding:0; border-bottom:1px solid var(--color-border); }
 .pt-retard { font-size:10px; font-weight:800; color:#dc2626; background:#fee2e2; border:1px solid #fca5a5; padding:2px 7px; border-radius:6px; white-space:nowrap; flex-shrink:0; }
 .pt-client { font-size:10px; font-weight:700; color:#1a4a3a; background:#e8f4f0; border:1px solid #b7ddd0; padding:2px 8px; border-radius:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:160px; flex-shrink:1; }
 /* Chronomètre live d'une tâche en cours */
@@ -480,8 +493,8 @@
   .perf-subtable td::before { content:attr(data-label); font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.03em; color:var(--muted,#78716c); text-align:left; }
   .perf-subtable .pcf-num { text-align:right; }
 }
-.pt-detail { display:none; margin:-1px 6px 7px 46px; padding:11px 13px; background:var(--color-bg); border:1px solid var(--color-border); border-radius:10px; }
-.pt-item.open .pt-detail { display:block; }
+.pt-detail { display:none; padding:11px 16px 13px 42px; background:var(--color-bg); }
+.pt-detail.open { display:block; }
 .pt-detail-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(118px,1fr)); gap:8px; }
 .pt-dt-l { font-size:9px; font-weight:800; text-transform:uppercase; letter-spacing:.04em; color:var(--color-text-muted); }
 .pt-dt-v { font-size:12.5px; font-weight:700; color:var(--color-text-primary); margin-top:1px; }
@@ -489,13 +502,21 @@
 .pt-photos { display:flex; gap:5px; flex-wrap:wrap; margin-top:9px; }
 .pt-photos img { width:46px; height:46px; object-fit:cover; border-radius:7px; border:1px solid var(--color-border); cursor:pointer; }
 
-/* — Production : Mobile Card Layout — */
+/* — Production : Mobile Card Layout (même technique que .perf-subtable) — */
 @media(max-width:680px){
-  .tache-card { flex-wrap:wrap; row-gap:9px; }
-  .tache-card__body { flex:1 1 60%; }
-  .tache-card__actions { flex:1 1 100%; justify-content:flex-end; }
+  .prod-task-table thead { display:none; }
+  .prod-task-table, .prod-task-table tbody, .prod-task-table tr, .prod-task-table td { display:block; width:100%; }
+  .pt-row { border:1px solid var(--color-border); border-radius:10px; margin-bottom:6px; padding:8px 10px; }
+  .pt-row td { border:none; padding:3px 2px; }
+  .prod-task-table .pt-td-etape { display:flex; align-items:center; padding-bottom:6px; }
+  .pt-td-client::before, .pt-td-op::before, .pt-td-status::before {
+    content:attr(data-label); display:block; font-size:9px; font-weight:800; text-transform:uppercase;
+    letter-spacing:.03em; color:var(--color-text-muted); margin-bottom:1px;
+  }
+  .prod-task-table .pt-td-action { display:flex; justify-content:flex-end; padding-top:6px; }
   .btn-prod-start, .btn-prod-done { min-height:40px; padding:9px 16px; font-size:12px; }
-  .pt-detail { margin-left:6px; }
+  .pt-detail-row > td { border-bottom:none; }
+  .pt-detail { padding-left:14px; }
   .pt-detail-grid { grid-template-columns:repeat(2,1fr); }
   .kebab-btn { min-width:40px; min-height:40px; }
 }
@@ -1654,6 +1675,8 @@
     <!-- Barre charge opérateurs mini (vue tâches uniquement) -->
     <div id="opWorkloadContainer"></div>
 
+    <!-- Filtres — restent visibles au scroll (sticky) -->
+    <div class="prod-filters-sticky">
     <!-- Filtres statut + filtre opérateur (masqués en vue charge) -->
     <div id="prodFilterBar" style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;align-items:center">
       <button class="prod-filter-btn prod-filter-btn--active" onclick="setProdFilter('TOUS',this)">
@@ -1693,6 +1716,7 @@
         Effacer filtre
       </button>
     </div>
+    </div><!-- /prod-filters-sticky -->
 
     <div id="tachesContainer"></div>
   </div>
@@ -2708,7 +2732,7 @@
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260701-live-attrib"></script>
+<script src="./app.js?v=20260701-prod-compact-table"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
