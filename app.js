@@ -5928,7 +5928,7 @@ function approveCommandeModif(modId) {
         clientName: c.clientName, clientContact: c.clientContact,
         adresseLivraison: c.adresseLivraison, deliveryMode: c.deliveryMode,
         fraisLivraison: c.fraisLivraison, dateLivraison: c.dateLivraison, dateLivraisonProd: c.dateLivraisonProd, dateBAT: c.dateBAT,
-        remise: c.remise, accompte: c.accompte, notes: c.notes, depositMethod: c.depositMethod,
+        remise: c.remise, accompte: c.accompte, notes: c.notes, depositMethod: c.depositMethod, depositRef: c.depositRef,
         items: ('items' in (mod.changes||{})) ? c.items : undefined,
         subtotal: c.subtotal, total: c.total, restant: c.restant
       }).catch(() => {});
@@ -6074,6 +6074,7 @@ const CMD_MODIF_FIELDS = [
   { key:'clientContact',    label:'Contact',               type:'text' },
   { key:'accompte',         label:'Acompte (Ar)',          type:'number' },
   { key:'depositMethod',    label:'Mode de paiement acompte', type:'select', options:_DEPOSIT_METHOD_OPTS },
+  { key:'depositRef',       label:'Référence Mobile Money', type:'text' },
   { key:'remise',           label:'Remise (Ar)',           type:'number' },
   { key:'adresseLivraison', label:'Adresse de livraison',  type:'text' },
   { key:'fraisLivraison',   label:'Frais de livraison (Ar)',type:'number' },
