@@ -687,6 +687,11 @@
 .pcok-chev { width:14px; height:14px; color:var(--color-text-muted); flex-shrink:0; }
 .pcok-td-act { width:20px; text-align:right; }
 .pcok-muted { color:var(--color-text-muted); font-weight:500; }
+/* Attribution : ligne sélectionnée + badge « À attribuer » */
+.pcok-row--sel { background:var(--color-primary-light) !important; box-shadow:inset 3px 0 0 var(--color-primary) !important; }
+.pcok-toassign { display:inline-block; font-size:10px; font-weight:800; color:#c2410c; background:#fff0e6; border:1px solid #fed7aa; padding:2px 8px; border-radius:6px; white-space:nowrap; }
+.pcok-toolbar--attr { z-index:14; }
+.pcok--attr { padding-bottom:4px; }
 .pcok-empty { display:flex; flex-direction:column; align-items:center; gap:10px; padding:56px 0; color:var(--color-text-secondary); }
 .pcok-empty p { font-size:13px; font-weight:500; margin:0; }
 /* Responsive : tableau → cartes empilées */
@@ -2891,7 +2896,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260701-cmd-cockpit"></script>
+<script src="./app.js?v=20260701-attr-cockpit"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

@@ -8836,6 +8836,186 @@ function _renderDossierRow(d) {
   </div>`;
 }
 
+// ════════════════════════════════════════════════════════════
+// COCKPIT ATTRIBUTION — même principe que Production/Commandes :
+// tableau compact (une ligne = un dossier), toolbar sticky (filtres rapides
+// + tri + densité), le panneau d'attribution à droite sert de détail.
+// Emphase « À attribuer » (étape courante sans opérateur). Couleurs :
+// rouge=retard, orange=proche échéance / à attribuer, bleu=en cours, vert=terminé.
+// ════════════════════════════════════════════════════════════
+let _attrFilter  = 'TOUS';  // TOUS|A_ATTRIBUER|EN_COURS|RETARD|TERMINE
+let _attrSort    = { key:'echeance', dir:'asc' }; // echeance|retard|progression|client|priorite|etape
+let _attrDensity = 'compact';
+let _attrLimit   = 80;
+const _ATTR_PAGE = 80;
+
+function _buildAttrRow(d) {
+  const dt = (Array.isArray(taches) ? taches : []).filter(t => t.dossierId === d.id);
+  let done = 0;
+  ETAPES_CONFIG.forEach(e => { const te = dt.filter(t => t.etapeCode === e.code); if (te.length && te.every(t => t.statut === 'TERMINE')) done++; });
+  const pct = dt.length ? Math.round(done / ETAPES_CONFIG.length * 100) : (d.progression || 0);
+  const isDone = pct === 100 || d.statut === 'LIVRE';
+  // Étape actuelle = statut serveur du dossier (avance via majProgressionDossier_)
+  const curStep  = ETAPES_CONFIG.find(e => e.code === d.statut) || null;
+  const curTasks = curStep ? dt.filter(t => t.etapeCode === curStep.code) : [];
+  const assigned = [...new Set(curTasks.filter(t => t.statut !== 'TERMINE').map(t => t.operateur).filter(Boolean))];
+  const needsAssign = !isDone && curTasks.length === 0;
+  const taskRetard  = dt.some(t => _getTacheRetardInfo(t).isRetard);
+  const ymd  = _toIsoDate(d.dateLivraisonProd || '');
+  const days = ymd ? _daysUntil(ymd) : null;
+  const deadlineLate = days != null && days < 0;
+  const hasEnCours = dt.some(t => t.statut === 'EN_COURS');
+  const prio = d.priorite || 'Normale';
+  const prioRank = prio === 'Urgente' ? 0 : prio === 'Haute' ? 1 : 2;
+  const etapeIdx = ETAPES_CONFIG.findIndex(e => e.code === d.statut);
+  return {
+    d, id: d.id, ref: d.numeroDossier || d.id, client: d.client || '—',
+    produit: d.produit || '', quantite: d.quantite || '',
+    priorite: prio, prioRank, curStep, assigned, needsAssign,
+    pct, isDone, hasEnCours, taskRetard, ymd, days, deadlineLate,
+    etapeIdx: etapeIdx < 0 ? 99 : etapeIdx,
+  };
+}
+
+function _attrMatch(r, k) {
+  if (k === 'TOUS')        return true;
+  if (k === 'A_ATTRIBUER') return r.needsAssign;
+  if (k === 'EN_COURS')    return !r.isDone && r.hasEnCours;
+  if (k === 'RETARD')      return !r.isDone && (r.deadlineLate || r.taskRetard);
+  if (k === 'TERMINE')     return r.isDone;
+  return true;
+}
+
+function _attrSortRows(rows) {
+  const { key, dir } = _attrSort;
+  const sign = dir === 'desc' ? -1 : 1;
+  const dk = r => r.days == null ? 1e9 : r.days;
+  const cmp = ({
+    echeance:    (a,b) => dk(a) - dk(b),
+    retard:      (a,b) => dk(a) - dk(b),
+    progression: (a,b) => a.pct - b.pct,
+    client:      (a,b) => a.client.localeCompare(b.client,'fr'),
+    priorite:    (a,b) => a.prioRank - b.prioRank,
+    etape:       (a,b) => a.etapeIdx - b.etapeIdx,
+  })[key] || (() => 0);
+  return rows.sort((a,b) => (sign * cmp(a,b)) || (dk(a) - dk(b)));
+}
+
+function _renderAttrCockpit(list) {
+  const container = document.getElementById('dossierListContainer');
+  if (!container) return;
+  const all = list.map(_buildAttrRow);
+  const cnt = k => all.filter(r => _attrMatch(r, k)).length;
+  const filtered = _attrSortRows(all.filter(r => _attrMatch(r, _attrFilter)));
+  const page = filtered.slice(0, _attrLimit);
+
+  const chips = [
+    ['TOUS','Tous'], ['A_ATTRIBUER','À attribuer'], ['EN_COURS','En cours'], ['RETARD','En retard'], ['TERMINE','Terminés']
+  ].map(([k,lbl]) => `<button class="pcok-chip ${_attrFilter===k?'pcok-chip--active':''} ${(k==='A_ATTRIBUER'||k==='RETARD')?'pcok-chip--warn':''}" onclick="_attrSetFilter('${k}')">${lbl}<span class="pcok-chip-n">${cnt(k)}</span></button>`).join('');
+  const sortOpts = [
+    ['echeance','Échéance'], ['retard','Retard'], ['progression','Progression'], ['client','Client'], ['priorite','Priorité'], ['etape','Étape']
+  ].map(([k,l]) => `<option value="${k}" ${_attrSort.key===k?'selected':''}>Trier : ${l}</option>`).join('');
+  const dirIcon = _attrSort.dir === 'asc' ? '↑' : '↓';
+  const toolbar = `<div class="pcok-toolbar pcok-toolbar--attr">
+    <div class="pcok-chips">${chips}</div>
+    <div class="pcok-controls">
+      <select class="select-input" onchange="_attrSetSort(this.value)" title="Trier">${sortOpts}</select>
+      <button class="pcok-iconbtn" title="Sens du tri" onclick="_attrToggleSortDir()">${dirIcon}</button>
+      <button class="pcok-iconbtn pcok-density" title="Vue compacte / détaillée" onclick="_attrToggleDensity()">${_attrDensity==='compact'?'Détaillé':'Compact'}</button>
+    </div>
+  </div>`;
+
+  const count = `<div class="pcok-count">${filtered.length} dossier${filtered.length>1?'s':''}${_attrFilter!=='TOUS'?' · filtré':''}</div>`;
+  const more = filtered.length > _attrLimit
+    ? `<div class="pcok-more"><button onclick="_attrShowMore()">Afficher plus (${filtered.length - _attrLimit} restants)</button></div>` : '';
+  const table = page.length ? `<div class="pcok-tablewrap"><table class="pcok-table"><thead>${_attrThead()}</thead><tbody>${page.map(_attrRow).join('')}</tbody></table></div>`
+    : `<div class="pcok-empty"><p>Aucun dossier dans ce filtre</p></div>`;
+
+  container.innerHTML = `<div class="pcok pcok--attr">${toolbar}${count}${table}${more}</div>`;
+}
+
+function _attrThead() {
+  const det = _attrDensity === 'detaille';
+  const th = (key, label) => {
+    const active = key && _attrSort.key === key;
+    const arrow = active ? (_attrSort.dir==='asc' ? ' ↑' : ' ↓') : '';
+    return `<th class="pcok-th ${active?'pcok-th--active':''}" ${key?`onclick="_attrSetSort('${key}')" style="cursor:pointer"`:''}>${label}${arrow}</th>`;
+  };
+  return `<tr>
+    ${th('priorite','!')}
+    ${th('client','Réf / Client')}
+    ${det ? th('', 'Produit') : ''}
+    ${th('etape','Étape')}
+    ${th('echeance','Échéance')}
+    ${th('retard','Retard')}
+    ${th('', 'Responsable')}
+    ${th('progression','Prog.')}
+    <th class="pcok-th"></th>
+  </tr>`;
+}
+
+function _attrRow(r) {
+  const det = _attrDensity === 'detaille';
+  const prioC = r.priorite==='Urgente'?'#dc2626':r.priorite==='Haute'?'#d97706':'#d6d3d1';
+  const prio = `<span class="pcok-prio" style="background:${prioC}" title="${r.priorite}"></span>`;
+  const stC = r.curStep ? r.curStep.color : (r.isDone ? '#16a34a' : '#a8a29e');
+  const stLbl = r.curStep ? (r.curStep.short || r.curStep.label) : (r.isDone ? 'Livré' : 'Créé');
+  const stepChip = `<span class="pcok-step" style="color:${stC};background:${stC}15;border-color:${stC}55">${_pcokEsc(stLbl)}</span>`;
+  const ech = r.ymd ? new Date(r.ymd+'T00:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'}) : '—';
+  let retC='#78716c', retTxt='—';
+  if (r.isDone)            { retC='#16a34a'; retTxt='Terminé'; }
+  else if (r.days==null)  { retC = r.taskRetard?'#dc2626':'#a8a29e'; retTxt = r.taskRetard?'Retard':'—'; }
+  else if (r.days<0)      { retC='#dc2626'; retTxt=`+${Math.abs(r.days)}j`; }
+  else if (r.days===0)    { retC='#e8834a'; retTxt='Auj.'; }
+  else if (r.days===1)    { retC='#e8834a'; retTxt='Demain'; }
+  else if (r.days<=7)     { retC='#d97706'; retTxt=`${r.days}j`; }
+  else                    { retC='#78716c'; retTxt=`${r.days}j`; }
+  const retBadge = `<span class="pcok-ret" style="color:${retC};background:${retC}1a">${retTxt}</span>`;
+  const resp = r.needsAssign
+    ? '<span class="pcok-toassign">À attribuer</span>'
+    : (r.assigned.length ? `${_pcokEsc(r.assigned[0])}${r.assigned.length>1?` <span class="pcok-muted">+${r.assigned.length-1}</span>`:''}` : (r.isDone ? '<span class="pcok-muted">—</span>' : '<span class="pcok-muted">—</span>'));
+  const pctC = r.pct===100?'#16a34a':r.pct>0?'#e8834a':'#a8a29e';
+  const prog = `<div class="pcok-prog"><div class="pcok-prog-bar"><div style="width:${r.pct}%;background:${pctC}"></div></div><span class="pcok-prog-n" style="color:${pctC}">${r.pct}%</span></div>`;
+  const accent = r.isDone ? '' : r.needsAssign ? 'inset 3px 0 0 #e8834a' : (r.days!=null&&r.days<0) ? 'inset 3px 0 0 #dc2626' : r.hasEnCours ? 'inset 3px 0 0 #2563eb' : '';
+  const sel = selectedDossier?.id === r.id ? 'pcok-row--sel' : '';
+  const _dots = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>';
+  const kebab = `<div class="kebab-wrap"><button class="kebab-btn" aria-label="Plus d'actions" onclick="toggleKebab('dos${r.id}',event)">${_dots}</button><div class="kebab-menu" id="kb-dos${r.id}" role="menu">
+    <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();selectDossier('${r.id}')">${_kebabIcon('eye')}<span>Ouvrir / attribuer</span></button>
+    <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printDossier('${r.id}')">${_kebabIcon('print')}<span>Imprimer le dossier</span></button>
+    ${['admin','chef_atelier'].includes(currentUser?.role) ? `<button class="kebab-item danger" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();resetTachesDossier('${r.id}')">${_kebabIcon('reset')}<span>Réinitialiser les tâches</span></button>` : ''}
+  </div></div>`;
+  return `<tr class="pcok-row ${sel}" id="attrrow-${r.id}" ${accent?`style="box-shadow:${accent}"`:''} onclick="selectDossier('${r.id}')">
+    <td class="pcok-td-prio">${prio}</td>
+    <td class="pcok-td-client"><div class="pcok-client">${_pcokEsc(r.client)}</div><div class="pcok-ref">${_pcokEsc(r.ref)}</div></td>
+    ${det ? `<td class="pcok-td-prod">${_pcokEsc(r.produit)||'<span class="pcok-muted">—</span>'}${r.quantite?` <span class="pcok-muted">× ${r.quantite}</span>`:''}</td>` : ''}
+    <td class="pcok-td-step">${stepChip}</td>
+    <td class="pcok-td-ech">${ech}</td>
+    <td class="pcok-td-ret">${retBadge}</td>
+    <td class="pcok-td-resp">${resp}</td>
+    <td class="pcok-td-prog">${prog}</td>
+    <td class="pcok-td-act" onclick="event.stopPropagation()">${kebab}</td>
+  </tr>`;
+}
+
+// Surligne la ligne sélectionnée sans reconstruire toute la table (préserve le scroll)
+function _attrSyncSelectedRow() {
+  document.querySelectorAll('#dossierListContainer .pcok-row--sel').forEach(el => el.classList.remove('pcok-row--sel'));
+  if (selectedDossier) {
+    const el = document.getElementById('attrrow-' + selectedDossier.id);
+    if (el) el.classList.add('pcok-row--sel');
+  }
+}
+
+function _attrSetFilter(k){ _attrFilter = k; _attrLimit = _ATTR_PAGE; renderDossiers(); }
+function _attrSetSort(k){
+  if (_attrSort.key === k) _attrSort.dir = _attrSort.dir==='asc' ? 'desc' : 'asc';
+  else { _attrSort.key = k; _attrSort.dir = (k==='client'||k==='etape') ? 'asc' : 'asc'; }
+  renderDossiers();
+}
+function _attrToggleSortDir(){ _attrSort.dir = _attrSort.dir==='asc' ? 'desc' : 'asc'; renderDossiers(); }
+function _attrToggleDensity(){ _attrDensity = _attrDensity==='compact' ? 'detaille' : 'compact'; renderDossiers(); }
+function _attrShowMore(){ _attrLimit += _ATTR_PAGE; renderDossiers(); }
+
 // Cloisonnement Attribution : la liste des dossiers visibles par l'utilisateur courant.
 // admin / chef / commercial → tous ; opérateur → uniquement ceux où il a une tâche.
 function _attribVisibleDossiers() {
@@ -8890,11 +9070,11 @@ function renderDossiers() {
     return;
   }
 
-  // Virtual-scroll réservé aux très longues listes. Les cartes ayant des hauteurs
-  // variables (note de briefing, badges…), le virtual-scroll à hauteur fixe faisait
-  // « voler » le défilement → en-dessous du seuil on rend tout en scroll natif (fluide).
-  if (list.length > 1500) _vsInit(list);
-  else _vsRenderAll(list);
+  // Vue liste = COCKPIT : tableau compact de dossiers (même principe que
+  // Production/Commandes) + toolbar sticky. Le panneau d'attribution à droite
+  // sert de détail. Pagination (au lieu du virtual-scroll : lignes de table).
+  container.className = '';
+  _renderAttrCockpit(list);
 }
 
 function _renderDossierTabs() {
@@ -9081,8 +9261,8 @@ async function selectDossier(id) {
     if (layout) layout.style.gridTemplateColumns = '1fr 420px';
     if (right)  right.style.display = '';
   }
-  // Mise à jour légère : re-rend seulement la fenêtre visible (évite de reconstruire tout le VS)
-  if (_dossierView === 'card') renderDossiers(); else _vsRender();
+  // Mise à jour légère : surligner la ligne sélectionnée sans tout re-rendre
+  if (_dossierView === 'card') renderDossiers(); else _attrSyncSelectedRow();
   // Mobile : masquer la liste, afficher le panneau détail
   document.querySelector('.attr-layout')?.classList.add('dossier-selected');
 
