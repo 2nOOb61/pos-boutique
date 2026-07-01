@@ -808,8 +808,9 @@ function renderDashboard() {
     .slice(0, 6);
   const actHtml = recent.length ? recent.map(t => {
     const isRunning = t.statut === 'EN_COURS';
+    const isLibre   = t.dossierId === 'LIBRE';
     const color     = isRunning ? 'var(--warning)' : 'var(--success)';
-    const label     = ETAPE_LABELS[t.etapeCode] || t.etapeLabel || t.etapeCode;
+    const label     = isLibre ? (t.etapeLabel || 'Tâche indépendante') : (ETAPE_LABELS[t.etapeCode] || t.etapeLabel || t.etapeCode);
     const time      = isRunning
       ? (t.dateDebut ? 'Débuté ' + t.dateDebut : 'En cours')
       : (t.dateFin   ? 'Terminé ' + t.dateFin  : 'Terminé');
@@ -817,7 +818,7 @@ function renderDashboard() {
       <div class="activity-row">
         <div class="activity-dot" style="background:${color}"></div>
         <div class="activity-main">
-          <div class="activity-title">${t.numeroDossier || '—'} — ${label}</div>
+          <div class="activity-title">${isLibre ? label : ((t.numeroDossier || '—') + ' — ' + label)}</div>
           <div class="activity-meta">${t.operateur || ''}${t.commentaire ? ' · ' + t.commentaire : ''}</div>
         </div>
         <div class="activity-time">${time}</div>
@@ -860,8 +861,9 @@ function renderTaskCard(t) {
   const cardClass  = statut === 'EN_COURS' ? 'en-cours' : statut === 'TERMINE' ? 'termine' : 'a-faire';
   const badgeClass = statut === 'EN_COURS' ? 'badge-running' : statut === 'TERMINE' ? 'badge-done' : 'badge-pending';
   const badgeLabel = statut === 'EN_COURS' ? 'En cours' : statut === 'TERMINE' ? 'Terminé' : 'À faire';
-  const color      = ETAPE_COLORS[t.etapeCode] || '#78716c';
-  const etapeLabel = ETAPE_LABELS[t.etapeCode] || t.etapeLabel || t.etapeCode;
+  const isLibre    = t.dossierId === 'LIBRE';
+  const color      = isLibre ? '#7c3aed' : (ETAPE_COLORS[t.etapeCode] || '#78716c');
+  const etapeLabel = isLibre ? (t.etapeLabel || 'Tâche indépendante') : (ETAPE_LABELS[t.etapeCode] || t.etapeLabel || t.etapeCode);
 
   let actionsHtml = '';
   if (statut === 'A_FAIRE') {
@@ -892,7 +894,7 @@ function renderTaskCard(t) {
       <div class="task-header">
         <div>
           <div class="task-dossier">
-            ${t.numeroDossier || '—'}
+            ${isLibre ? '<span style="font-size:9px;font-weight:700;background:#f3e8ff;color:#7c3aed;padding:1px 6px;border-radius:8px">TÂCHE INDÉPENDANTE</span>' : (t.numeroDossier || '—')}
             ${isManuel ? '<span style="font-size:9px;font-weight:700;background:#fdf0e8;color:#e8834a;padding:1px 6px;border-radius:8px;margin-left:6px">MANUEL</span>' : ''}
           </div>
           <div class="task-etape" style="color:${color}">${etapeLabel}</div>
@@ -926,8 +928,9 @@ function openStopModal(tacheId) {
   const t = tasks.find(x => x.id === tacheId);
   if (!t) return;
   pendingStop = tacheId;
-  const etapeLabel = ETAPE_LABELS[t.etapeCode] || t.etapeLabel;
-  document.getElementById('stopModalCtx').textContent = `${t.numeroDossier} — ${etapeLabel}`;
+  const isLibre    = t.dossierId === 'LIBRE';
+  const etapeLabel = isLibre ? (t.etapeLabel || 'Tâche indépendante') : (ETAPE_LABELS[t.etapeCode] || t.etapeLabel);
+  document.getElementById('stopModalCtx').textContent = isLibre ? etapeLabel : `${t.numeroDossier} — ${etapeLabel}`;
   document.getElementById('stopComment').value = '';
   document.getElementById('stopModal').classList.add('open');
 }

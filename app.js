@@ -6716,6 +6716,28 @@ function loadTachesLibres() {
   } catch(e) {}
 }
 
+// Fusion dédoublonnée taches (Sheet, autorité pour statut/dates) + tachesLibres
+// (local, complète les champs non persistés côté Sheet : titre/priorite/echeance/photos).
+// Les tâches libres écrivent aussi dans SHEET_TACHES (DossierID='LIBRE'), donc dès
+// qu'un getTaches les récupère, elles existent dans `taches` ET `tachesLibres` avec le
+// même id → sans fusion elles s'affichaient en double partout où le code combinait les
+// deux tableaux (cartes Charge de travail, page Production, KPI...).
+function _allTachesMerged() {
+  if (!tachesLibres.length) return taches;
+  const localById = new Map(tachesLibres.map(t => [t.id, t]));
+  const merged = taches.map(t => {
+    const local = localById.get(t.id);
+    if (!local) return t;
+    localById.delete(t.id);
+    return { ...t,
+      titre:    local.titre    || t.titre,
+      priorite: local.priorite || t.priorite,
+      echeance: local.echeance || t.echeance,
+      photos:   local.photos   || t.photos };
+  });
+  return [...merged, ...localById.values()]; // tâches locales pas encore remontées du Sheet
+}
+
 // ============================================================
 // NOTIFICATIONS D'AVANCEMENT
 // ============================================================
@@ -7350,8 +7372,8 @@ function printProductionReport() {
   const myLabel       = currentUser?.label || currentUser?.username || '';
 
   // Filtrer taches visibles + filtre date (par dateAssignation)
-  let list = isAdminOrChef ? [...taches, ...tachesLibres]
-           : [...taches, ...tachesLibres].filter(t => _sameOp(t.operateur, myLabel));
+  let list = isAdminOrChef ? _allTachesMerged()
+           : _allTachesMerged().filter(t => _sameOp(t.operateur, myLabel));
   list = list.filter(t => _matchDateFilter(t.dateAssignation, prodDateFilter));
   if (prodFilter !== 'TOUS') list = list.filter(t => t.statut === prodFilter);
 
@@ -9423,7 +9445,7 @@ function _buildProgressBar(dossierId) {
 function _buildMonDashboard() {
   if (!currentUser) return '';
   const myLabel  = currentUser.label || currentUser.username || '';
-  const myTaches = [...taches, ...tachesLibres].filter(t => _sameOp(t.operateur, myLabel));
+  const myTaches = _allTachesMerged().filter(t => _sameOp(t.operateur, myLabel));
   if (!myTaches.length) return '';
 
   const blocking = myTaches.filter(t => {
@@ -9468,7 +9490,7 @@ function _buildMonDashboard() {
     const btn = canStart
       ? `<button onclick="pointerStart('${t.id}')" class="mon-task-card__btn" style="background:var(--color-primary);color:#fff">▶ Démarrer</button>`
       : isEC
-        ? `<button onclick="openPointage('${t.id}','${t.etapeCode||''}','${t.numeroDossier||t.titre||''}')" class="mon-task-card__btn" style="background:var(--color-success);color:#fff"> Terminer</button>`
+        ? `<button onclick="openPointage('${t.id}','${t.etapeCode||''}','${(t.dossierId==='LIBRE'?(t.titre||t.etapeLabel):t.numeroDossier)||''}')" class="mon-task-card__btn" style="background:var(--color-success);color:#fff"> Terminer</button>`
         : '';
     return `<div class="mon-task-card" style="background:${bg};border-color:${border}">
       <div class="mon-task-card__num">${t.dossierId==='LIBRE'?'Tâche libre':(t.numeroDossier||'')}</div>
@@ -9549,7 +9571,7 @@ function _fmtChrono(ms) {
 function _operatorTimes(now) {
   now = now || Date.now();
   const map = {};
-  const all = (taches || []).concat(tachesLibres || []);
+  const all = _allTachesMerged();
   for (const t of all) {
     const op = (t.operateur || '').trim();
     if (!op) continue;
@@ -9598,7 +9620,7 @@ function _ensureChronoTick() {
 function _tacheRow(t) {
   const isLibre = t.dossierId === 'LIBRE';
   const etape   = isLibre
-    ? { color:'#7c3aed', icon:'', label:t.titre||'Tâche libre', short:'Libre' }
+    ? { color:'#7c3aed', icon:'', label:t.titre||t.etapeLabel||'Tâche libre', short:'Libre' }
     : (ETAPES_CONFIG.find(e => e.code === t.etapeCode) || { color:'#888', icon:'?', label:t.etapeLabel, short:'?' });
   // Nom du client du dossier — visibilité directe pour l'opérateur sur chaque tâche
   const _dosT       = isLibre ? null : dossiers.find(x => x.id === t.dossierId);
@@ -9622,7 +9644,7 @@ function _tacheRow(t) {
     ? `<span class="prod-badge" style="background:var(--color-success-bg);color:var(--color-success);padding:5px 10px;font-size:11px"> Terminé</span>`
     : isEC
       ? (canInteract
-          ? `<button class="btn-prod-done" onclick="openPointage('${t.id}','${t.etapeCode||''}','${(t.titre||t.numeroDossier||'').replace(/'/g,"\\'")}')"> Terminer</button>`
+          ? `<button class="btn-prod-done" onclick="openPointage('${t.id}','${t.etapeCode||''}','${(t.titre||t.etapeLabel||t.numeroDossier||'').replace(/'/g,"\\'")}')"> Terminer</button>`
           : `<span style="font-size:10px;font-weight:600;color:var(--color-warning);padding:4px 8px;background:var(--color-warning-bg);border-radius:6px;white-space:nowrap">En cours</span>`)
       : isStepBlocked
         ? `<span style="font-size:10px;font-weight:600;color:var(--color-text-muted);padding:4px 8px;background:#f5f5f4;border:1px solid #e5e3df;border-radius:6px;white-space:nowrap" title="Attend l'étape : ${blockedByStep}">⏸ ${blockedByStep}</span>`
@@ -9684,7 +9706,7 @@ function _tacheRow(t) {
       <div class="tache-card__icon" style="background:${etape.color}15;border-color:${etape.color};color:${etape.color}">${etape.icon}</div>
       <div class="tache-card__body" onclick="togglePtDetail('${t.id}')">
         <div class="pt-head">
-          <span class="tache-card__label" style="color:${etape.color}">${isLibre?t.titre:t.etapeLabel}</span>
+          <span class="tache-card__label" style="color:${etape.color}">${isLibre?(t.titre||t.etapeLabel):t.etapeLabel}</span>
           ${prioBadge}${retardChip}${clientChip}${isEC?_chronoBadge(t):''}
           <svg class="pt-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
         </div>
@@ -9723,7 +9745,7 @@ function _renderChargeView() {
 
   const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
   const canViewAllProd = isAdminOrChef || currentUser?.role === 'commerciale'; // commerciaux : suivi en lecture seule
-  const allTaches     = [...taches, ...tachesLibres];
+  const allTaches     = _allTachesMerged();
 
   // Construire la map opérateur → leurs tâches
   const opMap = {};
@@ -9817,13 +9839,13 @@ function _renderChargeView() {
       const isEC   = statut === 'EN_COURS';
       const isDone = statut === 'TERMINE';
       const etape  = t.dossierId === 'LIBRE'
-        ? { color:'#7c3aed', label: t.titre || 'Tâche libre' }
+        ? { color:'#7c3aed', label: t.titre || t.etapeLabel || 'Tâche libre' }
         : (ETAPES_CONFIG.find(e => e.code === t.etapeCode) || { color:'#888', label: t.etapeLabel || '?' });
       const dotBg  = isEC ? '#d97706' : isDone ? '#16a34a' : '#2563eb';
       const d = dossiers.find(x => x.id === t.dossierId);
       const isUrgent = d?.priorite === 'Urgente';
       const btn = isEC && (isAdminOrChef || _sameOp(op, myLabel))
-        ? `<button class="charge-task-btn" onclick="openPointage('${t.id}','${t.etapeCode||''}','${(t.numeroDossier||t.titre||'').replace(/'/g,"\\'")}'); event.stopPropagation();" style="background:var(--color-success-bg);color:var(--color-success)"></button>`
+        ? `<button class="charge-task-btn" onclick="openPointage('${t.id}','${t.etapeCode||''}','${((t.dossierId==='LIBRE'?(t.titre||t.etapeLabel):t.numeroDossier)||'').replace(/'/g,"\\'")}'); event.stopPropagation();" style="background:var(--color-success-bg);color:var(--color-success)"></button>`
         : t.statut === 'A_FAIRE' && (isAdminOrChef || _sameOp(op, myLabel))
           ? `<button class="charge-task-btn" onclick="pointerStart('${t.id}'); event.stopPropagation();" style="background:var(--color-primary-light);color:var(--color-primary)">▶</button>`
           : '';
@@ -9909,7 +9931,7 @@ function _buildOpWorkload() {
   const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
   if (!isAdminOrChef) return '';
   const counts = {};
-  [...taches, ...tachesLibres].forEach(t => {
+  _allTachesMerged().forEach(t => {
     if (t.statut === 'TERMINE' || !t.operateur) return;
     if (!counts[t.operateur]) counts[t.operateur] = { aFaire:0, enCours:0 };
     if (t.statut === 'A_FAIRE')   counts[t.operateur].aFaire++;
@@ -10689,7 +10711,7 @@ function _perfBuild() {
   };
 
   const map = {};
-  const all = (taches || []).concat(tachesLibres || []);
+  const all = _allTachesMerged();
   for (const t of all) {
     const opRaw = (t.operateur || '').trim();
     if (!opRaw) continue;
@@ -10716,7 +10738,7 @@ function _perfBuild() {
     o.totalTime += _tacheDureeMs(t, now);
     const dos = t.dossierId === 'LIBRE' ? null : dossiers.find(x => x.id === t.dossierId);
     o.tasks.push({ t, aMs, sMs, eMs, started, done, startDelay, exec, statut: t.statut,
-      label: t.dossierId === 'LIBRE' ? (t.titre || 'Tâche libre') : (t.etapeLabel || t.etapeCode || 'Tâche'),
+      label: t.dossierId === 'LIBRE' ? (t.titre || t.etapeLabel || 'Tâche libre') : (t.etapeLabel || t.etapeCode || 'Tâche'),
       num: t.dossierId === 'LIBRE' ? 'Libre' : (t.numeroDossier || ''),
       client: (dos && dos.client) || '' });
   }
@@ -11042,24 +11064,29 @@ function renderTaches() {
   const canViewAllProd = isAdminOrChef || currentUser?.role === 'commerciale';
   const myLabel       = currentUser?.label || currentUser?.username || '';
 
-  // Peupler le sélecteur d'années depuis les tâches
-  _populateYearSel('prodYearSel', [...taches, ...tachesLibres].map(t => t.dateAssignation));
+  // Peupler le sélecteur d'années depuis les tâches (fusion dédoublonnée Sheet + local)
+  const _merged = _allTachesMerged();
+  _populateYearSel('prodYearSel', _merged.map(t => t.dateAssignation));
 
-  let dossierList = canViewAllProd ? taches : taches.filter(t => _sameOp(t.operateur, myLabel));
+  // Les tâches libres (dossierId LIBRE) ont leur propre section plus bas : on les exclut
+  // du groupement par dossier pour ne pas créer un faux "dossier LIBRE" en doublon.
+  let dossierList = _merged.filter(t => t.dossierId !== 'LIBRE');
+  if (!canViewAllProd) dossierList = dossierList.filter(t => _sameOp(t.operateur, myLabel));
   if (prodFilter === 'EN_RETARD') dossierList = dossierList.filter(t => _getTacheRetardInfo(t).isRetard);
   else if (prodFilter !== 'TOUS') dossierList = dossierList.filter(t => t.statut === prodFilter);
   if (prodDateFilter.mois || prodDateFilter.annee)
     dossierList = dossierList.filter(t => _matchDateFilter(t.dateAssignation, prodDateFilter));
 
-  let libreList = canViewAllProd ? tachesLibres : tachesLibres.filter(t => _sameOp(t.operateur, myLabel));
+  let libreList = _merged.filter(t => t.dossierId === 'LIBRE');
+  if (!canViewAllProd) libreList = libreList.filter(t => _sameOp(t.operateur, myLabel));
   if (prodFilter === 'EN_RETARD') libreList = [];
   else if (prodFilter !== 'TOUS') libreList = libreList.filter(t => t.statut === prodFilter);
   if (prodDateFilter.mois || prodDateFilter.annee)
     libreList = libreList.filter(t => _matchDateFilter(t.dateAssignation, prodDateFilter));
 
   // Mettre à jour les compteurs dans les boutons filtre (sur données non filtrées par date)
-  const allVisible = [...taches, ...tachesLibres].filter(t => canViewAllProd || _sameOp(t.operateur, myLabel));
-  const retardCount = taches.filter(t => (canViewAllProd || _sameOp(t.operateur, myLabel)) && _getTacheRetardInfo(t).isRetard).length;
+  const allVisible = _merged.filter(t => canViewAllProd || _sameOp(t.operateur, myLabel));
+  const retardCount = _merged.filter(t => (canViewAllProd || _sameOp(t.operateur, myLabel)) && _getTacheRetardInfo(t).isRetard).length;
   const _cnt = s => s === 'EN_RETARD' ? retardCount : allVisible.filter(t => s==='TOUS'||t.statut===s).length;
   ['TOUS','A_FAIRE','EN_COURS','TERMINE','EN_RETARD'].forEach(s => {
     const sfx = {'TOUS':'Tous','A_FAIRE':'AFaire','EN_COURS':'EnCours','TERMINE':'Termine','EN_RETARD':'Retard'}[s];
@@ -11190,7 +11217,10 @@ async function pointerStart(tacheId) {
     }
   }
   let r;
-  if (APPS_SCRIPT_URL && !isLibre) { r = await apiCall({ action:'pointerAction', tacheId, action_:'START' }); }
+  // Les tâches libres vivent aussi dans SHEET_TACHES (DossierID='LIBRE') : il faut
+  // pointer côté serveur comme une tâche normale, sinon le statut reste bloqué à
+  // A_FAIRE dans le Sheet (invisible/faux pour operateur.html et les autres appareils).
+  if (APPS_SCRIPT_URL) { r = await apiCall({ action:'pointerAction', tacheId, action_:'START' }); }
   else { r = { ok:true }; }
   if (r && r.ok) {
     if (t) { t.statut = 'EN_COURS'; t.dateDebut = new Date().toLocaleString('fr-FR'); t.startTs = Date.now(); delete t.endTs; }
@@ -11200,10 +11230,10 @@ async function pointerStart(tacheId) {
       dossierId:     t.dossierId,
       numeroDossier: isLibre ? 'Tâche libre' : t.numeroDossier,
       etapeCode:     isLibre ? 'LIBRE' : t.etapeCode,
-      etapeLabel:    isLibre ? t.titre : t.etapeLabel,
+      etapeLabel:    isLibre ? (t.titre||t.etapeLabel) : t.etapeLabel,
       operateur:     currentUser?.label || t.operateur,
       message:       isLibre
-        ? `${currentUser?.label} a commencé la tâche libre "${t.titre}"`
+        ? `${currentUser?.label} a commencé la tâche libre "${t.titre||t.etapeLabel}"`
         : `${currentUser?.label} a commencé l'étape "${t.etapeLabel}" — dossier ${t.numeroDossier}`,
     });
     renderTaches();
@@ -11233,7 +11263,7 @@ async function confirmPointage() {
   }
   const comment = document.getElementById('pointageCommentInput').value;
   let r;
-  if (APPS_SCRIPT_URL && !isLibre) { r = await apiCall({ action:'pointerAction', tacheId, action_:'END', etapeCode, commentaire:comment }); }
+  if (APPS_SCRIPT_URL) { r = await apiCall({ action:'pointerAction', tacheId, action_:'END', etapeCode, commentaire:comment }); }
   else { r = { ok:true }; }
   if (r && r.ok) {
     const t = isLibre ? tachesLibres.find(x => x.id === tacheId) : taches.find(x => x.id === tacheId);
@@ -11265,12 +11295,12 @@ async function confirmPointage() {
         dossierId:     t.dossierId,
         numeroDossier: isLibre ? 'Tâche libre' : t.numeroDossier,
         etapeCode:     isLibre ? 'LIBRE' : t.etapeCode,
-        etapeLabel:    isLibre ? t.titre : t.etapeLabel,
+        etapeLabel:    isLibre ? (t.titre||t.etapeLabel) : t.etapeLabel,
         operateur:     currentUser?.label || t.operateur,
         message:       dossierComplet
           ? `Dossier ${t.numeroDossier} terminé à 100% — toutes les étapes sont complètes`
           : isLibre
-          ? `${currentUser?.label} a terminé la tâche libre "${t.titre}"`
+          ? `${currentUser?.label} a terminé la tâche libre "${t.titre||t.etapeLabel}"`
           : `${currentUser?.label} a terminé l'étape "${t.etapeLabel}" — dossier ${t.numeroDossier}`,
       });
     }
@@ -11905,7 +11935,7 @@ function renderPatronDashboard() {
   </div>`;
 
   // ── Charge opérateurs ──
-  const allTaches = [...taches, ...tachesLibres];
+  const allTaches = _allTachesMerged();
   const opMap = {};
   allTaches.forEach(t => {
     if (!t.operateur) return;
