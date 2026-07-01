@@ -6832,6 +6832,9 @@ function _startNotifPolling() {
     }
     // Rafraîchir la messagerie (fil commun) + badge non-lus
     _autoRefreshMessagerie();
+    // Rafraîchir la page active (Attribution / Production) : les nouvelles
+    // attributions apparaissent en direct, sans action manuelle
+    try { _autoRefreshActivePage(); } catch(e) { /* silencieux */ }
   }, 30000); // 30 secondes
 }
 
@@ -9464,6 +9467,74 @@ async function _autoRefreshProduction() {
     }
   } catch(e) { /* silencieux — on garde les données locales */ }
   renderTaches();
+}
+
+// ════════════════════════════════════════════════════════════
+// RAFRAÎCHISSEMENT LIVE de la page active (Attribution / Production)
+// Branché sur le polling 30s → les nouvelles attributions (dossiers,
+// étapes assignées, progression) apparaissent sans action manuelle.
+// Silencieux (pas de loader), préserve le scroll, ne re-rend que si
+// quelque chose a réellement changé (signature) pour ne pas perturber.
+// ════════════════════════════════════════════════════════════
+let _lastLiveRefresh = 0;
+let _liveSig = '';
+
+function _liveSig_() {
+  const dPart = dossiers.map(d => d.id+'|'+d.statut+'|'+(d.progression||0)+'|'+(d.priorite||'')).join(',');
+  const tPart = taches.map(t => t.id+'|'+(t.etapeCode||'')+'|'+(t.statut||'')+'|'+(t.operateur||'')).join(',');
+  return dPart + '##' + tPart;
+}
+
+async function _autoRefreshActivePage() {
+  const onAttr = document.getElementById('page-attribution')?.classList.contains('active');
+  const onProd = document.getElementById('page-production')?.classList.contains('active');
+  if (!onAttr && !onProd) return;
+  if (!APPS_SCRIPT_URL) return;
+  const now = Date.now();
+  if (now - _lastLiveRefresh < 20000) return;
+  _lastLiveRefresh = now;
+  try {
+    const filter = document.getElementById('dossierFilterSel')?.value || 'TOUS';
+    const [rD, rT] = await Promise.all([
+      apiCall({ action:'getDossiers', statut: filter }),
+      apiCall({ action:'getTaches' }),
+    ]);
+    // Fusionner les tâches serveur avec les tâches locales non encore synchronisées
+    if (rT && rT.ok && Array.isArray(rT.taches)) {
+      const backendIds = new Set(rT.taches.map(t => t.id));
+      const localOnly  = taches.filter(t => !backendIds.has(t.id));
+      taches = [...rT.taches, ...localOnly];
+      saveTaches();
+    }
+    if (rD && rD.ok && Array.isArray(rD.dossiers)) dossiers = rD.dossiers;
+    _ensureDossierLinks();
+    _purgeOrphanTaches();
+
+    const sig = _liveSig_();
+    if (sig === _liveSig) return; // rien de neuf → on ne touche pas au DOM
+    _liveSig = sig;
+
+    if (document.getElementById('page-attribution')?.classList.contains('active')) {
+      const cont = document.getElementById('dossierListContainer');
+      const st = cont ? cont.scrollTop : 0;
+      renderDossiers();
+      const cont2 = document.getElementById('dossierListContainer');
+      if (cont2) cont2.scrollTop = st; // préserve la position de défilement
+      // Rafraîchir le panneau si un dossier est sélectionné
+      if (selectedDossier) {
+        const still = dossiers.find(d => d.id === selectedDossier.id);
+        if (still) {
+          selectedDossier = still;
+          const dt = _applyTacheBlocklist(taches.filter(t => t.dossierId === selectedDossier.id));
+          const dc = dossierComments.filter(c => c.dossierId === selectedDossier.id)
+            .sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+          renderAttrPanel(dt, dc);
+        }
+      }
+    } else if (document.getElementById('page-production')?.classList.contains('active')) {
+      renderTaches();
+    }
+  } catch(e) { /* silencieux — on garde les données locales */ }
 }
 
 async function refreshTaches(btn) {
