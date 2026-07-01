@@ -105,6 +105,7 @@ function doPost(e) {
     else if (action === 'updateDossier')     result = handleUpdateDossier(data);
     else if (action === 'creerDossierManuel') result = handleCreerDossierManuel(data);
     else if (action === 'saveTacheLibre')    result = handleSaveTacheLibre(data);
+    else if (action === 'setTacheLibrePhotos') result = handleSetTacheLibrePhotos(data);
     else if (action === 'attribuerTache')    result = handleAttribuerTache(data);
     else if (action === 'getTaches')         result = handleGetTaches(data);
     else if (action === 'deleteTache')       result = handleDeleteTache(data);
@@ -162,6 +163,7 @@ function doGet(e) {
       else if (action === 'saveRythme')        result = handleSaveRythme(data);
       else if (action === 'clearAllData')      result = handleClearAllData(data);
       else if (action === 'saveTacheLibre')    result = handleSaveTacheLibre(data);
+      else if (action === 'setTacheLibrePhotos') result = handleSetTacheLibrePhotos(data);
       else if (action === 'saveDossier')       result = handleSaveDossier(data);
       else if (action === 'creerDossierManuel') result = handleCreerDossierManuel(data);
       else if (action === 'getControlPatron')   result = handleGetControlPatron(data);
@@ -238,7 +240,7 @@ function initSheets() {
 
   // Nouvelles feuilles production
   ensureSheet(ss, SHEET_DOSSIERS,   ['ID','NumeroDossier','Client','Produit','Quantite','Statut','Progression','DateCreation','DateLivraison','Priorite','SourceVente','Notes']);
-  ensureSheet(ss, SHEET_TACHES,     ['ID','DossierID','NumeroDossier','Etape','EtapeLabel','Operateur','Statut','DateAssignation','DateDebut','DateFin','Commentaire','AssignePar']);
+  ensureSheet(ss, SHEET_TACHES,     ['ID','DossierID','NumeroDossier','Etape','EtapeLabel','Operateur','Statut','DateAssignation','DateDebut','DateFin','Commentaire','AssignePar','Priorite','Echeance','Photos']);
 
   return { ok:true, message:'Feuilles initialisées ' };
 }
@@ -1305,15 +1307,26 @@ function handleSaveTacheLibre(data) {
   const ss = getSS();
   const sh = ensureSheet(ss, SHEET_TACHES,
     ['ID','DossierID','NumeroDossier','EtapeCode','EtapeLabel','Operateur',
-     'Statut','DateAssignation','DateDebut','DateFin','Commentaire','AssignePar']);
+     'Statut','DateAssignation','DateDebut','DateFin','Commentaire','AssignePar',
+     'Priorite','Echeance','Photos']);
+
+  // Photos = data URLs base64 dans un tableau. On les stocke en JSON dans une cellule,
+  // MAIS la limite Google Sheets est de 50 000 caractères/cellule : au-delà on n'écrit
+  // pas les photos (elles restent en local côté app) pour ne pas faire échouer le write.
+  const photosJson = _serializeTacheLibrePhotos_(t.photos);
 
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(6000);
-    // Idempotent : ne pas créer de doublon
+    // Idempotent : ne pas créer de doublon. Si la ligne existe déjà, on complète
+    // les colonnes Priorite/Echeance/Photos si elles sont vides (backfill migration).
     const rows = sh.getDataRange().getValues();
     for (let i = 1; i < rows.length; i++) {
       if (String(rows[i][0]) === String(t.id)) {
+        const r = rows[i];
+        if (!r[12] && (t.priorite || t.echeance || photosJson)) {
+          sh.getRange(i + 1, 13, 1, 3).setValues([[t.priorite || '', t.echeance || '', photosJson]]);
+        }
         return { ok:true, created:false };
       }
     }
@@ -1328,12 +1341,53 @@ function handleSaveTacheLibre(data) {
       new Date(),
       '', '',
       t.commentaire || '',
-      data.createdBy || 'admin'
+      data.createdBy || 'admin',
+      t.priorite || '',
+      t.echeance || '',
+      photosJson
     ]);
     _logAction_('TACHE_LIBRE_CREATE', data.createdBy || 'admin',
       String(t.id) + ' → ' + t.operateur);
     CacheService.getScriptCache().remove('dashboard_v1');
     return { ok:true, created:true };
+  } finally {
+    try { lock.releaseLock(); } catch(e) {}
+  }
+}
+
+// Sérialise le tableau de photos en JSON borné à la limite cellule Sheets.
+// En pratique le front envoie des métadonnées Drive (fileId/URL, ~qq centaines d'octets),
+// pas du base64 : ça rentre toujours. Le garde-fou 45k protège contre un base64 accidentel.
+// Retourne '' si absent ou trop volumineux (les photos restent alors en local seulement).
+function _serializeTacheLibrePhotos_(photos) {
+  if (!Array.isArray(photos) || !photos.length) return '';
+  try {
+    const json = JSON.stringify(photos);
+    return json.length <= 45000 ? json : ''; // marge sous la limite Sheets de 50 000
+  } catch (e) {
+    return '';
+  }
+}
+
+// Met à jour uniquement la colonne Photos (15) d'une tâche libre — appelée par le front
+// après l'upload asynchrone des photos sur Drive (URLs courtes qui remplacent le base64).
+function handleSetTacheLibrePhotos(data) {
+  if (!data.tacheId) return { ok:false, error:'tacheId requis' };
+  const ss = getSS();
+  const sh = ss.getSheetByName(SHEET_TACHES);
+  if (!sh) return { ok:false, error:'Feuille Taches introuvable' };
+  const photosJson = _serializeTacheLibrePhotos_(data.photos);
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(6000);
+    const ids = sh.getRange(2, 1, Math.max(0, sh.getLastRow() - 1), 1).getValues();
+    for (let i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]) === String(data.tacheId)) {
+        sh.getRange(i + 2, 15).setValue(photosJson);
+        return { ok:true };
+      }
+    }
+    return { ok:false, error:'Tâche introuvable' };
   } finally {
     try { lock.releaseLock(); } catch(e) {}
   }
@@ -1346,11 +1400,14 @@ function handleGetTaches(data) {
   const lastRow = sh.getLastRow();
   if (lastRow <= 1) return { ok:true, taches:[] };
 
-  // Lecture paginée depuis la fin de la feuille
+  // Lecture paginée depuis la fin de la feuille. Largeur = colonnes réellement présentes
+  // (min 12) : les feuilles antérieures aux colonnes Priorite/Echeance/Photos ont 12 cols,
+  // les nouvelles en ont 15 → on lit ce qui existe et on défend les index manquants.
+  const nCols  = Math.max(12, sh.getLastColumn());
   const LIMIT  = Number((data && data.limit)) || 500;
   const start  = Math.max(2, lastRow - LIMIT + 1);
   const nRows  = lastRow - start + 1;
-  const rows   = sh.getRange(start, 1, nRows, 12).getValues();
+  const rows   = sh.getRange(start, 1, nRows, nCols).getValues();
 
   const tz  = Session.getScriptTimeZone();
   const fmt = function(dt) { return dt ? Utilities.formatDate(new Date(dt), tz, 'dd/MM/yyyy HH:mm') : ''; };
@@ -1360,6 +1417,14 @@ function handleGetTaches(data) {
     const t = { id:r[0], dossierId:r[1], numeroDossier:r[2], etapeCode:r[3], etapeLabel:r[4],
       operateur:r[5], statut:r[6], dateAssignation:fmt(r[7]), dateDebut:fmt(r[8]),
       dateFin:fmt(r[9]), commentaire:r[10], assignePar:r[11] };
+    // Champs spécifiques aux tâches libres (colonnes 13-15, absentes des tâches normales)
+    if (r[12]) t.priorite = r[12];
+    // Échéance : Sheets peut avoir auto-converti "yyyy-MM-dd" en Date → re-formater en
+    // chaîne yyyy-MM-dd (le front fait `new Date(echeance+'T00:00:00')`).
+    if (r[13]) t.echeance = (r[13] instanceof Date)
+      ? Utilities.formatDate(r[13], tz, 'yyyy-MM-dd')
+      : String(r[13]);
+    if (r[14]) { try { t.photos = JSON.parse(r[14]); } catch (e) {} }
     if (data && data.operateur && data.operateur !== 'TOUS' && t.operateur !== data.operateur) continue;
     if (data && data.dossierId && t.dossierId !== data.dossierId) continue;
     list.push(t);
@@ -1400,14 +1465,16 @@ function handlePointerAction(data) {
     if (data.action_ === 'START') {
       rowData[6] = 'EN_COURS';
       rowData[8] = now;
-      sh.getRange(i + 1, 1, 1, 12).setValues([rowData]);
+      // rowData.length (pas 12 en dur) : préserve les colonnes 13-15 (Priorite/Echeance/
+      // Photos) des tâches libres, sinon setValues échoue (largeur ≠ celle du range).
+      sh.getRange(i + 1, 1, 1, rowData.length).setValues([rowData]);
       _logAction_('TACHE_START', data.operateur||String(rows[i][5]),
         'Tâche:' + data.tacheId + ' étape:' + rows[i][3]);
     } else {
       rowData[6]  = 'TERMINE';
       rowData[9]  = now;
       if (data.commentaire) rowData[10] = data.commentaire;
-      sh.getRange(i + 1, 1, 1, 12).setValues([rowData]);
+      sh.getRange(i + 1, 1, 1, rowData.length).setValues([rowData]);
       _logAction_('TACHE_FIN', data.operateur||String(rows[i][5]),
         'Tâche:' + data.tacheId + ' étape:' + rows[i][3]);
       const dossierId_  = rows[i][1];

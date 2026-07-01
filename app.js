@@ -7116,7 +7116,8 @@ function saveTacheLibre() {
   const checked = [...document.querySelectorAll('#tlUserList input[type=checkbox]:checked')];
   if (!checked.length) { showToast('Sélectionnez au moins un utilisateur', 'error'); return; }
   const now = new Date().toLocaleDateString('fr-FR') + ' ' + new Date().toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
-  let created = 0;
+  const photos = [...tlPhotos];
+  const createdTasks = [];
   checked.forEach(cb => {
     const t = {
       id:              `TL_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
@@ -7133,23 +7134,70 @@ function saveTacheLibre() {
       commentaire:     desc,
       echeance,
       priorite,
-      photos:          [...tlPhotos]
+      photos:          [...photos] // base64 local → affichage instantané
     };
     tachesLibres.push(t);
-    // Sync GAS pour visibilité dans operateur.html (best-effort)
+    createdTasks.push(t);
+    // Sync GAS pour visibilité cross-appareil (operateur.html, autres postes).
+    // On N'envoie PAS le base64 lourd : les photos partent sur Drive en arrière-plan
+    // (voir _uploadAndSyncTacheLibrePhotos) puis leurs URLs remplacent la cellule.
     if (APPS_SCRIPT_URL) {
       apiCall({
         action:    'saveTacheLibre',
-        tache:     t,
+        tache:     { ...t, photos: [] },
         createdBy: currentUser?.label || 'admin'
       }).catch(() => {});
     }
-    created++;
   });
   saveTachesLibres();
   closeModal('tacheLibreModal');
-  showToast(`${created} tâche(s) indépendante(s) créée(s)`);
+  showToast(`${createdTasks.length} tâche(s) indépendante(s) créée(s)`);
   renderTaches();
+  // Upload des photos sur Drive (une seule fois, partagé) puis persistance des URLs
+  if (APPS_SCRIPT_URL && photos.length) _uploadAndSyncTacheLibrePhotos(createdTasks, photos);
+}
+
+// Upload les photos d'une tâche libre sur Drive (via l'action générique 'uploadFile',
+// même infra que les pièces jointes de commande) et renvoie les métadonnées Drive
+// {name,type,fileId,viewUrl,dlUrl} — petites, stockables dans la cellule Photos du Sheet.
+async function _uploadTacheLibrePhotos(photos) {
+  if (!APPS_SCRIPT_URL || !Array.isArray(photos) || !photos.length) return null;
+  const uploaded = [];
+  for (let i = 0; i < photos.length; i++) {
+    const item    = photos[i];
+    const dataUrl = typeof item === 'string' ? item : (item && item.data) || '';
+    // Déjà une métadonnée Drive (re-sync) → conserver telle quelle
+    if (item && typeof item === 'object' && item.fileId) { uploaded.push(item); continue; }
+    if (!dataUrl || dataUrl.indexOf('data:') !== 0) continue;
+    const type = (dataUrl.split(';')[0].split(':')[1]) || 'image/jpeg';
+    const ext  = (type.split('/')[1] || 'jpg');
+    const name = `tachelibre-${Date.now()}-${i + 1}.${ext}`;
+    try {
+      const r = await apiCall({ action:'uploadFile', fileName:name, mimeType:type, base64Data:dataUrl });
+      if (r && r.ok) uploaded.push({ name:r.fileName || name, type, fileId:r.fileId, viewUrl:r.viewUrl, dlUrl:r.dlUrl });
+    } catch(e) { /* photo ignorée si l'upload échoue — reste en base64 local */ }
+  }
+  return uploaded.length ? uploaded : null;
+}
+
+// Après création : upload Drive + remplace le base64 local par les URLs + persiste au Sheet.
+async function _uploadAndSyncTacheLibrePhotos(tasks, photos) {
+  const uploaded = await _uploadTacheLibrePhotos(photos);
+  if (!uploaded || !uploaded.length) return;
+  tasks.forEach(t => { t.photos = uploaded; }); // source de vérité = Drive (libère le base64)
+  saveTachesLibres();
+  try { renderTaches(); } catch(e) {}
+  tasks.forEach(t => apiCall({ action:'setTacheLibrePhotos', tacheId:t.id, photos:uploaded }).catch(() => {}));
+}
+
+// <img> pour une photo de tâche libre — gère les 2 formats : chaîne base64 (local/legacy)
+// ou métadonnée Drive {fileId,...} (via _driveImgSrc/_driveImgFallback, mêmes que commandes).
+function _tacheLibrePhotoImg(p) {
+  const isObj = p && typeof p === 'object';
+  const src   = isObj ? _driveImgSrc(p) : p;
+  const fb    = isObj ? _driveImgFallback(p) : '';
+  const onerr = fb ? ` onerror="this.onerror=null;this.src='${fb}'"` : '';
+  return `<img src="${src}"${onerr} onclick="event.stopPropagation();window.open(this.src,'_blank')" />`;
 }
 
 function deleteTacheLibre(id) {
@@ -9698,7 +9746,7 @@ function _tacheRow(t) {
           ${retardInfo.isRetard?_dt('Retard', '+'+retardInfo.depassement+' mn'):''}
         </div>
         ${t.commentaire?`<div class="pt-note">${t.commentaire}</div>`:''}
-        ${isLibre&&t.photos?.length?`<div class="pt-photos">${t.photos.map(src=>`<img src="${src}" onclick="event.stopPropagation();window.open(this.src,'_blank')" />`).join('')}</div>`:''}
+        ${isLibre&&t.photos?.length?`<div class="pt-photos">${t.photos.map(_tacheLibrePhotoImg).join('')}</div>`:''}
       </div>`;
 
   return `<div class="pt-item" id="pti-${t.id}">
