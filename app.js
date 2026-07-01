@@ -2515,7 +2515,7 @@ function toggleKebab(uid, ev){
   }
 }
 document.addEventListener('click', closeAllKebabs);
-document.addEventListener('keydown', e=>{ if(e.key==='Escape'){ closeAllKebabs(); closeProdDrawer(); } });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape'){ closeAllKebabs(); closeDrawers(); } });
 
 // ===== Historique : recherche + filtre type + regroupement par date =====
 function _histDayKey(v){ const d=parseSaleDate(v); return d ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` : 'zzzz'; }
@@ -5364,16 +5364,24 @@ async function manualRefreshCommandes() {
 }
 
 function renderCommandes() {
-  const filter = document.getElementById('cmdFilter')?.value || 'pending';
-  const _cq = (document.getElementById('cmdSearch')?.value||'').trim().toLowerCase();
-  let list = commandes.filter(c => filter === 'all' ? true : c.status === filter);
-  if (_cq) list = list.filter(c => ((c.clientName||'')+' '+(c.clientContact||'')+' '+(c.items||[]).map(i=>i.name||'').join(' ')).toLowerCase().includes(_cq));
-
+  // Résumé KPIs (basé sur les commandes en cours) — inchangé
   const pending = commandes.filter(c => c.status === 'pending');
   if (document.getElementById('cmdSumCount'))   document.getElementById('cmdSumCount').textContent   = pending.length;
   if (document.getElementById('cmdSumTotal'))   document.getElementById('cmdSumTotal').textContent   = fmt(pending.reduce((s,c)=>s+(Number(c.total)||0),0));
   if (document.getElementById('cmdSumAcc'))     document.getElementById('cmdSumAcc').textContent     = fmt(pending.reduce((s,c)=>s+(Number(c.accompte)||0),0));
   if (document.getElementById('cmdSumRestant')) document.getElementById('cmdSumRestant').textContent = fmt(pending.reduce((s,c)=>s+(Number(c.restant)||0),0));
+  // Ancien filtre/recherche → remplacés par la toolbar cockpit
+  ['cmdSearch','cmdFilter'].forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+  _ensureDossierLinks();
+  renderCmdCockpit();
+}
+
+// ── Ancien rendu en cartes groupées (conservé pour référence / rollback) ────
+function _renderCommandesLegacy() {
+  const filter = document.getElementById('cmdFilter')?.value || 'pending';
+  const _cq = (document.getElementById('cmdSearch')?.value||'').trim().toLowerCase();
+  let list = commandes.filter(c => filter === 'all' ? true : c.status === filter);
+  if (_cq) list = list.filter(c => ((c.clientName||'')+' '+(c.clientContact||'')+' '+(c.items||[]).map(i=>i.name||'').join(' ')).toLowerCase().includes(_cq));
 
   const container = document.getElementById('commandesList');
   if (!container) return;
@@ -5509,6 +5517,366 @@ function updateCmdBadge() {
   const badge = document.getElementById('navCmdBadge');
   if (badge) { badge.textContent = n; badge.style.display = n > 0 ? 'inline' : 'none'; }
 }
+
+// ════════════════════════════════════════════════════════════
+// COCKPIT COMMANDES — même principe que le cockpit Production :
+// tableau compact (une ligne = une commande), toolbar sticky (filtres +
+// tri + recherche + densité), cartes d'alerte (livraisons urgentes),
+// panneau latéral détail au clic. Couleurs : rouge=retard/impayé,
+// orange=proche échéance, vert=soldé/livrée, gris=annulée.
+// ════════════════════════════════════════════════════════════
+let _cmdFilter   = 'EN_COURS'; // TOUS|EN_COURS|RETARD|AUJ|SEMAINE|IMPAYE|LIVREE|ANNULEE
+let _cmdCaissier = 'TOUS';
+let _cmdMode     = 'TOUS';     // TOUS|livraison|retrait
+let _cmdSearch   = '';
+let _cmdSort     = { key:'date', dir:'desc' }; // date|echeance|total|restant|client|statut
+let _cmdDensity  = 'compact';
+let _cmdLimit    = 60;
+const _CMD_PAGE  = 60;
+
+function _buildCommandeRows() {
+  return (Array.isArray(commandes) ? commandes : []).map(c => {
+    const dcmd = parseSaleDate(c.date);
+    const ymd  = _toIsoDate(c.dateLivraison || '');
+    const days = ymd ? _daysUntil(ymd) : null;
+    const total   = Number(c.total) || 0;
+    const restant = Number(c.restant) || 0;
+    const paid    = restant <= 0;
+    // Progression production (si dossier lié)
+    let prodPct = null;
+    if (c.dossierId) {
+      const dt = (Array.isArray(taches) ? taches : []).filter(t => t.dossierId === c.dossierId);
+      if (dt.length) {
+        let done = 0;
+        ETAPES_CONFIG.forEach(e => { const te = dt.filter(t => t.etapeCode === e.code); if (te.length && te.every(t => t.statut === 'TERMINE')) done++; });
+        prodPct = Math.round(done / ETAPES_CONFIG.length * 100);
+      }
+    }
+    let bucket = 'FUTUR';
+    if (c.status === 'cancelled')      bucket = 'ANNULEE';
+    else if (c.status === 'completed') bucket = 'LIVREE';
+    else if (days != null && days < 0) bucket = 'RETARD';
+    else if (days === 0)               bucket = 'AUJ';
+    else if (days === 1)               bucket = 'DEMAIN';
+    else if (days != null && days <= 7) bucket = 'SEMAINE';
+    return {
+      c, id: c.id,
+      ref: '#' + _factureNum(c),
+      client: c.clientName || 'Client',
+      contact: c.clientContact || '',
+      commercial: _resolveOperatorLabel(c.caissier || ''),
+      dcmd, dateStr: dcmd ? dcmd.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit' }) : '—',
+      ymd, days,
+      mode: c.deliveryMode === 'livraison' ? 'livraison' : 'retrait',
+      items: c.items || [], nItems: (c.items||[]).length,
+      produit: (c.items||[]).map(i => i.name).filter(Boolean).join(', '),
+      total, accompte: Number(c.accompte)||0, restant, paid,
+      status: c.status, bucket, prodPct,
+      dossierId: c.dossierId || '',
+    };
+  });
+}
+
+function _cmdBucketMatch(r, k) {
+  if (k === 'TOUS')     return true;
+  if (k === 'EN_COURS') return r.status === 'pending';
+  if (k === 'RETARD')   return r.status === 'pending' && r.days != null && r.days < 0;
+  if (k === 'AUJ')      return r.status === 'pending' && r.days === 0;
+  if (k === 'SEMAINE')  return r.status === 'pending' && r.days != null && r.days >= 0 && r.days <= 7;
+  if (k === 'IMPAYE')   return r.status === 'pending' && r.restant > 0;
+  if (k === 'LIVREE')   return r.status === 'completed';
+  if (k === 'ANNULEE')  return r.status === 'cancelled';
+  return true;
+}
+
+function _cmdFilterRows(rows) {
+  let out = rows.filter(r => _cmdBucketMatch(r, _cmdFilter));
+  if (_cmdCaissier !== 'TOUS') out = out.filter(r => _sameOp(r.commercial, _cmdCaissier) || _sameOp(r.c.caissier, _cmdCaissier));
+  if (_cmdMode !== 'TOUS')     out = out.filter(r => r.mode === _cmdMode);
+  const q = _cmdSearch.trim().toLowerCase();
+  if (q) out = out.filter(r => (r.client + ' ' + r.contact + ' ' + r.produit + ' ' + r.ref).toLowerCase().includes(q));
+  return out;
+}
+
+function _cmdSortRows(rows) {
+  const { key, dir } = _cmdSort;
+  const sign = dir === 'desc' ? -1 : 1;
+  const order = { pending:0, completed:1, cancelled:2 };
+  const dt = r => r.dcmd ? r.dcmd.getTime() : 0;
+  const cmp = ({
+    date:     (a,b) => dt(a) - dt(b),
+    echeance: (a,b) => (a.days==null?1e9:a.days) - (b.days==null?1e9:b.days),
+    total:    (a,b) => a.total - b.total,
+    restant:  (a,b) => a.restant - b.restant,
+    client:   (a,b) => a.client.localeCompare(b.client,'fr'),
+    statut:   (a,b) => (order[a.status]??9) - (order[b.status]??9),
+  })[key] || (() => 0);
+  return rows.sort((a,b) => (sign * cmp(a,b)) || (dt(b) - dt(a)));
+}
+
+function renderCmdCockpit() {
+  const container = document.getElementById('commandesList');
+  if (!container) return;
+  const all = _buildCommandeRows();
+  const cnt = k => all.filter(r => _cmdBucketMatch(r, k)).length;
+  const caisSet = [...new Set(all.map(r => r.commercial).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'fr'));
+  container.innerHTML =
+    `<div class="pcok">
+      ${_cmdToolbar(cnt, caisSet)}
+      ${_cmdAlertCards(all)}
+      <div id="cmdCockpitBody"></div>
+    </div>`;
+  _cmdRenderBody();
+}
+
+function _cmdRenderBody() {
+  const body = document.getElementById('cmdCockpitBody');
+  if (!body) return;
+  const filtered = _cmdSortRows(_cmdFilterRows(_buildCommandeRows()));
+  const page = filtered.slice(0, _cmdLimit);
+  const totalSum = filtered.reduce((s,r)=>s+r.total,0);
+  const restSum  = filtered.reduce((s,r)=>s+r.restant,0);
+  const filteredLbl = (_cmdFilter!=='TOUS'||_cmdCaissier!=='TOUS'||_cmdMode!=='TOUS'||_cmdSearch) ? ' · filtré' : '';
+  const count = `<div class="pcok-count">${filtered.length} commande${filtered.length>1?'s':''}${filteredLbl} · Total ${fmt(totalSum)}${restSum>0?` · Restant ${fmt(restSum)}`:''}</div>`;
+  const more = filtered.length > _cmdLimit
+    ? `<div class="pcok-more"><button onclick="_cmdShowMore()">Afficher plus (${filtered.length - _cmdLimit} restants)</button></div>` : '';
+  body.innerHTML = count + _cmdTable(page) + more;
+}
+
+function _cmdToolbar(cnt, caisSet) {
+  const chips = [
+    ['TOUS','Toutes'], ['EN_COURS','En cours'], ['RETARD','En retard'], ['AUJ',"Aujourd'hui"], ['SEMAINE','Cette semaine'], ['IMPAYE','Impayés'], ['LIVREE','Livrées'], ['ANNULEE','Annulées']
+  ].map(([k,lbl]) => {
+    const active = _cmdFilter === k;
+    const warn = (k==='RETARD'||k==='IMPAYE');
+    return `<button class="pcok-chip ${active?'pcok-chip--active':''} ${warn?'pcok-chip--warn':''}" onclick="_cmdSetFilter('${k}')">${lbl}<span class="pcok-chip-n">${cnt(k)}</span></button>`;
+  }).join('');
+  const caisOpts = ['<option value="TOUS">Tous les commerciaux</option>']
+    .concat(caisSet.map(o => `<option value="${_pcokEsc(o)}" ${_cmdCaissier===o?'selected':''}>${_pcokEsc(o)}</option>`)).join('');
+  const modeOpts = [['TOUS','Tous les modes'],['livraison','Livraison'],['retrait','Retrait']]
+    .map(([v,l]) => `<option value="${v}" ${_cmdMode===v?'selected':''}>${l}</option>`).join('');
+  const sortOpts = [
+    ['date','Date'], ['echeance','Livraison'], ['total','Montant'], ['restant','Restant dû'], ['client','Client'], ['statut','Statut']
+  ].map(([k,l]) => `<option value="${k}" ${_cmdSort.key===k?'selected':''}>Trier : ${l}</option>`).join('');
+  const dirIcon = _cmdSort.dir === 'asc' ? '↑' : '↓';
+  return `<div class="pcok-toolbar">
+    <div class="pcok-chips">${chips}</div>
+    <div class="pcok-controls">
+      <div class="pcok-search">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" placeholder="Rechercher client, article, réf…" value="${_pcokEsc(_cmdSearch)}" oninput="_cmdSetSearch(this.value)" />
+      </div>
+      <select class="select-input" onchange="_cmdSetCaissier(this.value)" title="Filtrer par commercial">${caisOpts}</select>
+      <select class="select-input" onchange="_cmdSetMode(this.value)" title="Filtrer par mode">${modeOpts}</select>
+      <select class="select-input" onchange="_cmdSetSort(this.value)" title="Trier">${sortOpts}</select>
+      <button class="pcok-iconbtn" title="Sens du tri" onclick="_cmdToggleSortDir()">${dirIcon}</button>
+      <button class="pcok-iconbtn pcok-density" title="Vue compacte / détaillée" onclick="_cmdToggleDensity()">${_cmdDensity==='compact'?'Détaillé':'Compact'}</button>
+    </div>
+  </div>`;
+}
+
+function _cmdAlertCards(rows) {
+  const alert = rows.filter(r => r.status==='pending' && (r.bucket==='RETARD'||r.bucket==='AUJ'||r.bucket==='DEMAIN'))
+    .sort((a,b) => (a.days==null?1e9:a.days) - (b.days==null?1e9:b.days))
+    .slice(0, 8);
+  if (!alert.length) return '';
+  const cards = alert.map(r => {
+    const late = r.days != null && r.days < 0;
+    const accent = late ? '#dc2626' : '#e8834a';
+    const bg = late ? '#fef2f2' : '#fff8f3';
+    const cd = r.days == null ? '' : late ? `${Math.abs(r.days)}j de retard` : r.days===0 ? "Aujourd'hui" : 'Demain';
+    return `<button class="pcok-alert" style="border-left:3px solid ${accent};background:${bg}" onclick="openCmdDrawer('${r.id}')">
+      <div class="pcok-alert-top"><span style="color:${accent};font-weight:800">${cd}</span>${r.restant>0?`<span class="pcok-alert-pct" style="color:#dc2626">Reste ${fmt(r.restant)}</span>`:'<span class="pcok-alert-pct" style="color:#16a34a">Soldé</span>'}</div>
+      <div class="pcok-alert-client">${_pcokEsc(r.client)}</div>
+      <div class="pcok-alert-step">${r.mode==='livraison'?'Livraison':'Retrait'} · ${fmt(r.total)}</div>
+    </button>`;
+  }).join('');
+  return `<div class="pcok-alerts"><div class="pcok-alerts-title">Livraisons urgentes <span>${alert.length}</span></div><div class="pcok-alerts-row">${cards}</div></div>`;
+}
+
+function _cmdTable(rows) {
+  if (!rows.length) return `<div class="pcok-empty">
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.4"><polyline points="20 6 9 17 4 12"/></svg>
+    <p>Aucune commande${_cmdFilter!=='TOUS'||_cmdSearch?' dans ce filtre':''}</p>
+  </div>`;
+  const det = _cmdDensity === 'detaille';
+  const th = (key, label, cls='') => {
+    const active = key && _cmdSort.key === key;
+    const arrow = active ? (_cmdSort.dir==='asc' ? ' ↑' : ' ↓') : '';
+    return `<th class="pcok-th ${cls} ${active?'pcok-th--active':''}" ${key?`onclick="_cmdSetSort('${key}')" style="cursor:pointer"`:''}>${label}${arrow}</th>`;
+  };
+  const head = `<tr>
+    ${th('statut','')}
+    ${th('client','Réf / Client')}
+    ${det ? th('date','Date') : ''}
+    ${th('echeance','Livraison')}
+    ${det ? th('', 'Articles') : ''}
+    ${th('total','Total','pcok-num')}
+    ${th('restant','Restant','pcok-num')}
+    ${det ? th('', 'Prod.') : ''}
+    ${th('statut','Statut')}
+    <th class="pcok-th"></th>
+  </tr>`;
+  return `<div class="pcok-tablewrap"><table class="pcok-table"><thead>${head}</thead><tbody>${rows.map(_cmdRow).join('')}</tbody></table></div>`;
+}
+
+function _cmdRow(r) {
+  const det = _cmdDensity === 'detaille';
+  const dotC = r.status==='cancelled'?'#a8a29e':r.status==='completed'?'#16a34a':(r.days!=null&&r.days<0)?'#dc2626':(r.days===0||r.days===1)?'#e8834a':'#2563eb';
+  const dot = `<span class="pcok-prio" style="background:${dotC}"></span>`;
+  // Livraison échéance + retard
+  let ech = '—', echC = 'var(--color-text-secondary)';
+  if (r.ymd) {
+    ech = new Date(r.ymd+'T00:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'});
+    if (r.status==='pending') {
+      if (r.days<0) echC='#dc2626'; else if (r.days===0||r.days===1) echC='#e8834a';
+    }
+  }
+  let retTxt='', retC='#78716c';
+  if (r.status==='completed') { retTxt='Livrée'; retC='#16a34a'; }
+  else if (r.status==='cancelled') { retTxt='Annulée'; retC='#a8a29e'; }
+  else if (r.days==null) { retTxt='—'; retC='#a8a29e'; }
+  else if (r.days<0) { retTxt=`+${Math.abs(r.days)}j`; retC='#dc2626'; }
+  else if (r.days===0) { retTxt='Auj.'; retC='#e8834a'; }
+  else if (r.days===1) { retTxt='Demain'; retC='#e8834a'; }
+  else if (r.days<=7) { retTxt=`${r.days}j`; retC='#d97706'; }
+  else { retTxt=`${r.days}j`; retC='#78716c'; }
+  const echCell = `<div style="color:${echC};font-weight:600">${ech}</div><div class="pcok-ret" style="color:${retC};background:${retC}1a;margin-top:2px">${retTxt}</div>`;
+  const restC = r.status!=='pending' ? '#a8a29e' : r.restant>0 ? '#dc2626' : '#16a34a';
+  const restTxt = r.restant>0 ? fmt(r.restant) : (r.status==='pending'?'Soldé':'—');
+  const prodCell = r.prodPct==null ? '<span class="pcok-muted">—</span>'
+    : `<div class="pcok-prog"><div class="pcok-prog-bar"><div style="width:${r.prodPct}%;background:${r.prodPct===100?'#16a34a':'#e8834a'}"></div></div><span class="pcok-prog-n" style="color:${r.prodPct===100?'#16a34a':'#e8834a'}">${r.prodPct}%</span></div>`;
+  const stMap = { pending:['#d97706','#fef3c7','En cours'], completed:['#16a34a','#dcfce7','Livrée'], cancelled:['#78716c','#f5f5f4','Annulée'] };
+  const [sc,sb,sl] = stMap[r.status] || ['#78716c','#f5f5f4','—'];
+  const statut = `<span class="pcok-badge" style="color:${sc};background:${sb}">${sl}</span>`;
+  const modeChip = `<span style="font-size:9px;font-weight:700;color:${r.mode==='livraison'?'#c2410c':'#1a4a3a'}">${r.mode==='livraison'?'LIV':'RET'}</span>`;
+  const accent = r.status==='cancelled' ? '' : r.status==='completed' ? '' : (r.days!=null&&r.days<0) ? 'inset 3px 0 0 #dc2626' : (r.days===0||r.days===1) ? 'inset 3px 0 0 #e8834a' : r.restant>0 ? 'inset 3px 0 0 #d97706' : '';
+  return `<tr class="pcok-row ${r.status==='cancelled'?'pcok-row--done':''}" ${accent?`style="box-shadow:${accent}"`:''} onclick="openCmdDrawer('${r.id}')">
+    <td class="pcok-td-prio">${dot}</td>
+    <td class="pcok-td-client"><div class="pcok-client">${_pcokEsc(r.client)} ${modeChip}</div><div class="pcok-ref">${_pcokEsc(r.ref)}${r.contact?' · '+_pcokEsc(r.contact):''}</div></td>
+    ${det ? `<td class="pcok-td-ech">${r.dateStr}</td>` : ''}
+    <td class="pcok-td-ech">${echCell}</td>
+    ${det ? `<td class="pcok-muted">${r.nItems} art.</td>` : ''}
+    <td class="pcok-num" style="font-weight:700">${fmt(r.total)}</td>
+    <td class="pcok-num" style="color:${restC};font-weight:700">${restTxt}</td>
+    ${det ? `<td class="pcok-td-prog">${prodCell}</td>` : ''}
+    <td class="pcok-td-statut">${statut}</td>
+    <td class="pcok-td-act"><svg class="pcok-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></td>
+  </tr>`;
+}
+
+// ── Drawer détail commande ─────────────────────────────────────────────────
+function openCmdDrawer(id) {
+  const c = commandes.find(x => String(x.id) === String(id));
+  const drawer = document.getElementById('cmdDrawer');
+  const body   = document.getElementById('cmdDrawerBody');
+  if (!c || !drawer || !body) return;
+  closeDrawers();
+  body.innerHTML = _cmdDrawerContent(c);
+  drawer.classList.add('open');
+  document.body.classList.add('pcok-drawer-open');
+  _ensureChronoTick();
+}
+
+function _cmdDrawerContent(c) {
+  const r = _buildCommandeRows().find(x => String(x.id) === String(c.id)) || {};
+  const dCmd = r.dcmd ? r.dcmd.toLocaleString('fr-FR') : '—';
+  const stMap = { pending:['#d97706','#fef3c7','En cours'], completed:['#16a34a','#dcfce7','Livrée'], cancelled:['#78716c','#f5f5f4','Annulée'] };
+  const [sc,sb,sl] = stMap[c.status] || ['#78716c','#f5f5f4','—'];
+  const livTxt = r.ymd ? new Date(r.ymd+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'2-digit',month:'long'}) : '';
+  const dtxt = r.days==null ? '' : r.days<0 ? `${Math.abs(r.days)}j de retard` : r.days===0 ? "Aujourd'hui" : r.days===1 ? 'Demain' : `${r.days}j`;
+  const dCol = r.days!=null && r.days<0 ? '#dc2626' : (r.days===0||r.days===1) ? '#e8834a' : '#16a34a';
+  const itemsHtml = (c.items||[]).map(i => `<div class="pcok-drawer-item"><span>${_pcokEsc(i.name)} × ${i.qty}</span><b>${fmt((Number(i.price)||0)*(Number(i.qty)||1))}</b></div>`).join('') || '<div class="pcok-muted" style="font-size:12px">Aucun article</div>';
+  const datesHtml = [
+    _dispDate(c.dateLivraison) ? `<div class="pcok-drawer-item"><span>Livraison client</span><b>${_dispDate(c.dateLivraison)}</b></div>` : '',
+    _dispDate(c.dateBAT) ? `<div class="pcok-drawer-item"><span style="color:#2563eb">BAT</span><b>${_dispDate(c.dateBAT)}</b></div>` : '',
+    _dispDate(c.dateLivraisonProd) ? `<div class="pcok-drawer-item"><span style="color:#e8834a">Production</span><b>${_dispDate(c.dateLivraisonProd)}</b></div>` : '',
+  ].join('');
+  const modeHtml = `<div class="pcok-drawer-item"><span>Mode</span><b>${r.mode==='livraison'?'Livraison':'Retrait boutique'}</b></div>${c.adresseLivraison?`<div class="pcok-drawer-item"><span>Adresse</span><b style="text-align:right;white-space:normal">${_pcokEsc(c.adresseLivraison)}</b></div>`:''}`;
+  // Pièces jointes (photos locales + Drive)
+  const atts = [
+    ...(c.photos||[]).map(src => typeof src==='string' ? { img:src, href:src, name:'Photo' } : { img:(src.type||'').startsWith('image/')?(src.data||''):'', href:src.data||'', name:src.name||'fichier' }),
+    ...(c.attachments||[]).map(a => ({ img:(a.type||'').startsWith('image/')?_driveImgSrc(a):'', href:a.viewUrl||a.dlUrl||a.data||'', name:a.name||'fichier' }))
+  ].filter(a => a.img || a.href);
+  const photosHtml = atts.length ? `<div class="pcok-drawer-photos">${atts.map(a => a.img
+    ? `<img src="${a.img}" onclick="window.open('${a.href||a.img}','_blank')" title="${_pcokEsc(a.name)}" />`
+    : `<a href="${a.href}" target="_blank" title="${_pcokEsc(a.name)}">${(a.name||'').split('.').pop().toUpperCase()}</a>`).join('')}</div>` : '';
+  const pipe = r.dossierId ? _cmdPipelineHtml(r.dossierId) : '';
+  return `<div class="pcok-drawer-head">
+      <div style="min-width:0">
+        <div class="pcok-drawer-ref">${_pcokEsc(r.ref||'')}${r.commercial?' · '+_pcokEsc(r.commercial):''}</div>
+        <div class="pcok-drawer-client">${_pcokEsc(c.clientName||'Client')}</div>
+      </div>
+      <button class="pcok-drawer-close" onclick="closeDrawers()" aria-label="Fermer">×</button>
+    </div>
+    <div class="pcok-drawer-meta">
+      <span class="pcok-badge" style="color:${sc};background:${sb}">${sl}</span>
+      ${c.clientContact?`<span style="font-size:12.5px;color:var(--color-text-secondary)">${_pcokEsc(c.clientContact)}</span>`:''}
+      <span style="font-size:11px;color:var(--color-text-muted);margin-left:auto">${dCmd}</span>
+    </div>
+    ${livTxt?`<div class="pcok-drawer-ech" style="color:${dCol};margin-bottom:12px">Livraison : ${livTxt}${dtxt?' · '+dtxt:''}</div>`:''}
+    <div class="pcok-pay">
+      <div class="pcok-pay-c"><div class="pcok-pay-l">Total</div><div class="pcok-pay-v">${fmt(c.total)}</div></div>
+      <div class="pcok-pay-c"><div class="pcok-pay-l">Acompte</div><div class="pcok-pay-v" style="color:#16a34a">${fmt(c.accompte)}</div></div>
+      <div class="pcok-pay-c"><div class="pcok-pay-l">Restant</div><div class="pcok-pay-v" style="color:${(Number(c.restant)||0)>0?'#dc2626':'#16a34a'}">${fmt(c.restant)}</div></div>
+    </div>
+    <div class="pcok-drawer-pipe-title">Articles (${(c.items||[]).length})</div>
+    <div class="pcok-drawer-items">${itemsHtml}</div>
+    <div class="pcok-drawer-pipe-title">Livraison</div>
+    <div class="pcok-drawer-items">${modeHtml}${datesHtml}</div>
+    ${c.notes?`<div class="pcok-drawer-note">${_pcokEsc(c.notes)}</div>`:''}
+    ${photosHtml}
+    ${pipe}
+    ${_cmdDrawerActions(c)}`;
+}
+
+function _cmdPipelineHtml(dossierId) {
+  const r = _buildDossierRows().find(x => x.dossierId === dossierId);
+  if (!r) return '';
+  return `<div class="pcok-drawer-pipe-title">Production — ${r.pct}%</div>
+    <div class="pcok-drawer-prog"><div class="pcok-prog-bar"><div style="width:${r.pct}%;background:${r.pct===100?'#16a34a':'#e8834a'}"></div></div><span>${r.pct}%</span></div>
+    <div class="pcok-drawer-pipe">${_pcokStepsHtml(r.steps)}</div>`;
+}
+
+function _cmdDrawerActions(c) {
+  const isCommercial = currentUser?.role === 'commerciale';
+  const isAdmin      = currentUser?.role === 'admin';
+  const canAttrib    = PAGE_ACCESS.attribution.includes(currentUser?.role);
+  const btns = [];
+  if (c.status === 'pending')
+    btns.push(`<button class="pcok-btn pcok-btn--primary" onclick="closeDrawers();openCmdFinalizeModal('${c.id}')">Finaliser</button>`);
+  btns.push(`<button class="pcok-btn" onclick="printCommandeTicket(commandes.find(x=>String(x.id)==='${c.id}'))">Imprimer</button>`);
+  if (c.dossierId && canAttrib)
+    btns.push(`<button class="pcok-btn" onclick="closeDrawers();openAttribForDossier('${c.dossierId}')">Production →</button>`);
+  // Modifications de dates (toujours utiles)
+  btns.push(`<button class="pcok-btn" onclick="closeDrawers();editCommandeDateClient('${c.id}')">Date livraison</button>`);
+  btns.push(`<button class="pcok-btn" onclick="closeDrawers();editCommandeDateProd('${c.id}')">Date production</button>`);
+  if (c.status === 'completed' && isAdmin)
+    btns.push(`<button class="pcok-btn" style="color:#dc2626" onclick="closeDrawers();definaliserCommande('${c.id}')">Dé-finaliser</button>`);
+  else if (isCommercial && c.status === 'pending') {
+    btns.push(`<button class="pcok-btn" onclick="closeDrawers();requestCommandeModif('${c.id}')">Demander modif</button>`);
+    btns.push(`<button class="pcok-btn" style="color:#dc2626" onclick="closeDrawers();requestCommandeCancel('${c.id}')">Demander annulation</button>`);
+  } else if (!isCommercial && c.status === 'pending') {
+    btns.push(`<button class="pcok-btn" onclick="closeDrawers();editCommandeAddress('${c.id}')">Adresse</button>`);
+    btns.push(`<button class="pcok-btn" onclick="closeDrawers();editCommandeFrais('${c.id}')">Frais livraison</button>`);
+    btns.push(`<button class="pcok-btn" style="color:#dc2626" onclick="closeDrawers();cancelCommande('${c.id}')">Annuler</button>`);
+  }
+  return `<div class="pcok-drawer-actions pcok-drawer-actions--wrap">${btns.join('')}</div>`;
+}
+
+// ── Setters cockpit commandes ──────────────────────────────────────────────
+function _cmdSetFilter(k){ _cmdFilter = k; _cmdLimit = _CMD_PAGE; renderCmdCockpit(); }
+function _cmdSetCaissier(v){ _cmdCaissier = v; _cmdLimit = _CMD_PAGE; renderCmdCockpit(); }
+function _cmdSetMode(v){ _cmdMode = v; _cmdLimit = _CMD_PAGE; renderCmdCockpit(); }
+function _cmdSetSort(k){
+  if (_cmdSort.key === k) _cmdSort.dir = _cmdSort.dir==='asc' ? 'desc' : 'asc';
+  else { _cmdSort.key = k; _cmdSort.dir = (k==='client') ? 'asc' : 'desc'; }
+  renderCmdCockpit();
+}
+function _cmdToggleSortDir(){ _cmdSort.dir = _cmdSort.dir==='asc' ? 'desc' : 'asc'; renderCmdCockpit(); }
+function _cmdToggleDensity(){ _cmdDensity = _cmdDensity==='compact' ? 'detaille' : 'compact'; renderCmdCockpit(); }
+function _cmdSetSearch(v){ _cmdSearch = v; _cmdLimit = _CMD_PAGE; _cmdRenderBody(); }
+function _cmdShowMore(){ _cmdLimit += _CMD_PAGE; _cmdRenderBody(); }
 
 // ============================================================
 // COMMANDES — FINALISER
@@ -11702,6 +12070,26 @@ function _cockpitRow(r) {
   </tr>`;
 }
 
+// Rendu du pipeline vertical (partagé par les drawers Production & Commande)
+function _pcokStepsHtml(steps) {
+  return steps.map((s,i) => {
+    const col = s.status==='TERMINE'?'#16a34a':s.status==='EN_COURS'?'#d97706':s.status==='A_FAIRE'?'#2563eb':'#d6d3d1';
+    const lbl = s.status==='TERMINE'?'Terminé':s.status==='EN_COURS'?'En cours':s.status==='A_FAIRE'?'À faire':'—';
+    const ops = [...new Set(s.te.map(t=>t.operateur).filter(Boolean))].join(', ');
+    const retard = s.te.some(t => _getTacheRetardInfo(t).isRetard);
+    return `<div class="pcok-dstep ${s.status==='EN_COURS'?'pcok-dstep--active':''}">
+      <div class="pcok-dstep-rail">
+        <span class="pcok-dstep-dot" style="background:${col}">${s.status==='TERMINE'?'✓':i+1}</span>
+        ${i<steps.length-1?`<span class="pcok-dstep-line" style="background:${s.status==='TERMINE'?'#16a34a':'#e5e3df'}"></span>`:''}
+      </div>
+      <div class="pcok-dstep-body">
+        <div class="pcok-dstep-head"><span class="pcok-dstep-lbl">${_pcokEsc(s.e.label)}</span><span class="pcok-dstep-st" style="color:${col}">${lbl}${retard?' · <b style="color:#dc2626">retard</b>':''}</span></div>
+        ${ops?`<div class="pcok-dstep-ops">${_pcokEsc(ops)}</div>`:'<div class="pcok-dstep-ops pcok-muted">Non assigné</div>'}
+      </div>
+    </div>`;
+  }).join('');
+}
+
 // ── Panneau latéral (drawer) : pipeline complet d'un dossier ────────────────
 function openProdDrawer(dossierId) {
   _ensureDossierLinks();
@@ -11709,16 +12097,18 @@ function openProdDrawer(dossierId) {
   const drawer = document.getElementById('prodDrawer');
   const body   = document.getElementById('prodDrawerBody');
   if (!r || !drawer || !body) { openAttribForDossier(dossierId); return; }
+  closeDrawers();
   body.innerHTML = _cockpitDrawerContent(r);
   drawer.classList.add('open');
   document.body.classList.add('pcok-drawer-open');
   _ensureChronoTick();
 }
-function closeProdDrawer() {
-  const drawer = document.getElementById('prodDrawer');
-  if (drawer) drawer.classList.remove('open');
+// Ferme tous les panneaux latéraux (Production + Commandes)
+function closeDrawers() {
+  document.querySelectorAll('.pcok-drawer.open').forEach(d => d.classList.remove('open'));
   document.body.classList.remove('pcok-drawer-open');
 }
+function closeProdDrawer() { closeDrawers(); }
 
 function _cockpitDrawerContent(r) {
   const canAttrib = PAGE_ACCESS.attribution.includes(currentUser?.role);
@@ -11727,22 +12117,7 @@ function _cockpitDrawerContent(r) {
   const dCol = r.days!=null && r.days<0 ? '#dc2626' : (r.days===0||r.days===1) ? '#e8834a' : '#16a34a';
   const prioC  = r.priorite==='Urgente'?'#dc2626':r.priorite==='Haute'?'#d97706':'#78716c';
   const prioBg = r.priorite==='Urgente'?'#fee2e2':r.priorite==='Haute'?'#fef3c7':'#f5f5f4';
-  const stepsHtml = r.steps.map((s,i) => {
-    const col = s.status==='TERMINE'?'#16a34a':s.status==='EN_COURS'?'#d97706':s.status==='A_FAIRE'?'#2563eb':'#d6d3d1';
-    const lbl = s.status==='TERMINE'?'Terminé':s.status==='EN_COURS'?'En cours':s.status==='A_FAIRE'?'À faire':'—';
-    const ops = [...new Set(s.te.map(t=>t.operateur).filter(Boolean))].join(', ');
-    const retard = s.te.some(t => _getTacheRetardInfo(t).isRetard);
-    return `<div class="pcok-dstep ${s.status==='EN_COURS'?'pcok-dstep--active':''}">
-      <div class="pcok-dstep-rail">
-        <span class="pcok-dstep-dot" style="background:${col}">${s.status==='TERMINE'?'✓':i+1}</span>
-        ${i<r.steps.length-1?`<span class="pcok-dstep-line" style="background:${s.status==='TERMINE'?'#16a34a':'#e5e3df'}"></span>`:''}
-      </div>
-      <div class="pcok-dstep-body">
-        <div class="pcok-dstep-head"><span class="pcok-dstep-lbl">${_pcokEsc(s.e.label)}</span><span class="pcok-dstep-st" style="color:${col}">${lbl}${retard?' · <b style="color:#dc2626">retard</b>':''}</span></div>
-        ${ops?`<div class="pcok-dstep-ops">${_pcokEsc(ops)}</div>`:'<div class="pcok-dstep-ops pcok-muted">Non assigné</div>'}
-      </div>
-    </div>`;
-  }).join('');
+  const stepsHtml = _pcokStepsHtml(r.steps);
   return `<div class="pcok-drawer-head">
       <div style="min-width:0">
         <div class="pcok-drawer-ref">${_pcokEsc(r.ref)}</div>
