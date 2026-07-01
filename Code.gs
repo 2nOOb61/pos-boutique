@@ -18,6 +18,11 @@ const SHEET_DOSSIERS   = 'Dossiers';
 const SHEET_TACHES     = 'Taches';
 const SHEET_JOURNAL    = 'JournalAcces'; // audit log : qui fait quoi et quand
 
+// En-têtes de la feuille Dossiers, partagés par tous les points de création
+// (vente, manuel, autre) pour éviter tout décalage de colonnes si l'un diverge.
+const DOSSIER_HEADERS = ['ID','NumeroDossier','Client','Produit','Quantite','Statut',
+  'Progression','DateCreation','DateLivraison','Priorite','SourceVente','Notes'];
+
 // ── Audit : enregistrement des actions critiques ───────────
 function _logAction_(action, user, detail) {
   try {
@@ -239,7 +244,7 @@ function initSheets() {
   cmdSh.getRange(1, 1, 1, 24).setValues([['ID','Date','Caissier','Client_Nom','Client_Contact','Articles','Mode_Livraison','Adresse_Livraison','Frais_Livraison','Date_Livraison','Sous_Total','Remise','Total','Accompte','Restant','Mode_Depot','Fournisseur_Mobile','Reference','Notes','Statut','Date_Finalisation','Vente_ID','Date_Livraison_Prod','Date_BAT']]);
 
   // Nouvelles feuilles production
-  ensureSheet(ss, SHEET_DOSSIERS,   ['ID','NumeroDossier','Client','Produit','Quantite','Statut','Progression','DateCreation','DateLivraison','Priorite','SourceVente','Notes']);
+  ensureSheet(ss, SHEET_DOSSIERS, DOSSIER_HEADERS);
   ensureSheet(ss, SHEET_TACHES,     ['ID','DossierID','NumeroDossier','Etape','EtapeLabel','Operateur','Statut','DateAssignation','DateDebut','DateFin','Commentaire','AssignePar','Priorite','Echeance','Photos']);
 
   return { ok:true, message:'Feuilles initialisées ' };
@@ -460,9 +465,7 @@ function handleCreerDossierManuel(data) {
   if (!d.quantite || Number(d.quantite) <= 0) return { ok:false, error:'Quantité invalide' };
 
   const ss  = getSS();
-  const sh  = ensureSheet(ss, SHEET_DOSSIERS,
-    ['ID','NumeroDossier','Client','Produit','Quantite','Statut',
-     'Progression','DateCreation','DateLivraison','Priorite','SourceVente','Notes']);
+  const sh  = ensureSheet(ss, SHEET_DOSSIERS, DOSSIER_HEADERS);
 
   const lock = LockService.getScriptLock();
   try {
@@ -1073,10 +1076,23 @@ function migrateDedupDossiers() {
   }
 }
 
+// Champs numériques ne devant jamais être négatifs (montants, quantités).
+const MONTANTS_NON_NEGATIFS_ = ['fraisLivraison', 'subtotal', 'remise', 'total', 'accompte', 'restant'];
+function _validerMontantsPositifs_(obj) {
+  for (const champ of MONTANTS_NON_NEGATIFS_) {
+    if (obj[champ] !== undefined && Number(obj[champ]) < 0) {
+      return 'Montant invalide (' + champ + ' ne peut pas être négatif)';
+    }
+  }
+  return null;
+}
+
 function handleAddCommande(data) {
   const sh = getSS().getSheetByName(SHEET_COMMANDES);
   if (!sh) return { ok:false, error:'Feuille Commandes introuvable' };
   const c = data.commande;
+  const errMontant = _validerMontantsPositifs_(c || {});
+  if (errMontant) return { ok:false, error: errMontant };
   const now = new Date();
   const tz  = Session.getScriptTimeZone();
   const id  = c.id ? String(c.id) : ('CMD' + now.getTime());
@@ -1117,6 +1133,8 @@ function _setTextCell_(sh, row, col, val) {
 function handleUpdateCommande(data) {
   const sh = getSS().getSheetByName(SHEET_COMMANDES);
   if (!sh) return { ok:false, error:'Feuille Commandes introuvable' };
+  const errMontant = _validerMontantsPositifs_(data || {});
+  if (errMontant) return { ok:false, error: errMontant };
   const rows = sh.getDataRange().getValues();
   const rawStatus = data.statut || data.status;
   const sheetStatut = rawStatus === 'completed' ? 'Terminée'
@@ -1195,9 +1213,7 @@ function handleSaveDossier(data) {
   const d  = data.dossier;
   if (!d || !d.id) return { ok:false, error:'dossier.id requis' };
   const ss  = getSS();
-  const sh  = ensureSheet(ss, SHEET_DOSSIERS,
-    ['ID','NumeroDossier','Client','Produit','Quantite','Statut',
-     'Progression','DateCreation','DateLivraison','Priorite','SourceVente','Notes']);
+  const sh  = ensureSheet(ss, SHEET_DOSSIERS, DOSSIER_HEADERS);
 
   const lock = LockService.getScriptLock();
   try {
@@ -1523,24 +1539,21 @@ function majProgressionDossier_(ss, dossierId, etapeCode) {
   if (idx < 0) return;
   const next = ETAPES_PROD[idx + 1];
 
-  // Lire uniquement les 200 dernières lignes (les dossiers récents y sont)
+  // Recherche le dossier sur toute la feuille (pas seulement les dossiers récents :
+  // un dossier ancien ne se voyait plus mettre à jour sa progression au-delà des 200
+  // dernières lignes). TextFinder évite de rapatrier toutes les colonnes en mémoire.
   const lastRow = sh.getLastRow();
   if (lastRow <= 1) return;
-  const start = Math.max(2, lastRow - 199);
-  const nRows = lastRow - start + 1;
-  const rows  = sh.getRange(start, 1, nRows, 7).getValues();
+  const match = sh.getRange(2, 1, lastRow - 1, 1)
+    .createTextFinder(dossierId).matchEntireCell(true).findNext();
+  if (!match) return;
+  const rowNum = match.getRow();
 
-  for (let i = 0; i < rows.length; i++) {
-    if (rows[i][0] === dossierId) {
-      const rowNum      = start + i;
-      const nouveauStatut = next ? next.code : 'LIVRE';
-      const progression   = ETAPES_PROD[idx].progress;
-      sh.getRange(rowNum, 6, 1, 2).setValues([[nouveauStatut, progression]]);
-      if (nouveauStatut === 'LIVRE') {
-        sh.getRange(rowNum, 9, 1, 1).setValue(new Date()); // DateLivraison (col 9)
-      }
-      return;
-    }
+  const nouveauStatut = next ? next.code : 'LIVRE';
+  const progression   = ETAPES_PROD[idx].progress;
+  sh.getRange(rowNum, 6, 1, 2).setValues([[nouveauStatut, progression]]);
+  if (nouveauStatut === 'LIVRE') {
+    sh.getRange(rowNum, 9, 1, 1).setValue(new Date()); // DateLivraison (col 9)
   }
 }
 
