@@ -2515,7 +2515,7 @@ function toggleKebab(uid, ev){
   }
 }
 document.addEventListener('click', closeAllKebabs);
-document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeAllKebabs(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape'){ closeAllKebabs(); closeProdDrawer(); } });
 
 // ===== Historique : recherche + filtre type + regroupement par date =====
 function _histDayKey(v){ const d=parseSaleDate(v); return d ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` : 'zzzz'; }
@@ -6225,6 +6225,18 @@ let _prodExpanded = new Set(); // dossierId des groupes dépliés (repliés par 
 let _opWorkloadOpen = false; // section "Charge opérateurs" repliée par défaut (vue compacte)
 let attrDateFilter = { mois: '', annee: '' };
 let prodDateFilter = { mois: '', annee: '' };
+
+// ── Cockpit Production (vue responsable : tableau compact de dossiers) ──────
+// État de la vue cockpit. filter = bucket d'échéance/statut ; sort = colonne + sens.
+let _cockpitFilter  = 'TOUS';   // TOUS | RETARD | AUJ | DEMAIN | SEMAINE | TERMINE
+let _cockpitOp      = 'TOUS';   // filtre responsable
+let _cockpitEtape   = 'TOUS';   // filtre étape actuelle (code)
+let _cockpitSearch  = '';       // recherche client / produit / réf
+let _cockpitSort    = { key:'echeance', dir:'asc' }; // echeance|retard|operateur|statut|progression|priorite
+let _cockpitDensity = 'compact'; // compact | detaille
+let _cockpitOpsOpen = false;    // heatmap opérateurs repliée par défaut
+let _cockpitLimit   = 60;       // pagination : nb de lignes affichées (pas à pas)
+const _COCKPIT_PAGE = 60;
 
 // Pipeline de production — l'ORDRE de ce tableau pilote tout l'affichage du flux.
 // Les `code` sont des clés persistées dans les tâches (t.etapeCode) et la feuille
@@ -11240,9 +11252,22 @@ function renderTaches() {
     return;
   }
 
+  // Vue COCKPIT (responsable : admin / chef / commercial) — tableau compact de
+  // dossiers + panneau détail au clic. Remplace la liste de tâches groupées.
+  const _canViewAllProd = ['admin','chef_atelier','commerciale'].includes(currentUser?.role);
+  if (_prodView === 'tasks' && _canViewAllProd) {
+    _ensureDossierLinks();
+    renderProdCockpit();
+    return;
+  }
+
+  // ── Vue opérateur (ses propres tâches) : restaurer les barres statiques ──
+  const _fs = document.getElementById('prodFiltersSticky'); if (_fs) _fs.style.display = '';
+  const _et = document.getElementById('prodExpandToggle'); if (_et) _et.style.display = '';
+
   // Mettre à jour la barre charge opérateurs
   const wlEl = document.getElementById('opWorkloadContainer');
-  if (wlEl) wlEl.innerHTML = _buildOpWorkload();
+  if (wlEl) { wlEl.style.display = ''; wlEl.innerHTML = _buildOpWorkload(); }
 
   const dash          = _buildMonDashboard();
   const deadlines     = _buildProdDeadlines();
@@ -11386,6 +11411,373 @@ function _syncProdExpandBtn(){
   const allOpen = ids.length > 0 && ids.every(id => _prodExpanded.has(id));
   lbl.textContent = allOpen ? 'Tout replier' : 'Tout déplier';
 }
+
+// ════════════════════════════════════════════════════════════
+// COCKPIT PRODUCTION — vue responsable (tableau compact de dossiers)
+// Tous les travaux d'un coup : priorité, échéance, retard/jours restants,
+// client, produit, étape actuelle, responsable, progression, statut.
+// Le pipeline complet s'ouvre dans un panneau latéral au clic sur la ligne.
+// Filtres/tri sticky, cartes d'alerte (retard/aujourd'hui/demain), heatmap
+// opérateurs compacte. Couleurs : rouge=retard critique, orange=proche
+// échéance, bleu=étape active, vert=terminé, gris=futur.
+// ════════════════════════════════════════════════════════════
+function _pcokEsc(v){ return String(v==null?'':v).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// Une ligne par dossier ayant des tâches (hors LIBRE), avec toutes les
+// métriques d'affichage/tri. Source = tâches fusionnées + méta dossier.
+function _buildDossierRows() {
+  const merged = _allTachesMerged().filter(t => t.dossierId && t.dossierId !== 'LIBRE');
+  const byDossier = {};
+  merged.forEach(t => { (byDossier[t.dossierId] = byDossier[t.dossierId] || []).push(t); });
+
+  return Object.entries(byDossier).map(([dossierId, dt]) => {
+    const d = (Array.isArray(dossiers) ? dossiers : []).find(x => x.id === dossierId) || {};
+    let done = 0;
+    const steps = ETAPES_CONFIG.map(e => {
+      const te = dt.filter(t => t.etapeCode === e.code);
+      let status = 'VIDE';
+      if (te.length && te.every(t => t.statut === 'TERMINE'))                   { status = 'TERMINE'; done++; }
+      else if (te.some(t => t.statut === 'EN_COURS' || t.statut === 'TERMINE')) status = 'EN_COURS';
+      else if (te.some(t => t.statut === 'A_FAIRE'))                            status = 'A_FAIRE';
+      return { e, status, te };
+    });
+    const pct = Math.round(done / ETAPES_CONFIG.length * 100);
+    // Étape actuelle = 1re EN_COURS, sinon 1re A_FAIRE
+    const cur = steps.find(s => s.status === 'EN_COURS') || steps.find(s => s.status === 'A_FAIRE') || null;
+    let responsables = [];
+    if (cur) {
+      responsables = [...new Set(cur.te.filter(t => t.statut !== 'TERMINE').map(t => t.operateur).filter(Boolean))];
+      if (!responsables.length) responsables = [...new Set(cur.te.map(t => t.operateur).filter(Boolean))];
+    }
+    const taskRetard = dt.some(t => _getTacheRetardInfo(t).isRetard);
+    const ymd  = _toIsoDate(d.dateLivraisonProd || '');
+    const days = ymd ? _daysUntil(ymd) : null;
+    const deadlineLate = days != null && days < 0;
+    const isDone = pct === 100 || d.statut === 'LIVRE';
+    let bucket = 'FUTUR';
+    if (isDone) bucket = 'TERMINE';
+    else if (deadlineLate || (taskRetard && days == null)) bucket = 'RETARD';
+    else if (days === 0) bucket = 'AUJ';
+    else if (days === 1) bucket = 'DEMAIN';
+    else if (days != null && days <= 7) bucket = 'SEMAINE';
+    const statut = isDone ? 'TERMINE'
+      : (bucket === 'RETARD' || taskRetard) ? 'RETARD'
+      : steps.some(s => s.status === 'EN_COURS') ? 'EN_COURS' : 'A_FAIRE';
+    const prio = d.priorite || 'Normale';
+    const prioRank = prio === 'Urgente' ? 0 : prio === 'Haute' ? 1 : 2;
+    return {
+      dossierId, d,
+      ref: d.numeroDossier || dt[0]?.numeroDossier || dossierId,
+      client: d.client || dt[0]?.client || '—',
+      produit: d.produit || dt[0]?.produit || dt[0]?.titre || '',
+      priorite: prio, prioRank, ymd, days, deadlineLate, taskRetard,
+      curStep: cur ? cur.e : null, responsables,
+      pct, steps, bucket, statut, isDone,
+      _hasRunning: dt.some(t => t.statut === 'EN_COURS'),
+    };
+  });
+}
+
+function _cockpitBucketMatch(r, k) {
+  if (k === 'TOUS')    return true;
+  if (k === 'RETARD')  return !r.isDone && (r.bucket === 'RETARD' || r.taskRetard || r.deadlineLate);
+  if (k === 'AUJ')     return r.days === 0 && !r.isDone;
+  if (k === 'DEMAIN')  return r.days === 1 && !r.isDone;
+  if (k === 'SEMAINE') return r.days != null && r.days >= 0 && r.days <= 7 && !r.isDone;
+  if (k === 'TERMINE') return r.isDone;
+  return true;
+}
+
+function _cockpitFilterRows(rows) {
+  let out = rows.filter(r => _cockpitBucketMatch(r, _cockpitFilter));
+  if (_cockpitOp !== 'TOUS')
+    out = out.filter(r => r.responsables.some(o => _sameOp(o, _cockpitOp)) || r.steps.some(s => s.te.some(t => _sameOp(t.operateur, _cockpitOp))));
+  if (_cockpitEtape !== 'TOUS')
+    out = out.filter(r => r.curStep && r.curStep.code === _cockpitEtape);
+  const q = _cockpitSearch.trim().toLowerCase();
+  if (q) out = out.filter(r => (r.client + ' ' + r.produit + ' ' + r.ref).toLowerCase().includes(q));
+  return out;
+}
+
+function _cockpitSortRows(rows) {
+  const { key, dir } = _cockpitSort;
+  const sign = dir === 'desc' ? -1 : 1;
+  const order = { RETARD:0, EN_COURS:1, A_FAIRE:2, TERMINE:3 };
+  const dkey = a => a.days == null ? 1e9 : a.days;
+  const cmp = ({
+    echeance:    (a,b) => dkey(a) - dkey(b),
+    retard:      (a,b) => dkey(a) - dkey(b),
+    operateur:   (a,b) => (a.responsables[0]||'￿').localeCompare(b.responsables[0]||'￿','fr'),
+    statut:      (a,b) => (order[a.statut]??9) - (order[b.statut]??9),
+    progression: (a,b) => a.pct - b.pct,
+    priorite:    (a,b) => a.prioRank - b.prioRank,
+  })[key] || (() => 0);
+  return rows.sort((a,b) => (sign * cmp(a,b)) || (dkey(a) - dkey(b)));
+}
+
+function renderProdCockpit() {
+  const container = document.getElementById('tachesContainer');
+  if (!container) return;
+  // Masquer les barres "tâches" statiques + le bouton déplier (non pertinents ici)
+  const fs = document.getElementById('prodFiltersSticky'); if (fs) fs.style.display = 'none';
+  const wl = document.getElementById('opWorkloadContainer'); if (wl) wl.style.display = 'none';
+  const et = document.getElementById('prodExpandToggle'); if (et) et.style.display = 'none';
+
+  const all = _buildDossierRows();
+  const cnt = k => all.filter(r => _cockpitBucketMatch(r, k)).length;
+  const opsSet = [...new Set(all.flatMap(r => r.responsables))].filter(Boolean).sort((a,b)=>a.localeCompare(b,'fr'));
+  const etapesUsed = ETAPES_CONFIG.filter(e => all.some(r => r.curStep && r.curStep.code === e.code));
+
+  container.innerHTML =
+    `<div class="pcok">
+      ${_cockpitToolbar(cnt, opsSet, etapesUsed)}
+      ${_cockpitAlertCards(all)}
+      ${_cockpitOpHeatmap()}
+      <div id="pcokBody"></div>
+    </div>`;
+  _cockpitRenderBody();
+}
+
+// Ne re-rend que le tableau (préserve le focus de la recherche pendant la frappe)
+function _cockpitRenderBody() {
+  const body = document.getElementById('pcokBody');
+  if (!body) return;
+  const filtered = _cockpitSortRows(_cockpitFilterRows(_buildDossierRows()));
+  const page = filtered.slice(0, _cockpitLimit);
+  const filteredLbl = (_cockpitFilter!=='TOUS'||_cockpitOp!=='TOUS'||_cockpitEtape!=='TOUS'||_cockpitSearch) ? ' · filtré' : '';
+  const count = `<div class="pcok-count">${filtered.length} dossier${filtered.length>1?'s':''}${filteredLbl}</div>`;
+  const more = filtered.length > _cockpitLimit
+    ? `<div class="pcok-more"><button onclick="_cockpitShowMore()">Afficher plus (${filtered.length - _cockpitLimit} restants)</button></div>` : '';
+  body.innerHTML = count + _cockpitTable(page) + more;
+  _ensureChronoTick();
+}
+
+function _cockpitToolbar(cnt, opsSet, etapesUsed) {
+  const chips = [
+    ['TOUS','Tous'], ['RETARD','En retard'], ['AUJ',"Aujourd'hui"], ['DEMAIN','Demain'], ['SEMAINE','Cette semaine'], ['TERMINE','Terminés']
+  ].map(([k,lbl]) => {
+    const active = _cockpitFilter === k;
+    return `<button class="pcok-chip ${active?'pcok-chip--active':''} ${k==='RETARD'?'pcok-chip--warn':''}" onclick="_cockpitSetFilter('${k}')">${lbl}<span class="pcok-chip-n">${cnt(k)}</span></button>`;
+  }).join('');
+  const opOpts = ['<option value="TOUS">Tous les opérateurs</option>']
+    .concat(opsSet.map(o => `<option value="${_pcokEsc(o)}" ${_cockpitOp===o?'selected':''}>${_pcokEsc(o)}</option>`)).join('');
+  const etOpts = ['<option value="TOUS">Toutes les étapes</option>']
+    .concat(etapesUsed.map(e => `<option value="${e.code}" ${_cockpitEtape===e.code?'selected':''}>${_pcokEsc(e.label)}</option>`)).join('');
+  const sortOpts = [
+    ['echeance','Échéance'], ['retard','Retard'], ['operateur','Opérateur'], ['statut','Statut'], ['progression','Progression'], ['priorite','Priorité']
+  ].map(([k,l]) => `<option value="${k}" ${_cockpitSort.key===k?'selected':''}>Trier : ${l}</option>`).join('');
+  const dirIcon = _cockpitSort.dir === 'asc' ? '↑' : '↓';
+  return `<div class="pcok-toolbar">
+    <div class="pcok-chips">${chips}</div>
+    <div class="pcok-controls">
+      <div class="pcok-search">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" placeholder="Rechercher client, produit, réf…" value="${_pcokEsc(_cockpitSearch)}" oninput="_cockpitSetSearch(this.value)" />
+      </div>
+      <select class="select-input" onchange="_cockpitSetOp(this.value)" title="Filtrer par opérateur">${opOpts}</select>
+      <select class="select-input" onchange="_cockpitSetEtape(this.value)" title="Filtrer par étape">${etOpts}</select>
+      <select class="select-input" onchange="_cockpitSetSort(this.value)" title="Trier">${sortOpts}</select>
+      <button class="pcok-iconbtn" title="Sens du tri" onclick="_cockpitToggleSortDir()">${dirIcon}</button>
+      <button class="pcok-iconbtn pcok-density" title="Vue compacte / détaillée" onclick="_cockpitToggleDensity()">${_cockpitDensity==='compact'?'Détaillé':'Compact'}</button>
+    </div>
+  </div>`;
+}
+
+function _cockpitAlertCards(rows) {
+  const alert = rows.filter(r => !r.isDone && (r.bucket==='RETARD'||r.bucket==='AUJ'||r.bucket==='DEMAIN'))
+    .sort((a,b) => (a.days==null?1e9:a.days) - (b.days==null?1e9:b.days))
+    .slice(0, 8);
+  if (!alert.length) return '';
+  const cards = alert.map(r => {
+    const late = r.days != null && r.days < 0;
+    const accent = late ? '#dc2626' : '#e8834a';
+    const bg = late ? '#fef2f2' : '#fff8f3';
+    const cd = r.days == null ? (r.taskRetard ? 'Retard rythme' : '') : late ? `${Math.abs(r.days)}j de retard` : r.days===0 ? "Aujourd'hui" : 'Demain';
+    const step = r.curStep ? _pcokEsc(r.curStep.short || r.curStep.label) : '—';
+    return `<button class="pcok-alert" style="border-left:3px solid ${accent};background:${bg}" onclick="openProdDrawer('${r.dossierId}')">
+      <div class="pcok-alert-top"><span style="color:${accent};font-weight:800">${cd}</span><span class="pcok-alert-pct">${r.pct}%</span></div>
+      <div class="pcok-alert-client">${_pcokEsc(r.client)}</div>
+      <div class="pcok-alert-step">${step}${r.responsables.length?' · '+_pcokEsc(r.responsables[0]):''}</div>
+    </button>`;
+  }).join('');
+  return `<div class="pcok-alerts"><div class="pcok-alerts-title">Alertes <span>${alert.length}</span></div><div class="pcok-alerts-row">${cards}</div></div>`;
+}
+
+function _cockpitOpHeatmap() {
+  const counts = {};
+  _allTachesMerged().forEach(t => {
+    if (t.statut === 'TERMINE' || !t.operateur) return;
+    counts[t.operateur] = counts[t.operateur] || { a:0, e:0 };
+    if (t.statut === 'A_FAIRE')   counts[t.operateur].a++;
+    else if (t.statut === 'EN_COURS') counts[t.operateur].e++;
+  });
+  const ops = Object.entries(counts);
+  if (!ops.length) return '';
+  const max = Math.max(...ops.map(([,v]) => v.a + v.e), 1);
+  const sorted = ops.sort((a,b) => (b[1].a+b[1].e) - (a[1].a+a[1].e));
+  const overloaded = sorted.filter(([,v]) => (v.a+v.e)/max >= 0.85).length;
+  const chips = sorted.map(([name, v]) => {
+    const tot = v.a + v.e, ratio = tot / max;
+    const bg = ratio>=0.85 ? '#fee2e2' : ratio>=0.6 ? '#fef3c7' : '#dcfce7';
+    const cl = ratio>=0.85 ? '#dc2626' : ratio>=0.6 ? '#b45309' : '#16a34a';
+    const dot = v.e > 0 ? '<span class="pcok-op-dot"></span>' : '';
+    const esc = _pcokEsc(name).replace(/'/g, "\\'");
+    return `<button class="pcok-op-chip" style="background:${bg};color:${cl}" onclick="_cockpitSetOp('${esc}')" title="${_pcokEsc(name)} — ${tot} tâche(s) active(s)">${dot}${_pcokEsc(name)} <b>${tot}</b></button>`;
+  }).join('');
+  const summary = overloaded ? `<span class="pcok-op-warn">${overloaded} en surcharge</span>` : `<span class="pcok-op-sum">${sorted.length} actifs</span>`;
+  return `<div class="pcok-ops ${_cockpitOpsOpen?'pcok-ops--open':''}">
+    <button class="pcok-ops-toggle" onclick="_cockpitToggleOps()">
+      <span class="pcok-ops-title">Charge opérateurs</span>${summary}
+      <svg class="pcok-ops-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>
+    <div class="pcok-ops-row">${chips}</div>
+  </div>`;
+}
+
+function _cockpitTable(rows) {
+  if (!rows.length) return `<div class="pcok-empty">
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.4"><polyline points="20 6 9 17 4 12"/></svg>
+    <p>Aucun dossier${_cockpitFilter!=='TOUS'||_cockpitSearch?' dans ce filtre':''}</p>
+  </div>`;
+  const det = _cockpitDensity === 'detaille';
+  const th = (key, label) => {
+    const active = key && _cockpitSort.key === key;
+    const arrow = active ? (_cockpitSort.dir==='asc' ? ' ↑' : ' ↓') : '';
+    return `<th class="pcok-th ${active?'pcok-th--active':''}" ${key?`onclick="_cockpitSetSort('${key}')" style="cursor:pointer"`:''}>${label}${arrow}</th>`;
+  };
+  const head = `<tr>
+    ${th('priorite','!')}
+    ${th('', 'Réf / Client')}
+    ${det ? th('', 'Produit') : ''}
+    ${th('echeance','Échéance')}
+    ${th('retard','Retard')}
+    ${th('', 'Étape')}
+    ${th('operateur','Resp.')}
+    ${th('progression','Prog.')}
+    ${th('statut','Statut')}
+    <th class="pcok-th"></th>
+  </tr>`;
+  return `<div class="pcok-tablewrap"><table class="pcok-table pcok-table--${_cockpitDensity}"><thead>${head}</thead><tbody>${rows.map(_cockpitRow).join('')}</tbody></table></div>`;
+}
+
+function _cockpitRow(r) {
+  const det = _cockpitDensity === 'detaille';
+  const prioC = r.priorite==='Urgente'?'#dc2626':r.priorite==='Haute'?'#d97706':'#d6d3d1';
+  const prio = `<span class="pcok-prio" style="background:${prioC}" title="${r.priorite}"></span>`;
+  const ech = r.ymd ? new Date(r.ymd+'T00:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'}) : '—';
+  let retC = '#78716c', retTxt = '—';
+  if (r.isDone)              { retC='#16a34a'; retTxt='Terminé'; }
+  else if (r.days == null)   { retC = r.taskRetard?'#dc2626':'#a8a29e'; retTxt = r.taskRetard?'Retard':'—'; }
+  else if (r.days < 0)       { retC='#dc2626'; retTxt=`+${Math.abs(r.days)}j`; }
+  else if (r.days === 0)     { retC='#e8834a'; retTxt='Auj.'; }
+  else if (r.days === 1)     { retC='#e8834a'; retTxt='Demain'; }
+  else if (r.days <= 7)      { retC='#d97706'; retTxt=`${r.days}j`; }
+  else                       { retC='#78716c'; retTxt=`${r.days}j`; }
+  const retBadge = `<span class="pcok-ret" style="color:${retC};background:${retC}1a">${retTxt}</span>`;
+  const stC = r.curStep ? r.curStep.color : '#a8a29e';
+  const stepChip = r.curStep
+    ? `<span class="pcok-step" style="color:${stC};background:${stC}15;border-color:${stC}55">${_pcokEsc(r.curStep.short || r.curStep.label)}</span>`
+    : (r.isDone ? `<span class="pcok-step" style="color:#16a34a;background:#dcfce7;border-color:#bbf7d0">Livré</span>` : '<span class="pcok-muted">—</span>');
+  const running = r._hasRunning ? '<span class="pcok-run-dot"></span>' : '';
+  const resp = r.responsables.length
+    ? `${_pcokEsc(r.responsables[0])}${r.responsables.length>1?` <span class="pcok-muted">+${r.responsables.length-1}</span>`:''}`
+    : '<span class="pcok-muted">Non assigné</span>';
+  const pctC = r.pct===100?'#16a34a':r.pct>0?'#e8834a':'#a8a29e';
+  const prog = `<div class="pcok-prog"><div class="pcok-prog-bar"><div style="width:${r.pct}%;background:${pctC}"></div></div><span class="pcok-prog-n" style="color:${pctC}">${r.pct}%</span></div>`;
+  const stMap = { RETARD:['#dc2626','#fee2e2','En retard'], EN_COURS:['#d97706','#fef3c7','En cours'], A_FAIRE:['#2563eb','#dbeafe','À faire'], TERMINE:['#16a34a','#dcfce7','Terminé'] };
+  const [sc,sb,sl] = stMap[r.statut] || ['#78716c','#f5f5f4','—'];
+  const statut = `<span class="pcok-badge" style="color:${sc};background:${sb}">${sl}</span>`;
+  const accent = r.isDone ? '' : (r.days!=null && r.days<0) ? 'inset 3px 0 0 #dc2626' : (r.days===0||r.days===1) ? 'inset 3px 0 0 #e8834a' : r._hasRunning ? 'inset 3px 0 0 #2563eb' : '';
+  return `<tr class="pcok-row ${r.isDone?'pcok-row--done':''}" ${accent?`style="box-shadow:${accent}"`:''} onclick="openProdDrawer('${r.dossierId}')">
+    <td class="pcok-td-prio">${prio}</td>
+    <td class="pcok-td-client"><div class="pcok-client">${_pcokEsc(r.client)}</div><div class="pcok-ref">${_pcokEsc(r.ref)}</div></td>
+    ${det ? `<td class="pcok-td-prod">${_pcokEsc(r.produit) || '<span class="pcok-muted">—</span>'}</td>` : ''}
+    <td class="pcok-td-ech">${ech}</td>
+    <td class="pcok-td-ret">${retBadge}</td>
+    <td class="pcok-td-step">${stepChip}</td>
+    <td class="pcok-td-resp">${running}${resp}</td>
+    <td class="pcok-td-prog">${prog}</td>
+    <td class="pcok-td-statut">${statut}</td>
+    <td class="pcok-td-act"><svg class="pcok-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></td>
+  </tr>`;
+}
+
+// ── Panneau latéral (drawer) : pipeline complet d'un dossier ────────────────
+function openProdDrawer(dossierId) {
+  _ensureDossierLinks();
+  const r = _buildDossierRows().find(x => x.dossierId === dossierId);
+  const drawer = document.getElementById('prodDrawer');
+  const body   = document.getElementById('prodDrawerBody');
+  if (!r || !drawer || !body) { openAttribForDossier(dossierId); return; }
+  body.innerHTML = _cockpitDrawerContent(r);
+  drawer.classList.add('open');
+  document.body.classList.add('pcok-drawer-open');
+  _ensureChronoTick();
+}
+function closeProdDrawer() {
+  const drawer = document.getElementById('prodDrawer');
+  if (drawer) drawer.classList.remove('open');
+  document.body.classList.remove('pcok-drawer-open');
+}
+
+function _cockpitDrawerContent(r) {
+  const canAttrib = PAGE_ACCESS.attribution.includes(currentUser?.role);
+  const ech  = r.ymd ? new Date(r.ymd+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'2-digit',month:'long'}) : '—';
+  const dtxt = r.days==null ? '' : r.days<0 ? `${Math.abs(r.days)}j de retard` : r.days===0 ? "Aujourd'hui" : r.days===1 ? 'Demain' : `${r.days}j restants`;
+  const dCol = r.days!=null && r.days<0 ? '#dc2626' : (r.days===0||r.days===1) ? '#e8834a' : '#16a34a';
+  const prioC  = r.priorite==='Urgente'?'#dc2626':r.priorite==='Haute'?'#d97706':'#78716c';
+  const prioBg = r.priorite==='Urgente'?'#fee2e2':r.priorite==='Haute'?'#fef3c7':'#f5f5f4';
+  const stepsHtml = r.steps.map((s,i) => {
+    const col = s.status==='TERMINE'?'#16a34a':s.status==='EN_COURS'?'#d97706':s.status==='A_FAIRE'?'#2563eb':'#d6d3d1';
+    const lbl = s.status==='TERMINE'?'Terminé':s.status==='EN_COURS'?'En cours':s.status==='A_FAIRE'?'À faire':'—';
+    const ops = [...new Set(s.te.map(t=>t.operateur).filter(Boolean))].join(', ');
+    const retard = s.te.some(t => _getTacheRetardInfo(t).isRetard);
+    return `<div class="pcok-dstep ${s.status==='EN_COURS'?'pcok-dstep--active':''}">
+      <div class="pcok-dstep-rail">
+        <span class="pcok-dstep-dot" style="background:${col}">${s.status==='TERMINE'?'✓':i+1}</span>
+        ${i<r.steps.length-1?`<span class="pcok-dstep-line" style="background:${s.status==='TERMINE'?'#16a34a':'#e5e3df'}"></span>`:''}
+      </div>
+      <div class="pcok-dstep-body">
+        <div class="pcok-dstep-head"><span class="pcok-dstep-lbl">${_pcokEsc(s.e.label)}</span><span class="pcok-dstep-st" style="color:${col}">${lbl}${retard?' · <b style="color:#dc2626">retard</b>':''}</span></div>
+        ${ops?`<div class="pcok-dstep-ops">${_pcokEsc(ops)}</div>`:'<div class="pcok-dstep-ops pcok-muted">Non assigné</div>'}
+      </div>
+    </div>`;
+  }).join('');
+  return `<div class="pcok-drawer-head">
+      <div style="min-width:0">
+        <div class="pcok-drawer-ref">${_pcokEsc(r.ref)}</div>
+        <div class="pcok-drawer-client">${_pcokEsc(r.client)}</div>
+      </div>
+      <button class="pcok-drawer-close" onclick="closeProdDrawer()" aria-label="Fermer">×</button>
+    </div>
+    <div class="pcok-drawer-meta">
+      <span class="pcok-badge" style="color:${prioC};background:${prioBg}">${r.priorite}</span>
+      <span class="pcok-drawer-ech" style="color:${dCol}">${ech}${dtxt?' · '+dtxt:''}</span>
+    </div>
+    ${r.produit?`<div class="pcok-drawer-prod">${_pcokEsc(r.produit)}</div>`:''}
+    <div class="pcok-drawer-prog"><div class="pcok-prog-bar"><div style="width:${r.pct}%;background:${r.pct===100?'#16a34a':'#e8834a'}"></div></div><span>${r.pct}%</span></div>
+    <div class="pcok-drawer-pipe-title">Pipeline de production</div>
+    <div class="pcok-drawer-pipe">${stepsHtml}</div>
+    <div class="pcok-drawer-actions">
+      ${canAttrib?`<button class="pcok-btn pcok-btn--primary" onclick="closeProdDrawer();openAttribForDossier('${r.dossierId}')">Gérer l'attribution →</button>`:''}
+      <button class="pcok-btn" onclick="printDossier('${r.dossierId}')">Imprimer</button>
+    </div>`;
+}
+
+// ── Setters cockpit ─────────────────────────────────────────────────────────
+function _cockpitSetFilter(k){ _cockpitFilter = k; _cockpitLimit = _COCKPIT_PAGE; renderProdCockpit(); }
+function _cockpitSetOp(v){ _cockpitOp = v; _cockpitLimit = _COCKPIT_PAGE; renderProdCockpit(); }
+function _cockpitSetEtape(v){ _cockpitEtape = v; _cockpitLimit = _COCKPIT_PAGE; renderProdCockpit(); }
+function _cockpitSetSort(k){
+  if (_cockpitSort.key === k) _cockpitSort.dir = _cockpitSort.dir==='asc' ? 'desc' : 'asc';
+  else { _cockpitSort.key = k; _cockpitSort.dir = 'asc'; }
+  renderProdCockpit();
+}
+function _cockpitToggleSortDir(){ _cockpitSort.dir = _cockpitSort.dir==='asc' ? 'desc' : 'asc'; renderProdCockpit(); }
+function _cockpitToggleDensity(){ _cockpitDensity = _cockpitDensity==='compact' ? 'detaille' : 'compact'; renderProdCockpit(); }
+function _cockpitToggleOps(){ _cockpitOpsOpen = !_cockpitOpsOpen; renderProdCockpit(); }
+function _cockpitSetSearch(v){ _cockpitSearch = v; _cockpitLimit = _COCKPIT_PAGE; _cockpitRenderBody(); }
+function _cockpitShowMore(){ _cockpitLimit += _COCKPIT_PAGE; _cockpitRenderBody(); }
 
 async function pointerStart(tacheId) {
   const isLibre = tacheId.startsWith('TL_');
