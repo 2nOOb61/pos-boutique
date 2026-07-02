@@ -2211,6 +2211,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
     <div class="payment-tabs" style="margin-bottom:12px">
       <button class="payment-tab active" id="tabCmdFinCash" onclick="switchCmdFinPayTab('cash')">Espèces</button>
       <button class="payment-tab payment-tab-mobile" id="tabCmdFinMobile" onclick="switchCmdFinPayTab('mobile')">Mobile Money</button>
+      <button class="payment-tab" id="tabCmdFinCheque" onclick="switchCmdFinPayTab('cheque')">Chèque</button>
     </div>
     <div id="cmdFinCashSection">
       <div class="form-group"><label>Montant remis par le client (Ar)</label><input id="cmdFinGiven" type="number" placeholder="0" oninput="calcCmdFinChange()" /></div>
@@ -2227,6 +2228,12 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
         <button class="provider-btn" id="cmdFinProvBmoov" onclick="selectCmdFinProvider('Bmoov')">Bmoov</button>
       </div>
       <div class="form-group"><label>Référence transaction</label><input id="cmdFinMobileRef" placeholder="Ex: TX12345678" /></div>
+    </div>
+    <div id="cmdFinChequeSection" style="display:none">
+      <div class="form-group"><label>Banque</label><input id="cmdFinChequeBank" placeholder="Ex: BNI, BOA, BFV-SG, BMOI…" /></div>
+      <div class="form-group"><label>Numéro du chèque</label><input id="cmdFinChequeNumber" placeholder="Ex: 0012345" /></div>
+      <div class="form-group"><label>Titulaire du chèque</label><input id="cmdFinChequeTitulaire" placeholder="Nom inscrit sur le chèque" /></div>
+      <div class="form-group"><label>Date sur le chèque</label><input id="cmdFinChequeDate" type="date" /></div>
     </div>
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeModal('cmdFinalizeModal')">Annuler</button>
@@ -2981,7 +2988,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260702-attr-panel"></script>
+<script src="./app.js?v=20260702-cmd-cheque"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

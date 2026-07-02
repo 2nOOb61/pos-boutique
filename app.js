@@ -1489,6 +1489,11 @@ function printTicket(sale) {
       ? (sale.method==='cash'
         ? `<div class="row"><span>Espèces reçus</span><span>${fmt(sale.given)}</span></div>
            <div class="row"><span>Monnaie rendue</span><span>${fmt(sale.change)}</span></div>`
+        : sale.method==='cheque'
+        ? `<div class="row"><span>Chèque — Banque</span><span>${sale.provider||''}</span></div>
+           <div class="row"><span>N° du chèque</span><span>${sale.ref||''}</span></div>
+           ${sale.chequeTitulaire ? `<div class="row"><span>Titulaire</span><span>${sale.chequeTitulaire}</span></div>` : ''}
+           ${sale.chequeDate ? `<div class="row"><span>Date du chèque</span><span>${new Date(sale.chequeDate).toLocaleDateString('fr-FR')}</span></div>` : ''}`
         : `<div class="row"><span>Paiement mobile (${sale.provider})</span><span>${sale.ref||''}</span></div>`)
       : ''}
     <hr style="${st.sepSolid}"/>
@@ -5905,6 +5910,10 @@ function openCmdFinalizeModal(id) {
   document.getElementById('cmdFinGiven').value = '';
   document.getElementById('cmdFinChangeVal').textContent = '0 Ar';
   document.getElementById('cmdFinMobileRef').value = '';
+  const _cb = document.getElementById('cmdFinChequeBank');       if (_cb) _cb.value = '';
+  const _cn = document.getElementById('cmdFinChequeNumber');     if (_cn) _cn.value = '';
+  const _ct = document.getElementById('cmdFinChequeTitulaire');  if (_ct) _ct.value = '';
+  const _cd = document.getElementById('cmdFinChequeDate');       if (_cd) _cd.value = '';
   cmdFinalPayMode = 'cash';
   cmdFinalProvider = 'MVola';
   switchCmdFinPayTab('cash');
@@ -5915,8 +5924,12 @@ function switchCmdFinPayTab(mode) {
   cmdFinalPayMode = mode;
   document.getElementById('cmdFinCashSection').style.display  = mode==='cash'   ? 'block' : 'none';
   document.getElementById('cmdFinMobileSection').style.display = mode==='mobile' ? 'block' : 'none';
+  const chequeSec = document.getElementById('cmdFinChequeSection');
+  if (chequeSec) chequeSec.style.display = mode==='cheque' ? 'block' : 'none';
   document.getElementById('tabCmdFinCash').classList.toggle('active', mode==='cash');
   document.getElementById('tabCmdFinMobile').classList.toggle('active', mode==='mobile');
+  const tabCheque = document.getElementById('tabCmdFinCheque');
+  if (tabCheque) tabCheque.classList.toggle('active', mode==='cheque');
 }
 
 function calcCmdFinChange() {
@@ -5943,13 +5956,22 @@ function confirmCmdFinalize() {
     const given = parseFloat(document.getElementById('cmdFinGiven').value) || 0;
     if (given < c.restant) { showToast('Montant insuffisant !', 'error'); return; }
     _doCmdFinalize(c, 'cash', given, given - c.restant, null, null);
+  } else if (cmdFinalPayMode === 'cheque') {
+    const bank      = document.getElementById('cmdFinChequeBank').value.trim();
+    const number    = document.getElementById('cmdFinChequeNumber').value.trim();
+    const titulaire = document.getElementById('cmdFinChequeTitulaire').value.trim();
+    const dateCheque= document.getElementById('cmdFinChequeDate').value;
+    if (!bank)   { showToast('Veuillez saisir la banque du chèque.', 'error'); return; }
+    if (!number) { showToast('Veuillez saisir le numéro du chèque.', 'error'); return; }
+    // provider = banque, ref = numéro du chèque (réutilise le schéma de vente) ; titulaire + date stockés en extra
+    _doCmdFinalize(c, 'cheque', c.restant, 0, bank, number, { titulaire, date: dateCheque });
   } else {
     const ref = document.getElementById('cmdFinMobileRef').value.trim();
     _doCmdFinalize(c, 'mobile', c.restant, 0, cmdFinalProvider, ref);
   }
 }
 
-function _doCmdFinalize(c, method, given, change, provider, ref) {
+function _doCmdFinalize(c, method, given, change, provider, ref, chequeInfo) {
   const sale = {
     id:            nextSaleId++,
     date:          new Date().toISOString(),
@@ -5967,6 +5989,12 @@ function _doCmdFinalize(c, method, given, change, provider, ref) {
     ref:      ref      || '',
     fromCommande: c.id
   };
+  if (method === 'cheque' && chequeInfo) {
+    sale.chequeBank      = provider || '';
+    sale.chequeNumber    = ref      || '';
+    sale.chequeTitulaire = chequeInfo.titulaire || '';
+    sale.chequeDate      = chequeInfo.date      || '';
+  }
   c.items.forEach(item => {
     if (!item.custom) {
       const p = products.find(pr => pr.name === item.name);
