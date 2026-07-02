@@ -13483,11 +13483,12 @@ function renderPatronDashboard() {
   </div>`;
 
   // ── Ventes par jour — détail par commercial (liste dépliable) ──
-  // Clé = jour LOCAL (comme les KPI « aujourd'hui ») et non la date UTC de l'ISO,
-  // sinon à Madagascar (UTC+3) une vente du matin tombe dans le jour UTC précédent.
+  // Le serveur stocke la date en « dd/MM/yyyy » (jour d'abord) — parseSaleDate/saleDateKey
+  // (qui attendent l'ISO) la mal-interprètent. On passe par _parseFRDate qui gère
+  // dd/MM/yyyy ET ISO, puis on dérive un jour LOCAL (cohérent avec « aujourd'hui »).
   const _localDayKey = str => {
-    const d = parseSaleDate(str);
-    if (!d || isNaN(d)) return saleDateKey(str);
+    const d = _parseFRDate(str);
+    if (!d || isNaN(d)) return '';
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   };
   const byDay = {};
@@ -13514,12 +13515,17 @@ function renderPatronDashboard() {
           .sort((a, b) => b[1].reduce((x, s) => x + (Number(s.total) || 0), 0) - a[1].reduce((x, s) => x + (Number(s.total) || 0), 0))
           .map(([nom, arr]) => {
             const comTotal = arr.reduce((a, s) => a + (Number(s.total) || 0), 0);
+            const _heureOf = s => {
+              // Le serveur fournit s.time = « HH:mm:ss » ; sinon on lit l'heure de la date (ISO local)
+              if (s.time && /\d{1,2}:\d{2}/.test(s.time)) return String(s.time).slice(0, 5);
+              const d = _parseFRDate(s.date);
+              return d && !isNaN(d) ? d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
+            };
             const saleLines = arr
-              .sort((a, b) => (parseSaleDate(b.date) || 0) - (parseSaleDate(a.date) || 0))
+              .sort((a, b) => String(b.time || '').localeCompare(String(a.time || '')))
               .map(s => {
                 const items = (s.items || []).map(i => `${i.name || '?'} ×${i.qty || 1}`).join(', ') || '—';
-                const t = parseSaleDate(s.date);
-                const heure = t && !isNaN(t) ? t.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
+                const heure = _heureOf(s);
                 return `<div class="pdb-day-sale">
                   <div style="min-width:0"><span style="color:#a8a29e">${heure}</span> <span style="font-weight:600;color:#1c1917">${s.clientName || 'Client'}</span> <span style="color:#78716c">${items}</span></div>
                   <div style="font-weight:700;color:#1a4a3a;white-space:nowrap">${fmt(s.total)}</div>
