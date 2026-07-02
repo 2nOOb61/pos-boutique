@@ -26,7 +26,7 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20260630-edititems">
+<link rel="stylesheet" href="./style.css?v=20260702-calplan">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
@@ -1967,41 +1967,102 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
   <div class="page" id="page-calendrier" data-roles="admin,commerciale,chef_atelier,gestionnaire">
     <div class="page-topbar">
       <div>
-        <h1 class="page-title">Calendrier</h1>
-        <p class="page-subtitle">Planifiez la production et suivez les échéances de livraison client</p>
+        <h1 class="page-title">Planification production &amp; livraisons</h1>
+        <p class="page-subtitle">Organisez et suivez vos productions et vos échéances de livraison client</p>
       </div>
-      <div class="cal-toolbar">
-        <div class="cal-nav">
-          <button class="cal-nav-btn" onclick="calShift(-1)" aria-label="Mois précédent" title="Mois précédent">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-          </button>
-          <span class="cal-month-label" id="calMonthLabel">—</span>
-          <button class="cal-nav-btn" onclick="calShift(1)" aria-label="Mois suivant" title="Mois suivant">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-          </button>
-        </div>
-        <button class="cal-btn" onclick="calToday()" title="Revenir au mois courant">Aujourd'hui</button>
-        <button class="cal-btn cal-btn-print" onclick="printCalendrier()" title="Imprimer les deux calendriers">
-          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
-          Imprimer
+      <button class="cal-btn cal-btn-print" onclick="printCalendrier()" title="Imprimer les deux calendriers">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+        Imprimer
+      </button>
+    </div>
+
+    <!-- Barre de filtres sticky commune aux deux calendriers -->
+    <div class="cal-fbar" id="calFbar">
+      <div class="cal-nav">
+        <button class="cal-nav-btn" onclick="calShift(-1)" aria-label="Mois précédent" title="Mois précédent">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <span class="cal-month-label" id="calMonthLabel">—</span>
+        <button class="cal-nav-btn" onclick="calShift(1)" aria-label="Mois suivant" title="Mois suivant">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
         </button>
       </div>
+      <button class="cal-today-btn" onclick="calToday()" title="Revenir au mois courant">Aujourd'hui</button>
+      <span class="cal-fbar-sep"></span>
+      <select class="cal-fsel" id="calFilterClient" onchange="setCalFilter('client',this.value)" aria-label="Filtrer par client"><option value="">Client</option></select>
+      <select class="cal-fsel" id="calFilterStatut" onchange="setCalFilter('status',this.value)" aria-label="Filtrer par statut">
+        <option value="">Statut</option>
+        <option value="active">En cours</option>
+        <option value="late">En retard</option>
+        <option value="completed">Terminé</option>
+      </select>
+      <select class="cal-fsel" id="calFilterResp" onchange="setCalFilter('resp',this.value)" aria-label="Filtrer par responsable"><option value="">Responsable</option></select>
+      <select class="cal-fsel" id="calFilterType" onchange="setCalFilter('type',this.value)" aria-label="Filtrer par type">
+        <option value="">Type</option>
+        <option value="commande">Commande</option>
+        <option value="reservation">Réservation</option>
+        <option value="livraison">Livraison</option>
+        <option value="retrait">Retrait</option>
+      </select>
+      <div class="cal-search">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="calSearch" type="search" placeholder="Rechercher un client…" oninput="setCalFilter('q',this.value)" />
+      </div>
     </div>
+
+    <!-- Ligne KPI compacte -->
+    <div class="cal-kpis" id="calKpis">
+      <div class="cal-kpi">
+        <span class="cal-kpi-ic ic-red"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg></span>
+        <span class="cal-kpi-txt"><b id="calKpiRetardProd">0</b><small>En retard production</small></span>
+      </div>
+      <div class="cal-kpi">
+        <span class="cal-kpi-ic ic-amber"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="14" x2="15" y2="20"/><line x1="15" y1="14" x2="9" y2="20"/></svg></span>
+        <span class="cal-kpi-txt"><b id="calKpiRetardLiv">0</b><small>En retard livraison</small></span>
+      </div>
+      <div class="cal-kpi">
+        <span class="cal-kpi-ic ic-violet"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><rect x="9" y="12" width="6" height="9"/></svg></span>
+        <span class="cal-kpi-txt"><b id="calKpiProdAuj">0</b><small>À produire aujourd'hui</small></span>
+      </div>
+      <div class="cal-kpi">
+        <span class="cal-kpi-ic ic-teal"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="6" width="13" height="11" rx="1"/><path d="M14 9h4l3 3v5h-7z"/><circle cx="6" cy="19" r="2"/><circle cx="17" cy="19" r="2"/></svg></span>
+        <span class="cal-kpi-txt"><b id="calKpiLivAuj">0</b><small>À livrer aujourd'hui</small></span>
+      </div>
+      <div class="cal-kpi">
+        <span class="cal-kpi-ic ic-gray"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.5-3 4"/><line x1="12" y1="17" x2="12" y2="17.5"/></svg></span>
+        <span class="cal-kpi-txt"><b id="calKpiSansDate">0</b><small>Commandes sans date</small></span>
+      </div>
+    </div>
+
     <div class="cal-grid-wrap" id="calGridWrap">
       <section class="cal-cal" id="calProd">
         <div class="cal-cal-head cal-head-prod">
-          <span class="cal-cal-title">🏭 Production</span>
+          <span class="cal-cal-title">Production planifiée</span>
           <span class="cal-cal-sub">Dates de production planifiées</span>
         </div>
         <div class="cal-month" id="calMonthProd"></div>
       </section>
       <section class="cal-cal" id="calClient">
         <div class="cal-cal-head cal-head-client">
-          <span class="cal-cal-title">📦 Échéances client</span>
+          <span class="cal-cal-title">Livraison / retrait client</span>
           <span class="cal-cal-sub">Dates de livraison / retrait client</span>
         </div>
         <div class="cal-month" id="calMonthClient"></div>
       </section>
+    </div>
+
+    <!-- Légende commune -->
+    <div class="cal-legend" id="calLegend">
+      <span class="cal-lg"><i class="cal-lg-dot" style="background:#7c3aed"></i>Production</span>
+      <span class="cal-lg"><i class="cal-lg-dot" style="background:#0d9488"></i>Livraison</span>
+      <span class="cal-lg"><i class="cal-lg-dot" style="background:#dc2626"></i>Urgent</span>
+      <span class="cal-lg"><i class="cal-lg-dot" style="background:#d97706"></i>En retard</span>
+      <span class="cal-lg"><i class="cal-lg-dot" style="background:#9ca3af"></i>Terminé</span>
+      <span class="cal-lg"><i class="cal-lg-dot" style="background:#cbd5e1"></i>Sans date</span>
+      <span class="cal-lg cal-lg-link">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#7c3aed" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>
+        Lien production → livraison
+      </span>
     </div>
   </div>
 
@@ -2016,6 +2077,9 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 </aside>
 <aside id="cmdDrawer" class="pcok-drawer" aria-label="Détail de la commande">
   <div id="cmdDrawerBody" class="pcok-drawer-body"></div>
+</aside>
+<aside id="calDrawer" class="pcok-drawer" aria-label="Détail de la commande planifiée">
+  <div id="calDrawerBody" class="pcok-drawer-body"></div>
 </aside>
 <aside id="delivDrawer" class="pcok-drawer" aria-label="Détail de la livraison">
   <div id="delivDrawerBody" class="pcok-drawer-body"></div>
@@ -2988,7 +3052,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260702-cmd-cheque"></script>
+<script src="./app.js?v=20260702-calplan"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

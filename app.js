@@ -11000,6 +11000,7 @@ function _collectDeliveries() {
       status:     c.status,
       mode:       c.deliveryMode === 'livraison' ? 'livraison' : 'retrait',
       address:    c.adresseLivraison || '',
+      notes:      c.notes || '',
       dateClient: _toIsoDate(c.dateLivraison || ''),
       dateProd:   _toIsoDate(c.dateLivraisonProd || ''),
       dossierId:  c.dossierId || ''
@@ -11018,6 +11019,7 @@ function _collectDeliveries() {
       status:     r.status,
       mode:       r.deliveryMode === 'livraison' ? 'livraison' : 'retrait',
       address:    r.deliveryAddress || '',
+      notes:      r.notes || '',
       dateClient: _toIsoDate(r.deliveryDate || ''),
       dateProd:   '',
       dossierId:  r.dossierId || ''
@@ -11112,6 +11114,106 @@ function _delivBuildRows() {
 let _calRef = (function(){ const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); })();
 const _CAL_MONTHS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 const _CAL_DOWS   = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
+const _CAL_LINK_SVG = '<span class="cal-chip-link" title="Lié à sa livraison"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12a4 4 0 0 0 5.7 0l2.6-2.6a4 4 0 0 0-5.7-5.7l-.8.8"/><path d="M15 12a4 4 0 0 0-5.7 0L6.7 14.6a4 4 0 0 0 5.7 5.7l.8-.8"/></svg></span>';
+
+// État des filtres communs aux deux calendriers.
+let _calFilters = { client:'', status:'', resp:'', type:'', q:'' };
+// Cache des paires production↔livraison + délais courts, recalculé à chaque rendu.
+let _calPair = { linked:{}, short:{} };
+
+function setCalFilter(field, value){
+  if(!(field in _calFilters)) return;
+  _calFilters[field] = (value||'').trim ? value.trim() : (value||'');
+  renderCalendrier();
+}
+
+// Filtres hors statut (utilisés aussi pour les KPI).
+function _calMatchesBase(e){
+  const f = _calFilters;
+  if(f.client && e.client !== f.client) return false;
+  if(f.resp && (e.commercial||'') !== f.resp) return false;
+  if(f.type){
+    if((f.type==='commande'||f.type==='reservation') && e.kind !== f.type) return false;
+    if((f.type==='livraison'||f.type==='retrait') && e.mode !== f.type) return false;
+  }
+  if(f.q){
+    const q = f.q.toLowerCase();
+    const hay = (String(e.client||'')+' '+String(e.ref||'')+' '+(e.items||[]).map(i=>i.name).join(' ')+' '+String(e.commercial||'')).toLowerCase();
+    if(!hay.includes(q)) return false;
+  }
+  return true;
+}
+
+// Écart en jours entre deux dates ISO (b - a). null si invalide.
+function _calGapDays(a, b){
+  if(!a || !b) return null;
+  const da = new Date(a+'T00:00:00'), db = new Date(b+'T00:00:00');
+  if(isNaN(da.getTime()) || isNaN(db.getTime())) return null;
+  return Math.round((db - da) / 86400000);
+}
+
+// Détecte les commandes présentes dans les deux calendriers (lien) et celles
+// dont la production est trop proche de la livraison (délai court).
+function _calBuildPairs(){
+  const linked = {}, short = {};
+  _collectDeliveries().forEach(x=>{
+    if(x.status==='cancelled') return;
+    if(x.dateProd && x.dateClient){
+      const key = x.kind+':'+x.id;
+      linked[key] = true;
+      const gap = _calGapDays(x.dateProd, x.dateClient);
+      if(gap!==null && gap <= 1) short[key] = true;   // prod le même jour, la veille, ou après la livraison
+    }
+  });
+  return { linked, short };
+}
+
+// KPI compacts calculés sur l'ensemble des livraisons (hors filtre statut).
+function _calComputeKpis(){
+  const today = _calTodayIso();
+  let retardProd=0, retardLiv=0, prodAuj=0, livAuj=0, sansDate=0;
+  _collectDeliveries().forEach(x=>{
+    if(x.status==='cancelled') return;
+    if(!_calMatchesBase(x)) return;
+    const done = x.status==='completed';
+    const dp = x.dateProd, dc = x.dateClient;
+    if(dp && !done && dp <  today) retardProd++;
+    if(dc && !done && dc <  today) retardLiv++;
+    if(dp && !done && dp === today) prodAuj++;
+    if(dc && !done && dc === today) livAuj++;
+    if(!dp && !dc) sansDate++;
+  });
+  return { retardProd, retardLiv, prodAuj, livAuj, sansDate };
+}
+
+// Remplit les listes déroulantes Client / Responsable en préservant la sélection.
+function _calPopulateFilters(){
+  const dels = _collectDeliveries().filter(x=>x.status!=='cancelled');
+  const clients = [...new Set(dels.map(x=>x.client).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'fr'));
+  const resps   = [...new Set(dels.map(x=>x.commercial).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'fr'));
+  const fill = (id, label, values, current) => {
+    const sel = document.getElementById(id);
+    if(!sel) return;
+    sel.innerHTML = `<option value="">${label}</option>` + values.map(v=>`<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
+    sel.value = current && values.includes(current) ? current : '';
+    if(sel.value !== current) _calFilters[id==='calFilterClient'?'client':'resp'] = sel.value;
+  };
+  fill('calFilterClient', 'Client', clients, _calFilters.client);
+  fill('calFilterResp',   'Responsable', resps, _calFilters.resp);
+  const st = document.getElementById('calFilterStatut'); if(st) st.value = _calFilters.status;
+  const tp = document.getElementById('calFilterType');   if(tp) tp.value = _calFilters.type;
+}
+
+// Injecte les valeurs des KPI dans la ligne compacte.
+function _calRenderKpis(){
+  const k = _calComputeKpis();
+  const set = (id,v)=>{ const el=document.getElementById(id); if(el) el.textContent = v; };
+  set('calKpiRetardProd', k.retardProd);
+  set('calKpiRetardLiv',  k.retardLiv);
+  set('calKpiProdAuj',    k.prodAuj);
+  set('calKpiLivAuj',     k.livAuj);
+  set('calKpiSansDate',   k.sansDate);
+}
 
 function calShift(delta){ _calRef = new Date(_calRef.getFullYear(), _calRef.getMonth()+delta, 1); renderCalendrier(); }
 function calToday(){ const d = new Date(); _calRef = new Date(d.getFullYear(), d.getMonth(), 1); renderCalendrier(); }
@@ -11138,11 +11240,21 @@ function _calEvents(kind){
 // Groupe les événements d'un calendrier par jour, limité au mois affiché.
 function _calByDay(kind){
   const year = _calRef.getFullYear(), month = _calRef.getMonth();
+  const todayIso = _calTodayIso();
   const byDay = {};
   _calEvents(kind).forEach(e=>{
     if(e.status==='cancelled') return;
     const d = new Date(e.ymd+'T00:00:00');
     if(isNaN(d.getTime()) || d.getFullYear()!==year || d.getMonth()!==month) return;
+    if(!_calMatchesBase(e)) return;
+    const st = _calFilters.status;
+    if(st){
+      const done = e.status==='completed';
+      const late = !done && e.ymd < todayIso;
+      if(st==='completed' && !done) return;
+      if(st==='active'    && (done || late)) return;
+      if(st==='late'      && !late) return;
+    }
     (byDay[e.ymd] = byDay[e.ymd]||[]).push(e);
   });
   return byDay;
@@ -11165,14 +11277,25 @@ function _calRenderMonth(kind){
     const evs = byDay[iso] || [];
     const isToday = iso===todayIso;
     const chips = evs.slice(0,4).map(e=>{
-      const done = e.status==='completed';
-      const late = !done && iso < todayIso;
-      const cls = done?'done':late?'late':'ok';
-      const art = (e.items||[]).map(i=>`${i.name} ×${i.qty||1}`).join(', ');
-      return `<button type="button" class="cal-chip cal-chip-${cls}" onclick="_calOpen('${e.kind}','${e.id}','${e.dossierId}')" title="${escapeHtml(e.client)}${art?' — '+escapeHtml(art):''}">
-        <span class="cal-chip-client">${escapeHtml(e.client)}</span>${art?`<span class="cal-chip-items">${escapeHtml(art)}</span>`:''}</button>`;
+      const done  = e.status==='completed';
+      const late  = !done && iso < todayIso;
+      const key   = e.kind+':'+e.id;
+      const linked = !!_calPair.linked[key];
+      const short  = !!_calPair.short[key] && !done;
+      const base  = kind==='prod' ? 'prod' : 'liv';
+      const cls   = done?'done':late?'late':base;
+      const items = e.items||[];
+      const first = items.length ? items[0].name + (items.length>1?' +'+(items.length-1):'') : '';
+      const qty   = items.reduce((s,i)=>s+(Number(i.qty)||1),0);
+      const dot   = done?'#9ca3af':late?'#d97706':short?'#dc2626':(kind==='prod'?'#7c3aed':'#0d9488');
+      const art   = items.map(i=>`${i.name} ×${i.qty||1}`).join(', ');
+      const tip   = `${e.client}${art?' — '+art:''}${short?' — délai court (production proche de la livraison)':''}`;
+      return `<button type="button" class="cal-chip cal-chip--${cls}${linked?' cal-chip-linked':''}${short?' cal-chip-urgent':''}" onclick="_calOpenDetail('${e.kind}','${e.id}','${e.dossierId}')" title="${escapeHtml(tip)}">
+        <span class="cal-chip-head"><span class="cal-chip-client">${escapeHtml(e.client)}</span><span class="cal-chip-badges">${linked?_CAL_LINK_SVG:''}${qty?`<span class="cal-chip-qty">×${qty}</span>`:''}</span></span>
+        ${first?`<span class="cal-chip-items">${escapeHtml(first)}</span>`:''}
+        <span class="cal-chip-foot"><span class="cal-dot" style="background:${dot}"></span>${short?'<span class="cal-chip-warn">Délai court</span>':''}</span></button>`;
     }).join('');
-    const more = evs.length>4 ? `<span class="cal-more">+${evs.length-4}</span>` : '';
+    const more = evs.length>4 ? `<span class="cal-more" onclick="_calOpenDetail('${evs[4].kind}','${evs[4].id}','${evs[4].dossierId}')">+${evs.length-4} autres</span>` : '';
     grid += `<div class="cal-day${isToday?' cal-day-today':''}${evs.length?' cal-day-has':''}">
       <span class="cal-daynum">${day}</span>
       <div class="cal-chips">${chips}${more}</div>
@@ -11185,6 +11308,9 @@ function _calRenderMonth(kind){
 function renderCalendrier(){
   if(!document.getElementById('page-calendrier')) return;
   if(typeof _syncDossierDates==='function') _syncDossierDates();
+  _calPair = _calBuildPairs();
+  _calPopulateFilters();
+  _calRenderKpis();
   const lbl = document.getElementById('calMonthLabel');
   if(lbl) lbl.textContent = _CAL_MONTHS[_calRef.getMonth()]+' '+_calRef.getFullYear();
   const p = document.getElementById('calMonthProd');   if(p) p.innerHTML = _calRenderMonth('prod');
@@ -11194,6 +11320,63 @@ function renderCalendrier(){
 // Ouvre la source (dossier/commande/réservation) au clic sur un événement.
 function _calOpen(kind, id, dossierId){
   if(typeof _openDeliverySource==='function') _openDeliverySource(kind, id, dossierId);
+}
+
+// Ouvre le panneau détail à droite au clic sur une commande planifiée.
+function _calOpenDetail(kind, id, dossierId){
+  const x = _collectDeliveries().find(d => d.kind===kind && String(d.id)===String(id));
+  const body = document.getElementById('calDrawerBody');
+  const drawer = document.getElementById('calDrawer');
+  if(!x || !body || !drawer){ if(typeof _openDeliverySource==='function') _openDeliverySource(kind, id, dossierId); return; }
+  const today = _calTodayIso();
+  const done  = x.status==='completed';
+  const key   = x.kind+':'+x.id;
+  const short = !!_calPair.short[key] && !done;
+  const lateLiv = x.dateClient && !done && x.dateClient < today;
+  let badge, bg, fg;
+  if(done)        { badge='Terminé';   bg='#f3f4f6'; fg='#4b5563'; }
+  else if(short)  { badge='Urgent';    bg='#fbecec'; fg='#a32d2d'; }
+  else if(lateLiv){ badge='En retard'; bg='#faeeda'; fg='#854f0b'; }
+  else            { badge='En cours';  bg='#e4f3ec'; fg='#0f6e56'; }
+  const showMoney = _DELIV_MONEY_ROLES.includes(currentUser?.role);
+  const items = x.items||[];
+  const prod  = items.length ? items.map(i=>`${i.name} ×${i.qty||1}`).join(', ') : '—';
+  const qty   = items.reduce((s,i)=>s+(Number(i.qty)||1),0) || '—';
+  const dProd = _dispDate(x.dateProd) || 'Non planifiée';
+  const dCli  = _dispDate(x.dateClient) || 'Non planifiée';
+  const gap   = _calGapDays(x.dateProd, x.dateClient);
+  const modeLabel = x.mode==='livraison' ? 'Livraison' + (x.address?' — '+x.address:'') : 'Retrait boutique';
+  const svg = (p)=>`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+  body.innerHTML = `
+    <div class="cal-dt-head">
+      <div>
+        <div class="cal-dt-client">${escapeHtml(x.client)}</div>
+        <div class="cal-dt-ref">${escapeHtml(x.ref||'')} · ${x.kind==='reservation'?'Réservation':'Commande'}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="cal-dt-badge" style="background:${bg};color:${fg}">${badge}</span>
+        <button class="cal-dt-close" onclick="closeDrawers()" aria-label="Fermer">&times;</button>
+      </div>
+    </div>
+    ${short?`<div class="cal-dt-alert">${svg('<path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>')} Délai court — la production est proche de la livraison${gap!==null?` (${gap<=0?'même jour ou après':'1 jour d\'écart'})`:''}.</div>`:''}
+    <div class="cal-dt-fields">
+      <div class="cal-dt-f"><label>${svg('<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>')}Client</label><span>${escapeHtml(x.client)}${x.contact?` · ${escapeHtml(x.contact)}`:''}</span></div>
+      <div class="cal-dt-f"><label>${svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/>')}Produit / tâche</label><span>${escapeHtml(prod)}</span></div>
+      <div class="cal-dt-f"><label>${svg('<path d="M3 7h18"/><path d="M6 7v13h12V7"/><path d="M9 7V4h6v3"/>')}Quantité</label><span>${qty}</span></div>
+      <div class="cal-dt-f"><label>${svg('<path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/>')}Date production</label><span>${dProd}</span></div>
+      <div class="cal-dt-f"><label>${svg('<rect x="1" y="6" width="13" height="11" rx="1"/><path d="M14 9h4l3 3v5h-7z"/>')}Date livraison</label><span>${dCli}${lateLiv?' · <span style="color:#a32d2d">en retard</span>':''}</span></div>
+      <div class="cal-dt-f"><label>${svg('<path d="M12 3v3"/><circle cx="12" cy="9" r="3"/><path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/>')}Mode</label><span>${escapeHtml(modeLabel)}</span></div>
+      <div class="cal-dt-f"><label>${svg('<circle cx="12" cy="8" r="3.2"/><path d="M5 20a7 7 0 0 1 14 0"/>')}Responsable</label><span>${escapeHtml(x.commercial||'Non attribué')}</span></div>
+      ${showMoney?`<div class="cal-dt-f"><label>${svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v10M9 10h4a2 2 0 0 1 0 4H9"/>')}Total</label><span>${fmt(x.total)}</span></div>`:''}
+      <div class="cal-dt-f"><label>${svg('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>')}Commentaires</label><span class="cal-dt-note">${escapeHtml(x.notes || 'Aucun commentaire.')}</span></div>
+    </div>
+    <div class="cal-dt-acts">
+      <button class="cal-dt-btn primary" onclick="closeDrawers(); _openDeliverySource('${x.kind}','${x.id}','${x.dossierId||''}')">${svg('<path d="M11 4h9"/><path d="M11 9h9"/><path d="M4 4l3 3-3 3"/><path d="M11 14h9M4 14l3 3-3 3"/>')} Ouvrir la fiche</button>
+      <button class="cal-dt-btn" onclick="_delivPrintOne('${x.kind}','${x.id}')">${svg('<polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>')} Imprimer le bon</button>
+    </div>`;
+  document.querySelectorAll('.pcok-drawer.open').forEach(d=>d.classList.remove('open'));
+  drawer.classList.add('open');
+  document.body.classList.add('pcok-drawer-open');
 }
 
 // Impression A4 paysage des deux calendriers du mois affiché.
