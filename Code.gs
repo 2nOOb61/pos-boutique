@@ -228,7 +228,7 @@ function initSheets() {
 
   // Feuilles existantes POS (préservées telles quelles)
   ensureSheet(ss, SHEET_PRODUCTS,   ['ID','Nom','Categorie','Emoji','Code','Prix_Vente','Prix_Achat','Stock','Stock_Min','Date_MAJ']);
-  ensureSheet(ss, SHEET_SALES,      ['ID','Date','Heure','Article','Quantite','Prix_Unitaire','Sous_Total','Total_Vente','Paiement','Fournisseur','Reference','Caissier']);
+  ensureSheet(ss, SHEET_SALES,      ['ID','Date','Heure','Article','Quantite','Prix_Unitaire','Sous_Total','Total_Vente','Paiement','Fournisseur','Reference','Caissier','Titulaire_Cheque','Date_Cheque']);
   ensureSheet(ss, SHEET_STOCK_LOG,  ['Date','Article','Type','Quantite','Stock_Avant','Stock_Apres','Motif','Caissier']);
   ensureSheet(ss, SHEET_USERS,      ['Username','MotDePasse','Role','Nom','Actif']);
   // Réservations — ajouter col 22 Attachments_JSON si absente
@@ -377,17 +377,33 @@ function handleAddSale(data) {
   const tz   = Session.getScriptTimeZone();
   const dateS = Utilities.formatDate(d, tz, 'dd/MM/yyyy');
   const timeS = Utilities.formatDate(d, tz, 'HH:mm:ss');
-  const modePaiement = sale.method === 'cash' ? 'Espèces' : 'Mobile Money';
+  const modePaiement = sale.method === 'cash'   ? 'Espèces'
+                     : sale.method === 'cheque' ? 'Chèque'
+                     : 'Mobile Money';
+
+  // Infos chèque (colonnes 13-14). Pour un chèque : provider=banque, ref=numéro (déjà écrits) ;
+  // titulaire + date du chèque stockés en plus.
+  let chequeDateS = '';
+  if (sale.method === 'cheque' && sale.chequeDate) {
+    const cd = new Date(String(sale.chequeDate) + 'T00:00:00');
+    chequeDateS = isNaN(cd.getTime()) ? String(sale.chequeDate) : Utilities.formatDate(cd, tz, 'dd/MM/yyyy');
+  }
+  // La feuille Ventes a pu être créée avant l'ajout de ces 2 colonnes → poser l'en-tête si absent.
+  if (sh.getLastColumn() < 14) {
+    sh.getRange(1, 13, 1, 2).setValues([['Titulaire_Cheque','Date_Cheque']])
+      .setBackground('#1a4a3a').setFontColor('#ffffff').setFontWeight('bold');
+  }
 
   // Écriture batch : une seule requête Sheets pour tous les articles (x5-10 plus rapide)
   const batchRows = sale.items.map(item => [
     sale.id, dateS, timeS, item.name, item.qty, item.price,
     item.price * item.qty, sale.total,
-    modePaiement, sale.provider||'', sale.ref||'', sale.caissier||''
+    modePaiement, sale.provider||'', sale.ref||'', sale.caissier||'',
+    sale.chequeTitulaire||'', chequeDateS
   ]);
   if (batchRows.length > 0) {
     const lastRow = sh.getLastRow();
-    sh.getRange(lastRow + 1, 1, batchRows.length, 12).setValues(batchRows);
+    sh.getRange(lastRow + 1, 1, batchRows.length, 14).setValues(batchRows);
   }
 
   // Stock + log (gardés séquentiels pour le LockService)
