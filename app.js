@@ -5753,6 +5753,9 @@ function _cmdRow(r) {
   const stMap = { pending:['#d97706','#fef3c7','En cours'], completed:['#16a34a','#dcfce7','Livrée'], cancelled:['#78716c','#f5f5f4','Annulée'] };
   const [sc,sb,sl] = stMap[r.status] || ['#78716c','#f5f5f4','—'];
   const statut = `<span class="pcok-badge" style="color:${sc};background:${sb}">${sl}</span>`;
+  // Demande de modification / annulation en attente → pastille visible (validation dans le drawer)
+  const _pmod = _pendingModFor(r.id);
+  const modChip = _pmod ? `<span class="pcok-badge" style="color:#b45309;background:#fef3c7;margin-left:4px" title="Demande ${_pmod.type==='cancel'?"d'annulation":'de modification'} en attente — ouvrir pour valider">⏳ ${_pmod.type==='cancel'?'Annul.':'Modif'}</span>` : '';
   const modeChip = `<span style="font-size:9px;font-weight:700;color:${r.mode==='livraison'?'#c2410c':'#1a4a3a'}">${r.mode==='livraison'?'LIV':'RET'}</span>`;
   const accent = r.status==='cancelled' ? '' : r.status==='completed' ? '' : (r.days!=null&&r.days<0) ? 'inset 3px 0 0 #dc2626' : (r.days===0||r.days===1) ? 'inset 3px 0 0 #e8834a' : r.restant>0 ? 'inset 3px 0 0 #d97706' : '';
   return `<tr class="pcok-row ${r.status==='cancelled'?'pcok-row--done':''}" ${accent?`style="box-shadow:${accent}"`:''} onclick="openCmdDrawer('${r.id}')">
@@ -5764,7 +5767,7 @@ function _cmdRow(r) {
     <td class="pcok-num" style="font-weight:700">${fmt(r.total)}</td>
     <td class="pcok-num" style="color:${restC};font-weight:700">${restTxt}</td>
     ${det ? `<td class="pcok-td-prog">${prodCell}</td>` : ''}
-    <td class="pcok-td-statut">${statut}</td>
+    <td class="pcok-td-statut">${statut}${modChip}</td>
     <td class="pcok-td-act"><svg class="pcok-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></td>
   </tr>`;
 }
@@ -5784,6 +5787,7 @@ function openCmdDrawer(id) {
 
 function _cmdDrawerContent(c) {
   const r = _buildCommandeRows().find(x => String(x.id) === String(c.id)) || {};
+  const _pmod = _pendingModFor(c.id); // demande en attente → bandeau + boutons valider/refuser (admin)
   const dCmd = r.dcmd ? r.dcmd.toLocaleString('fr-FR') : '—';
   const stMap = { pending:['#d97706','#fef3c7','En cours'], completed:['#16a34a','#dcfce7','Livrée'], cancelled:['#78716c','#f5f5f4','Annulée'] };
   const [sc,sb,sl] = stMap[c.status] || ['#78716c','#f5f5f4','—'];
@@ -5819,6 +5823,7 @@ function _cmdDrawerContent(c) {
       <span style="font-size:11px;color:var(--color-text-muted);margin-left:auto">${dCmd}</span>
     </div>
     ${livTxt?`<div class="pcok-drawer-ech" style="color:${dCol};margin-bottom:12px">Livraison : ${livTxt}${dtxt?' · '+dtxt:''}</div>`:''}
+    ${_pmod ? _buildModBanner(c, _pmod) : ''}
     <div class="pcok-pay">
       <div class="pcok-pay-c"><div class="pcok-pay-l">Total</div><div class="pcok-pay-v">${fmt(c.total)}</div></div>
       <div class="pcok-pay-c"><div class="pcok-pay-l">Acompte</div><div class="pcok-pay-v" style="color:#16a34a">${fmt(c.accompte)}</div></div>
@@ -6363,6 +6368,7 @@ function approveCommandeModif(modId) {
   mod.statut = 'approved';
   mod.resoluPar = currentUser?.label || 'Admin';
   mod.resoluLe = new Date().toISOString();
+  if (typeof closeDrawers === 'function') closeDrawers(); // ferme le drawer cockpit si ouvert (évite un affichage périmé)
   renderCommandes();
   if (APPS_SCRIPT_URL) apiCall({ action: 'resolveModif', id: mod.id, statut: 'approved', resoluPar: mod.resoluPar }).catch(() => {});
   _addNotification({
@@ -6385,6 +6391,7 @@ function rejectCommandeModif(modId) {
   mod.resoluPar = currentUser?.label || 'Admin';
   mod.resoluLe = new Date().toISOString();
   mod.motif = motif.trim();
+  if (typeof closeDrawers === 'function') closeDrawers(); // ferme le drawer cockpit si ouvert
   renderCommandes();
   if (APPS_SCRIPT_URL) apiCall({ action: 'resolveModif', id: mod.id, statut: 'rejected', resoluPar: mod.resoluPar, motif: mod.motif }).catch(() => {});
   _addNotification({
