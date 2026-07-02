@@ -138,6 +138,7 @@ const PAGE_ACCESS = {
   users:          ['admin'],
   attribution:    ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','commerciale'],
   production:     ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
+  calendrier:     ['admin','commerciale','chef_atelier','gestionnaire'],
   messagerie:     ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
 };
 let editingUserId = null; // index dans localUsers
@@ -414,6 +415,7 @@ function showPage(id, btn, bnavBtn) {
     loadDossiers(); initModulesProduction();
   }
   if (id==='production')   { _setupProdViewToggle(); loadTaches(); _autoRefreshProduction(); initModulesProduction(); }
+  if (id==='calendrier')   { _ensureDossierLinks(); renderCalendrier(); if (APPS_SCRIPT_URL) Promise.all([loadCommandesFromScript(), loadReservationsFromScript()]).then(() => { _ensureDossierLinks(); renderCalendrier(); }).catch(()=>{}); }
   if (id==='messagerie')   { loadMessagerie(); _autoRefreshMessagerie(); }
   if (id==='patron')       { renderControlFinance(); renderPatronDashboard(); _autoRefreshPatron(); }
   if (id==='commandes')    { _ensureDossierLinks(); renderCommandes(); _lastCmdRefresh = 0; _autoRefreshCommandes(); _loadTachesQuietly().then(renderCommandes); }
@@ -11072,6 +11074,168 @@ function _delivBuildRows() {
     else                                bucket = 'FUTUR';
     return { ...x, ymd, days, bucket };
   });
+}
+
+// ============================================================
+// CALENDRIER — double vue (production + échéance client)
+// Accès : admin, commerciaux, responsables (chef_atelier / gestionnaire).
+// Source unique = _collectDeliveries() (commandes + réservations, dates normalisées).
+// ============================================================
+let _calRef = (function(){ const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); })();
+const _CAL_MONTHS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+const _CAL_DOWS   = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
+
+function calShift(delta){ _calRef = new Date(_calRef.getFullYear(), _calRef.getMonth()+delta, 1); renderCalendrier(); }
+function calToday(){ const d = new Date(); _calRef = new Date(d.getFullYear(), d.getMonth(), 1); renderCalendrier(); }
+function _calTodayIso(){ const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+
+// Liste d'événements pour un calendrier. kind='prod' → date de production ;
+// kind='client' → date de livraison/retrait client. Enrichit avec la progression du dossier.
+function _calEvents(kind){
+  const dossById = {};
+  (Array.isArray(dossiers)?dossiers:[]).forEach(d=>{ if(d&&d.id) dossById[d.id]=d; });
+  return _collectDeliveries().map(x=>{
+    const ymd = kind==='prod' ? _toIsoDate(x.dateProd||'') : _toIsoDate(x.dateClient||'');
+    if(!ymd) return null;
+    const dos = x.dossierId ? dossById[x.dossierId] : null;
+    return {
+      ymd, client:x.client, ref:x.ref, total:x.total, status:x.status,
+      kind:x.kind, id:x.id, dossierId:x.dossierId||'', commercial:x.commercial||'',
+      progression: dos ? (Number(dos.progression)||0) : null
+    };
+  }).filter(Boolean);
+}
+
+// Groupe les événements d'un calendrier par jour, limité au mois affiché.
+function _calByDay(kind){
+  const year = _calRef.getFullYear(), month = _calRef.getMonth();
+  const byDay = {};
+  _calEvents(kind).forEach(e=>{
+    if(e.status==='cancelled') return;
+    const d = new Date(e.ymd+'T00:00:00');
+    if(isNaN(d.getTime()) || d.getFullYear()!==year || d.getMonth()!==month) return;
+    (byDay[e.ymd] = byDay[e.ymd]||[]).push(e);
+  });
+  return byDay;
+}
+
+// Rendu HTML d'une grille mensuelle (affichage écran).
+function _calRenderMonth(kind){
+  const year = _calRef.getFullYear(), month = _calRef.getMonth();
+  const showMoney = _DELIV_MONEY_ROLES.includes(currentUser?.role);
+  const todayIso = _calTodayIso();
+  const byDay = _calByDay(kind);
+  const first = new Date(year, month, 1);
+  const startDow = (first.getDay()+6)%7;          // 0 = lundi
+  const dim = new Date(year, month+1, 0).getDate();
+  const totalCells = Math.ceil((startDow+dim)/7)*7;
+  let grid = '';
+  let day = 1 - startDow;
+  for(let i=0;i<totalCells;i++,day++){
+    if(day<1 || day>dim){ grid += '<div class="cal-day cal-day-out"></div>'; continue; }
+    const iso = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    const evs = byDay[iso] || [];
+    const isToday = iso===todayIso;
+    const chips = evs.slice(0,4).map(e=>{
+      const done = e.status==='completed';
+      const late = !done && iso < todayIso;
+      const cls = done?'done':late?'late':'ok';
+      const meta = kind==='prod'
+        ? (e.progression!=null ? e.progression+'%' : '')
+        : (showMoney ? fmt(e.total) : '');
+      return `<button type="button" class="cal-chip cal-chip-${cls}" onclick="_calOpen('${e.kind}','${e.id}','${e.dossierId}')" title="${escapeHtml(e.client)}${e.ref?' — '+e.ref:''}">
+        <span class="cal-chip-client">${escapeHtml(e.client)}</span>${meta?`<span class="cal-chip-meta">${meta}</span>`:''}</button>`;
+    }).join('');
+    const more = evs.length>4 ? `<span class="cal-more">+${evs.length-4}</span>` : '';
+    grid += `<div class="cal-day${isToday?' cal-day-today':''}${evs.length?' cal-day-has':''}">
+      <span class="cal-daynum">${day}</span>
+      <div class="cal-chips">${chips}${more}</div>
+    </div>`;
+  }
+  const head = '<div class="cal-week-head">'+_CAL_DOWS.map(d=>`<div class="cal-dow">${d}</div>`).join('')+'</div>';
+  return head + '<div class="cal-days">'+grid+'</div>';
+}
+
+function renderCalendrier(){
+  if(!document.getElementById('page-calendrier')) return;
+  if(typeof _syncDossierDates==='function') _syncDossierDates();
+  const lbl = document.getElementById('calMonthLabel');
+  if(lbl) lbl.textContent = _CAL_MONTHS[_calRef.getMonth()]+' '+_calRef.getFullYear();
+  const p = document.getElementById('calMonthProd');   if(p) p.innerHTML = _calRenderMonth('prod');
+  const c = document.getElementById('calMonthClient'); if(c) c.innerHTML = _calRenderMonth('client');
+}
+
+// Ouvre la source (dossier/commande/réservation) au clic sur un événement.
+function _calOpen(kind, id, dossierId){
+  if(typeof _openDeliverySource==='function') _openDeliverySource(kind, id, dossierId);
+}
+
+// Impression A4 paysage des deux calendriers du mois affiché.
+function printCalendrier(){
+  const showMoney = _DELIV_MONEY_ROLES.includes(currentUser?.role);
+  const shop = (typeof shopConfig !== 'undefined' && shopConfig && shopConfig.name) || 'FOREVER MG';
+  const monthLbl = _CAL_MONTHS[_calRef.getMonth()]+' '+_calRef.getFullYear();
+  const year = _calRef.getFullYear(), month = _calRef.getMonth();
+  const todayIso = _calTodayIso();
+  function tableFor(kind){
+    const byDay = _calByDay(kind);
+    const first = new Date(year, month, 1);
+    const startDow = (first.getDay()+6)%7;
+    const dim = new Date(year, month+1, 0).getDate();
+    const totalCells = Math.ceil((startDow+dim)/7)*7;
+    let day = 1 - startDow;
+    let rows = '';
+    for(let w=0; w<totalCells/7; w++){
+      let tds='';
+      for(let dd=0; dd<7; dd++, day++){
+        if(day<1||day>dim){ tds += '<td class="out"></td>'; continue; }
+        const iso = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+        const evs = byDay[iso] || [];
+        const items = evs.map(e=>{
+          const done = e.status==='completed';
+          const late = !done && iso < todayIso;
+          const meta = kind==='prod'
+            ? (e.progression!=null?' ('+e.progression+'%)':'')
+            : (showMoney?' — '+fmt(e.total):'');
+          return `<div class="ev ${late?'late':''}${done?' done':''}">${escapeHtml(e.client)}${meta}</div>`;
+        }).join('');
+        tds += `<td class="${iso===todayIso?'today':''}"><div class="dn">${day}</div>${items}</td>`;
+      }
+      rows += '<tr>'+tds+'</tr>';
+    }
+    return `<table><thead><tr>${_CAL_DOWS.map(d=>`<th>${d}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
+  }
+  const w = window.open('', '_blank', 'width=1200,height=900');
+  if(!w){ alert("Impression bloquée : autorisez les fenêtres pop-up pour ce site, puis réessayez."); return; }
+  const stamp = new Date().toLocaleDateString('fr-FR')+' '+new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+  w.document.write(`<html><head><meta charset="utf-8"><title>Calendrier ${monthLbl}</title><style>
+    @page{size:A4 landscape;margin:7mm}
+    body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;font-size:9px}
+    h1{font-size:15px;margin:0}
+    .sub{color:#555;font-size:9.5px;margin:2px 0 6px}
+    h2{font-size:12px;margin:10px 0 4px;padding:4px 8px;border-radius:4px;color:#fff}
+    h2.prod{background:#7c3aed}h2.client{background:#0f766e}
+    table{width:100%;border-collapse:collapse;table-layout:fixed;page-break-inside:avoid}
+    th{background:#e9e9e9;font-size:8px;text-transform:uppercase;border:1px solid #999;padding:2px}
+    td{border:1px solid #bbb;height:78px;vertical-align:top;padding:2px 3px;width:14.28%;overflow:hidden}
+    td.out{background:#f6f6f6}
+    td.today{background:#fff7ed}
+    .dn{font-weight:bold;font-size:9px;color:#444;margin-bottom:2px}
+    .ev{font-size:7.5px;line-height:1.25;margin-bottom:1.5px;padding:1px 2px;border-radius:2px;background:#eef2ff;border-left:2px solid #6366f1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ev.late{background:#fef2f2;border-left-color:#dc2626;color:#991b1b}
+    .ev.done{background:#f0fdf4;border-left-color:#16a34a;color:#166534}
+    .cal2{page-break-before:always}
+    @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+  </style></head><body onload="window.print()">
+    <h1>${shop} — CALENDRIER ${monthLbl.toUpperCase()}</h1>
+    <div class="sub">Édité le ${stamp}${showMoney?'':' · montants masqués'}</div>
+    <h2 class="prod">🏭 Production — dates planifiées</h2>
+    ${tableFor('prod')}
+    <div class="cal2"></div>
+    <h2 class="client">📦 Échéances client — livraison / retrait</h2>
+    ${tableFor('client')}
+  </body></html>`);
+  w.document.close();
 }
 
 function _delivBucketMatch(r, k) {

@@ -977,6 +977,10 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
           <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg></span>
           <span class="sidebar-label">Production</span>
         </button>
+        <button class="nav-btn sidebar-btn" data-roles="admin,commerciale,chef_atelier,gestionnaire" onclick="showPage('calendrier',this)" aria-label="Calendrier">
+          <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="14" x2="8" y2="14"/><line x1="12" y1="14" x2="12" y2="14"/><line x1="16" y1="14" x2="16" y2="14"/><line x1="8" y1="18" x2="8" y2="18"/><line x1="12" y1="18" x2="12" y2="18"/></svg></span>
+          <span class="sidebar-label">Calendrier</span>
+        </button>
         <button class="nav-btn sidebar-btn" data-roles="admin,chef_atelier,gestionnaire" onclick="showPage('perf',this)" aria-label="Performance opérateurs">
           <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>
           <span class="sidebar-label">Performance</span>
@@ -1956,6 +1960,48 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
           </button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- CALENDRIER (double : production + échéance client) -->
+  <div class="page" id="page-calendrier" data-roles="admin,commerciale,chef_atelier,gestionnaire">
+    <div class="page-topbar">
+      <div>
+        <h1 class="page-title">Calendrier</h1>
+        <p class="page-subtitle">Planifiez la production et suivez les échéances de livraison client</p>
+      </div>
+      <div class="cal-toolbar">
+        <div class="cal-nav">
+          <button class="cal-nav-btn" onclick="calShift(-1)" aria-label="Mois précédent" title="Mois précédent">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <span class="cal-month-label" id="calMonthLabel">—</span>
+          <button class="cal-nav-btn" onclick="calShift(1)" aria-label="Mois suivant" title="Mois suivant">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+        </div>
+        <button class="cal-btn" onclick="calToday()" title="Revenir au mois courant">Aujourd'hui</button>
+        <button class="cal-btn cal-btn-print" onclick="printCalendrier()" title="Imprimer les deux calendriers">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+          Imprimer
+        </button>
+      </div>
+    </div>
+    <div class="cal-grid-wrap" id="calGridWrap">
+      <section class="cal-cal" id="calProd">
+        <div class="cal-cal-head cal-head-prod">
+          <span class="cal-cal-title">🏭 Production</span>
+          <span class="cal-cal-sub">Dates de production planifiées</span>
+        </div>
+        <div class="cal-month" id="calMonthProd"></div>
+      </section>
+      <section class="cal-cal" id="calClient">
+        <div class="cal-cal-head cal-head-client">
+          <span class="cal-cal-title">📦 Échéances client</span>
+          <span class="cal-cal-sub">Dates de livraison / retrait client</span>
+        </div>
+        <div class="cal-month" id="calMonthClient"></div>
+      </section>
     </div>
   </div>
 
