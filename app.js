@@ -5463,7 +5463,11 @@ function _renderCommandesLegacy() {
           + `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();requestCommandeModif('${c.id}')">${_kebabIcon('edit')}<span>Demander une modification (montants…)</span></button>`
           + (c.status === 'pending' ? `<button class="kebab-item danger" role="menuitem" onclick="closeAllKebabs();requestCommandeCancel('${c.id}')">${_kebabIcon('trash')}<span>Demander l'annulation</span></button>` : '');
       } else {
-        kebabItems = _editFull
+        // Admin (et autres rôles habilités) : édition directe de TOUTE la commande + articles
+        const _adminEditAll = _isAdmin
+          ? `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeAdmin('${c.id}')">${_kebabIcon('edit')}<span>Modifier la commande (tout + articles)</span></button>`
+          : '';
+        kebabItems = _adminEditAll + _editFull
           + (c.status === 'pending' ? `<button class="kebab-item danger" role="menuitem" onclick="closeAllKebabs();cancelCommande('${c.id}')">${_kebabIcon('trash')}<span>Annuler la commande</span></button>` : '');
       }
       const kebab = kebabItems ? `<div class="kebab-wrap">
@@ -5857,6 +5861,8 @@ function _cmdDrawerActions(c) {
     btns.push(`<button class="pcok-btn" onclick="closeDrawers();requestCommandeModif('${c.id}')">Demander modif</button>`);
     btns.push(`<button class="pcok-btn" style="color:#dc2626" onclick="closeDrawers();requestCommandeCancel('${c.id}')">Demander annulation</button>`);
   } else if (!isCommercial && c.status === 'pending') {
+    if (isAdmin)
+      btns.push(`<button class="pcok-btn pcok-btn--primary" onclick="closeDrawers();editCommandeAdmin('${c.id}')">Modifier (tout)</button>`);
     btns.push(`<button class="pcok-btn" onclick="closeDrawers();editCommandeAddress('${c.id}')">Adresse</button>`);
     btns.push(`<button class="pcok-btn" onclick="closeDrawers();editCommandeFrais('${c.id}')">Frais livraison</button>`);
     btns.push(`<button class="pcok-btn" style="color:#dc2626" onclick="closeDrawers();cancelCommande('${c.id}')">Annuler</button>`);
@@ -6076,6 +6082,7 @@ function _fmtModDate(iso) {
 }
 function _modVal(key, v) {
   if (key === 'depositMethod') return _depositLabel(v);
+  if (key === 'deliveryMode') return v === 'livraison' ? 'Livraison' : (v === 'retrait' ? 'Retrait boutique' : (v || '—'));
   if (CMD_MODIF_NUMKEYS.includes(key)) return fmt(Number(v) || 0);
   return (v === '' || v == null) ? '—' : String(v);
 }
@@ -6112,12 +6119,21 @@ function _buildModBanner(c, mod) {
 }
 
 let _modifCmdId = null;
+let _modifMode = 'request'; // 'request' = commercial (validé par l'admin) · 'direct' = admin (appliqué tout de suite)
 
-// Ouvre le formulaire de demande de modification (commercial)
-function requestCommandeModif(id) {
+// Entrées : commercial → demande validée par l'admin ; admin → édition directe
+function requestCommandeModif(id) { _openCmdEditForm(id, 'request'); }
+function editCommandeAdmin(id) {
+  if (currentUser?.role !== 'admin') { showToast('Réservé à l\'admin', 'error'); return; }
+  _openCmdEditForm(id, 'direct');
+}
+
+// Ouvre le formulaire d'édition de commande (partagé demande / édition directe)
+function _openCmdEditForm(id, mode) {
   const c = commandes.find(x => String(x.id) === String(id));
   if (!c) { showToast('Commande introuvable', 'error'); return; }
   _modifCmdId = id;
+  _modifMode = (mode === 'direct') ? 'direct' : 'request';
   const fields = CMD_MODIF_FIELDS.map(f => {
     const raw = c[f.key] ?? '';
     const val = String(raw).replace(/"/g, '&quot;');
@@ -6140,12 +6156,19 @@ function requestCommandeModif(id) {
        <button type="button" class="mf-add-item" onclick="_modifAddItem()">+ Ajouter un article</button>
        <div class="mf-items-total">Sous-total calculé : <strong id="mf_items_sum">0</strong> Ar</div>
      </div>`;
-  const body = document.getElementById('cmdModifBody');
-  if (body) body.innerHTML = fields + itemsSection +
+  // La note pour l'admin n'a de sens que pour une demande (pas l'édition directe admin)
+  const reasonField = _modifMode === 'direct' ? '' :
     `<label class="modif-field"><span>Note pour l'admin (optionnel)</span><textarea id="mf_reason" rows="2" placeholder="Pourquoi cette modification ?"></textarea></label>`;
+  const body = document.getElementById('cmdModifBody');
+  if (body) body.innerHTML = fields + itemsSection + reasonField;
   _renderModifItems();
+  const isDirect = _modifMode === 'direct';
   const title = document.getElementById('cmdModifTitle');
-  if (title) title.textContent = `Demande de modification — ${c.clientName || 'commande'}`;
+  if (title) title.textContent = (isDirect ? 'Modifier la commande — ' : 'Demande de modification — ') + (c.clientName || 'commande');
+  const notice = document.getElementById('cmdModifNotice');
+  if (notice) notice.style.display = isDirect ? 'none' : '';
+  const submitBtn = document.getElementById('cmdModifSubmitBtn');
+  if (submitBtn) submitBtn.textContent = isDirect ? 'Enregistrer les modifications' : 'Envoyer la demande';
   openModal('cmdModifModal');
 }
 
@@ -6204,6 +6227,24 @@ function submitCommandeModif() {
     changes.items = { old: oldItems, new: newItems, label: 'Articles' };
   }
   if (!Object.keys(changes).length) { showToast('Aucune modification détectée', 'info'); return; }
+
+  // ── Mode admin : appliqué immédiatement, sans validation ──
+  if (_modifMode === 'direct') {
+    _applyCommandeChanges(c, changes);
+    closeModal('cmdModifModal');
+    renderCommandes();
+    if (typeof updateCmdBadge === 'function') updateCmdBadge();
+    _addNotification({
+      dossierId: c.dossierId || '', numeroDossier: `CMD-${String(c.id).padStart(3,'0')}`,
+      etapeCode: 'MODIF', etapeLabel: 'Commande modifiée',
+      operateur: currentUser?.label || 'Admin',
+      message: `${currentUser?.label || 'Admin'} a modifié la commande de ${c.clientName}`
+    });
+    showToast('Commande modifiée');
+    return;
+  }
+
+  // ── Mode commercial : demande envoyée à l'admin pour validation ──
   const reason = (document.getElementById('mf_reason')?.value || '').trim();
   const mod = {
     id: 'M_' + Date.now(),
@@ -6260,6 +6301,52 @@ function requestCommandeCancel(id) {
   showToast('Demande d\'annulation envoyée');
 }
 
+// ── Application d'un jeu de changements à une commande ──────────────────────
+// Point d'entrée unique du process de modification : applique les champs, recalcule
+// les montants dérivés, déduit le mode de remise, répercute sur le dossier de
+// production lié et synchronise Google Sheets. Utilisé aussi bien par l'édition
+// directe (admin) que par la validation d'une demande (commercial) → comportement
+// strictement identique dans les deux cas.
+function _applyCommandeChanges(c, changes) {
+  changes = changes || {};
+  Object.entries(changes).forEach(([k, v]) => { c[k] = v.new; });
+  if ('dateLivraison' in changes || 'dateLivraisonProd' in changes) c._dateEditedAt = Date.now();
+  // Recalcul des montants dérivés à partir des articles (ajout/retrait/qté/prix)
+  const itemsSum = (c.items || []).reduce((s, i) => s + (Number(i.qty) || 0) * (Number(i.price) || 0), 0);
+  c.subtotal = itemsSum > 0 ? itemsSum : (Number(c.subtotal) || 0);
+  c.total    = Math.max(0, c.subtotal - (Number(c.remise) || 0) + (Number(c.fraisLivraison) || 0));
+  c.restant  = Math.max(0, c.total - (Number(c.accompte) || 0));
+  // Mode de remise : explicite s'il a été modifié, sinon déduit de l'adresse
+  if (!('deliveryMode' in changes) && 'adresseLivraison' in changes)
+    c.deliveryMode = c.adresseLivraison ? 'livraison' : 'retrait';
+  // Répercuter dates / articles / client sur le dossier de production lié
+  const dos = dossiers.find(d => d.sourceType === 'commande' && String(d.sourceId) === String(c.id));
+  if (dos) {
+    if ('dateLivraison' in changes)     dos.dateLivraison = c.dateLivraison;
+    if ('dateLivraisonProd' in changes) dos.dateLivraisonProd = c.dateLivraisonProd;
+    if ('clientName' in changes)        dos.client = c.clientName;
+    if ('items' in changes) {
+      dos.produit  = (c.items || []).map(i => i.name).join(', ') || 'Articles';
+      dos.quantite = (c.items || []).reduce((s, i) => s + (Number(i.qty) || 1), 0);
+    }
+    if (APPS_SCRIPT_URL && ('items' in changes || 'clientName' in changes || 'dateLivraison' in changes || 'dateLivraisonProd' in changes)) {
+      apiCall({ action: 'updateDossier', id: dos.id, client: dos.client, produit: dos.produit, quantite: dos.quantite, dateLivraison: dos.dateLivraison }).catch(() => {});
+    }
+  }
+  saveData();
+  if (APPS_SCRIPT_URL) {
+    apiCall({ action: 'updateCommande', id: c.id,
+      clientName: c.clientName, clientContact: c.clientContact,
+      adresseLivraison: c.adresseLivraison, deliveryMode: c.deliveryMode,
+      fraisLivraison: c.fraisLivraison, dateLivraison: c.dateLivraison, dateLivraisonProd: c.dateLivraisonProd, dateBAT: c.dateBAT,
+      remise: c.remise, accompte: c.accompte, notes: c.notes,
+      depositMethod: c.depositMethod, depositProvider: c.depositProvider, depositRef: c.depositRef,
+      items: ('items' in changes) ? c.items : undefined,
+      subtotal: c.subtotal, total: c.total, restant: c.restant
+    }).catch(() => {});
+  }
+}
+
 // ── Validation admin ───────────────────────────────────────
 function approveCommandeModif(modId) {
   if (currentUser?.role !== 'admin') { showToast('Réservé à l\'admin', 'error'); return; }
@@ -6271,39 +6358,7 @@ function approveCommandeModif(modId) {
   if (mod.type === 'cancel') {
     _applyCommandeCancel(c);
   } else {
-    Object.entries(mod.changes || {}).forEach(([k, v]) => { c[k] = v.new; });
-    if ('dateLivraison' in mod.changes || 'dateLivraisonProd' in mod.changes) c._dateEditedAt = Date.now();
-    // Recalcul des montants dérivés (articles inchangés)
-    const itemsSum = (c.items || []).reduce((s, i) => s + (Number(i.qty) || 0) * (Number(i.price) || 0), 0);
-    c.subtotal = itemsSum > 0 ? itemsSum : (Number(c.subtotal) || 0);
-    c.total = Math.max(0, c.subtotal - (Number(c.remise) || 0) + (Number(c.fraisLivraison) || 0));
-    c.restant = Math.max(0, c.total - (Number(c.accompte) || 0));
-    if ('adresseLivraison' in mod.changes) c.deliveryMode = c.adresseLivraison ? 'livraison' : 'retrait';
-    // Répercuter les dates / articles / client sur le dossier de production lié
-    const dos = dossiers.find(d => d.sourceType === 'commande' && String(d.sourceId) === String(c.id));
-    if (dos) {
-      if ('dateLivraison' in mod.changes)     dos.dateLivraison = c.dateLivraison;
-      if ('dateLivraisonProd' in mod.changes) dos.dateLivraisonProd = c.dateLivraisonProd;
-      if ('clientName' in mod.changes)        dos.client = c.clientName;
-      if ('items' in mod.changes) {
-        dos.produit  = (c.items || []).map(i => i.name).join(', ') || 'Articles';
-        dos.quantite = (c.items || []).reduce((s, i) => s + (Number(i.qty) || 1), 0);
-      }
-      if (APPS_SCRIPT_URL && ('items' in mod.changes || 'clientName' in mod.changes || 'dateLivraison' in mod.changes)) {
-        apiCall({ action: 'updateDossier', id: dos.id, client: dos.client, produit: dos.produit, quantite: dos.quantite, dateLivraison: dos.dateLivraison }).catch(() => {});
-      }
-    }
-    saveData();
-    if (APPS_SCRIPT_URL) {
-      apiCall({ action: 'updateCommande', id: c.id,
-        clientName: c.clientName, clientContact: c.clientContact,
-        adresseLivraison: c.adresseLivraison, deliveryMode: c.deliveryMode,
-        fraisLivraison: c.fraisLivraison, dateLivraison: c.dateLivraison, dateLivraisonProd: c.dateLivraisonProd, dateBAT: c.dateBAT,
-        remise: c.remise, accompte: c.accompte, notes: c.notes, depositMethod: c.depositMethod, depositRef: c.depositRef,
-        items: ('items' in (mod.changes||{})) ? c.items : undefined,
-        subtotal: c.subtotal, total: c.total, restant: c.restant
-      }).catch(() => {});
-    }
+    _applyCommandeChanges(c, mod.changes);
   }
   mod.statut = 'approved';
   mod.resoluPar = currentUser?.label || 'Admin';
@@ -6440,17 +6495,21 @@ let commandeMods = []; // demandes récentes (pending / approved / rejected / su
 // Champs qu'un commercial peut demander à modifier (avec validation admin)
 const _DEPOSIT_METHOD_OPTS = [['cash','Espèces'],['mobile','Mobile Money'],['cheque','Chèque']];
 function _depositLabel(v){ const o = _DEPOSIT_METHOD_OPTS.find(x => x[0] === v); return o ? o[1] : (v ? String(v) : '—'); }
+const _DELIVERY_MODE_OPTS = [['retrait','Retrait boutique'],['livraison','Livraison']];
 const CMD_MODIF_FIELDS = [
   { key:'clientName',       label:'Nom client',            type:'text' },
   { key:'clientContact',    label:'Contact',               type:'text' },
   { key:'accompte',         label:'Acompte (Ar)',          type:'number' },
   { key:'depositMethod',    label:'Mode de paiement acompte', type:'select', options:_DEPOSIT_METHOD_OPTS },
+  { key:'depositProvider',  label:'Opérateur Mobile Money', type:'text' },
   { key:'depositRef',       label:'Référence Mobile Money', type:'text' },
   { key:'remise',           label:'Remise (Ar)',           type:'number' },
+  { key:'deliveryMode',     label:'Mode de remise',        type:'select', options:_DELIVERY_MODE_OPTS },
   { key:'adresseLivraison', label:'Adresse de livraison',  type:'text' },
   { key:'fraisLivraison',   label:'Frais de livraison (Ar)',type:'number' },
   { key:'dateLivraison',    label:'Date livraison client', type:'date' },
   { key:'dateLivraisonProd',label:'Date production',       type:'date' },
+  { key:'dateBAT',          label:'Date BAT',              type:'date' },
   { key:'notes',            label:'Notes',                 type:'textarea' },
 ];
 const CMD_MODIF_NUMKEYS = ['accompte','remise','fraisLivraison'];

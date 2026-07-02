@@ -1165,6 +1165,7 @@ function handleUpdateCommande(data) {
     if (data.remise !== undefined)           sh.getRange(i+1, 12).setValue(Number(data.remise)||0);   // col L = Remise
     if (data.accompte !== undefined)         sh.getRange(i+1, 14).setValue(Number(data.accompte)||0); // col N = Accompte
     if (data.depositMethod !== undefined)    sh.getRange(i+1, 16).setValue(data.depositMethod);  // col P = Mode_Paiement (acompte)
+    if (data.depositProvider !== undefined)  _setTextCell_(sh, i+1, 17, data.depositProvider);   // col Q = Opérateur Mobile Money — texte
     if (data.depositRef !== undefined)       _setTextCell_(sh, i+1, 18, data.depositRef);        // col R = Réf paiement (Mobile Money) — texte
     if (data.notes !== undefined)            sh.getRange(i+1, 19).setValue(data.notes);        // col S = Notes
     if (data.attachments !== undefined) {                                                      // col Y = Pièces_Jointes (JSON)
