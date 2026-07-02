@@ -11101,6 +11101,7 @@ function _calEvents(kind){
     return {
       ymd, client:x.client, ref:x.ref, total:x.total, status:x.status,
       kind:x.kind, id:x.id, dossierId:x.dossierId||'', commercial:x.commercial||'',
+      items:x.items||[],
       progression: dos ? (Number(dos.progression)||0) : null
     };
   }).filter(Boolean);
@@ -11122,7 +11123,6 @@ function _calByDay(kind){
 // Rendu HTML d'une grille mensuelle (affichage écran).
 function _calRenderMonth(kind){
   const year = _calRef.getFullYear(), month = _calRef.getMonth();
-  const showMoney = _DELIV_MONEY_ROLES.includes(currentUser?.role);
   const todayIso = _calTodayIso();
   const byDay = _calByDay(kind);
   const first = new Date(year, month, 1);
@@ -11140,11 +11140,9 @@ function _calRenderMonth(kind){
       const done = e.status==='completed';
       const late = !done && iso < todayIso;
       const cls = done?'done':late?'late':'ok';
-      const meta = kind==='prod'
-        ? (e.progression!=null ? e.progression+'%' : '')
-        : (showMoney ? fmt(e.total) : '');
-      return `<button type="button" class="cal-chip cal-chip-${cls}" onclick="_calOpen('${e.kind}','${e.id}','${e.dossierId}')" title="${escapeHtml(e.client)}${e.ref?' — '+e.ref:''}">
-        <span class="cal-chip-client">${escapeHtml(e.client)}</span>${meta?`<span class="cal-chip-meta">${meta}</span>`:''}</button>`;
+      const art = (e.items||[]).map(i=>`${i.name} ×${i.qty||1}`).join(', ');
+      return `<button type="button" class="cal-chip cal-chip-${cls}" onclick="_calOpen('${e.kind}','${e.id}','${e.dossierId}')" title="${escapeHtml(e.client)}${art?' — '+escapeHtml(art):''}">
+        <span class="cal-chip-client">${escapeHtml(e.client)}</span>${art?`<span class="cal-chip-items">${escapeHtml(art)}</span>`:''}</button>`;
     }).join('');
     const more = evs.length>4 ? `<span class="cal-more">+${evs.length-4}</span>` : '';
     grid += `<div class="cal-day${isToday?' cal-day-today':''}${evs.length?' cal-day-has':''}">
@@ -11172,7 +11170,6 @@ function _calOpen(kind, id, dossierId){
 
 // Impression A4 paysage des deux calendriers du mois affiché.
 function printCalendrier(){
-  const showMoney = _DELIV_MONEY_ROLES.includes(currentUser?.role);
   const shop = (typeof shopConfig !== 'undefined' && shopConfig && shopConfig.name) || 'FOREVER MG';
   const monthLbl = _CAL_MONTHS[_calRef.getMonth()]+' '+_calRef.getFullYear();
   const year = _calRef.getFullYear(), month = _calRef.getMonth();
@@ -11194,10 +11191,8 @@ function printCalendrier(){
         const items = evs.map(e=>{
           const done = e.status==='completed';
           const late = !done && iso < todayIso;
-          const meta = kind==='prod'
-            ? (e.progression!=null?' ('+e.progression+'%)':'')
-            : (showMoney?' — '+fmt(e.total):'');
-          return `<div class="ev ${late?'late':''}${done?' done':''}">${escapeHtml(e.client)}${meta}</div>`;
+          const art = (e.items||[]).map(i=>`${i.name} ×${i.qty||1}`).join(', ');
+          return `<div class="ev ${late?'late':''}${done?' done':''}"><b>${escapeHtml(e.client)}</b>${art?'<br>'+escapeHtml(art):''}</div>`;
         }).join('');
         tds += `<td class="${iso===todayIso?'today':''}"><div class="dn">${day}</div>${items}</td>`;
       }
@@ -11221,14 +11216,14 @@ function printCalendrier(){
     td.out{background:#f6f6f6}
     td.today{background:#fff7ed}
     .dn{font-weight:bold;font-size:9px;color:#444;margin-bottom:2px}
-    .ev{font-size:7.5px;line-height:1.25;margin-bottom:1.5px;padding:1px 2px;border-radius:2px;background:#eef2ff;border-left:2px solid #6366f1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .ev{font-size:7.5px;line-height:1.25;margin-bottom:1.5px;padding:1px 2px;border-radius:2px;background:#eef2ff;border-left:2px solid #6366f1;word-wrap:break-word;overflow:hidden}
     .ev.late{background:#fef2f2;border-left-color:#dc2626;color:#991b1b}
     .ev.done{background:#f0fdf4;border-left-color:#16a34a;color:#166534}
     .cal2{page-break-before:always}
     @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
   </style></head><body onload="window.print()">
     <h1>${shop} — CALENDRIER ${monthLbl.toUpperCase()}</h1>
-    <div class="sub">Édité le ${stamp}${showMoney?'':' · montants masqués'}</div>
+    <div class="sub">Édité le ${stamp}</div>
     <h2 class="prod">🏭 Production — dates planifiées</h2>
     ${tableFor('prod')}
     <div class="cal2"></div>
