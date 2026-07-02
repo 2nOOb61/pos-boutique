@@ -9564,6 +9564,13 @@ function renderAttrPanel(tachesD, commentsD = []) {
       };
       const userEtapes = ROLE_ETAPE_MAP[currentUser_role] || [];
       const canSelfAssign = !canAssign && !etapeComplete && !alreadySelfAssigned && userEtapes.includes(e.code);
+      // Le commercial valide ses propres étapes (VALID_CMD / RETOUR_CLIENT /
+      // VALID_CLIENT2) directement depuis l'Attribution : il n'a pas la vue
+      // opérateur (il est routé vers le cockpit lecture seule en Production) et
+      // resterait donc bloqué « Assigné » sans pouvoir terminer l'étape.
+      const myTaskEtape   = tachesEtape.find(t => _sameOp(t.operateur, currentUser?.label));
+      const canSelfComplete = alreadySelfAssigned && !etapeComplete
+        && currentUser_role === 'commerciale' && userEtapes.includes(e.code);
       // Cloisonnement : un opérateur ne voit que son propre nom ; le travail des
       // collègues garde son badge de statut (utile pour le déblocage) mais sans nom.
       const _seeAllOps = _canSeeAllOps();
@@ -9596,6 +9603,8 @@ function renderAttrPanel(tachesD, commentsD = []) {
           ? `<button class="btn-attr-assign" onclick="openAttrib('${e.code}','${e.label}')">Assigner</button>`
           : canSelfAssign
           ? `<button class="btn-attr-assign" style="background:var(--color-secondary);border-color:var(--color-secondary)" onclick="selfAssign('${e.code}','${e.label}')">Je m'assigne</button>`
+          : canSelfComplete
+          ? `<button class="btn-attr-assign" style="background:#16a34a;border-color:#16a34a" onclick="attrValiderEtape('${e.code}','${(e.label||'').replace(/'/g,"\\'")}')">✓ Valider</button>`
           : alreadySelfAssigned && !etapeComplete
           ? `<span style="font-size:11px;font-weight:600;color:var(--color-secondary);padding:4px 10px;background:var(--color-secondary-light);border-radius:6px"> Assigné</span>`
           : ''}
@@ -10040,6 +10049,57 @@ async function selfAssign(etapeCode, etapeLabel) {
       message:       `${operateur} s'est assigné à "${etapeLabel}" — ${selectedDossier.numeroDossier}`
     });
     showToast(` Vous êtes assigné à "${etapeLabel}"`);
+    selectDossier(selectedDossier.id);
+  } else {
+    showToast(`Erreur : ${r?.error || 'inconnu'}`, 'error');
+  }
+}
+
+// Valide (= termine) une étape de validation commerciale directement depuis le
+// panneau Attribution. Le commercial n'ayant pas la vue opérateur (bouton
+// Démarrer/Terminer), c'est ici qu'il boucle son étape. On pointe côté serveur
+// (action END, qui met à jour la progression du dossier) puis on rafraîchit.
+async function attrValiderEtape(etapeCode, etapeLabel) {
+  if (!selectedDossier || !currentUser) return;
+  const myLabel = currentUser.label || currentUser.username;
+  const t = taches.find(x =>
+    x.dossierId === selectedDossier.id &&
+    x.etapeCode === etapeCode &&
+    _sameOp(x.operateur, myLabel)
+  );
+  if (!t) { showToast('Tâche introuvable — assignez-vous d\'abord à l\'étape', 'error'); return; }
+  if (t.statut === 'TERMINE') { showToast('Étape déjà validée', 'info'); return; }
+  // Garde : toutes les étapes précédentes du dossier doivent être terminées
+  const si = ETAPES_CONFIG.findIndex(e => e.code === etapeCode);
+  for (let i = 0; i < si; i++) {
+    const prev = ETAPES_CONFIG[i];
+    const pt = taches.filter(x => x.dossierId === selectedDossier.id && x.etapeCode === prev.code);
+    if (pt.length && !pt.every(x => x.statut === 'TERMINE')) {
+      showToast(`Impossible de valider : "${prev.label}" n'est pas encore terminée.`, 'error');
+      return;
+    }
+  }
+  let r;
+  if (APPS_SCRIPT_URL) {
+    r = await apiCall({ action:'pointerAction', tacheId:t.id, action_:'END', etapeCode, operateur:myLabel, commentaire:'' });
+  } else {
+    r = { ok:true };
+  }
+  if (r && r.ok) {
+    if (!t.dateDebut) { t.dateDebut = new Date().toLocaleString('fr-FR'); t.startTs = Date.now(); }
+    t.statut = 'TERMINE';
+    t.dateFin = new Date().toLocaleString('fr-FR');
+    t.endTs = Date.now();
+    saveTaches();
+    _addNotification({
+      dossierId:     selectedDossier.id,
+      numeroDossier: selectedDossier.numeroDossier,
+      etapeCode,
+      etapeLabel,
+      operateur:     myLabel,
+      message:       `${myLabel} a validé l'étape "${etapeLabel}" — ${selectedDossier.numeroDossier}`
+    });
+    showToast(`✓ "${etapeLabel}" validée`);
     selectDossier(selectedDossier.id);
   } else {
     showToast(`Erreur : ${r?.error || 'inconnu'}`, 'error');
