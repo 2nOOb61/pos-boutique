@@ -13482,6 +13482,73 @@ function renderPatronDashboard() {
     </table>
   </div>`;
 
+  // ── Ventes par jour — détail par commercial (liste dépliable) ──
+  const byDay = {};
+  sales.forEach(s => {
+    const key = saleDateKey(s.date) || (parseSaleDate(s.date) ? parseSaleDate(s.date).toISOString().slice(0, 10) : '');
+    if (!key) return;
+    (byDay[key] = byDay[key] || []).push(s);
+  });
+  const dayKeys = Object.keys(byDay).sort((a, b) => b.localeCompare(a));
+  const jourRows = dayKeys.length
+    ? dayKeys.map((key, idx) => {
+        const daySales = byDay[key];
+        const dayTotal = daySales.reduce((a, s) => a + (Number(s.total) || 0), 0);
+        const dObj = new Date(key + 'T00:00:00');
+        const dayLabel = isNaN(dObj) ? key : dObj.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+        // Regrouper les ventes du jour par commercial (caissier)
+        const byCom = {};
+        daySales.forEach(s => {
+          const c = s.caissier || 'Inconnu';
+          (byCom[c] = byCom[c] || []).push(s);
+        });
+        const comBlocks = Object.entries(byCom)
+          .sort((a, b) => b[1].reduce((x, s) => x + (Number(s.total) || 0), 0) - a[1].reduce((x, s) => x + (Number(s.total) || 0), 0))
+          .map(([nom, arr]) => {
+            const comTotal = arr.reduce((a, s) => a + (Number(s.total) || 0), 0);
+            const saleLines = arr
+              .sort((a, b) => (parseSaleDate(b.date) || 0) - (parseSaleDate(a.date) || 0))
+              .map(s => {
+                const items = (s.items || []).map(i => `${i.name || '?'} ×${i.qty || 1}`).join(', ') || '—';
+                const t = parseSaleDate(s.date);
+                const heure = t && !isNaN(t) ? t.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
+                return `<div class="pdb-day-sale">
+                  <div style="min-width:0"><span style="color:#a8a29e">${heure}</span> <span style="font-weight:600;color:#1c1917">${s.clientName || 'Client'}</span> <span style="color:#78716c">${items}</span></div>
+                  <div style="font-weight:700;color:#1a4a3a;white-space:nowrap">${fmt(s.total)}</div>
+                </div>`;
+              }).join('');
+            return `<div class="pdb-day-com">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px">
+                <span style="font-weight:700;font-size:12px;color:#1a4a3a">${nom} <span style="font-weight:400;color:#78716c;font-size:11px">· ${arr.length} vente(s)</span></span>
+                <span style="font-weight:700;color:#1a4a3a;font-size:12px">${fmt(comTotal)}</span>
+              </div>
+              ${saleLines}
+            </div>`;
+          }).join('');
+
+        return `<details class="pdb-day"${idx === 0 ? ' open' : ''}>
+          <summary>
+            <span class="pdb-day-title">${dayLabel}</span>
+            <span style="display:flex;align-items:center;gap:10px;flex-shrink:0">
+              <span style="font-size:11px;color:#78716c">${daySales.length} vente(s)</span>
+              <span style="font-size:13px;font-weight:700;color:#1a4a3a">${fmt(dayTotal)}</span>
+            </span>
+          </summary>
+          <div class="pdb-day-body">${comBlocks}</div>
+        </details>`;
+      }).join('')
+    : `<div class="pdb-empty">Aucune vente enregistrée</div>`;
+
+  const jourHtml = `
+  <div class="pdb-section">
+    <div class="pdb-section-head">
+      <div><div class="pdb-section-title">Ventes par jour — détail par commercial</div><div class="pdb-section-sub">Touchez un jour pour voir le détail des ventes</div></div>
+      <span class="pdb-section-badge" style="background:#e8f4f0;color:#1a4a3a">${dayKeys.length} jour(s)</span>
+    </div>
+    <div style="padding:12px 14px">${jourRows}</div>
+  </div>`;
+
   // ── Charge opérateurs ──
   const allTaches = _allTachesMerged();
   const opMap = {};
@@ -13723,7 +13790,7 @@ function renderPatronDashboard() {
   </div>`;
 
   // ── Assemblage final ──
-  body.innerHTML = kpiHtml + chartHtml + caissierHtml + opsHtml + prodHtml + resCmdHtml + creancesHtml + stockHtml + actHtml;
+  body.innerHTML = kpiHtml + chartHtml + caissierHtml + jourHtml + opsHtml + prodHtml + resCmdHtml + creancesHtml + stockHtml + actHtml;
 }
 
 function _pdbKpi(label, val, sub, color) {

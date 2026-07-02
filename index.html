@@ -199,6 +199,18 @@
 .pdb-prog-wrap { flex:1; height:6px; background:#f5f4f2; border-radius:4px; min-width:60px; }
 .pdb-prog-fill { height:100%; border-radius:4px; transition:width .4s; }
 .pdb-empty { display:flex; flex-direction:column; align-items:center; padding:32px 16px; color:#a8a29e; font-size:12px; gap:8px; }
+/* Ventes par jour — liste dépliable */
+.pdb-day { border:1px solid #f0efed; border-radius:10px; margin-bottom:8px; overflow:hidden; background:#fff; }
+.pdb-day > summary { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:12px 14px; cursor:pointer; list-style:none; user-select:none; }
+.pdb-day > summary::-webkit-details-marker { display:none; }
+.pdb-day > summary:hover { background:#fafaf9; }
+.pdb-day > summary::before { content:'\25B8'; color:#a8a29e; font-size:12px; transition:transform .2s; margin-right:2px; }
+.pdb-day[open] > summary::before { transform:rotate(90deg); }
+.pdb-day > summary .pdb-day-title { flex:1; min-width:0; font-size:13px; font-weight:700; color:#1c1917; text-transform:capitalize; }
+.pdb-day-body { padding:6px 14px 12px; border-top:1px solid #f5f4f2; }
+.pdb-day-com { margin:8px 0; padding:8px 10px; background:#faf9f7; border-radius:8px; }
+.pdb-day-sale { display:flex; justify-content:space-between; gap:8px; padding:5px 0; border-bottom:1px dashed #f0efed; font-size:11px; }
+.pdb-day-sale:last-child { border-bottom:none; }
 @media(max-width:700px){ .pdb-two-col{ grid-template-columns:1fr; } .pdb-kpi-grid{ grid-template-columns:repeat(2,1fr); } }
 
 /* ══ PATRON — pdb-table responsive (cartes sur mobile) ══ */
