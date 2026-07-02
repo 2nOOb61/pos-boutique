@@ -413,7 +413,7 @@ function showPage(id, btn, bnavBtn) {
     }
     loadDossiers(); initModulesProduction();
   }
-  if (id==='production')   { loadTaches(); _autoRefreshProduction(); initModulesProduction(); }
+  if (id==='production')   { _setupProdViewToggle(); loadTaches(); _autoRefreshProduction(); initModulesProduction(); }
   if (id==='messagerie')   { loadMessagerie(); _autoRefreshMessagerie(); }
   if (id==='patron')       { renderControlFinance(); renderPatronDashboard(); _autoRefreshPatron(); }
   if (id==='commandes')    { _ensureDossierLinks(); renderCommandes(); _lastCmdRefresh = 0; _autoRefreshCommandes(); _loadTachesQuietly().then(renderCommandes); }
@@ -10617,9 +10617,19 @@ function togglePtDetail(id){
   if (row) row.classList.toggle('open', open);
 }
 
+// Le bouton « Mes tâches » n'a de sens que pour les rôles routés vers le cockpit
+// global (admin / chef / commercial) : les opérateurs voient déjà leurs seules
+// tâches par défaut. Appelé à l'ouverture de la page Production.
+function _setupProdViewToggle() {
+  const canAll = ['admin','chef_atelier','commerciale'].includes(currentUser?.role);
+  const btn = document.getElementById('prodViewMine');
+  if (btn) btn.style.display = canAll ? '' : 'none';
+}
+
 function toggleProdView(mode) {
   _prodView = mode;
   document.getElementById('prodViewTasks')?.classList.toggle('view-toggle-btn--active', mode === 'tasks');
+  document.getElementById('prodViewMine')?.classList.toggle('view-toggle-btn--active', mode === 'mine');
   document.getElementById('prodViewCharge')?.classList.toggle('view-toggle-btn--active', mode === 'charge');
   // Masquer les filtres statut en vue charge (non pertinents)
   const fb = document.getElementById('prodFilterBar');
@@ -12216,8 +12226,10 @@ function renderTaches() {
   const dash          = _buildMonDashboard();
   const deadlines     = _buildProdDeadlines();
   const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
-  // Les commerciaux suivent TOUTE la production en lecture seule (pas d'action — géré par canInteract)
-  const canViewAllProd = isAdminOrChef || currentUser?.role === 'commerciale';
+  // Les commerciaux suivent TOUTE la production en lecture seule (pas d'action — géré par canInteract).
+  // En vue « Mes tâches » (_prodView==='mine'), on force le filtrage sur ses propres tâches
+  // pour que le responsable/commercial retrouve et pointe ce qui lui est assigné.
+  const canViewAllProd = (isAdminOrChef || currentUser?.role === 'commerciale') && _prodView !== 'mine';
   const myLabel       = currentUser?.label || currentUser?.username || '';
 
   // Peupler le sélecteur d'années depuis les tâches (fusion dédoublonnée Sheet + local)
