@@ -11120,6 +11120,15 @@ const _CAL_LINK_SVG = '<span class="cal-chip-link" title="Lié à sa livraison">
 let _calFilters = { client:'', status:'', resp:'', type:'', q:'' };
 // Cache des paires production↔livraison + délais courts, recalculé à chaque rendu.
 let _calPair = { linked:{}, short:{} };
+// Journées dépliées (clé = 'prod:iso' / 'client:iso') → affiche toutes les commandes du jour.
+let _calExpanded = new Set();
+
+// Déplie / replie une journée pour afficher toutes ses commandes.
+function calToggleDay(kind, iso){
+  const key = kind+':'+iso;
+  if(_calExpanded.has(key)) _calExpanded.delete(key); else _calExpanded.add(key);
+  renderCalendrier();
+}
 
 function setCalFilter(field, value){
   if(!(field in _calFilters)) return;
@@ -11276,7 +11285,10 @@ function _calRenderMonth(kind){
     const iso = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
     const evs = byDay[iso] || [];
     const isToday = iso===todayIso;
-    const chips = evs.slice(0,4).map(e=>{
+    const dayKey  = kind+':'+iso;
+    const expanded = _calExpanded.has(dayKey);
+    const shown   = expanded ? evs : evs.slice(0,4);
+    const chips = shown.map(e=>{
       const done  = e.status==='completed';
       const late  = !done && iso < todayIso;
       const key   = e.kind+':'+e.id;
@@ -11295,8 +11307,13 @@ function _calRenderMonth(kind){
         ${first?`<span class="cal-chip-items">${escapeHtml(first)}</span>`:''}
         <span class="cal-chip-foot"><span class="cal-dot" style="background:${dot}"></span>${short?'<span class="cal-chip-warn">Délai court</span>':''}</span></button>`;
     }).join('');
-    const more = evs.length>4 ? `<span class="cal-more" onclick="_calOpenDetail('${evs[4].kind}','${evs[4].id}','${evs[4].dossierId}')">+${evs.length-4} autres</span>` : '';
-    grid += `<div class="cal-day${isToday?' cal-day-today':''}${evs.length?' cal-day-has':''}">
+    let more = '';
+    if(evs.length>4){
+      more = expanded
+        ? `<span class="cal-more cal-more-less" onclick="calToggleDay('${kind}','${iso}')">▲ Réduire</span>`
+        : `<span class="cal-more" onclick="calToggleDay('${kind}','${iso}')">+${evs.length-4} autres</span>`;
+    }
+    grid += `<div class="cal-day${isToday?' cal-day-today':''}${evs.length?' cal-day-has':''}${expanded?' cal-day-open':''}">
       <span class="cal-daynum">${day}</span>
       <div class="cal-chips">${chips}${more}</div>
     </div>`;
