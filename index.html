@@ -647,6 +647,13 @@
 .pcok-search input:focus { border-color:var(--color-primary); }
 .pcok-iconbtn { padding:8px 12px; border:1px solid var(--color-border); border-radius:8px; background:var(--color-surface); color:var(--color-text-secondary); cursor:pointer; font-size:13px; font-weight:600; font-family:inherit; white-space:nowrap; }
 .pcok-iconbtn:hover { border-color:var(--color-primary); color:var(--color-primary); }
+/* Filtre par date d'échéance (Livraisons) */
+.pcok-datefilter { display:flex; align-items:center; gap:6px; padding:4px 8px; border:1px solid var(--color-border); border-radius:8px; background:var(--color-surface); color:var(--color-text-secondary); }
+.pcok-datefilter svg { flex-shrink:0; }
+.pcok-datefilter input { border:none; background:transparent; font-size:13px; font-family:inherit; color:var(--color-text-primary); outline:none; padding:2px 0; }
+.pcok-datefilter--active { border-color:var(--color-primary); color:var(--color-primary); background:#eef5f1; }
+.pcok-datefilter-clear { border:none; background:transparent; color:inherit; cursor:pointer; font-size:16px; line-height:1; padding:0 2px; }
+.pcok-datefilter-clear:hover { color:#dc2626; }
 /* Cartes d'alerte (retard / aujourd'hui / demain) */
 .pcok-alerts { margin:12px 0 6px; }
 .pcok-alerts-title { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; color:#dc2626; margin-bottom:7px; display:flex; align-items:center; gap:6px; }

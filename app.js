@@ -10876,7 +10876,8 @@ function _resolveOperatorLabel(who) {
 // (chips de filtre + cartes d'alerte + tableau compact + drawer latéral).
 // filter : ACTIVE|RETARD|AUJ|SEMAINE|SANS_DATE|TERMINE|TOUS
 // groupBy : quelle date fait foi pour l'échéance (client|prod)
-let _delivState = { filter: 'ACTIVE', mode: 'all', groupBy: 'client', sort: 'echeance', dir: 'asc', density: 'compact', q: '' };
+// date : filtre optionnel sur une date d'échéance précise (ISO 'AAAA-MM-JJ', '' = toutes)
+let _delivState = { filter: 'ACTIVE', mode: 'all', groupBy: 'client', sort: 'echeance', dir: 'asc', density: 'compact', q: '', date: '' };
 const _DELIV_PAGE = 80;
 let _delivLimit = _DELIV_PAGE;
 
@@ -10949,6 +10950,8 @@ function setDelivSort(v)     { if (_delivState.sort === v) _delivState.dir = _de
 function toggleDelivSortDir(){ _delivState.dir = _delivState.dir === 'asc' ? 'desc' : 'asc'; renderLivraisons(); }
 function toggleDelivDensity(){ _delivState.density = _delivState.density === 'compact' ? 'detaille' : 'compact'; renderLivraisons(); }
 function setDelivSearch(v)   { _delivState.q = v;      _delivLimit = _DELIV_PAGE; renderLivraisons(); }
+function setDelivDate(v)     { _delivState.date = _toIsoDate(v || ''); _delivLimit = _DELIV_PAGE; renderLivraisons(); }
+function clearDelivDate()    { _delivState.date = ''; _delivLimit = _DELIV_PAGE; renderLivraisons(); }
 function delivShowMore()     { _delivLimit += _DELIV_PAGE; renderLivraisons(); }
 
 async function _openDeliverySource(kind, id, dossierId) {
@@ -11015,6 +11018,7 @@ function _delivBucketMatch(r, k) {
 function _delivFilterRows(rows) {
   let out = rows.filter(r => _delivBucketMatch(r, _delivState.filter));
   if (_delivState.mode !== 'all') out = out.filter(r => r.mode === _delivState.mode);
+  if (_delivState.date) out = out.filter(r => r.ymd === _delivState.date);
   const q = (_delivState.q || '').trim().toLowerCase();
   if (q) out = out.filter(r => (r.client + ' ' + (r.commercial || '') + ' ' + (r.items || []).map(i => i.name).join(' ') + ' ' + (r.address || '') + ' ' + (r.ref || '')).toLowerCase().includes(q));
   return out;
@@ -11065,8 +11069,9 @@ function _delivRenderBody() {
   const page = filtered.slice(0, _delivLimit);
   const lateN = filtered.filter(r => r.status === 'pending' && r.days != null && r.days < 0).length;
   const totalSum = filtered.reduce((s, r) => s + r.total, 0);
-  const filteredLbl = (_delivState.filter !== 'ACTIVE' || _delivState.mode !== 'all' || _delivState.q) ? ' · filtré' : '';
-  const count = `<div class="pcok-count">${filtered.length} livraison${filtered.length > 1 ? 's' : ''}${filteredLbl}${lateN ? ` · <span style="color:#dc2626;font-weight:700">${lateN} en retard</span>` : ''}${showMoney ? ` · Total ${fmt(totalSum)}` : ''}</div>`;
+  const dateLbl = _delivState.date ? ` · échéance ${_dispDate(_delivState.date)}` : '';
+  const filteredLbl = (_delivState.filter !== 'ACTIVE' || _delivState.mode !== 'all' || _delivState.q || _delivState.date) ? ' · filtré' : '';
+  const count = `<div class="pcok-count">${filtered.length} livraison${filtered.length > 1 ? 's' : ''}${filteredLbl}${dateLbl}${lateN ? ` · <span style="color:#dc2626;font-weight:700">${lateN} en retard</span>` : ''}${showMoney ? ` · Total ${fmt(totalSum)}` : ''}</div>`;
   const more = filtered.length > _delivLimit
     ? `<div class="pcok-more"><button onclick="delivShowMore()">Afficher plus (${filtered.length - _delivLimit} restants)</button></div>` : '';
   body.innerHTML = count + _delivTable(page, showMoney) + more;
@@ -11087,6 +11092,11 @@ function _delivToolbar(cnt) {
   const sortOpts = [['echeance', 'Échéance'], ['client', 'Client'], ['commercial', 'Commercial'], ['total', 'Montant']]
     .map(([k, l]) => `<option value="${k}" ${_delivState.sort === k ? 'selected' : ''}>Trier : ${l}</option>`).join('');
   const dirIcon = _delivState.dir === 'asc' ? '↑' : '↓';
+  const dateFilter = `<div class="pcok-datefilter${_delivState.date ? ' pcok-datefilter--active' : ''}" title="Filtrer sur une date d'échéance précise">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        <input type="date" value="${_delivState.date || ''}" onchange="setDelivDate(this.value)" aria-label="Date d'échéance" />
+        ${_delivState.date ? `<button class="pcok-datefilter-clear" title="Effacer la date" onclick="clearDelivDate()">×</button>` : ''}
+      </div>`;
   return `<div class="pcok-toolbar">
     <div class="pcok-chips">${chips}</div>
     <div class="pcok-controls">
@@ -11095,6 +11105,7 @@ function _delivToolbar(cnt) {
         <input type="text" placeholder="Rechercher client, article, commercial…" value="${_pcokEsc(_delivState.q)}" oninput="setDelivSearch(this.value)" />
       </div>
       <select class="select-input" onchange="setDelivGroupBy(this.value)" title="Date d'échéance">${groupOpts}</select>
+      ${dateFilter}
       <select class="select-input" onchange="setDelivMode(this.value)" title="Filtrer par mode">${modeOpts}</select>
       <select class="select-input" onchange="setDelivSort(this.value)" title="Trier">${sortOpts}</select>
       <button class="pcok-iconbtn" title="Sens du tri" onclick="toggleDelivSortDir()">${dirIcon}</button>
@@ -11300,7 +11311,7 @@ function printLivraisons() {
       @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
     </style></head><body onload="window.print()">
       <h1>${shop} — PLANNING DE LIVRAISON</h1>
-      <div class="sub">${filterLbl} · ${modeLbl} · échéance ${_delivState.groupBy === 'prod' ? 'production' : 'client'} · ${rows.length} livraison(s)${late ? ` · ${late} en retard` : ''} · édité le ${new Date().toLocaleDateString('fr-FR')} ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</div>
+      <div class="sub">${filterLbl} · ${modeLbl} · échéance ${_delivState.groupBy === 'prod' ? 'production' : 'client'}${_delivState.date ? ' · date ' + _dispDate(_delivState.date) : ''} · ${rows.length} livraison(s)${late ? ` · ${late} en retard` : ''} · édité le ${new Date().toLocaleDateString('fr-FR')} ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</div>
       <table>
         <colgroup><col style="width:3%"><col style="width:7%"><col style="width:15%"><col style="width:9%"><col style="width:17%"><col style="width:15%"><col style="width:9%">${showMoney ? '<col style="width:7%">' : ''}<col style="width:8%"><col style="width:6%"><col style="width:9%"><col style="width:4%"></colgroup>
         <thead><tr>
