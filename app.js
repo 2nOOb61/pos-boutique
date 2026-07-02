@@ -7994,7 +7994,11 @@ async function loadCommentsForDossier(dossierId) {
 }
 
 function renderCommentsSection(dossierId, comments) {
-  const container = document.getElementById('commentsSection');
+  // Rend UNIQUEMENT le fil de commentaires (historique) dans le body scrollable.
+  // Le formulaire de saisie (textarea + Envoyer) vit dans le footer fixe du
+  // panneau, rendu une seule fois par renderAttrPanel — il n'est pas régénéré ici,
+  // pour rester toujours visible et conserver la saisie en cours.
+  const container = document.getElementById('commentsList');
   if (!container) return;
   const myLabel = currentUser?.label || currentUser?.username || '';
 
@@ -8038,30 +8042,7 @@ function renderCommentsSection(dossierId, comments) {
       }).join('')
     : '<div style="font-size:12px;color:var(--color-text-muted);text-align:center;padding:10px 0;font-style:italic">Aucun commentaire</div>';
 
-  container.innerHTML = `
-    <div style="margin-bottom:10px">${listHtml}</div>
-    <div style="position:relative">
-      <textarea id="commentTextarea" onkeyup="handleCommentMention(event)"
-        placeholder="Ajouter une note… tapez @ pour mentionner un utilisateur"
-        style="width:100%;padding:8px 10px;border:1px solid var(--color-border);border-radius:8px;font-size:13px;resize:vertical;min-height:56px;box-sizing:border-box;font-family:inherit;color:var(--color-text-primary);background:var(--color-surface)"
-        onfocus="this.style.borderColor='var(--color-primary)'"
-        onblur="this.style.borderColor='var(--color-border)'"></textarea>
-      <div id="mentionDropdown" style="display:none;position:absolute;bottom:calc(100% + 4px);left:0;background:#fff;border:1px solid var(--color-border);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);z-index:200;min-width:200px;max-height:180px;overflow-y:auto"></div>
-    </div>
-    <div id="commentAttachPreviews" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"></div>
-    <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
-      <label for="commentAttachInput" style="display:inline-flex;align-items:center;gap:5px;padding:5px 10px;background:var(--color-bg);color:var(--color-text-secondary);border:1px solid var(--color-border);border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;flex-shrink:0">
-        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-        Fichier
-      </label>
-      <input id="commentAttachInput" type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv" multiple style="display:none" onchange="addCommentAttachment(this.files)" />
-      <div style="flex:1"></div>
-      <button onclick="submitComment('${dossierId}')"
-        style="display:inline-flex;align-items:center;gap:5px;padding:7px 16px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-        Envoyer
-      </button>
-    </div>`;
+  container.innerHTML = listHtml;
 }
 
 function handleCommentMention(event) {
@@ -9373,9 +9354,13 @@ function renderAttrPanel(tachesD, commentsD = []) {
         }).filter(a => a.data))
       ];
       const attachRow = attachList.length
-        ? `<div style="margin-top:10px">
-             <div style="font-size:11px;font-weight:700;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Pièces jointes (${attachList.length})</div>
-             <div style="display:flex;flex-direction:column;gap:6px">
+        ? `<details class="attr-files">
+             <summary>
+               <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+               Pièces jointes (${attachList.length})
+               <svg class="attr-files__chev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+             </summary>
+             <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
                ${attachList.map(a => {
                  const isImg   = (a.type || '').startsWith('image/');
                  const ext     = (a.name || 'fichier').split('.').pop().toUpperCase();
@@ -9397,7 +9382,7 @@ function renderAttrPanel(tachesD, commentsD = []) {
                    + '</div>';
                }).join('')}
              </div>
-           </div>`
+           </details>`
         : '';
 
       const srcIcon = d.sourceType === 'reservation'
@@ -9531,7 +9516,7 @@ function renderAttrPanel(tachesD, commentsD = []) {
         ? `<span style="font-size:10px;font-weight:700;color:var(--color-success);background:var(--color-success-bg);padding:2px 8px;border-radius:20px;margin-left:6px"> Étape complète</span>`
         : '';
       return `<div class="etape-row-attr">
-        <div style="width:20px;height:20px;border-radius:50%;background:${etapeComplete?'#16a34a':e.color}18;border:1.5px solid ${etapeComplete?'#16a34a':e.color};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:9px;font-weight:700;color:${etapeComplete?'#16a34a':e.color}">${etapeComplete?'✓':e.icon}</div>
+        <div style="width:18px;height:18px;border-radius:50%;background:${etapeComplete?'#16a34a':e.color}18;border:1.5px solid ${etapeComplete?'#16a34a':e.color};display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:9px;font-weight:700;color:${etapeComplete?'#16a34a':e.color}">${etapeComplete?'✓':e.icon}</div>
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">
             <span style="font-size:12px;font-weight:600;color:var(--color-text-primary)">${e.label}</span>
@@ -9551,25 +9536,49 @@ function renderAttrPanel(tachesD, commentsD = []) {
       </div>`;
     }).join('')}
       </div>
-    </div>
-    <div class="attr-comments-section" style="padding:14px 18px 16px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <div style="font-size:11px;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:.06em;display:flex;align-items:center;gap:6px">
-          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-          Commentaires &amp; notes
-          <span style="background:var(--color-border);color:var(--color-text-secondary);font-size:10px;padding:1px 6px;border-radius:8px" id="commentCount">${commentsD.length}</span>
+      <div style="padding:14px 0 2px;border-top:1px solid var(--color-border);margin-top:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div style="font-size:11px;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:.06em;display:flex;align-items:center;gap:6px">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            Commentaires &amp; notes
+            <span style="background:var(--color-border);color:var(--color-text-secondary);font-size:10px;padding:1px 6px;border-radius:8px" id="commentCount">${commentsD.length}</span>
+          </div>
+          <button onclick="refreshComments('${d.id}')" id="refreshCommentsBtn"
+            title="Voir les derniers commentaires des collègues"
+            style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;background:var(--color-bg);color:var(--color-text-secondary);border:1px solid var(--color-border);border-radius:6px;cursor:pointer;font-size:11px;font-weight:500">
+            <svg id="refreshCommentsIcon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.2"/></svg>
+            Actualiser
+          </button>
         </div>
-        <button onclick="refreshComments('${d.id}')" id="refreshCommentsBtn"
-          title="Voir les derniers commentaires des collègues"
-          style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;background:var(--color-bg);color:var(--color-text-secondary);border:1px solid var(--color-border);border-radius:6px;cursor:pointer;font-size:11px;font-weight:500">
-          <svg id="refreshCommentsIcon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.2"/></svg>
-          Actualiser
+        <div id="commentsList"></div>
+      </div>
+    </div>
+    <div class="attr-panel-footer">
+      <div style="position:relative">
+        <textarea id="commentTextarea" onkeyup="handleCommentMention(event)"
+          placeholder="Ajouter une note… tapez @ pour mentionner un utilisateur"
+          style="width:100%;padding:8px 10px;border:1px solid var(--color-border);border-radius:8px;font-size:13px;resize:vertical;min-height:48px;box-sizing:border-box;font-family:inherit;color:var(--color-text-primary);background:var(--color-surface)"
+          onfocus="this.style.borderColor='var(--color-primary)'"
+          onblur="this.style.borderColor='var(--color-border)'"></textarea>
+        <div id="mentionDropdown" style="display:none;position:absolute;bottom:calc(100% + 4px);left:0;background:#fff;border:1px solid var(--color-border);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);z-index:200;min-width:200px;max-height:180px;overflow-y:auto"></div>
+      </div>
+      <div id="commentAttachPreviews" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"></div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+        <label for="commentAttachInput" style="display:inline-flex;align-items:center;gap:5px;padding:5px 10px;background:var(--color-bg);color:var(--color-text-secondary);border:1px solid var(--color-border);border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;flex-shrink:0">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+          Fichier
+        </label>
+        <input id="commentAttachInput" type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv" multiple style="display:none" onchange="addCommentAttachment(this.files)" />
+        <div style="flex:1"></div>
+        <button onclick="submitComment('${d.id}')"
+          style="display:inline-flex;align-items:center;gap:5px;padding:7px 16px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          Envoyer
         </button>
       </div>
-      <div id="commentsSection"></div>
     </div>
   `;
-  // Initialiser la section commentaires
+  // Initialiser le fil de commentaires (le footer de saisie est déjà rendu ci-dessus)
   commentAttachments = [];
   renderCommentsSection(d.id, commentsD);
 }

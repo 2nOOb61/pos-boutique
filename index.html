@@ -48,14 +48,27 @@
 .attr-left { display:flex; flex-direction:column; gap:10px; }
 .attr-right { position:sticky; top:74px; }
 .attr-panel { background:var(--color-surface); border:1px solid var(--color-border); border-radius:14px; overflow:hidden; min-height:200px; }
-/* Panneau 3 zones : header fixe | étapes défile | commentaires fixe en bas */
+/* Panneau 3 zones : header fixe | body défile (résumé + étapes + historique) |
+   footer fixe (saisie commentaire + Envoyer, toujours visible) */
 @media(min-width:901px){
   .attr-right           { max-height:calc(100vh - 90px); overflow:hidden; }
   .attr-panel           { height:100%; max-height:calc(100vh - 90px); display:flex; flex-direction:column; overflow:hidden; }
   .attr-panel-header    { flex-shrink:0; }
-  .attr-panel-body      { flex:1; overflow-y:auto; overflow-x:hidden; min-height:140px; }
-  .attr-comments-section{ flex-shrink:0; max-height:158px; overflow-y:auto; border-top:1px solid var(--color-border); }
+  .attr-panel-body      { flex:1; overflow-y:auto; overflow-x:hidden; min-height:120px; }
+  .attr-panel-footer    { flex-shrink:0; }
 }
+/* Footer de saisie : toujours visible en bas — sur mobile il colle au bas du
+   viewport pendant que le body défile au-dessus. */
+.attr-panel-footer { border-top:1px solid var(--color-border); background:var(--color-surface); padding:10px 16px 12px; }
+@media(max-width:900px){
+  .attr-panel-footer { position:sticky; bottom:0; z-index:10; box-shadow:0 -6px 14px -8px rgba(0,0,0,.14); }
+}
+/* Section fichiers pliable */
+.attr-files { margin-top:10px; }
+.attr-files > summary { list-style:none; cursor:pointer; display:flex; align-items:center; gap:6px; font-size:11px; font-weight:700; color:var(--color-text-muted); text-transform:uppercase; letter-spacing:.05em; padding:4px 0; user-select:none; }
+.attr-files > summary::-webkit-details-marker { display:none; }
+.attr-files > summary .attr-files__chev { transition:transform .18s; margin-left:auto; }
+.attr-files[open] > summary .attr-files__chev { transform:rotate(90deg); }
 /* Chips dates (BAT / livraison client / production) : flux inline compact */
 .attr-date-chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:9px; }
 .attr-date-chips:empty { margin-top:0; }
@@ -151,7 +164,7 @@
 .attr-source-card { background:var(--color-bg); border:1px solid var(--color-border); border-radius:10px; padding:12px 14px; margin-bottom:14px; }
 .attr-source-label { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; color:var(--color-text-muted); margin-bottom:8px; display:flex; align-items:center; gap:5px; }
 .attr-etapes-list { margin:0 -18px; }
-.etape-row-attr { display:flex; align-items:center; gap:10px; padding:10px 18px; border-bottom:1px solid var(--color-border); transition:background .12s; }
+.etape-row-attr { display:flex; align-items:center; gap:9px; padding:6px 18px; border-bottom:1px solid var(--color-border); transition:background .12s; }
 .etape-row-attr:hover { background:var(--color-bg); }
 .etape-row-attr:last-child { border-bottom:none; }
 .btn-attr-assign { padding:5px 11px; border-radius:7px; background:var(--color-primary-light); color:var(--color-primary); border:1px solid rgba(26,74,58,.2); cursor:pointer; font-size:11px; font-weight:600; transition:.15s; white-space:nowrap; }
@@ -2903,7 +2916,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260701-attr-fit2"></script>
+<script src="./app.js?v=20260702-attr-panel"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
