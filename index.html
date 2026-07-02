@@ -1711,15 +1711,9 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
        PAGE LIVRAISONS
        ═══════════════════════════════════════════ -->
   <div class="page" id="page-livraisons" data-roles="admin,caissier,commerciale,gestionnaire,comptable,livreur,chef_atelier,operateur_prod,machiniste,finition">
-    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:18px">
-      <div>
-        <h1 style="font-size:21px;font-weight:800;color:var(--text);margin:0">Livraisons</h1>
-        <p style="font-size:13px;color:var(--muted);margin:3px 0 0">Toutes les livraisons à venir, regroupées par date d'échéance</p>
-      </div>
-      <div class="search-wrap" style="max-width:300px;flex:1;min-width:180px">
-        <span class="search-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
-        <input class="search-input" id="livSearch" placeholder="Rechercher client, article, commercial..." oninput="setDelivSearch(this.value)" aria-label="Rechercher une livraison" autocomplete="off" />
-      </div>
+    <div style="margin-bottom:18px">
+      <h1 style="font-size:21px;font-weight:800;color:var(--text);margin:0">Livraisons</h1>
+      <p style="font-size:13px;color:var(--muted);margin:3px 0 0">Planifiez et suivez les livraisons — retards en évidence, imprimez le planning</p>
     </div>
     <div id="livraisonsContent"></div>
   </div>
@@ -1954,6 +1948,9 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 </aside>
 <aside id="cmdDrawer" class="pcok-drawer" aria-label="Détail de la commande">
   <div id="cmdDrawerBody" class="pcok-drawer-body"></div>
+</aside>
+<aside id="delivDrawer" class="pcok-drawer" aria-label="Détail de la livraison">
+  <div id="delivDrawerBody" class="pcok-drawer-body"></div>
 </aside>
 
 <!-- MODAL COMMANDE — CRÉATION -->
