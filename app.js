@@ -13483,9 +13483,16 @@ function renderPatronDashboard() {
   </div>`;
 
   // ── Ventes par jour — détail par commercial (liste dépliable) ──
+  // Clé = jour LOCAL (comme les KPI « aujourd'hui ») et non la date UTC de l'ISO,
+  // sinon à Madagascar (UTC+3) une vente du matin tombe dans le jour UTC précédent.
+  const _localDayKey = str => {
+    const d = parseSaleDate(str);
+    if (!d || isNaN(d)) return saleDateKey(str);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
   const byDay = {};
   sales.forEach(s => {
-    const key = saleDateKey(s.date) || (parseSaleDate(s.date) ? parseSaleDate(s.date).toISOString().slice(0, 10) : '');
+    const key = _localDayKey(s.date);
     if (!key) return;
     (byDay[key] = byDay[key] || []).push(s);
   });
