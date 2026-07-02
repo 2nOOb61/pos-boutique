@@ -40,20 +40,25 @@
 }
 @media(min-width:901px) {
   .btn-back-dossier { display:none !important; }
-  #attrLeft { height:calc(100vh - 220px); overflow:hidden; }
+  /* Hauteur de repli — surchargée dynamiquement par _fitAttrLayout() (JS) qui
+     mesure la position réelle sous l'en-tête pour éviter tout débordement. */
+  #attrLeft { height:calc(100vh - 200px); overflow:hidden; }
   #dossierListContainer { flex:1; overflow-y:auto; min-height:0; }
 }
 .attr-left { display:flex; flex-direction:column; gap:10px; }
-.attr-right { position:sticky; top:80px; }
+.attr-right { position:sticky; top:74px; }
 .attr-panel { background:var(--color-surface); border:1px solid var(--color-border); border-radius:14px; overflow:hidden; min-height:200px; }
 /* Panneau 3 zones : header fixe | étapes défile | commentaires fixe en bas */
 @media(min-width:901px){
-  .attr-right           { max-height:calc(100vh - 96px); overflow:hidden; }
-  .attr-panel           { height:100%; max-height:calc(100vh - 96px); display:flex; flex-direction:column; overflow:hidden; }
+  .attr-right           { max-height:calc(100vh - 90px); overflow:hidden; }
+  .attr-panel           { height:100%; max-height:calc(100vh - 90px); display:flex; flex-direction:column; overflow:hidden; }
   .attr-panel-header    { flex-shrink:0; }
-  .attr-panel-body      { flex:1; overflow-y:auto; overflow-x:hidden; }
-  .attr-comments-section{ flex-shrink:0; max-height:270px; overflow-y:auto; border-top:1px solid var(--color-border); }
+  .attr-panel-body      { flex:1; overflow-y:auto; overflow-x:hidden; min-height:140px; }
+  .attr-comments-section{ flex-shrink:0; max-height:158px; overflow-y:auto; border-top:1px solid var(--color-border); }
 }
+/* Chips dates (BAT / livraison client / production) : flux inline compact */
+.attr-date-chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:9px; }
+.attr-date-chips:empty { margin-top:0; }
 .dossier-list-wrap { display:flex; flex-direction:column; gap:10px; }
 .dossier-card { background:var(--color-surface); border:1.5px solid var(--color-border); border-radius:12px; padding:14px 16px; cursor:pointer; transition:border-color .15s, box-shadow .15s; }
 .dossier-card:hover { border-color:var(--color-primary); box-shadow:0 2px 8px rgba(26,74,58,.08); }
@@ -102,7 +107,9 @@
 .kpi-mini-val { font-size:22px; font-weight:700; color:var(--color-text-primary); }
 
 /* ══ ATTRIBUTION — Status tabs ══ */
-.dossier-tabs-row { display:flex; gap:5px; flex-wrap:wrap; margin-bottom:14px; }
+.dossier-tabs-row { display:flex; gap:5px; flex-wrap:nowrap; overflow-x:auto; margin-bottom:8px; padding-bottom:2px; scrollbar-width:thin; }
+.dossier-tabs-row::-webkit-scrollbar { height:4px; }
+.dossier-tabs-row .dossier-tab { flex:0 0 auto; }
 .dossier-tab { display:inline-flex; align-items:center; gap:5px; padding:6px 12px; border-radius:8px; border:1.5px solid var(--color-border); background:var(--color-surface); color:var(--color-text-secondary); cursor:pointer; font-size:12px; font-weight:500; transition:.15s; white-space:nowrap; font-family:'DM Sans',sans-serif; }
 .dossier-tab:hover { border-color:var(--color-primary); color:var(--color-primary); }
 .dossier-tab--active { background:var(--color-primary); border-color:var(--color-primary); color:#fff; font-weight:600; }
@@ -1752,7 +1759,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
     <div id="dossierStatusTabs" class="dossier-tabs-row"></div>
 
     <!-- Filtre date attribution -->
-    <div id="attrDateFilterBar" style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+    <div id="attrDateFilterBar" style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
       <span style="font-size:12px;font-weight:600;color:var(--color-text-secondary)">Filtrer par :</span>
       <select id="attrMonthSel" class="select-input" onchange="applyAttrDateFilter()" style="min-width:130px">
         <option value="">Tous les mois</option>
@@ -2896,7 +2903,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260701-attr-cockpit"></script>
+<script src="./app.js?v=20260701-attr-fit2"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

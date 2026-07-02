@@ -8932,6 +8932,7 @@ function _renderAttrCockpit(list) {
     : `<div class="pcok-empty"><p>Aucun dossier dans ce filtre</p></div>`;
 
   container.innerHTML = `<div class="pcok pcok--attr">${toolbar}${count}${table}${more}</div>`;
+  _fitAttrLayout();
 }
 
 function _attrThead() {
@@ -9018,6 +9019,33 @@ function _attrShowMore(){ _attrLimit += _ATTR_PAGE; renderDossiers(); }
 
 // Cloisonnement Attribution : la liste des dossiers visibles par l'utilisateur courant.
 // admin / chef / commercial → tous ; opérateur → uniquement ceux où il a une tâche.
+// Ajuste dynamiquement la hauteur des colonnes Attribution (liste + panneau) pour
+// qu'elles remplissent EXACTEMENT l'espace disponible sous l'en-tête, quelle que
+// soit la hauteur d'écran ou du bloc de filtres. Corrige le panneau d'attribution
+// qui débordait sous le pli (offsets fixes calc(100vh - 96px) inadaptés).
+function _fitAttrLayout() {
+  const layout = document.getElementById('attrLayout');
+  if (!layout || document.getElementById('page-attribution')?.classList.contains('active') === false) return;
+  const left  = document.getElementById('attrLeft');
+  const right = document.getElementById('attrRight');
+  const panel = document.getElementById('attrPanel');
+  // Mobile (<901px) : layout empilé → on retire toute hauteur forcée
+  if (window.innerWidth < 901) {
+    [left, right, panel].forEach(el => { if (el) { el.style.height = ''; el.style.maxHeight = ''; } });
+    return;
+  }
+  const top = layout.getBoundingClientRect().top; // position réelle sous l'en-tête
+  const h = Math.max(360, Math.round(window.innerHeight - top - 12));
+  if (left)  left.style.height = h + 'px';
+  if (right) { right.style.maxHeight = h + 'px'; right.style.height = h + 'px'; }
+  if (panel) { panel.style.maxHeight = h + 'px'; panel.style.height = h + 'px'; }
+}
+let _fitAttrRaf = 0;
+window.addEventListener('resize', () => {
+  cancelAnimationFrame(_fitAttrRaf);
+  _fitAttrRaf = requestAnimationFrame(_fitAttrLayout);
+});
+
 function _attribVisibleDossiers() {
   if (_canSeeAllOps()) return dossiers;
   const my = _myOpLabel();
@@ -9271,6 +9299,7 @@ async function selectDossier(id) {
   const localComments = dossierComments.filter(c => c.dossierId === id)
     .sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
   renderAttrPanel(localTaches, localComments);
+  _fitAttrLayout();
 
   // ── 2. Refresh silencieux depuis GAS en arrière-plan ──
   if (!APPS_SCRIPT_URL) return;
@@ -9438,21 +9467,21 @@ function renderAttrPanel(tachesD, commentsD = []) {
         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="#1a4a3a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         <span style="font-size:11px;color:var(--color-text-secondary)">Commercial : <strong style="color:#1a4a3a;font-weight:700">${_commercial}</strong></span>
       </div>` : ''}
-      ${(() => { const _bat = _toIsoDate(d.dateBAT); return _bat ? `<div style="margin-top:9px;margin-right:6px;display:inline-flex;align-items:center;gap:7px;padding:6px 11px;border-radius:9px;background:#eaf1fb;border:1px solid rgba(37,99,235,.3)">
+      <div class="attr-date-chips">${(() => { const _bat = _toIsoDate(d.dateBAT); return _bat ? `<div style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:9px;background:#eaf1fb;border:1px solid rgba(37,99,235,.3)">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg>
         <span style="font-size:12px;font-weight:700;color:#1d4ed8">BAT : ${new Date(_bat+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'2-digit',month:'short'})}</span>
         ${(()=>{const dd=_daysUntil(_bat);return dd==null?'':`<span style="font-size:11px;font-weight:800;color:${dd<0?'#dc2626':dd<=2?'#e8834a':'#1a4a3a'}">${dd<0?Math.abs(dd)+'j de retard':dd===0?"aujourd'hui":dd===1?'demain':dd+'j restants'}</span>`;})()}
       </div>` : ''; })()}
-      ${(() => { const _ldc = _toIsoDate(d.dateLivraison); return _ldc ? `<div style="margin-top:9px;margin-right:6px;display:inline-flex;align-items:center;gap:7px;padding:6px 11px;border-radius:9px;background:#e8f4f0;border:1px solid rgba(26,74,58,.25)">
+      ${(() => { const _ldc = _toIsoDate(d.dateLivraison); return _ldc ? `<div style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:9px;background:#e8f4f0;border:1px solid rgba(26,74,58,.25)">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#1a4a3a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
         <span style="font-size:12px;font-weight:700;color:#1a4a3a">Livraison client : ${new Date(_ldc+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'2-digit',month:'short'})}</span>
         ${(()=>{const dd=_daysUntil(_ldc);return dd==null?'':`<span style="font-size:11px;font-weight:800;color:${dd<0?'#dc2626':dd<=2?'#e8834a':'#1a4a3a'}">${dd<0?Math.abs(dd)+'j de retard':dd===0?"aujourd'hui":dd===1?'demain':dd+'j restants'}</span>`;})()}
       </div>` : ''; })()}
-      ${(() => { const _prd = _toIsoDate(d.dateLivraisonProd); return _prd ? `<div style="margin-top:9px;display:inline-flex;align-items:center;gap:7px;padding:6px 11px;border-radius:9px;background:#fff0e6;border:1px solid rgba(232,131,74,.3)">
+      ${(() => { const _prd = _toIsoDate(d.dateLivraisonProd); return _prd ? `<div style="display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:9px;background:#fff0e6;border:1px solid rgba(232,131,74,.3)">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#e8834a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
         <span style="font-size:12px;font-weight:700;color:#c2410c">Livraison production : ${new Date(_prd+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'2-digit',month:'short'})}</span>
         ${(()=>{const dd=_daysUntil(_prd);return dd==null?'':`<span style="font-size:11px;font-weight:800;color:${dd<0?'#dc2626':dd<=2?'#e8834a':'#1a4a3a'}">${dd<0?Math.abs(dd)+'j de retard':dd===0?"aujourd'hui":dd===1?'demain':dd+'j restants'}</span>`;})()}
-      </div>` : ''; })()}
+      </div>` : ''; })()}</div>
       <div style="margin-top:10px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
           <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted)">Progression</span>
