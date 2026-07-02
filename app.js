@@ -41,6 +41,11 @@ var _notifPollInterval = null;
 var _tlPhotoQueue = (function(){ try { return JSON.parse(localStorage.getItem('pos-tl-photo-queue')||'[]'); } catch(e){ return []; } })();
 var _notifPopupArmed   = false; // pop-ups activés après le chargement initial (évite le backlog au login ; insensible aux horloges)
 var _notifAudioCtx     = null; // contexte Web Audio pour le son de notification
+// Pop-ups à l'écran : file navigable (les plus récentes en tête) + page courante.
+// Permet de feuilleter les anciennes notifs sans devoir les fermer.
+var _notifPopQueue     = [];
+var _notifPopPage      = 0;
+var _NOTIF_POP_PER_PAGE = 4;
 var notifications      = (function() {
   try { var r = localStorage.getItem('pos-notifications'); return r ? JSON.parse(r) : []; } catch(e) { return []; }
 }());
@@ -7372,28 +7377,31 @@ function _notifPopColors(n) {
   return { np:'#e8834a', npbg:'#fff0e6' };
 }
 
-function _updateNotifPopAllClose() {
-  const stack = document.getElementById('notifPopStack');
-  if (!stack) return;
-  const n = stack.querySelectorAll('.notif-pop').length;
-  let btn = stack.querySelector('.notif-pop-allclose');
-  if (n >= 2) {
-    if (!btn) {
-      btn = document.createElement('button');
-      btn.className = 'notif-pop-allclose';
-      btn.onclick = () => { stack.querySelectorAll('.notif-pop').forEach(p => p.remove()); btn.remove(); };
-      stack.insertBefore(btn, stack.firstChild);
-    }
-    btn.textContent = '✕ Tout fermer (' + n + ')';
-  } else if (btn) {
-    btn.remove();
-  }
-}
-
+// Empile une notif dans la file d'affichage puis (re)dessine le pager.
 function showNotifPopup(n) {
   if (!n) return;
-  const stack = _notifPopStack();
-  if (n.id && stack.querySelector('[data-nid="' + n.id + '"]')) return; // anti-doublon
+  if (n.id && _notifPopQueue.some(x => x && x.id === n.id)) return; // anti-doublon
+  _notifPopQueue.unshift(n);   // plus récent en tête
+  _notifPopPage = 0;           // une nouvelle notif ramène sur la page la plus récente
+  _renderNotifPops();
+}
+
+// Retire une notif précise de la file (bouton × d'une carte).
+function _closeNotifPop(n) {
+  const i = _notifPopQueue.indexOf(n);
+  if (i !== -1) _notifPopQueue.splice(i, 1);
+  _renderNotifPops();
+}
+
+// Vide toute la file (bouton « Tout fermer »).
+function _closeAllNotifPops() {
+  _notifPopQueue = [];
+  _notifPopPage = 0;
+  _renderNotifPops();
+}
+
+// Construit l'élément DOM d'une carte de notification.
+function _buildNotifPopEl(n) {
   const c = _notifPopColors(n);
   const dt = n.timestamp ? new Date(n.timestamp) : new Date();
   const timeStr = isNaN(dt.getTime()) ? '' : dt.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
@@ -7409,16 +7417,47 @@ function showNotifPopup(n) {
     + '<button class="notif-pop__close" aria-label="Fermer">&times;</button>';
   pop.querySelector('.notif-pop__msg').textContent  = n.message || 'Nouvelle notification';
   pop.querySelector('.notif-pop__meta').textContent = meta;
-  const close = () => { pop.remove(); _updateNotifPopAllClose(); };
-  pop.querySelector('.notif-pop__close').addEventListener('click', (e) => { e.stopPropagation(); close(); });
+  pop.querySelector('.notif-pop__close').addEventListener('click', (e) => { e.stopPropagation(); _closeNotifPop(n); });
   pop.addEventListener('click', () => {
     if (n.dossierId) { try { openAttribForDossier(n.dossierId); } catch(e){} }
     else            { try { openNotifPanel(); } catch(e){} }
-    close();
+    _closeNotifPop(n);
   });
-  const allBtn = stack.querySelector('.notif-pop-allclose');
-  stack.insertBefore(pop, allBtn ? allBtn.nextSibling : stack.firstChild); // plus récent en haut
-  _updateNotifPopAllClose();
+  return pop;
+}
+
+// (Re)dessine la pile de pop-ups : barre de navigation (‹ page / total ›) + une page de cartes.
+function _renderNotifPops() {
+  const stack = _notifPopStack();
+  stack.innerHTML = '';
+  const total = _notifPopQueue.length;
+  if (!total) return;
+  const perPage   = _NOTIF_POP_PER_PAGE;
+  const pageCount = Math.ceil(total / perPage);
+  if (_notifPopPage > pageCount - 1) _notifPopPage = pageCount - 1;
+  if (_notifPopPage < 0) _notifPopPage = 0;
+
+  if (total >= 2) {
+    const start = _notifPopPage * perPage + 1;
+    const end   = Math.min(total, (_notifPopPage + 1) * perPage);
+    const nav = document.createElement('div');
+    nav.className = 'notif-pop-nav';
+    nav.innerHTML =
+        '<div class="notif-pop-nav__pager">'
+      +   '<button class="notif-pop-nav__btn" data-act="older" ' + (_notifPopPage >= pageCount - 1 ? 'disabled' : '') + ' aria-label="Notifications plus anciennes" title="Plus anciennes">&#8249;</button>'
+      +   '<span class="notif-pop-nav__count">' + start + '–' + end + ' / ' + total + '</span>'
+      +   '<button class="notif-pop-nav__btn" data-act="newer" ' + (_notifPopPage <= 0 ? 'disabled' : '') + ' aria-label="Notifications plus récentes" title="Plus récentes">&#8250;</button>'
+      + '</div>'
+      + '<button class="notif-pop-nav__all">✕ Tout fermer</button>';
+    nav.querySelector('[data-act="older"]').addEventListener('click', (e) => { e.stopPropagation(); if (_notifPopPage < pageCount - 1) { _notifPopPage++; _renderNotifPops(); } });
+    nav.querySelector('[data-act="newer"]').addEventListener('click', (e) => { e.stopPropagation(); if (_notifPopPage > 0) { _notifPopPage--; _renderNotifPops(); } });
+    nav.querySelector('.notif-pop-nav__all').addEventListener('click', (e) => { e.stopPropagation(); _closeAllNotifPops(); });
+    stack.appendChild(nav);
+  }
+
+  _notifPopQueue
+    .slice(_notifPopPage * perPage, _notifPopPage * perPage + perPage)
+    .forEach(n => stack.appendChild(_buildNotifPopEl(n)));
 }
 
 // Son de notification — chime court généré en Web Audio (aucun fichier externe).
