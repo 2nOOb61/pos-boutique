@@ -10280,13 +10280,25 @@ function _liveSig_() {
 }
 
 async function _autoRefreshActivePage() {
+  const onCal  = document.getElementById('page-calendrier')?.classList.contains('active');
   const onAttr = document.getElementById('page-attribution')?.classList.contains('active');
   const onProd = document.getElementById('page-production')?.classList.contains('active');
-  if (!onAttr && !onProd) return;
+  if (!onCal && !onAttr && !onProd) return;
   if (!APPS_SCRIPT_URL) return;
   const now = Date.now();
   if (now - _lastLiveRefresh < 20000) return;
   _lastLiveRefresh = now;
+  // Calendrier : recharge commandes + réservations (source des événements) puis
+  // re-rend. renderCalendrier ne remplace que les grilles (#calMonthProd/#calMonthClient)
+  // → le mois affiché (_calRef), les filtres, les jours dépliés et le drawer sont préservés.
+  if (onCal) {
+    try {
+      await Promise.all([loadCommandesFromScript(), loadReservationsFromScript()]);
+      _ensureDossierLinks();
+      renderCalendrier();
+    } catch(e) { /* silencieux — on garde les données locales */ }
+    return;
+  }
   try {
     const filter = document.getElementById('dossierFilterSel')?.value || 'TOUS';
     const [rD, rT] = await Promise.all([
