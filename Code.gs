@@ -1444,12 +1444,18 @@ function handleGetTaches(data) {
 
   const tz  = Session.getScriptTimeZone();
   const fmt = function(dt) { return dt ? Utilities.formatDate(new Date(dt), tz, 'dd/MM/yyyy HH:mm') : ''; };
+  // Epoch absolu (ms) pour le chronomètre : immunise le minuteur contre tout écart
+  // de fuseau entre le script (appsscript.json) et le téléphone de l'opérateur.
+  // Sans ça, le front reparsait la chaîne "dd/MM/yyyy HH:mm" (formatée en TZ script)
+  // comme heure locale → le minuteur sautait de l'écart de fuseau après le polling.
+  const ms  = function(dt) { if (!dt) return null; const d = new Date(dt); return isNaN(d.getTime()) ? null : d.getTime(); };
   let list  = [];
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i]; if (!r[0]) continue;
     const t = { id:r[0], dossierId:r[1], numeroDossier:r[2], etapeCode:r[3], etapeLabel:r[4],
       operateur:r[5], statut:r[6], dateAssignation:fmt(r[7]), dateDebut:fmt(r[8]),
-      dateFin:fmt(r[9]), commentaire:r[10], assignePar:r[11] };
+      dateFin:fmt(r[9]), commentaire:r[10], assignePar:r[11],
+      startTs:ms(r[8]), endTs:ms(r[9]) };
     // Champs spécifiques aux tâches libres (colonnes 13-15, absentes des tâches normales)
     if (r[12]) t.priorite = r[12];
     // Échéance : Sheets peut avoir auto-converti "yyyy-MM-dd" en Date → re-formater en
