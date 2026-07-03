@@ -142,6 +142,7 @@ const PAGE_ACCESS = {
   config:         ['admin'],
   users:          ['admin'],
   attribution:    ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','commerciale'],
+  blocages:       ['admin','chef_atelier','commerciale','gestionnaire'],
   production:     ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
   calendrier:     ['admin','commerciale','chef_atelier','gestionnaire'],
   messagerie:     ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
@@ -419,6 +420,7 @@ function showPage(id, btn, bnavBtn) {
     }
     loadDossiers(); initModulesProduction();
   }
+  if (id==='blocages')     { renderBlocages(); if (APPS_SCRIPT_URL) Promise.all([loadDossiers(), _loadTachesQuietly()]).then(renderBlocages).catch(()=>renderBlocages()); }
   if (id==='production')   { _setupProdViewToggle(); loadTaches(); _autoRefreshProduction(); initModulesProduction(); }
   if (id==='calendrier')   { _ensureDossierLinks(); renderCalendrier(); if (APPS_SCRIPT_URL) Promise.all([loadCommandesFromScript(), loadReservationsFromScript()]).then(() => { _ensureDossierLinks(); renderCalendrier(); }).catch(()=>{}); }
   if (id==='messagerie')   { loadMessagerie(); _autoRefreshMessagerie(); }
@@ -9161,6 +9163,176 @@ window.addEventListener('resize', () => {
   cancelAnimationFrame(_fitAttrRaf);
   _fitAttrRaf = requestAnimationFrame(_fitAttrLayout);
 });
+
+// ════════════════════════════════════════════════════════════
+// BLOCAGES — pour chaque commande en retard : à QUELLE étape elle
+// est coincée et QUI doit agir. Réutilise _buildAttrRow (source de
+// vérité unique du pipeline) + les styles .pcok du cockpit Attribution.
+// ════════════════════════════════════════════════════════════
+// Responsable métier par étape (inverse de ROLE_ETAPE_MAP, lisible humain).
+const _BLOC_ETAPE_RESP = {
+  VALID_CMD:     'Commercial',
+  PAO:           'PAO',
+  RETOUR_CLIENT: 'Commercial / Client',
+  MODIFICATIONS: 'PAO',
+  VALID_CLIENT2: 'Commercial / Client',
+  BAT:           'PAO / Prod / Finition',
+  ACHAT:         'Acheteur',
+  PRODUCTION:    'Machiniste / Opérateur',
+  FINITION:      'Finition',
+  LIVRE:         'Livreur',
+};
+// Étapes clôturées par une validation commerciale (bouton « ✓ Valider »).
+const _BLOC_VALID_STEPS = { VALID_CMD: 1, RETOUR_CLIENT: 1, VALID_CLIENT2: 1 };
+
+let _blocFilter = 'TOUS'; // TOUS | ECHEANCE | SLA | AATTRIBUER
+let _blocSort   = 'retard'; // retard | echeance | etape
+
+// Diagnostique la cause du blocage + l'action précise attendue.
+function _buildBlocRow(r) {
+  const dt   = (Array.isArray(taches) ? taches : []).filter(t => t.dossierId === r.id);
+  const step = r.curStep;
+  const curTasks = step ? dt.filter(t => t.etapeCode === step.code) : [];
+  const enCours  = curTasks.filter(t => t.statut === 'EN_COURS');
+  const aFaire   = curTasks.filter(t => t.statut === 'A_FAIRE');
+  const isValid  = !!(step && _BLOC_VALID_STEPS[step.code]);
+  const resp     = step ? (_BLOC_ETAPE_RESP[step.code] || '—') : '—';
+  const lbl      = step ? (step.short || step.label) : '';
+
+  let cause, action, sev; // sev : 3=critique 2=à faire 1=en cours
+  if (!step) {
+    cause  = 'Étape non déterminée';
+    action = 'Ouvrir le dossier et vérifier le pipeline';
+    sev = 2;
+  } else if (r.needsAssign || curTasks.length === 0) {
+    cause  = `« ${lbl} » non attribuée`;
+    action = isValid
+      ? `Le commercial doit prendre puis valider « ${lbl} »`
+      : `Chef d'atelier : assigner « ${lbl} » à un ${resp}`;
+    sev = 3;
+  } else if (isValid) {
+    cause  = `En attente de validation — « ${lbl} »`;
+    action = `Commercial : cliquer « ✓ Valider » sur « ${lbl} » (Attribution)`;
+    sev = 2;
+  } else if (enCours.length) {
+    cause  = r.taskRetard ? `« ${lbl} » en cours — délai dépassé` : `« ${lbl} » en cours`;
+    action = `${resp} : terminer « ${lbl} » (bouton Terminer)`;
+    sev = r.taskRetard ? 3 : 1;
+  } else if (aFaire.length) {
+    cause  = `« ${lbl} » assignée, pas démarrée`;
+    action = `${resp} : démarrer puis terminer « ${lbl} »`;
+    sev = 2;
+  } else {
+    cause  = `« ${lbl} » terminée, dossier non avancé`;
+    action = `Chef d'atelier : faire avancer le dossier à l'étape suivante`;
+    sev = 2;
+  }
+  const who = r.assigned && r.assigned.length ? r.assigned.join(', ')
+    : (r.needsAssign ? 'À attribuer' : resp);
+  return { ...r, cause, action, resp, who, sev };
+}
+
+function _blocMatch(r, k) {
+  if (k === 'TOUS')       return true;
+  if (k === 'ECHEANCE')   return r.deadlineLate;
+  if (k === 'SLA')        return r.taskRetard;
+  if (k === 'AATTRIBUER') return r.needsAssign;
+  return true;
+}
+
+function _blocSortRows(rows) {
+  const dk = r => r.days == null ? 1e9 : r.days; // plus négatif = plus en retard → en tête
+  const cmp = {
+    retard:   (a, b) => (dk(a) - dk(b)) || (b.sev - a.sev),
+    echeance: (a, b) => dk(a) - dk(b),
+    etape:    (a, b) => a.etapeIdx - b.etapeIdx,
+  }[_blocSort] || (() => 0);
+  return rows.slice().sort(cmp);
+}
+
+function renderBlocages() {
+  const container = document.getElementById('blocagesContainer');
+  if (!container) return;
+  const base = (Array.isArray(dossiers) ? dossiers : [])
+    .map(_buildAttrRow)
+    .map(_buildBlocRow)
+    // Un blocage = dossier non terminé ET (échéance dépassée OU délai interne dépassé OU non attribué)
+    .filter(r => !r.isDone && (r.deadlineLate || r.taskRetard || r.needsAssign));
+
+  const cnt = k => base.filter(r => _blocMatch(r, k)).length;
+  const rows = _blocSortRows(base.filter(r => _blocMatch(r, _blocFilter)));
+
+  // Cartes de synthèse
+  const cards = [
+    ['Total blocages', base.length, '#dc2626'],
+    ['Échéance dépassée', cnt('ECHEANCE'), '#dc2626'],
+    ['Délai interne dépassé', cnt('SLA'), '#d97706'],
+    ['À attribuer', cnt('AATTRIBUER'), '#e8834a'],
+  ].map(([lbl, n, c]) => `<div class="bloc-card"><div class="bloc-card-n" style="color:${c}">${n}</div><div class="bloc-card-l">${lbl}</div></div>`).join('');
+
+  const chips = [
+    ['TOUS', 'Tous'], ['ECHEANCE', 'Échéance dépassée'], ['SLA', 'Délai interne'], ['AATTRIBUER', 'À attribuer'],
+  ].map(([k, l]) => `<button class="pcok-chip ${_blocFilter === k ? 'pcok-chip--active' : ''} ${k !== 'TOUS' ? 'pcok-chip--warn' : ''}" onclick="_blocSetFilter('${k}')">${l}<span class="pcok-chip-n">${cnt(k)}</span></button>`).join('');
+  const sortOpts = [['retard', 'Retard'], ['echeance', 'Échéance'], ['etape', 'Étape']]
+    .map(([k, l]) => `<option value="${k}" ${_blocSort === k ? 'selected' : ''}>Trier : ${l}</option>`).join('');
+
+  const toolbar = `<div class="pcok-toolbar">
+    <div class="pcok-chips">${chips}</div>
+    <div class="pcok-controls">
+      <select class="select-input" onchange="_blocSetSort(this.value)" title="Trier">${sortOpts}</select>
+      <button class="pcok-iconbtn" title="Rafraîchir" onclick="refreshBlocages()">⟳</button>
+    </div>
+  </div>`;
+
+  const body = rows.length ? rows.map(r => {
+    const prioC = r.priorite === 'Urgente' ? '#dc2626' : r.priorite === 'Haute' ? '#d97706' : '#d6d3d1';
+    const stC   = r.curStep ? r.curStep.color : '#a8a29e';
+    const stLbl = r.curStep ? (r.curStep.short || r.curStep.label) : 'Créé';
+    const ech   = r.ymd ? new Date(r.ymd + 'T00:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) : '—';
+    let retC = '#78716c', retTxt = '—';
+    if (r.days == null)   { retC = r.taskRetard ? '#d97706' : '#a8a29e'; retTxt = r.taskRetard ? 'Délai' : '—'; }
+    else if (r.days < 0)  { retC = '#dc2626'; retTxt = `+${Math.abs(r.days)}j`; }
+    else if (r.days === 0){ retC = '#e8834a'; retTxt = 'Auj.'; }
+    else if (r.days === 1){ retC = '#e8834a'; retTxt = 'Demain'; }
+    else                  { retC = '#d97706'; retTxt = `${r.days}j`; }
+    const sevC = r.sev === 3 ? '#dc2626' : r.sev === 2 ? '#d97706' : '#2563eb';
+    return `<tr class="pcok-row" style="box-shadow:inset 3px 0 0 ${sevC}" onclick="openAttribForDossier('${r.id}')">
+      <td class="pcok-td-prio"><span class="pcok-prio" style="background:${prioC}" title="${r.priorite}"></span></td>
+      <td class="pcok-td-client"><div class="pcok-client">${_pcokEsc(r.client)}</div><div class="pcok-ref">${_pcokEsc(r.ref)}</div></td>
+      <td class="pcok-td-ech">${ech}</td>
+      <td class="pcok-td-ret"><span class="pcok-ret" style="color:${retC};background:${retC}1a">${retTxt}</span></td>
+      <td class="pcok-td-step"><span class="pcok-step" style="color:${stC};background:${stC}15;border-color:${stC}55">${_pcokEsc(stLbl)}</span></td>
+      <td class="bloc-td-cause">${_pcokEsc(r.cause)}</td>
+      <td class="bloc-td-who">${_pcokEsc(r.who)}</td>
+      <td class="bloc-td-action"><span class="bloc-action" style="border-color:${sevC};color:${sevC}">${_pcokEsc(r.action)}</span></td>
+    </tr>`;
+  }).join('') : '';
+
+  const table = rows.length ? `<div class="pcok-tablewrap"><table class="pcok-table"><thead><tr>
+    <th class="pcok-th">!</th>
+    <th class="pcok-th">Réf / Client</th>
+    <th class="pcok-th">Échéance</th>
+    <th class="pcok-th">Retard</th>
+    <th class="pcok-th">Étape bloquée</th>
+    <th class="pcok-th">Cause</th>
+    <th class="pcok-th">Qui doit agir</th>
+    <th class="pcok-th">Action à faire</th>
+  </tr></thead><tbody>${body}</tbody></table></div>`
+    : `<div class="pcok-empty"><p>🎉 Aucune commande bloquée — tout le pipeline est à jour.</p></div>`;
+
+  const count = `<div class="pcok-count">${rows.length} commande${rows.length > 1 ? 's' : ''} bloquée${rows.length > 1 ? 's' : ''}${_blocFilter !== 'TOUS' ? ' · filtré' : ''} · cliquez une ligne pour ouvrir le dossier</div>`;
+  container.innerHTML = `<div class="bloc-cards">${cards}</div><div class="pcok">${toolbar}${count}${table}</div>`;
+}
+
+function _blocSetFilter(k) { _blocFilter = k; renderBlocages(); }
+function _blocSetSort(v)   { _blocSort = v; renderBlocages(); }
+function refreshBlocages() {
+  if (APPS_SCRIPT_URL) {
+    Promise.all([loadDossiers(), _loadTachesQuietly()]).then(renderBlocages).catch(() => renderBlocages());
+  } else {
+    renderBlocages();
+  }
+}
 
 function _attribVisibleDossiers() {
   if (_canSeeAllOps()) return dossiers;
