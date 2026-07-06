@@ -161,12 +161,14 @@ let products = [];
 
 let sales = [];
 let arretsCaisse = [];
+let encaissements = [];   // journal des entrées d'argent (ventes + acomptes/soldes commandes)
 
 let nextId = 1;
 // Id GLOBALEMENT unique (timestamp + aléatoire) — évite les collisions entre postes/caissiers
 function _genUid(prefix){ return (prefix||'') + Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
 let nextSaleId = 1;
 let nextArretId = 1;
+let nextEncId = 1;
 
 let reservations = [];
 let resAttachments   = []; // { name, type, data (base64) }
@@ -802,6 +804,15 @@ function recordSale(total, method, given, change, provider, ref, remise=0, accom
     clientType, clientCompany
   };
   sales.unshift(sale);
+  // Journal d'encaissement : la part RÉELLEMENT payée maintenant (total − reste dû)
+  _recordEncaissement({
+    source: 'vente', refId: sale.id, refLabel: '#' + sale.id,
+    client: clientName || 'Client comptant',
+    montant: Math.max(0, (Number(total) || 0) - (Number(sale.due) || 0)),
+    method, provider, ref,
+    type: (Number(sale.due) || 0) > 0 ? 'acompte' : 'comptant',
+    resteApres: Number(sale.due) || 0
+  });
   printTicket(sale);
   saveData();
   if (window._posBroadcast) window._posBroadcast('sale-added', { id: sale.id });
@@ -813,6 +824,67 @@ function recordSale(total, method, given, change, provider, ref, remise=0, accom
   renderStockTable();
   renderStats();
   syncToAppsScript(sale);
+}
+
+// ============================================================
+// JOURNAL DES ENCAISSEMENTS — entrées d'argent réelles
+// (ventes rapides + acomptes/soldes/paiements de commandes).
+// Sert de source unique à la fiche d'encaissement / arrêt de caisse.
+// ============================================================
+
+// Référence lisible d'une commande (CMD-001 du dossier lié, sinon repli court)
+function _cmdRef(c) {
+  if (!c) return '';
+  const ds = (typeof dossiers !== 'undefined' ? dossiers : []);
+  const d  = ds.find(x => String(x.id) === String(c.dossierId));
+  return (d && d.numeroDossier) || ('CMD-' + String(c.id).slice(-4).toUpperCase());
+}
+
+// Montant déjà encaissé pour une commande (journal si présent, sinon accompte legacy)
+function _cmdEncaisse(c) {
+  const evts = encaissements.filter(e => e.source === 'commande' && String(e.refId) === String(c.id));
+  if (evts.length) return evts.reduce((a, b) => a + (Number(b.montant) || 0), 0);
+  return Number(c.accompte) || 0;   // repli commandes créées avant le journal
+}
+
+// Reste dû réel d'une commande (total − déjà encaissé)
+function _cmdReste(c) {
+  return Math.max(0, (Number(c.total) || 0) - _cmdEncaisse(c));
+}
+
+// Enregistre une entrée d'argent dans le journal (+ persistance + sync best-effort)
+function _recordEncaissement(evt) {
+  const montant = Math.max(0, Number(evt.montant) || 0);
+  if (montant <= 0) return null;
+  const e = {
+    id:            nextEncId++,
+    date:          evt.date || new Date().toISOString(),
+    caissier:      evt.caissier || currentUser?.username || 'caissier',
+    caissierLabel: evt.caissierLabel || currentUser?.label || currentUser?.username || 'Caissier',
+    source:        evt.source || 'vente',                 // vente|commande|reservation
+    refId:         evt.refId != null ? evt.refId : '',
+    refLabel:      evt.refLabel || (evt.source === 'vente' ? ('#' + evt.refId) : String(evt.refId)),
+    client:        (evt.client || '').trim() || 'Client comptant',
+    montant,
+    method:        evt.method || 'cash',                  // cash|mobile|cheque
+    provider:      evt.provider || '',
+    ref:           evt.ref || '',
+    type:          evt.type || 'comptant',                // comptant|acompte|solde|paiement
+    resteApres:    Math.max(0, Number(evt.resteApres) || 0)
+  };
+  encaissements.unshift(e);
+  try {
+    localStorage.setItem('pos-encaissements', JSON.stringify(encaissements));
+    localStorage.setItem('pos-nextEncId', String(nextEncId));
+  } catch (_) {}
+  syncEncaissementToSheets(e);
+  return e;
+}
+
+async function syncEncaissementToSheets(e) {
+  if (!APPS_SCRIPT_URL || !navigator.onLine) return;
+  try { await apiCall({ action: 'addEncaissement', encaissement: e }); }
+  catch (err) { console.warn('Sync encaissement GAS:', err); }
 }
 
 // ============================================================
@@ -3367,6 +3439,9 @@ function saveData() {
     // Arrêts de caisse
     safeLocalSet('pos-arrets', JSON.stringify(arretsCaisse));
     localStorage.setItem('pos-nextArretId', String(nextArretId));
+    // Journal des encaissements
+    safeLocalSet('pos-encaissements', JSON.stringify(encaissements));
+    localStorage.setItem('pos-nextEncId', String(nextEncId));
   } catch(e) { console.warn('localStorage full?', e); }
 }
 
@@ -3413,6 +3488,14 @@ function loadData() {
     const nai = localStorage.getItem('pos-nextArretId');
     if (ar)  arretsCaisse = JSON.parse(ar);
     if (nai) nextArretId  = parseInt(nai);
+    const enc  = localStorage.getItem('pos-encaissements');
+    const nei  = localStorage.getItem('pos-nextEncId');
+    if (enc) encaissements = JSON.parse(enc);
+    if (nei) nextEncId = parseInt(nei);
+    if (encaissements.length > 0) {
+      const maxEncId = Math.max(...encaissements.map(e => Number(e.id) || 0));
+      if (maxEncId >= nextEncId) nextEncId = maxEncId + 1;
+    }
 
     // Recalibration depuis les données réelles pour éviter les doublons
     if (sales.length > 0) {
@@ -5331,6 +5414,16 @@ function saveCommande() {
   const _cmdDossier = _createDossierFromSource('commande', commande);
   commande.dossierId = _cmdDossier.id;
   commandes.unshift(commande);
+  // Journal d'encaissement : l'acompte encaissé à la création (le cas échéant)
+  if (accompte > 0) {
+    _recordEncaissement({
+      source: 'commande', refId: commande.id,
+      refLabel: _cmdDossier.numeroDossier || _cmdRef(commande),
+      client: clientName, montant: accompte,
+      method: cmdPayMode, provider: depositProvider, ref: depositRef,
+      type: restant > 0 ? 'acompte' : 'solde', resteApres: restant
+    });
+  }
   saveData();
   syncCommandeToSheets(commande);
   syncCommandeToAirtable(commande);
@@ -5558,7 +5651,7 @@ function _buildCommandeRows() {
     const ymd  = _toIsoDate(c.dateLivraison || '');
     const days = ymd ? _daysUntil(ymd) : null;
     const total   = Number(c.total) || 0;
-    const restant = Number(c.restant) || 0;
+    const restant = _cmdReste(c);          // reste réel (journal d'encaissements)
     const paid    = restant <= 0;
     // Progression production (si dossier lié)
     let prodPct = null;
@@ -5588,7 +5681,7 @@ function _buildCommandeRows() {
       mode: c.deliveryMode === 'livraison' ? 'livraison' : 'retrait',
       items: c.items || [], nItems: (c.items||[]).length,
       produit: (c.items||[]).map(i => i.name).filter(Boolean).join(', '),
-      total, accompte: Number(c.accompte)||0, restant, paid,
+      total, accompte: _cmdEncaisse(c), restant, paid,
       status: c.status, bucket, prodPct,
       dossierId: c.dossierId || '',
     };
@@ -5840,8 +5933,8 @@ function _cmdDrawerContent(c) {
     ${_pmod ? _buildModBanner(c, _pmod) : ''}
     <div class="pcok-pay">
       <div class="pcok-pay-c"><div class="pcok-pay-l">Total</div><div class="pcok-pay-v">${fmt(c.total)}</div></div>
-      <div class="pcok-pay-c"><div class="pcok-pay-l">Acompte</div><div class="pcok-pay-v" style="color:#16a34a">${fmt(c.accompte)}</div></div>
-      <div class="pcok-pay-c"><div class="pcok-pay-l">Restant</div><div class="pcok-pay-v" style="color:${(Number(c.restant)||0)>0?'#dc2626':'#16a34a'}">${fmt(c.restant)}</div></div>
+      <div class="pcok-pay-c"><div class="pcok-pay-l">Encaissé</div><div class="pcok-pay-v" style="color:#16a34a">${fmt(_cmdEncaisse(c))}</div></div>
+      <div class="pcok-pay-c"><div class="pcok-pay-l">Restant</div><div class="pcok-pay-v" style="color:${_cmdReste(c)>0?'#dc2626':'#16a34a'}">${fmt(_cmdReste(c))}</div></div>
     </div>
     <div class="pcok-drawer-pipe-title">Articles (${(c.items||[]).length})</div>
     <div class="pcok-drawer-items">${itemsHtml}</div>
@@ -5866,6 +5959,8 @@ function _cmdDrawerActions(c) {
   const isAdmin      = currentUser?.role === 'admin';
   const canAttrib    = PAGE_ACCESS.attribution.includes(currentUser?.role);
   const btns = [];
+  if (c.status === 'pending' && _cmdReste(c) > 0)
+    btns.push(`<button class="pcok-btn" style="color:#16a34a;border-color:rgba(22,163,74,.4)" onclick="closeDrawers();openEncaisseModal('${c.id}')">Encaisser</button>`);
   if (c.status === 'pending')
     btns.push(`<button class="pcok-btn pcok-btn--primary" onclick="closeDrawers();openCmdFinalizeModal('${c.id}')">Finaliser</button>`);
   btns.push(`<button class="pcok-btn" onclick="printCommandeTicket(commandes.find(x=>String(x.id)==='${c.id}'))">Imprimer</button>`);
@@ -5912,8 +6007,8 @@ function openCmdFinalizeModal(id) {
   currentCmdFinalizeId = id;
   document.getElementById('cmdFinalClientInfo').textContent = ` ${c.clientName}${c.clientContact?' — '+c.clientContact:''}`;
   document.getElementById('cmdFinalTotal').textContent   = fmt(c.total);
-  document.getElementById('cmdFinalAcc').textContent     = fmt(c.accompte);
-  document.getElementById('cmdFinalRestant').textContent = fmt(c.restant);
+  document.getElementById('cmdFinalAcc').textContent     = fmt(_cmdEncaisse(c));   // déjà encaissé (journal)
+  document.getElementById('cmdFinalRestant').textContent = fmt(_cmdReste(c));      // reste réel
   document.getElementById('cmdFinGiven').value = '';
   document.getElementById('cmdFinChangeVal').textContent = '0 Ar';
   document.getElementById('cmdFinMobileRef').value = '';
@@ -5943,7 +6038,7 @@ function calcCmdFinChange() {
   const c = commandes.find(x => String(x.id) === String(currentCmdFinalizeId));
   if (!c) return;
   const given  = parseFloat(document.getElementById('cmdFinGiven').value) || 0;
-  const change = given - c.restant;
+  const change = given - _cmdReste(c);
   const el = document.getElementById('cmdFinChangeVal');
   el.textContent = fmt(Math.abs(change));
   el.className = 'val ' + (change >= 0 ? 'positive' : 'negative');
@@ -5959,10 +6054,11 @@ function selectCmdFinProvider(p) {
 function confirmCmdFinalize() {
   const c = commandes.find(x => String(x.id) === String(currentCmdFinalizeId));
   if (!c) return;
+  const reste = _cmdReste(c);   // reste réel (journal) — robuste aux refresh serveur
   if (cmdFinalPayMode === 'cash') {
     const given = parseFloat(document.getElementById('cmdFinGiven').value) || 0;
-    if (given < c.restant) { showToast('Montant insuffisant !', 'error'); return; }
-    _doCmdFinalize(c, 'cash', given, given - c.restant, null, null);
+    if (given < reste) { showToast('Montant insuffisant !', 'error'); return; }
+    _doCmdFinalize(c, 'cash', given, given - reste, null, null);
   } else if (cmdFinalPayMode === 'cheque') {
     const bank      = document.getElementById('cmdFinChequeBank').value.trim();
     const number    = document.getElementById('cmdFinChequeNumber').value.trim();
@@ -5971,11 +6067,100 @@ function confirmCmdFinalize() {
     if (!bank)   { showToast('Veuillez saisir la banque du chèque.', 'error'); return; }
     if (!number) { showToast('Veuillez saisir le numéro du chèque.', 'error'); return; }
     // provider = banque, ref = numéro du chèque (réutilise le schéma de vente) ; titulaire + date stockés en extra
-    _doCmdFinalize(c, 'cheque', c.restant, 0, bank, number, { titulaire, date: dateCheque });
+    _doCmdFinalize(c, 'cheque', reste, 0, bank, number, { titulaire, date: dateCheque });
   } else {
     const ref = document.getElementById('cmdFinMobileRef').value.trim();
-    _doCmdFinalize(c, 'mobile', c.restant, 0, cmdFinalProvider, ref);
+    _doCmdFinalize(c, 'mobile', reste, 0, cmdFinalProvider, ref);
   }
+}
+
+// ============================================================
+// ENCAISSER — paiement partiel d'une commande (acompte complémentaire)
+// Money-only : n'affecte NI le stock NI le statut. La finalisation reste
+// l'événement de livraison qui solde et déduit le stock.
+// ============================================================
+let currentEncaisseId = null;
+
+function openEncaisseModal(id) {
+  const c = commandes.find(x => String(x.id) === String(id));
+  if (!c) return;
+  currentEncaisseId = c.id;
+  const reste = _cmdReste(c);
+  const set = (elId, v) => { const el = document.getElementById(elId); if (el) el.textContent = v; };
+  set('encClientInfo', `${c.clientName}${c.clientContact ? ' — ' + c.clientContact : ''}`);
+  set('encRefLabel',   _cmdRef(c));
+  set('encTotal',      fmt(c.total));
+  set('encDejaVal',    fmt(_cmdEncaisse(c)));
+  set('encResteVal',   fmt(reste));
+  const mEl = document.getElementById('encMontant');
+  if (mEl) { mEl.value = reste || ''; mEl.max = reste; }
+  const methEl = document.getElementById('encMethod');   if (methEl) methEl.value = 'cash';
+  const refEl  = document.getElementById('encRefInput'); if (refEl)  refEl.value = '';
+  updateEncaisseApercu();
+  openModal('encaisseModal');
+}
+
+function updateEncaisseApercu() {
+  const c = commandes.find(x => String(x.id) === String(currentEncaisseId));
+  if (!c) return;
+  const reste   = _cmdReste(c);
+  const montant = Math.min(Math.max(0, Number(document.getElementById('encMontant')?.value) || 0), reste);
+  const after   = Math.max(0, reste - montant);
+  const el = document.getElementById('encApresVal');
+  if (el) { el.textContent = fmt(after); el.style.color = after > 0 ? '#dc2626' : '#16a34a'; }
+  const lbl = document.getElementById('encTypeLabel');
+  if (lbl) lbl.textContent = after > 0 ? 'Acompte (reste dû après)' : 'Solde — commande payée intégralement';
+}
+
+function validerEncaissement() {
+  const c = commandes.find(x => String(x.id) === String(currentEncaisseId));
+  if (!c) return;
+  const reste   = _cmdReste(c);
+  const montant = Math.min(Math.max(0, Number(document.getElementById('encMontant')?.value) || 0), reste);
+  if (montant <= 0) { showToast('Saisissez un montant à encaisser.', 'error'); return; }
+  const method  = document.getElementById('encMethod')?.value || 'cash';
+  const refTxt  = document.getElementById('encRefInput')?.value?.trim() || '';
+  const after   = Math.max(0, reste - montant);
+
+  // Backfill : commande ancienne (aucun événement) avec acompte d'origine → l'inscrire
+  // au journal (daté de la création, donc hors fiche du jour) pour que le total reste juste.
+  const hasEvents = encaissements.some(e => e.source === 'commande' && String(e.refId) === String(c.id));
+  const baseAcc   = Number(c.accompte) || 0;
+  if (!hasEvents && baseAcc > 0) {
+    _recordEncaissement({
+      source: 'commande', refId: c.id, refLabel: _cmdRef(c),
+      client: c.clientName, montant: baseAcc, method: c.depositMethod || 'cash',
+      provider: c.depositProvider || '', ref: c.depositRef || '',
+      type: 'acompte', resteApres: Math.max(0, (Number(c.total) || 0) - baseAcc),
+      date: c.date
+    });
+  }
+
+  _recordEncaissement({
+    source: 'commande', refId: c.id, refLabel: _cmdRef(c),
+    client: c.clientName, montant,
+    method, ref: refTxt,
+    type: after > 0 ? 'paiement' : 'solde', resteApres: after
+  });
+
+  // Mise à jour des montants de la commande (accompte cumulé / reste)
+  c.accompte = (Number(c.accompte) || 0) + montant;
+  c.restant  = after;
+  c._dateEditedAt = Date.now();
+  saveData();
+  syncCmdUpdateToSheets(c);
+  try { syncCmdUpdateToAirtable(c); } catch (e) {}
+  _addNotification({
+    dossierId: c.dossierId || '', numeroDossier: _cmdRef(c),
+    etapeCode: 'ENCAISSE', etapeLabel: after > 0 ? 'Acompte encaissé' : 'Commande soldée',
+    operateur: currentUser?.label || 'Caissier',
+    message: `${fmt(montant)} encaissé sur ${_cmdRef(c)} — ${c.clientName}${after > 0 ? ` — reste ${fmt(after)}` : ' — soldée'}`
+  });
+  closeModal('encaisseModal');
+  showToast(`${fmt(montant)} encaissé — ${after > 0 ? 'reste ' + fmt(after) : 'commande soldée'}`);
+  renderCommandes();
+  updateCmdBadge();
+  if (document.getElementById('page-mon-dashboard')?.classList.contains('active')) renderMonDashboard();
 }
 
 function _doCmdFinalize(c, method, given, change, provider, ref, chequeInfo) {
@@ -6009,6 +6194,16 @@ function _doCmdFinalize(c, method, given, change, provider, ref, chequeInfo) {
     }
   });
   sales.unshift(sale);
+  // Journal d'encaissement : le SOLDE réellement encaissé maintenant (reste dû, pas le total)
+  const _resteSolde = _cmdReste(c);
+  if (_resteSolde > 0) {
+    _recordEncaissement({
+      source: 'commande', refId: c.id, refLabel: _cmdRef(c),
+      client: c.clientName, montant: _resteSolde,
+      method, provider: provider || '', ref: ref || '',
+      type: 'solde', resteApres: 0
+    });
+  }
   c.status           = 'completed';
   c.dateFinalisation = new Date().toISOString();
   c.saleId           = sale.id;
@@ -6058,6 +6253,9 @@ function definaliserCommande(id) {
     sales = sales.filter(s => String(s.id) !== String(saleId));
     if (APPS_SCRIPT_URL) apiCall({ action: 'deleteSale', id: saleId, by: currentUser?.username || 'admin' }).catch(() => {});
   }
+
+  // Annuler l'encaissement du SOLDE enregistré à la finalisation (l'acompte reste acquis)
+  encaissements = encaissements.filter(e => !(e.source === 'commande' && String(e.refId) === String(c.id) && e.type === 'solde'));
 
   c.status = 'pending';
   c.dateFinalisation = null;
@@ -6528,7 +6726,7 @@ async function _uploadCommandeAttachments(commandeId, photos) {
 
 async function syncCmdUpdateToSheets(cmd) {
   if (!APPS_SCRIPT_URL) return;
-  await apiCall({ action: 'updateCommande', id: cmd.id, status: cmd.status, dateFinalisation: cmd.dateFinalisation || '', saleId: cmd.saleId || '' });
+  await apiCall({ action: 'updateCommande', id: cmd.id, status: cmd.status, dateFinalisation: cmd.dateFinalisation || '', saleId: cmd.saleId || '', accompte: cmd.accompte, restant: cmd.restant });
 }
 
 // ============================================================
@@ -14863,43 +15061,61 @@ function openArretCaisse() {
   openModal('arretCaisseModal');
 }
 
-// Calcule les ventes du jour pour le caissier courant
+// Fiche d'encaissement du jour pour le caissier courant.
+// Source = journal `encaissements` (argent réellement reçu), avec repli sur les
+// ventes du jour sans événement lié (robustesse transition / anciennes données).
 function _getArretData() {
   const username = currentUser ? currentUser.username : '';
   const label    = currentUser ? (currentUser.label || username) : '';
   const today    = new Date().toDateString();
+  const mine = e => (e.caissier === username || e.caissierLabel === label || e.caissier === label);
+
+  // Encaissements du jour (journal)
+  const evts = encaissements.filter(e => {
+    const d = parseSaleDate(e.date);
+    return d && d.toDateString() === today && mine(e);
+  });
+
+  // Repli : ventes du jour SANS encaissement lié (ex. faites avant l'ajout du journal)
+  const covered = new Set(evts.filter(e => e.source === 'vente').map(e => String(e.refId)));
   const todaySales = sales.filter(s => {
     const d = parseSaleDate(s.date);
-    return d && d.toDateString() === today &&
-      (s.caissier === username || s.caissier === label);
+    return d && d.toDateString() === today && (s.caissier === username || s.caissier === label);
   });
-  // Montant réellement encaissé pour une vente = total − reste dû
-  // (pour un acompte, seule la part payée entre en caisse)
-  const encaisseOf = s => {
+  todaySales.forEach(s => {
+    if (covered.has(String(s.id))) return;
+    if (s.fromCommande) return;   // finalisation de commande : déjà couverte par ses encaissements (acompte + solde)
     const total = Number(s.total) || 0;
     const reste = Math.max(0, Number(s.due != null ? s.due : (total - (Number(s.accompte) || 0))) || 0);
-    return Math.max(0, total - reste);
-  };
-  const especes = todaySales.filter(s => s.method === 'cash').reduce((a, b) => a + encaisseOf(b), 0);
-  const mobile  = todaySales.filter(s => s.method === 'mobile').reduce((a, b) => a + encaisseOf(b), 0);
-  const cheque  = todaySales.filter(s => s.method === 'cheque').reduce((a, b) => a + encaisseOf(b), 0);
-
-  // Fiche d'encaissement : une ligne par vente (N° / Client / Encaissement / Obs)
-  const METHOD_LABEL = { cash: 'Espèces', mobile: 'Mobile Money', cheque: 'Chèque' };
-  const lignes = todaySales.map(s => {
-    const total   = Number(s.total) || 0;
-    const reste   = Math.max(0, Number(s.due != null ? s.due : (total - (Number(s.accompte) || 0))) || 0);
-    return {
-      num:      s.commandeRef || s.numFacture || ('#' + s.id),
-      client:   (s.clientName || '').trim() || (s.clientCompany || '').trim() || 'Client comptant',
-      methode:  METHOD_LABEL[s.method] || s.method || '—',
-      encaisse: Math.max(0, total - reste), // montant réellement encaissé pour cette vente
-      reste,
-      acompte:  reste > 0            // true = acompte (A), sinon soldé
-    };
+    evts.push({
+      id: 'S' + s.id, date: s.date, source: 'vente', refId: s.id, refLabel: '#' + s.id,
+      client: (s.clientName || '').trim() || (s.clientCompany || '').trim() || 'Client comptant',
+      montant: Math.max(0, total - reste), method: s.method || 'cash',
+      type: reste > 0 ? 'acompte' : 'comptant', resteApres: reste
+    });
   });
 
-  return { todaySales, especes, mobile, cheque, total: especes + mobile + cheque, lignes };
+  const sumBy   = m => evts.filter(e => e.method === m).reduce((a, b) => a + (Number(b.montant) || 0), 0);
+  const especes = sumBy('cash');
+  const mobile  = sumBy('mobile');
+  const cheque  = sumBy('cheque');
+
+  const METHOD_LABEL = { cash: 'Espèces', mobile: 'Mobile Money', cheque: 'Chèque' };
+  const TYPE_LABEL   = { comptant: 'Comptant', acompte: 'Acompte', solde: 'Solde', paiement: 'Paiement' };
+  // Ordre chronologique (comme la feuille papier)
+  const lignes = evts.slice()
+    .sort((a, b) => new Date(a.date) - new Date(b.date))
+    .map(e => ({
+      num:       e.refLabel || ('#' + e.refId),
+      client:    (e.client || '').trim() || 'Client comptant',
+      methode:   METHOD_LABEL[e.method] || e.method || '—',
+      typeLabel: TYPE_LABEL[e.type] || '',
+      encaisse:  Number(e.montant) || 0,
+      reste:     Math.max(0, Number(e.resteApres) || 0),
+      acompte:   (Math.max(0, Number(e.resteApres) || 0)) > 0   // reste après → badge A + RAP
+    }));
+
+  return { todaySales, evts, especes, mobile, cheque, total: especes + mobile + cheque, lignes };
 }
 
 // Rend la fiche d'encaissement (liste détaillée) dans le modal d'arrêt de caisse
@@ -14954,7 +15170,7 @@ function renderArretCaisseModal() {
   set('arretMobile',  fmt(d.mobile));
   set('arretCheque',  fmt(d.cheque));
   set('arretTotal',   fmt(d.total));
-  set('arretNbTrans', d.todaySales.length + ' transaction' + (d.todaySales.length > 1 ? 's' : ''));
+  set('arretNbTrans', d.lignes.length + ' encaissement' + (d.lignes.length > 1 ? 's' : ''));
 
   // Fiche d'encaissement détaillée
   _renderArretFiche(d.lignes || []);
@@ -15029,7 +15245,7 @@ function validerArretCaisse() {
     date:           new Date().toISOString(),
     caissier:       currentUser.username,
     caissierLabel:  currentUser.label || currentUser.username,
-    nbTransactions: d.todaySales.length,
+    nbTransactions: d.lignes.length,
     totalEspeces:   d.especes,
     totalMobile:    d.mobile,
     totalCheque:    d.cheque,
@@ -15428,6 +15644,17 @@ function saveCommandeRapide() {
   const _cmdDossier = _createDossierFromSource('commande', commande);
   commande.dossierId = _cmdDossier.id;
   commandes.unshift(commande);
+  // Journal d'encaissement : l'acompte encaissé à la création (le cas échéant)
+  if ((Number(commande.accompte) || 0) > 0) {
+    _recordEncaissement({
+      source: 'commande', refId: commande.id,
+      refLabel: _cmdDossier.numeroDossier || _cmdRef(commande),
+      client: commande.clientName, montant: Number(commande.accompte) || 0,
+      method: 'cash',
+      type: (Number(commande.restant) || 0) > 0 ? 'acompte' : 'solde',
+      resteApres: Number(commande.restant) || 0
+    });
+  }
   saveData();
   syncCommandeToSheets(commande);
   syncCommandeToAirtable(commande);
