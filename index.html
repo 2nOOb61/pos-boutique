@@ -1078,7 +1078,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
             <button class="btn-pay btn-commande" onclick="openCommandeModal(true)">Commander</button>
           </div>
           <button class="btn-clear" onclick="clearCart()" aria-label="Vider le panier">Vider le panier</button>
-          <button class="btn-arret-caisse" onclick="openArretCaisse()" data-roles="admin,caissier" aria-label="Arrêt de caisse" title="Clôturer la session de caisse du jour">
+          <button class="btn-arret-caisse" onclick="openArretCaisse()" data-roles="admin,caissier,commerciale" aria-label="Arrêt de caisse" title="Clôturer la session de caisse du jour">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
             Arrêt de caisse
           </button>
@@ -1353,7 +1353,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
           <option value="month" selected>Ce mois</option>
           <option value="year">Cette année</option>
         </select>
-        <button onclick="openArretCaisse()" data-roles="admin,caissier"
+        <button onclick="openArretCaisse()" data-roles="admin,caissier,commerciale"
           style="display:inline-flex;align-items:center;gap:7px;padding:9px 16px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;transition:.2s"
           onmouseover="this.style.background='#153d30'" onmouseout="this.style.background='var(--accent)'">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
