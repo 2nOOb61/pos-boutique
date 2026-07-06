@@ -108,6 +108,7 @@ function doPost(e) {
     else if (action === 'getDossiers')       result = handleGetDossiers(data);
     else if (action === 'saveDossier')       result = handleSaveDossier(data);
     else if (action === 'updateDossier')     result = handleUpdateDossier(data);
+    else if (action === 'cloturerDossier')   result = handleCloturerDossier(data);
     else if (action === 'creerDossierManuel') result = handleCreerDossierManuel(data);
     else if (action === 'saveTacheLibre')    result = handleSaveTacheLibre(data);
     else if (action === 'setTacheLibrePhotos') result = handleSetTacheLibrePhotos(data);
@@ -157,6 +158,7 @@ function doGet(e) {
       else if (action === 'addCommande')       result = handleAddCommande(data);
       else if (action === 'updateCommande')    result = handleUpdateCommande(data);
       else if (action === 'updateDossier')     result = handleUpdateDossier(data);
+      else if (action === 'cloturerDossier')   result = handleCloturerDossier(data);
       else if (action === 'attribuerTache')    result = handleAttribuerTache(data);
       else if (action === 'pointerAction')     result = handlePointerAction(data);
       else if (action === 'deleteTache')       result = handleDeleteTache(data);
@@ -1283,6 +1285,29 @@ function handleUpdateDossier(data) {
   }
   if (updated) CacheService.getScriptCache().remove('dashboard_v1');
   return updated ? { ok:true } : { ok:false, error:'Dossier introuvable' };
+}
+
+// Clôture administrative d'un dossier : le passe directement à LIVRE / 100 % et
+// date sa livraison, MÊME si aucune tâche n'a été attribuée (le pipeline habituel
+// via majProgressionDossier_ exige des tâches terminées, ce qui bloquait les
+// dossiers jamais attribués). Réservé aux admins côté client ; on trace l'auteur.
+function handleCloturerDossier(data) {
+  if (!data.id) return { ok:false, error:'id requis' };
+  const ss = getSS();
+  const sh = ss.getSheetByName(SHEET_DOSSIERS);
+  if (!sh) return { ok:false, error:'Feuille Dossiers introuvable' };
+  const lastRow = sh.getLastRow();
+  if (lastRow <= 1) return { ok:false, error:'Dossier introuvable' };
+  const match = sh.getRange(2, 1, lastRow - 1, 1)
+    .createTextFinder(String(data.id)).matchEntireCell(true).findNext();
+  if (!match) return { ok:false, error:'Dossier introuvable' };
+  const rowNum = match.getRow();
+  sh.getRange(rowNum, 6, 1, 2).setValues([['LIVRE', 100]]); // col F = Statut, col G = Progression
+  sh.getRange(rowNum, 9, 1, 1).setValue(new Date());        // col I = DateLivraison
+  _logAction_('DOSSIER_CLOTURE', data.par || 'admin',
+    'Clôture dossier ' + data.id + (data.motif ? ' — ' + data.motif : ''));
+  CacheService.getScriptCache().remove('dashboard_v1');
+  return { ok:true };
 }
 
 // ============================================================

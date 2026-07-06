@@ -7002,6 +7002,70 @@ async function resetTachesDossier(dossierId) {
   renderAttrPanel([], dossierComments.filter(c => c.dossierId === dossierId));
 }
 
+// Un dossier clôturé (LIVRE) ou à 100 % est considéré terminé : tout le pipeline
+// s'affiche alors comme complet, même sans aucune tâche attribuée (clôture admin).
+function _dossierClosed(d) {
+  return !!d && (d.statut === 'LIVRE' || Number(d.progression) === 100);
+}
+
+// Clôture administrative : passe le dossier à LIVRE / 100 % même sans attribution.
+// Réservé admin / chef d'atelier. Marque aussi ses éventuelles tâches en cours comme
+// terminées pour que le pipeline (calculé sur les tâches) reste cohérent partout.
+async function cloturerDossier(dossierId) {
+  if (!dossierId) return;
+  if (!['admin','chef_atelier'].includes(currentUser?.role)) {
+    showToast('Action réservée à l’administrateur.', 'error');
+    return;
+  }
+  const d = (Array.isArray(dossiers) ? dossiers : []).find(x => x.id === dossierId) || selectedDossier;
+  if (!d) { showToast('Dossier introuvable', 'error'); return; }
+  if (_dossierClosed(d)) { showToast('Dossier déjà clôturé', 'info'); return; }
+  const nbTaches = taches.filter(t => t.dossierId === dossierId).length;
+  const warn = nbTaches === 0
+    ? 'Aucune tâche n’a été attribuée à ce dossier.\n\nLe clôturer quand même (LIVRÉ, 100 %) ?'
+    : 'Clôturer ce dossier ? Il passera à LIVRÉ (100 %) et ses tâches en cours seront marquées terminées.';
+  if (!confirm(warn)) return;
+
+  // Persistance serveur (best-effort) — la source de vérité reste la feuille Dossiers.
+  if (APPS_SCRIPT_URL) {
+    const r = await apiCall({ action:'cloturerDossier', id:dossierId, par:currentUser?.label || 'admin' });
+    if (r && r.ok === false) { showToast('Clôture refusée : ' + (r.error||''), 'error'); return; }
+  }
+
+  // Mise à jour optimiste locale : dossier + toutes ses tâches → TERMINE.
+  d.statut = 'LIVRE';
+  d.progression = 100;
+  let changed = false;
+  taches.forEach(t => {
+    if (t.dossierId === dossierId && t.statut !== 'TERMINE') {
+      t.statut = 'TERMINE';
+      if (!t.dateFin) { t.dateFin = new Date().toLocaleString('fr-FR'); t.endTs = Date.now(); }
+      changed = true;
+    }
+  });
+  if (changed) saveTaches();
+  if (selectedDossier && selectedDossier.id === dossierId) selectedDossier = d;
+
+  _addNotification({
+    dossierId,
+    numeroDossier: d.numeroDossier || dossierId,
+    etapeCode:     'LIVRE',
+    etapeLabel:    'Clôture',
+    operateur:     currentUser?.label || 'admin',
+    message:       `Dossier ${d.numeroDossier || dossierId} clôturé par ${currentUser?.label || 'admin'} (100 %)`,
+  });
+
+  showToast('Dossier clôturé (100 %)');
+  closeAllKebabs();
+  // Rafraîchir la vue active (Attribution ou Production)
+  if (selectedDossier && selectedDossier.id === dossierId) {
+    renderAttrPanel(taches.filter(t => t.dossierId === dossierId), dossierComments.filter(c => c.dossierId === dossierId));
+  }
+  if (typeof renderDossiers === 'function' && document.getElementById('dossierListContainer')) renderDossiers();
+  if (typeof renderTaches === 'function' && document.getElementById('tachesContainer')) renderTaches();
+  if (typeof closeDrawers === 'function') closeDrawers();
+}
+
 function _purgeOrphanTaches() {
   // Base : les ids des dossiers RÉELLEMENT présents (couvre tous les formats hérités,
   // y compris les ids basés sur la date) → ne JAMAIS purger une tâche d'un dossier existant.
@@ -7081,16 +7145,18 @@ async function openAttribForDossier(dossierId) {
 // Vue lecture seule d'un dossier (pour les rôles sans accès Attribution)
 function showDossierReadOnly(d) {
   const dt = taches.filter(t => t.dossierId === d.id);
+  const clos = _dossierClosed(d);
   const steps = ETAPES_CONFIG.map(e => {
     const te = dt.filter(t => t.etapeCode === e.code);
     let status = 'VIDE';
-    if (te.length > 0 && te.every(t => t.statut === 'TERMINE'))               status = 'TERMINE';
+    if (clos)                                                                status = 'TERMINE';
+    else if (te.length > 0 && te.every(t => t.statut === 'TERMINE'))          status = 'TERMINE';
     else if (te.some(t => t.statut === 'EN_COURS' || t.statut === 'TERMINE')) status = 'EN_COURS';
     else if (te.some(t => t.statut === 'A_FAIRE'))                            status = 'A_FAIRE';
     return { e, status, te };
   });
   const done = steps.filter(s => s.status === 'TERMINE').length;
-  const pct  = Math.round(done / ETAPES_CONFIG.length * 100);
+  const pct  = clos ? 100 : Math.round(done / ETAPES_CONFIG.length * 100);
   const col  = s => s==='TERMINE'?'#16a34a':s==='EN_COURS'?'#d97706':s==='A_FAIRE'?'#2563eb':'#d6d3d1';
 
   const stepsHtml = steps.map(s => `
@@ -7133,17 +7199,20 @@ function showDossierReadOnly(d) {
 
 function _buildCardProductionSection(dossierId) {
   const dt = taches.filter(t => t.dossierId === dossierId);
+  const clos = _dossierClosed((Array.isArray(dossiers) ? dossiers : []).find(x => x.id === dossierId));
   let doneCount = 0;
   const steps = ETAPES_CONFIG.map(e => {
     const te = dt.filter(t => t.etapeCode === e.code);
     let status = 'VIDE';
     // Toutes les tâches de l'étape doivent être TERMINE pour valider l'étape
-    if (te.length > 0 && te.every(t => t.statut === 'TERMINE'))                  { status = 'TERMINE'; doneCount++; }
+    // (ou dossier clôturé par l'admin → pipeline complet même sans tâche)
+    if (clos)                                                                    { status = 'TERMINE'; doneCount++; }
+    else if (te.length > 0 && te.every(t => t.statut === 'TERMINE'))             { status = 'TERMINE'; doneCount++; }
     else if (te.some(t => t.statut === 'EN_COURS' || t.statut === 'TERMINE'))     status = 'EN_COURS';
     else if (te.some(t => t.statut === 'A_FAIRE'))                                status = 'A_FAIRE';
     return { ...e, status, tachesEtape: te };
   });
-  const pct = Math.round(doneCount / ETAPES_CONFIG.length * 100);
+  const pct = clos ? 100 : Math.round(doneCount / ETAPES_CONFIG.length * 100);
   const bg  = s => s==='TERMINE'?'#16a34a':s==='EN_COURS'?'#d97706':s==='A_FAIRE'?'#2563eb':'#f5f5f4';
   const bc  = s => s==='VIDE'?'#d6d3d1':bg(s);
   const tc  = s => s==='VIDE'?'#a8a29e':'#fff';
@@ -8904,9 +8973,11 @@ function _renderDossierRow(d) {
   const etapeShort = etape?.short || 'Créé';
 
   const dTaches  = taches.filter(t => t.dossierId === d.id);
+  const _clos    = _dossierClosed(d);
   const pipeDots = ETAPES_CONFIG.map(e => {
     const te = dTaches.filter(t => t.etapeCode === e.code);
-    const s  = te.length === 0 ? 'vide'
+    const s  = _clos ? 'done'
+      : te.length === 0 ? 'vide'
       : te.every(t => t.statut === 'TERMINE') ? 'done'
       : te.some(t  => t.statut === 'EN_COURS') ? 'encours'
       : 'todo';
@@ -8948,6 +9019,7 @@ function _renderDossierRow(d) {
       <div class="kebab-menu" id="kb-dos${d.id}" role="menu">
         <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();selectDossier('${d.id}')">${_kebabIcon('eye')}<span>Ouvrir / attribuer</span></button>
         <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printDossier('${d.id}')">${_kebabIcon('print')}<span>Imprimer le dossier</span></button>
+        ${['admin','chef_atelier'].includes(currentUser?.role) && !_dossierClosed(d) ? `<button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();cloturerDossier('${d.id}')"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#16a34a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><span>Clôturer le dossier</span></button>` : ''}
         ${['admin','chef_atelier'].includes(currentUser?.role) ? `<button class="kebab-item danger" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();resetTachesDossier('${d.id}')">${_kebabIcon('reset')}<span>Réinitialiser les tâches</span></button>` : ''}
       </div>
     </div>
@@ -8969,10 +9041,11 @@ const _ATTR_PAGE = 80;
 
 function _buildAttrRow(d) {
   const dt = (Array.isArray(taches) ? taches : []).filter(t => t.dossierId === d.id);
+  const clos = _dossierClosed(d); // clôture admin → 100 % même sans (ou avec partielle) attribution
   let done = 0;
   ETAPES_CONFIG.forEach(e => { const te = dt.filter(t => t.etapeCode === e.code); if (te.length && te.every(t => t.statut === 'TERMINE')) done++; });
-  const pct = dt.length ? Math.round(done / ETAPES_CONFIG.length * 100) : (d.progression || 0);
-  const isDone = pct === 100 || d.statut === 'LIVRE';
+  const pct = clos ? 100 : (dt.length ? Math.round(done / ETAPES_CONFIG.length * 100) : (d.progression || 0));
+  const isDone = clos || pct === 100;
   // Étape actuelle = statut serveur du dossier (avance via majProgressionDossier_)
   const curStep  = ETAPES_CONFIG.find(e => e.code === d.statut) || null;
   const curTasks = curStep ? dt.filter(t => t.etapeCode === curStep.code) : [];
@@ -9742,6 +9815,7 @@ function renderAttrPanel(tachesD, commentsD = []) {
           ${['admin','chef_atelier'].includes(currentUser?.role) ? `<div class="kebab-wrap">
             <button class="kebab-btn" aria-label="Plus d'actions" aria-haspopup="true" onclick="toggleKebab('attrh${d.id}',event)"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>
             <div class="kebab-menu" id="kb-attrh${d.id}" role="menu">
+              ${!_dossierClosed(d) ? `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();cloturerDossier('${d.id}')"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#16a34a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><span>Clôturer le dossier</span></button>` : ''}
               <button class="kebab-item danger" role="menuitem" onclick="closeAllKebabs();resetTachesDossier('${d.id}')">${_kebabIcon('reset')}<span>Réinitialiser les tâches</span></button>
             </div>
           </div>` : ''}
@@ -9791,7 +9865,9 @@ function renderAttrPanel(tachesD, commentsD = []) {
       const tachesEtape = tachesD.filter(t => t.etapeCode === e.code);
       const currentUser_role = currentUser?.role||'';
       const canAssign = ['admin','chef_atelier'].includes(currentUser_role);
-      const etapeComplete = tachesEtape.length > 0 && tachesEtape.every(t => t.statut === 'TERMINE');
+      // Dossier clôturé (clôture admin) → toutes les étapes sont complètes, même non attribuées.
+      const dossierClos = _dossierClosed(d);
+      const etapeComplete = dossierClos || (tachesEtape.length > 0 && tachesEtape.every(t => t.statut === 'TERMINE'));
       const alreadySelfAssigned = tachesEtape.some(t => _sameOp(t.operateur, currentUser?.label));
       // Étapes qu'un rôle peut s'auto-assigner (le BAT physique = PAO+prod+finition,
       // donc partagé par ces 3 rôles). Un rôle peut couvrir plusieurs étapes du flux.
@@ -9825,7 +9901,9 @@ function renderAttrPanel(tachesD, commentsD = []) {
             const _name = (_seeAllOps || _sameOp(t.operateur, currentUser?.label)) ? t.operateur : 'Opérateur';
             return `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:6px;margin-bottom:2px">${_name} ${badge}</span>`;
           }).join('')
-        : '<em style="color:var(--color-text-muted)">Non assigné</em>';
+        : (dossierClos
+            ? '<em style="color:var(--color-success)">Clôturé (sans attribution)</em>'
+            : '<em style="color:var(--color-text-muted)">Non assigné</em>');
       const etapeIcon = etapeComplete
         ? `<span style="font-size:10px;font-weight:700;color:var(--color-success);background:var(--color-success-bg);padding:2px 8px;border-radius:20px;margin-left:6px"> Étape complète</span>`
         : '';
@@ -9840,7 +9918,9 @@ function renderAttrPanel(tachesD, commentsD = []) {
             ${operateursHtml}
           </div>
         </div>
-        ${canAssign
+        ${dossierClos
+          ? ''
+          : canAssign
           ? `<button class="btn-attr-assign" onclick="openAttrib('${e.code}','${e.label}')">Assigner</button>`
           : canSelfAssign
           ? `<button class="btn-attr-assign" style="background:var(--color-secondary);border-color:var(--color-secondary)" onclick="selfAssign('${e.code}','${e.label}')">Je m'assigne</button>`
@@ -10543,16 +10623,18 @@ function _buildProgressBar(dossierId) {
   // admin / chef d'atelier / commercial (suivi global) voient tous les opérateurs.
   const _canSeeAllOps = ['admin','chef_atelier','commerciale'].includes(currentUser?.role);
   const _myLabel = currentUser?.label || currentUser?.username || '';
+  const clos = _dossierClosed((Array.isArray(dossiers) ? dossiers : []).find(x => x.id === dossierId));
   let doneCount = 0;
   const steps = ETAPES_CONFIG.map(e => {
     const te = dt.filter(t => t.etapeCode === e.code);
     let status = 'VIDE';
-    if (te.length > 0 && te.every(t => t.statut === 'TERMINE'))              { status = 'TERMINE'; doneCount++; }
+    if (clos)                                                                { status = 'TERMINE'; doneCount++; }
+    else if (te.length > 0 && te.every(t => t.statut === 'TERMINE'))         { status = 'TERMINE'; doneCount++; }
     else if (te.some(t => t.statut === 'EN_COURS' || t.statut === 'TERMINE')) status = 'EN_COURS';
     else if (te.some(t => t.statut === 'A_FAIRE'))                            status = 'A_FAIRE';
     return { ...e, status };
   });
-  const pct      = Math.round(doneCount / ETAPES_CONFIG.length * 100);
+  const pct      = clos ? 100 : Math.round(doneCount / ETAPES_CONFIG.length * 100);
   const pctColor = pct===100?'#16a34a':pct>0?'#e8834a':'#a8a29e';
   const bg  = s => s==='TERMINE'?'#16a34a':s==='EN_COURS'?'#d97706':s==='A_FAIRE'?'#2563eb':'#f5f5f4';
   const bc  = s => s==='VIDE'?'#e5e3df':bg(s);
@@ -12998,16 +13080,18 @@ function _buildDossierRows() {
 
   return Object.entries(byDossier).map(([dossierId, dt]) => {
     const d = (Array.isArray(dossiers) ? dossiers : []).find(x => x.id === dossierId) || {};
+    const clos = _dossierClosed(d); // clôture admin → pipeline complet même sans tâche
     let done = 0;
     const steps = ETAPES_CONFIG.map(e => {
       const te = dt.filter(t => t.etapeCode === e.code);
       let status = 'VIDE';
-      if (te.length && te.every(t => t.statut === 'TERMINE'))                   { status = 'TERMINE'; done++; }
+      if (clos)                                                                { status = 'TERMINE'; done++; }
+      else if (te.length && te.every(t => t.statut === 'TERMINE'))             { status = 'TERMINE'; done++; }
       else if (te.some(t => t.statut === 'EN_COURS' || t.statut === 'TERMINE')) status = 'EN_COURS';
       else if (te.some(t => t.statut === 'A_FAIRE'))                            status = 'A_FAIRE';
       return { e, status, te };
     });
-    const pct = Math.round(done / ETAPES_CONFIG.length * 100);
+    const pct = clos ? 100 : Math.round(done / ETAPES_CONFIG.length * 100);
     // Étape actuelle = 1re EN_COURS, sinon 1re A_FAIRE
     const cur = steps.find(s => s.status === 'EN_COURS') || steps.find(s => s.status === 'A_FAIRE') || null;
     let responsables = [];
@@ -13333,6 +13417,7 @@ function _cockpitDrawerContent(r) {
     <div class="pcok-drawer-pipe">${stepsHtml}</div>
     <div class="pcok-drawer-actions">
       ${canAttrib?`<button class="pcok-btn pcok-btn--primary" onclick="closeProdDrawer();openAttribForDossier('${r.dossierId}')">Gérer l'attribution →</button>`:''}
+      ${['admin','chef_atelier'].includes(currentUser?.role) && !r.isDone ? `<button class="pcok-btn" style="color:#16a34a;border-color:rgba(22,163,74,.4)" onclick="cloturerDossier('${r.dossierId}')">✓ Clôturer</button>` : ''}
       <button class="pcok-btn" onclick="printDossier('${r.dossierId}')">Imprimer</button>
     </div>`;
 }
