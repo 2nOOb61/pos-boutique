@@ -14873,10 +14873,71 @@ function _getArretData() {
     return d && d.toDateString() === today &&
       (s.caissier === username || s.caissier === label);
   });
-  const especes = todaySales.filter(s => s.method === 'cash').reduce((a, b) => a + (Number(b.total) || 0), 0);
-  const mobile  = todaySales.filter(s => s.method === 'mobile').reduce((a, b) => a + (Number(b.total) || 0), 0);
-  const cheque  = todaySales.filter(s => s.method === 'cheque').reduce((a, b) => a + (Number(b.total) || 0), 0);
-  return { todaySales, especes, mobile, cheque, total: especes + mobile + cheque };
+  // Montant réellement encaissé pour une vente = total − reste dû
+  // (pour un acompte, seule la part payée entre en caisse)
+  const encaisseOf = s => {
+    const total = Number(s.total) || 0;
+    const reste = Math.max(0, Number(s.due != null ? s.due : (total - (Number(s.accompte) || 0))) || 0);
+    return Math.max(0, total - reste);
+  };
+  const especes = todaySales.filter(s => s.method === 'cash').reduce((a, b) => a + encaisseOf(b), 0);
+  const mobile  = todaySales.filter(s => s.method === 'mobile').reduce((a, b) => a + encaisseOf(b), 0);
+  const cheque  = todaySales.filter(s => s.method === 'cheque').reduce((a, b) => a + encaisseOf(b), 0);
+
+  // Fiche d'encaissement : une ligne par vente (N° / Client / Encaissement / Obs)
+  const METHOD_LABEL = { cash: 'Espèces', mobile: 'Mobile Money', cheque: 'Chèque' };
+  const lignes = todaySales.map(s => {
+    const total   = Number(s.total) || 0;
+    const reste   = Math.max(0, Number(s.due != null ? s.due : (total - (Number(s.accompte) || 0))) || 0);
+    return {
+      num:      s.commandeRef || s.numFacture || ('#' + s.id),
+      client:   (s.clientName || '').trim() || (s.clientCompany || '').trim() || 'Client comptant',
+      methode:  METHOD_LABEL[s.method] || s.method || '—',
+      encaisse: Math.max(0, total - reste), // montant réellement encaissé pour cette vente
+      reste,
+      acompte:  reste > 0            // true = acompte (A), sinon soldé
+    };
+  });
+
+  return { todaySales, especes, mobile, cheque, total: especes + mobile + cheque, lignes };
+}
+
+// Rend la fiche d'encaissement (liste détaillée) dans le modal d'arrêt de caisse
+function _renderArretFiche(lignes) {
+  const list  = document.getElementById('arretFicheList');
+  const count = document.getElementById('arretFicheCount');
+  if (!list) return;
+  if (count) count.textContent = lignes.length ? (lignes.length + ' encaissement' + (lignes.length > 1 ? 's' : '')) : '';
+
+  if (!lignes.length) {
+    list.innerHTML = `<div style="text-align:center;padding:18px;color:var(--muted);font-size:12px">Aucun encaissement aujourd'hui</div>`;
+    return;
+  }
+
+  const rows = lignes.map(l => {
+    const obs = l.acompte
+      ? `<span style="background:#fef3c7;color:#b45309;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:800">A</span>
+         <span style="font-size:11px;color:#dc2626;font-weight:700;white-space:nowrap">RAP ${fmt(l.reste)}</span>`
+      : `<span style="background:#dcfce7;color:#16a34a;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:800">Soldé</span>`;
+    return `<div style="display:grid;grid-template-columns:52px 1fr auto;gap:8px;align-items:center;padding:9px 12px;border-bottom:1px solid var(--border)">
+      <span style="font-size:11px;font-weight:700;color:var(--muted)">${_pcokEsc ? _pcokEsc(l.num) : l.num}</span>
+      <div style="min-width:0">
+        <div style="font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_pcokEsc ? _pcokEsc(l.client) : l.client}</div>
+        <div style="font-size:10px;color:var(--muted)">${l.methode}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:13px;font-weight:800;color:var(--text);white-space:nowrap">${fmt(l.encaisse)}</div>
+        <div style="margin-top:2px;display:flex;gap:5px;align-items:center;justify-content:flex-end">${obs}</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const totalEnc = lignes.reduce((a, b) => a + (b.encaisse || 0), 0);
+  const totalRap = lignes.reduce((a, b) => a + (b.reste || 0), 0);
+  list.innerHTML = rows + `<div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:10px 12px;background:var(--surface2);font-weight:800">
+      <span style="font-size:12px;color:var(--text)">TOTAL${totalRap > 0 ? ` · RAP ${fmt(totalRap)}` : ''}</span>
+      <span style="font-size:14px;color:#1a4a3a">${fmt(totalEnc)}</span>
+    </div>`;
 }
 
 function renderArretCaisseModal() {
@@ -14894,6 +14955,9 @@ function renderArretCaisseModal() {
   set('arretCheque',  fmt(d.cheque));
   set('arretTotal',   fmt(d.total));
   set('arretNbTrans', d.todaySales.length + ' transaction' + (d.todaySales.length > 1 ? 's' : ''));
+
+  // Fiche d'encaissement détaillée
+  _renderArretFiche(d.lignes || []);
 
   // Reset fond de caisse + notes
   ['arretFondCaisse', 'arretNotes'].forEach(id => {
@@ -14974,7 +15038,8 @@ function validerArretCaisse() {
     billetage,
     especesReelles: especesR,
     ecart,
-    notes
+    notes,
+    lignes:         d.lignes || []   // fiche d'encaissement détaillée
   };
 
   arretsCaisse.unshift(arret);
@@ -15028,6 +15093,27 @@ function printArretCaisse(arret) {
       <div class="kpi-box"><div class="kl">Total encaissé</div><div class="kv" style="color:#1a4a3a">${fmt(arret.totalGeneral)}</div></div>
       <div class="kpi-box"><div class="kl">Transactions</div><div class="kv">${arret.nbTransactions}</div></div>
     </div>
+
+    ${(arret.lignes && arret.lignes.length) ? `
+    <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#78716c;margin:16px 0 6px">Fiche d'encaissement</p>
+    <table>
+      <thead>
+        <tr><th style="width:60px">N° FC</th><th>Client</th><th style="text-align:right">Encaissement</th><th style="text-align:center;width:150px">Obs</th></tr>
+      </thead>
+      <tbody>
+        ${arret.lignes.map(l => `<tr>
+          <td>${_pcokEsc(l.num)}</td>
+          <td>${_pcokEsc(l.client)}${l.methode ? `<span style="color:#a8a29e;font-size:10px"> · ${_pcokEsc(l.methode)}</span>` : ''}</td>
+          <td style="text-align:right;font-weight:600">${fmt(l.encaisse)}</td>
+          <td style="text-align:center">${l.acompte ? `<strong>A</strong> · RAP ${fmt(l.reste)}` : 'Soldé'}</td>
+        </tr>`).join('')}
+        <tr style="font-weight:700;background:#f8f7f4">
+          <td colspan="2">TOTAL${arret.lignes.reduce((a,b)=>a+(b.reste||0),0) > 0 ? ` · Reste à payer ${fmt(arret.lignes.reduce((a,b)=>a+(b.reste||0),0))}` : ''}</td>
+          <td style="text-align:right">${fmt(arret.lignes.reduce((a,b)=>a+(b.encaisse||0),0))}</td>
+          <td></td>
+        </tr>
+      </tbody>
+    </table>` : ''}
 
     <table>
       <thead>
