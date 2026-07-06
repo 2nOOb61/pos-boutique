@@ -12,6 +12,7 @@ const SHEET_STOCK_LOG    = 'MouvementsStock';
 const SHEET_USERS        = 'Utilisateurs';
 const SHEET_RESERVATIONS = 'Réservations';
 const SHEET_COMMANDES    = 'Commandes';
+const SHEET_ENCAISSEMENTS = 'Encaissements'; // journal centralisé des entrées d'argent (patron)
 
 // Nouvelles feuilles
 const SHEET_DOSSIERS   = 'Dossiers';
@@ -104,6 +105,8 @@ function doPost(e) {
     else if (action === 'addCommande')       result = handleAddCommande(data);
     else if (action === 'updateCommande')    result = handleUpdateCommande(data);
     else if (action === 'getCommandes')      result = handleGetCommandes();
+    else if (action === 'addEncaissement')   result = handleAddEncaissement(data);
+    else if (action === 'getEncaissements')  result = handleGetEncaissements(data);
     // Nouveaux modules
     else if (action === 'getDossiers')       result = handleGetDossiers(data);
     else if (action === 'saveDossier')       result = handleSaveDossier(data);
@@ -157,6 +160,7 @@ function doGet(e) {
       else if (action === 'updateReservationAttachments') result = handleUpdateReservationAttachments(data);
       else if (action === 'addCommande')       result = handleAddCommande(data);
       else if (action === 'updateCommande')    result = handleUpdateCommande(data);
+      else if (action === 'addEncaissement')   result = handleAddEncaissement(data);
       else if (action === 'updateDossier')     result = handleUpdateDossier(data);
       else if (action === 'cloturerDossier')   result = handleCloturerDossier(data);
       else if (action === 'attribuerTache')    result = handleAttribuerTache(data);
@@ -190,6 +194,7 @@ function doGet(e) {
     if (action === 'getUsers')        return jsonResp(handleGetUsers());
     if (action === 'getReservations') return jsonResp(handleGetReservations());
     if (action === 'getCommandes')    return jsonResp(handleGetCommandes());
+    if (action === 'getEncaissements') return jsonResp(handleGetEncaissements(e.parameter));
     if (action === 'getDossiers')     return jsonResp(handleGetDossiers(e.parameter));
     if (action === 'getTaches')       return jsonResp(handleGetTaches(e.parameter));
     if (action === 'getDashboard')    return jsonResp(handleGetDashboard());
@@ -244,6 +249,9 @@ function initSheets() {
   // Commandes client — mise à jour de l'en-tête si besoin
   const cmdSh = ss.getSheetByName(SHEET_COMMANDES) || ss.insertSheet(SHEET_COMMANDES);
   cmdSh.getRange(1, 1, 1, 24).setValues([['ID','Date','Caissier','Client_Nom','Client_Contact','Articles','Mode_Livraison','Adresse_Livraison','Frais_Livraison','Date_Livraison','Sous_Total','Remise','Total','Accompte','Restant','Mode_Depot','Fournisseur_Mobile','Reference','Notes','Statut','Date_Finalisation','Vente_ID','Date_Livraison_Prod','Date_BAT']]);
+
+  // Journal centralisé des encaissements (fiche d'encaissement / arrêt de caisse — vue patron)
+  ensureSheet(ss, SHEET_ENCAISSEMENTS, ['ID','Date','Heure','Caissier','Caissier_Label','Source','Ref','Ref_Label','Client','Montant','Mode','Fournisseur','Reference','Type','Reste_Apres']);
 
   // Nouvelles feuilles production
   ensureSheet(ss, SHEET_DOSSIERS, DOSSIER_HEADERS);
@@ -577,6 +585,61 @@ function handleGetSales(data) {
   }
 
   return { ok:true, sales: sales.slice(0, PAGE) };
+}
+
+// ============================================================
+// ENCAISSEMENTS — journal centralisé (fiche d'encaissement / arrêt de caisse)
+// ============================================================
+function handleAddEncaissement(data) {
+  const e = data.encaissement;
+  if (!e || !(Number(e.montant) > 0)) return { ok:false, error:'Encaissement invalide' };
+  const ss = getSS();
+  const sh = ss.getSheetByName(SHEET_ENCAISSEMENTS) ||
+    ensureSheet(ss, SHEET_ENCAISSEMENTS, ['ID','Date','Heure','Caissier','Caissier_Label','Source','Ref','Ref_Label','Client','Montant','Mode','Fournisseur','Reference','Type','Reste_Apres']);
+
+  // Déduplication : même caissier + même ID = déjà enregistré (rejeu réseau)
+  const last = sh.getLastRow();
+  if (last > 1) {
+    const key = sh.getRange(2, 1, last - 1, 4).getValues(); // cols ID(1) … Caissier(4)
+    for (let i = 0; i < key.length; i++) {
+      if (String(key[i][0]) === String(e.id) && String(key[i][3]) === String(e.caissier || '')) {
+        return { ok:true, dedup:true };
+      }
+    }
+  }
+
+  const d     = new Date(e.date);
+  const tz    = Session.getScriptTimeZone();
+  const dateS = isNaN(d.getTime()) ? String(e.date || '') : Utilities.formatDate(d, tz, 'dd/MM/yyyy');
+  const timeS = isNaN(d.getTime()) ? '' : Utilities.formatDate(d, tz, 'HH:mm:ss');
+  const modeS = e.method === 'cash' ? 'Espèces' : e.method === 'cheque' ? 'Chèque' : 'Mobile Money';
+
+  sh.appendRow([
+    e.id, dateS, timeS, e.caissier || '', e.caissierLabel || '', e.source || '',
+    String(e.refId || ''), e.refLabel || '', e.client || '', Number(e.montant) || 0,
+    modeS, e.provider || '', e.ref || '', e.type || '', Number(e.resteApres) || 0
+  ]);
+  _logAction_('ENCAISSEMENT', e.caissier || 'caissier', 'ID:' + e.id + ' ' + (Number(e.montant)||0) + ' ' + (e.type || ''));
+  return { ok:true, id:e.id };
+}
+
+function handleGetEncaissements(data) {
+  const sh = getSS().getSheetByName(SHEET_ENCAISSEMENTS);
+  if (!sh) return { ok:true, encaissements:[] };
+  const last = sh.getLastRow();
+  if (last <= 1) return { ok:true, encaissements:[] };
+  const PAGE  = Number(data && data.limit) || 2000;
+  const start = Math.max(2, last - PAGE + 1);
+  const rows  = sh.getRange(start, 1, last - start + 1, 15).getValues();
+  const METH  = { 'Espèces':'cash', 'Chèque':'cheque', 'Mobile Money':'mobile' };
+  let list = rows.map(r => ({
+    id: r[0], date: r[1], time: r[2], caissier: r[3], caissierLabel: r[4],
+    source: r[5], refId: r[6], refLabel: r[7], client: r[8],
+    montant: Number(r[9]) || 0, method: METH[r[10]] || 'cash', provider: r[11], ref: r[12],
+    type: r[13], resteApres: Number(r[14]) || 0
+  })).filter(x => String(x.id) !== '');
+  if (data && data.caissier) list = list.filter(x => String(x.caissier) === String(data.caissier));
+  return { ok:true, encaissements:list };
 }
 
 // ============================================================

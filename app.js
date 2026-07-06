@@ -426,7 +426,7 @@ function showPage(id, btn, bnavBtn) {
   if (id==='production')   { _setupProdViewToggle(); loadTaches(); _autoRefreshProduction(); initModulesProduction(); }
   if (id==='calendrier')   { _ensureDossierLinks(); renderCalendrier(); if (APPS_SCRIPT_URL) Promise.all([loadCommandesFromScript(), loadReservationsFromScript()]).then(() => { _ensureDossierLinks(); renderCalendrier(); }).catch(()=>{}); }
   if (id==='messagerie')   { loadMessagerie(); _autoRefreshMessagerie(); }
-  if (id==='patron')       { renderControlFinance(); renderPatronDashboard(); _autoRefreshPatron(); }
+  if (id==='patron')       { renderControlFinance(); renderPatronEncaissements(); renderPatronDashboard(); _autoRefreshPatron(); loadEncaissementsFromScript().then(renderPatronEncaissements).catch(()=>{}); }
   if (id==='commandes')    { _ensureDossierLinks(); renderCommandes(); _lastCmdRefresh = 0; _autoRefreshCommandes(); _loadTachesQuietly().then(renderCommandes); }
   if (id==='livraisons')   { renderLivraisons(); if (APPS_SCRIPT_URL) Promise.all([loadCommandesFromScript(), loadReservationsFromScript()]).then(() => { updateDeliveryBadge(); renderLivraisons(); }).catch(()=>{}); }
   if (id==='finances')     { _ensureDossierLinks(); renderFinances(); if (APPS_SCRIPT_URL) loadCommandesFromScript().then(() => { _ensureDossierLinks(); renderFinances(); }).catch(()=>{}); }
@@ -885,6 +885,35 @@ async function syncEncaissementToSheets(e) {
   if (!APPS_SCRIPT_URL || !navigator.onLine) return;
   try { await apiCall({ action: 'addEncaissement', encaissement: e }); }
   catch (err) { console.warn('Sync encaissement GAS:', err); }
+}
+
+// Clé stable d'un encaissement (dédup local ↔ serveur)
+function _encKey(e) { return String(e.caissier || '') + '|' + String(e.id || ''); }
+
+// Charge les encaissements du serveur et les fusionne dans le journal local.
+// Admin = tous les caissiers (vue patron) ; autres = seulement les leurs.
+async function loadEncaissementsFromScript() {
+  if (!APPS_SCRIPT_URL) return;
+  try {
+    const isAdmin = currentUser?.role === 'admin';
+    const params  = { action: 'getEncaissements', limit: 3000 };
+    if (!isAdmin) params.caissier = currentUser?.username || '';
+    const r = await apiCall(params);
+    if (!r || !r.ok || !Array.isArray(r.encaissements)) return;
+    const have = new Set(encaissements.map(_encKey));
+    let added = 0;
+    r.encaissements.forEach(se => {
+      const k = _encKey(se);
+      if (have.has(k)) return;
+      // Reconstituer une date ISO à partir de dd/MM/yyyy + HH:mm:ss (le local raisonne en ISO)
+      let iso = se.date;
+      const p = String(se.date || '').split('/');
+      if (p.length === 3) iso = `${p[2]}-${p[1]}-${p[0]}T${se.time || '00:00:00'}`;
+      encaissements.push({ ...se, date: iso });
+      have.add(k); added++;
+    });
+    if (added) { try { localStorage.setItem('pos-encaissements', JSON.stringify(encaissements)); } catch (_) {} }
+  } catch (e) { console.warn('load encaissements:', e); }
 }
 
 // ============================================================
@@ -4002,7 +4031,7 @@ async function apiCall(payload) {
   if (!APPS_SCRIPT_URL) return null;
 
   // ── LECTURES & LOGIN : requête GET avec params individuels ─
-  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getDossiers', 'getTaches', 'getDashboard', 'getControlPatron', 'getComments', 'getNotifs', 'getModifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles'];
+  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getEncaissements', 'getDossiers', 'getTaches', 'getDashboard', 'getControlPatron', 'getComments', 'getNotifs', 'getModifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles'];
   if (getActions.includes(payload.action)) {
     try {
       let url = APPS_SCRIPT_URL + '?action=' + payload.action;
@@ -4012,6 +4041,7 @@ async function apiCall(payload) {
       if (payload.statut)    url += '&statut='    + encodeURIComponent(payload.statut);
       if (payload.dossierId) url += '&dossierId=' + encodeURIComponent(payload.dossierId);
       if (payload.operateur) url += '&operateur=' + encodeURIComponent(payload.operateur);
+      if (payload.caissier)  url += '&caissier='  + encodeURIComponent(payload.caissier);
       if (payload.from != null) url += '&from=' + encodeURIComponent(payload.from);
       if (payload.to   != null) url += '&to='   + encodeURIComponent(payload.to);
       // Cache-buster : GAS edge-cache les GET ~15 s → renverrait des données périmées
@@ -13833,7 +13863,9 @@ async function _autoRefreshPatron() {
       _ensureDossierLinks();
     }
   } catch(e) {}
+  await loadEncaissementsFromScript().catch(()=>{});
   renderPatronDashboard();
+  renderPatronEncaissements();
 }
 
 async function refreshPatronDashboard(btn) {
@@ -13887,6 +13919,7 @@ function setPatronPeriodMode(mode) {
   _patronPeriod.mode = mode;
   _patronPeriod.anchor = new Date();
   renderControlFinance();
+  renderPatronEncaissements();
 }
 function shiftPatronPeriod(dir) {
   const a = new Date(_patronPeriod.anchor);
@@ -13897,6 +13930,7 @@ function shiftPatronPeriod(dir) {
   else return; // 'all' : pas de navigation
   _patronPeriod.anchor = a;
   renderControlFinance();
+  renderPatronEncaissements();
 }
 
 // ── Refonte UX vue patron (pcf-*) : hiérarchie, scanabilité, progressive
@@ -13985,6 +14019,90 @@ function _pcfVoirCommandes(i, ev){
   const s=document.getElementById('cmdSearch'); if(s) s.value=c.client;
   if(typeof renderCommandes==='function') renderCommandes();
 }
+
+// ── Vue patron : encaissements par caissier (fiche d'encaissement centralisée) ──
+// Lit le journal `encaissements` (fusionné depuis le serveur → tous les caissiers)
+// sur la période patron sélectionnée. Détail dépliable = la fiche par caissier.
+function renderPatronEncaissements() {
+  const box = document.getElementById('patronEncaissements');
+  if (!box) return;
+  const range = _patronPeriodRange();
+  const inRange = e => {
+    if (range.from == null) return true;
+    const d = parseSaleDate(e.date); if (!d) return false;
+    const t = d.getTime();
+    return t >= range.from && t <= range.to;
+  };
+  const list = (Array.isArray(encaissements) ? encaissements : []).filter(inRange);
+
+  const byCais = {};
+  list.forEach(e => {
+    const key = e.caissierLabel || e.caissier || 'Caissier';
+    const g = byCais[key] || (byCais[key] = { nom:key, nb:0, total:0, cash:0, mobile:0, cheque:0, lignes:[] });
+    const m = Number(e.montant) || 0;
+    g.nb++; g.total += m;
+    if (e.method === 'cash') g.cash += m; else if (e.method === 'cheque') g.cheque += m; else g.mobile += m;
+    g.lignes.push(e);
+  });
+  const groups = Object.values(byCais).sort((a, b) => b.total - a.total);
+  const gTotal  = groups.reduce((a, b) => a + b.total, 0);
+  const gCash   = groups.reduce((a, b) => a + b.cash, 0);
+  const gMobile = groups.reduce((a, b) => a + b.mobile, 0);
+  const gCheque = groups.reduce((a, b) => a + b.cheque, 0);
+  const esc = _pcokEsc;
+
+  const head = `<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+      <h3 style="margin:0;font-size:15px;font-weight:800;color:var(--text)">Encaissements par caissier</h3>
+      <span style="font-size:12px;color:var(--muted)">${esc(range.label)} · Total <b style="color:#16a34a">${fmt(gTotal)}</b></span>
+    </div>`;
+
+  if (!groups.length) {
+    box.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px">${head}
+      <div style="text-align:center;padding:20px;color:var(--muted);font-size:13px">Aucun encaissement sur cette période</div></div>`;
+    return;
+  }
+
+  const kpi = (lbl, val, col) => `<div style="flex:1;min-width:110px;background:var(--surface2);border-radius:10px;padding:10px 12px">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">${lbl}</div>
+      <div style="font-size:16px;font-weight:800;color:${col};margin-top:2px">${fmt(val)}</div></div>`;
+
+  const rows = groups.map(g => {
+    const ligneRows = g.lignes.slice().sort((a, b) => new Date(a.date) - new Date(b.date)).map(l => {
+      const obs = (Number(l.resteApres) || 0) > 0
+        ? `<span style="color:#b45309;font-weight:700">A</span> · <span style="color:#dc2626">RAP ${fmt(l.resteApres)}</span>`
+        : `<span style="color:#16a34a;font-weight:600">Soldé</span>`;
+      const hh = l.time || (parseSaleDate(l.date) ? parseSaleDate(l.date).toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' }) : '');
+      return `<tr style="border-top:1px solid var(--border)">
+        <td style="padding:5px 8px;font-size:11px;color:var(--muted);white-space:nowrap">${esc(l.refLabel || ('#' + l.refId))}</td>
+        <td style="padding:5px 8px;font-size:12px">${esc(l.client || 'Client comptant')}<span style="color:var(--muted);font-size:10px"> · ${esc(fmtMethLabel(l.method))}${hh ? ' · ' + hh : ''}</span></td>
+        <td style="padding:5px 8px;text-align:right;font-weight:700;white-space:nowrap">${fmt(l.montant)}</td>
+        <td style="padding:5px 8px;text-align:right;font-size:11px;white-space:nowrap">${obs}</td>
+      </tr>`;
+    }).join('');
+    return `<details style="border:1px solid var(--border);border-radius:10px;margin-bottom:8px;overflow:hidden">
+      <summary style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 14px;cursor:pointer;list-style:none">
+        <div style="min-width:0">
+          <div style="font-size:13px;font-weight:700;color:var(--text)">${esc(g.nom)}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">${g.nb} encaissement${g.nb > 1 ? 's' : ''} · Esp. ${fmt(g.cash)} · MM ${fmt(g.mobile)}${g.cheque > 0 ? ' · Chq ' + fmt(g.cheque) : ''}</div>
+        </div>
+        <div style="font-size:15px;font-weight:800;color:#16a34a;white-space:nowrap">${fmt(g.total)}</div>
+      </summary>
+      <table style="width:100%;border-collapse:collapse;border-top:1px solid var(--border);background:var(--surface2)">
+        <tbody>${ligneRows}</tbody>
+      </table>
+    </details>`;
+  }).join('');
+
+  box.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px 18px">
+      ${head}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+        ${kpi('Espèces', gCash, '#1a4a3a')}${kpi('Mobile Money', gMobile, '#c2410c')}${gCheque > 0 ? kpi('Chèque', gCheque, '#1e40af') : ''}${kpi('Total encaissé', gTotal, '#16a34a')}
+      </div>
+      ${rows}
+    </div>`;
+}
+
+function fmtMethLabel(m) { return m === 'cash' ? 'Espèces' : m === 'cheque' ? 'Chèque' : 'Mobile Money'; }
 
 async function renderControlFinance() {
   const box = document.getElementById('patronControlFinance');
@@ -15059,6 +15177,20 @@ function openArretCaisse() {
   if (!currentUser) return;
   renderArretCaisseModal();
   openModal('arretCaisseModal');
+  // Récupère les encaissements du serveur (multi-appareils) puis rafraîchit la fiche
+  // (résumé + liste seulement — ne réinitialise PAS fond de caisse / billetage / notes en cours de saisie)
+  loadEncaissementsFromScript().then(() => {
+    if (!document.getElementById('arretCaisseModal')?.classList.contains('active')) return;
+    const d = _getArretData();
+    const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+    set('arretEspeces', fmt(d.especes));
+    set('arretMobile',  fmt(d.mobile));
+    set('arretCheque',  fmt(d.cheque));
+    set('arretTotal',   fmt(d.total));
+    set('arretNbTrans', d.lignes.length + ' encaissement' + (d.lignes.length > 1 ? 's' : ''));
+    _renderArretFiche(d.lignes || []);
+    updateArretEcart();
+  }).catch(() => {});
 }
 
 // Fiche d'encaissement du jour pour le caissier courant.
