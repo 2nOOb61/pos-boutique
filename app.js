@@ -6225,6 +6225,7 @@ function validerEncaissement() {
   renderCommandes();
   updateCmdBadge();
   if (document.getElementById('page-mon-dashboard')?.classList.contains('active')) renderMonDashboard();
+  _refreshArretIfOpen();   // si lancé depuis l'arrêt de caisse : la fiche du jour intègre ce solde
 }
 
 function _doCmdFinalize(c, method, given, change, provider, ref, chequeInfo) {
@@ -6291,6 +6292,7 @@ function _doCmdFinalize(c, method, given, change, provider, ref, chequeInfo) {
   showToast(` Vente #${sale.id} enregistrée — Commande #${c.id} livrée !`);
   renderCommandes();
   updateCmdBadge();
+  _refreshArretIfOpen();   // si lancé depuis l'arrêt de caisse : la fiche du jour intègre le solde
 }
 
 // ── Dé-finaliser une commande (ADMIN uniquement) ───────────────────────────
@@ -15238,19 +15240,8 @@ function openArretCaisse() {
   renderArretCaisseModal();
   openModal('arretCaisseModal');
   // Récupère les encaissements du serveur (multi-appareils) puis rafraîchit la fiche
-  // (résumé + liste seulement — ne réinitialise PAS fond de caisse / billetage / notes en cours de saisie)
-  loadEncaissementsFromScript().then(() => {
-    if (!document.getElementById('arretCaisseModal')?.classList.contains('active')) return;
-    const d = _getArretData();
-    const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-    set('arretEspeces', fmt(d.especes));
-    set('arretMobile',  fmt(d.mobile));
-    set('arretCheque',  fmt(d.cheque));
-    set('arretTotal',   fmt(d.total));
-    set('arretNbTrans', d.lignes.length + ' encaissement' + (d.lignes.length > 1 ? 's' : ''));
-    _renderArretFiche(d.lignes || []);
-    updateArretEcart();
-  }).catch(() => {});
+  // (résumé + liste + soldes en attente — ne réinitialise PAS fond de caisse / billetage / notes en cours de saisie)
+  loadEncaissementsFromScript().then(() => { _refreshArretIfOpen(); }).catch(() => {});
 }
 
 // Fiche d'encaissement du jour pour le caissier courant.
@@ -15348,6 +15339,81 @@ function _renderArretFiche(lignes) {
     </div>`;
 }
 
+// ── Encaisser un solde différé depuis l'arrêt de caisse ────────────────────
+// Le client règle son reste (souvent un autre jour que l'acompte) : on retrouve
+// sa commande, on l'encaisse/finalise, et l'événement rentre dans l'arrêt du jour.
+function renderArretSoldeResults(q) {
+  const box = document.getElementById('arretSoldeResults');
+  if (!box) return;
+  const query   = (q || '').trim().toLowerCase();
+  const isAdmin = currentUser?.role === 'admin';
+  const uname   = currentUser?.username || '';
+  let list = commandes.filter(c =>
+    c.status === 'pending' && _cmdReste(c) > 0 &&
+    (isAdmin || String(c.caissier || '') === String(uname))
+  );
+  if (query) {
+    list = list.filter(c => {
+      const hay = `${c.clientName || ''} ${c.clientContact || ''} ${_cmdRef(c)} #${c.id}`.toLowerCase();
+      return hay.includes(query);
+    });
+  }
+  list = list.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0)).slice(0, 8);
+
+  if (!list.length) {
+    box.innerHTML = `<div style="text-align:center;padding:12px;color:var(--muted);font-size:12px">${
+      query ? 'Aucune commande à solder pour cette recherche' : 'Aucun solde en attente'
+    }</div>`;
+    return;
+  }
+
+  box.innerHTML = list.map(c => {
+    const reste = _cmdReste(c);
+    return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:9px;margin-bottom:6px">
+      <div style="min-width:0;flex:1">
+        <div style="font-size:12px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(c.clientName || 'Client')}</div>
+        <div style="font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(_cmdRef(c))}${c.clientContact ? ' · ' + escapeHtml(c.clientContact) : ''}</div>
+      </div>
+      <div style="text-align:right;white-space:nowrap">
+        <div style="font-size:9px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.05em">Reste</div>
+        <div style="font-size:13px;font-weight:800;color:#dc2626">${fmt(reste)}</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <button onclick="arretEncaisser('${c.id}')" style="padding:5px 10px;border:none;border-radius:7px;background:#1a4a3a;color:#fff;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">Encaisser</button>
+        <button onclick="arretFinaliser('${c.id}')" style="padding:5px 10px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap">Finaliser</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// Ouvre l'encaissement/finalisation AU-DESSUS de l'arrêt (z-index modal-overlay = 500)
+function arretEncaisser(id) {
+  const m = document.getElementById('encaisseModal'); if (m) m.style.zIndex = '600';
+  openEncaisseModal(id);
+}
+function arretFinaliser(id) {
+  const m = document.getElementById('cmdFinalizeModal'); if (m) m.style.zIndex = '600';
+  openCmdFinalizeModal(id);
+}
+
+// Rafraîchit l'arrêt (totaux + fiche + résultats de recherche) s'il est ouvert.
+// Appelé après un encaissement/finalisation lancé depuis le modal d'arrêt.
+function _refreshArretIfOpen() {
+  const modal = document.getElementById('arretCaisseModal');
+  if (!modal || !modal.classList.contains('open')) return;
+  const d = _getArretData();
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set('arretEspeces', fmt(d.especes));
+  set('arretMobile',  fmt(d.mobile));
+  set('arretCheque',  fmt(d.cheque));
+  set('arretTotal',   fmt(d.total));
+  set('arretNbTrans', d.lignes.length + ' encaissement' + (d.lignes.length > 1 ? 's' : ''));
+  _renderArretFiche(d.lignes || []);
+  updateArretEcart();
+  const sEl = document.getElementById('arretSoldeSearch');
+  renderArretSoldeResults(sEl ? sEl.value : '');
+}
+
 function renderArretCaisseModal() {
   const d   = _getArretData();
   const now = new Date();
@@ -15366,6 +15432,11 @@ function renderArretCaisseModal() {
 
   // Fiche d'encaissement détaillée
   _renderArretFiche(d.lignes || []);
+
+  // Recherche « encaisser un solde différé » : champ vide + liste des soldes en attente
+  const soldeSearch = document.getElementById('arretSoldeSearch');
+  if (soldeSearch) soldeSearch.value = '';
+  renderArretSoldeResults('');
 
   // Reset fond de caisse + notes
   ['arretFondCaisse', 'arretNotes'].forEach(id => {

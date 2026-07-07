@@ -3015,6 +3015,19 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
     <div style="height:1px;background:var(--border);margin:0 0 14px"></div>
 
+    <!-- Section 1c : Encaisser un solde différé (client revenu payer son reste) -->
+    <div id="arretSoldeSection" style="margin-bottom:14px">
+      <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:4px">Encaisser un solde en attente</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:9px">Le client est revenu payer son reste ? Retrouvez sa commande pour l'encaisser dans cet arrêt.</div>
+      <input id="arretSoldeSearch" type="text" placeholder="Rechercher un client, un contact ou une réf…" autocomplete="off"
+        oninput="renderArretSoldeResults(this.value)"
+        style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:9px;font-size:13px;color:var(--text);background:var(--surface);box-sizing:border-box;outline:none;transition:.15s"
+        onfocus="this.style.borderColor='var(--accent)';renderArretSoldeResults(this.value)" onblur="this.style.borderColor='var(--border)'" />
+      <div id="arretSoldeResults" style="margin-top:8px"></div>
+    </div>
+
+    <div style="height:1px;background:var(--border);margin:0 0 14px"></div>
+
     <!-- Section 2 : Fond de caisse + Billetage -->
     <div style="margin-bottom:14px">
       <!-- Fond de caisse -->
