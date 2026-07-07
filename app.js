@@ -12422,8 +12422,11 @@ function updateDeliveryBadge() {
 let _finState = { period: 'all', pay: 'all', q: '', from: '', to: '' };
 let _finItemOpen = new Set();
 function setFinPeriod(v) { _finState.period = v; _finState.from = ''; _finState.to = ''; renderFinances(); }
-function setFinFrom(v)   { _finState.from = v; _finState.period = null; renderFinances(); }
-function setFinTo(v)     { _finState.to = v;   _finState.period = null; renderFinances(); }
+function setFinFrom(v)   { _finState.from = v; _finState.period = null; renderFinances(); _finRefocusDate('finDateFrom'); }
+function setFinTo(v)     { _finState.to = v;   _finState.period = null; renderFinances(); _finRefocusDate('finDateTo'); }
+// Après un renderFinances() qui reconstruit tout le panneau (root.innerHTML), l'input date
+// qui vient de déclencher le change est détruit → le focus saute. On le rend à l'input recréé.
+function _finRefocusDate(id) { const el = document.getElementById(id); if (el) { try { el.focus({ preventScroll: true }); } catch (e) { try { el.focus(); } catch (e2) {} } } }
 function setFinClearDates() { _finState.from = ''; _finState.to = ''; _finState.period = 'all'; renderFinances(); }
 function setFinPay(v)    { _finState.pay = v;    renderFinances(); }
 function setFinSearch(v) { _finState.q = v;      renderFinances(); }
@@ -12604,9 +12607,9 @@ function renderFinances() {
       <div class="pcf-segs">${seg('all', _finState.period, 'Tout', 'setFinPeriod')}${seg('month', _finState.period, 'Ce mois', 'setFinPeriod')}${seg('week', _finState.period, '7 jours', 'setFinPeriod')}</div>
       <div class="pcf-segs" style="gap:7px;align-items:center;padding:4px 9px">
         <span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)">Du</span>
-        <input type="date" value="${_finState.from || ''}" onchange="setFinFrom(this.value)" style="border:none;background:transparent;font-size:12px;font-weight:600;color:var(--text);font-family:inherit;outline:none;width:122px" />
+        <input type="date" id="finDateFrom" value="${_finState.from || ''}" onchange="setFinFrom(this.value)" style="border:none;background:transparent;font-size:12px;font-weight:600;color:var(--text);font-family:inherit;outline:none;width:122px" />
         <span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)">Au</span>
-        <input type="date" value="${_finState.to || ''}" onchange="setFinTo(this.value)" style="border:none;background:transparent;font-size:12px;font-weight:600;color:var(--text);font-family:inherit;outline:none;width:122px" />
+        <input type="date" id="finDateTo" value="${_finState.to || ''}" onchange="setFinTo(this.value)" style="border:none;background:transparent;font-size:12px;font-weight:600;color:var(--text);font-family:inherit;outline:none;width:122px" />
         ${(_finState.from || _finState.to) ? `<button onclick="setFinClearDates()" title="Effacer la plage de dates" style="border:none;background:var(--surface);color:var(--muted);cursor:pointer;font-size:15px;line-height:1;padding:2px 7px;border-radius:6px">×</button>` : ''}
       </div>
       <div class="pcf-segs">${seg('all', _finState.pay, 'Toutes', 'setFinPay')}${seg('unpaid', _finState.pay, 'À solder', 'setFinPay')}${seg('paid', _finState.pay, 'Soldées', 'setFinPay')}</div>
@@ -12791,8 +12794,8 @@ let _perfOpen  = new Set();
 let _perfLast  = null;
 
 function setPerfPeriod(p) { _perfState.period = p; if (p !== 'range') { _perfState.from = ''; _perfState.to = ''; } renderPerf(); }
-function setPerfFrom(v)   { _perfState.from = v; _perfState.period = 'range'; renderPerf(); }
-function setPerfTo(v)     { _perfState.to = v; _perfState.period = 'range'; renderPerf(); }
+function setPerfFrom(v)   { _perfState.from = v; _perfState.period = 'range'; renderPerf(); _finRefocusDate('perfDateFrom'); }
+function setPerfTo(v)     { _perfState.to = v; _perfState.period = 'range'; renderPerf(); _finRefocusDate('perfDateTo'); }
 function setPerfClearDates(){ _perfState.from = ''; _perfState.to = ''; _perfState.period = 'all'; renderPerf(); }
 function setPerfSearch(v) { _perfState.search = v; renderPerf(); }
 function togglePerfOp(key){ if (_perfOpen.has(key)) _perfOpen.delete(key); else _perfOpen.add(key); renderPerf(); }
@@ -12899,9 +12902,9 @@ function renderPerf() {
       <div class="pcf-segs">${seg('all', 'Tout')}${seg('month', 'Ce mois')}${seg('week', '7 jours')}</div>
       <div class="pcf-segs" style="gap:7px;align-items:center;padding:4px 9px">
         <span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)">Du</span>
-        <input type="date" value="${_perfState.from || ''}" onchange="setPerfFrom(this.value)" style="border:none;background:transparent;font-size:12px;font-weight:600;color:var(--text);font-family:inherit;outline:none;width:122px" />
+        <input type="date" id="perfDateFrom" value="${_perfState.from || ''}" onchange="setPerfFrom(this.value)" style="border:none;background:transparent;font-size:12px;font-weight:600;color:var(--text);font-family:inherit;outline:none;width:122px" />
         <span style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)">Au</span>
-        <input type="date" value="${_perfState.to || ''}" onchange="setPerfTo(this.value)" style="border:none;background:transparent;font-size:12px;font-weight:600;color:var(--text);font-family:inherit;outline:none;width:122px" />
+        <input type="date" id="perfDateTo" value="${_perfState.to || ''}" onchange="setPerfTo(this.value)" style="border:none;background:transparent;font-size:12px;font-weight:600;color:var(--text);font-family:inherit;outline:none;width:122px" />
         ${(_perfState.from || _perfState.to) ? `<button onclick="setPerfClearDates()" title="Effacer la plage" style="border:none;background:var(--surface);color:var(--muted);cursor:pointer;font-size:15px;line-height:1;padding:2px 7px;border-radius:6px">×</button>` : ''}
       </div>
       <div class="pcf-tools">
