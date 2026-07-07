@@ -13,6 +13,7 @@ const SHEET_USERS        = 'Utilisateurs';
 const SHEET_RESERVATIONS = 'Réservations';
 const SHEET_COMMANDES    = 'Commandes';
 const SHEET_ENCAISSEMENTS = 'Encaissements'; // journal centralisé des entrées d'argent (patron)
+const SHEET_ARRETS        = 'ArretsCaisse';   // clôtures de caisse centralisées (multi-appareils + vue patron)
 
 // Nouvelles feuilles
 const SHEET_DOSSIERS   = 'Dossiers';
@@ -107,6 +108,8 @@ function doPost(e) {
     else if (action === 'getCommandes')      result = handleGetCommandes();
     else if (action === 'addEncaissement')   result = handleAddEncaissement(data);
     else if (action === 'getEncaissements')  result = handleGetEncaissements(data);
+    else if (action === 'addArretCaisse')    result = handleAddArretCaisse(data);
+    else if (action === 'getArretsCaisse')   result = handleGetArretsCaisse(data);
     // Nouveaux modules
     else if (action === 'getDossiers')       result = handleGetDossiers(data);
     else if (action === 'saveDossier')       result = handleSaveDossier(data);
@@ -161,6 +164,7 @@ function doGet(e) {
       else if (action === 'addCommande')       result = handleAddCommande(data);
       else if (action === 'updateCommande')    result = handleUpdateCommande(data);
       else if (action === 'addEncaissement')   result = handleAddEncaissement(data);
+      else if (action === 'addArretCaisse')    result = handleAddArretCaisse(data);
       else if (action === 'updateDossier')     result = handleUpdateDossier(data);
       else if (action === 'cloturerDossier')   result = handleCloturerDossier(data);
       else if (action === 'attribuerTache')    result = handleAttribuerTache(data);
@@ -195,6 +199,7 @@ function doGet(e) {
     if (action === 'getReservations') return jsonResp(handleGetReservations());
     if (action === 'getCommandes')    return jsonResp(handleGetCommandes());
     if (action === 'getEncaissements') return jsonResp(handleGetEncaissements(e.parameter));
+    if (action === 'getArretsCaisse')  return jsonResp(handleGetArretsCaisse(e.parameter));
     if (action === 'getDossiers')     return jsonResp(handleGetDossiers(e.parameter));
     if (action === 'getTaches')       return jsonResp(handleGetTaches(e.parameter));
     if (action === 'getDashboard')    return jsonResp(handleGetDashboard());
@@ -640,6 +645,72 @@ function handleGetEncaissements(data) {
   })).filter(x => String(x.id) !== '');
   if (data && data.caissier) list = list.filter(x => String(x.caissier) === String(data.caissier));
   return { ok:true, encaissements:list };
+}
+
+// ── Arrêts de caisse (clôtures) : persistance Sheet ────────
+// billetage (objet {denom:qty}) et lignes (fiche détaillée) sont stockés en JSON
+function handleAddArretCaisse(data) {
+  const a = data.arret;
+  if (!a || a.id == null) return { ok:false, error:'Arrêt de caisse invalide' };
+  const ss = getSS();
+  const sh = ss.getSheetByName(SHEET_ARRETS) ||
+    ensureSheet(ss, SHEET_ARRETS, ['ID','Date','Heure','Caissier','Caissier_Label','NbTransactions',
+      'Total_Especes','Total_Mobile','Total_Cheque','Total_General','Fond_Caisse',
+      'Especes_Reelles','Ecart','Billetage','Lignes','Notes']);
+
+  // Déduplication : même caissier + même ID = déjà enregistré (rejeu réseau)
+  const last = sh.getLastRow();
+  if (last > 1) {
+    const key = sh.getRange(2, 1, last - 1, 4).getValues(); // ID(1) … Caissier(4)
+    for (let i = 0; i < key.length; i++) {
+      if (String(key[i][0]) === String(a.id) && String(key[i][3]) === String(a.caissier || '')) {
+        return { ok:true, dedup:true };
+      }
+    }
+  }
+
+  const d     = new Date(a.date);
+  const tz    = Session.getScriptTimeZone();
+  const dateS = isNaN(d.getTime()) ? String(a.date || '') : Utilities.formatDate(d, tz, 'dd/MM/yyyy');
+  const timeS = isNaN(d.getTime()) ? '' : Utilities.formatDate(d, tz, 'HH:mm:ss');
+
+  sh.appendRow([
+    a.id, dateS, timeS, a.caissier || '', a.caissierLabel || '',
+    Number(a.nbTransactions) || 0,
+    Number(a.totalEspeces) || 0, Number(a.totalMobile) || 0, Number(a.totalCheque) || 0,
+    Number(a.totalGeneral) || 0, Number(a.fondCaisse) || 0,
+    (a.especesReelles == null ? '' : Number(a.especesReelles)),
+    (a.ecart == null ? '' : Number(a.ecart)),
+    JSON.stringify(a.billetage || {}),
+    JSON.stringify(a.lignes || []),
+    a.notes || ''
+  ]);
+  _logAction_('ARRET_CAISSE', a.caissier || 'caissier',
+    'ID:' + a.id + ' total:' + (Number(a.totalGeneral)||0) + ' écart:' + (a.ecart==null?'—':a.ecart));
+  return { ok:true, id:a.id };
+}
+
+function handleGetArretsCaisse(data) {
+  const sh = getSS().getSheetByName(SHEET_ARRETS);
+  if (!sh) return { ok:true, arrets:[] };
+  const last = sh.getLastRow();
+  if (last <= 1) return { ok:true, arrets:[] };
+  const PAGE  = Number(data && data.limit) || 1000;
+  const start = Math.max(2, last - PAGE + 1);
+  const rows  = sh.getRange(start, 1, last - start + 1, 16).getValues();
+  const parse = (s, def) => { try { return JSON.parse(s); } catch(e) { return def; } };
+  let list = rows.map(r => ({
+    id: r[0], date: r[1], time: r[2], caissier: r[3], caissierLabel: r[4],
+    nbTransactions: Number(r[5]) || 0,
+    totalEspeces: Number(r[6]) || 0, totalMobile: Number(r[7]) || 0, totalCheque: Number(r[8]) || 0,
+    totalGeneral: Number(r[9]) || 0, fondCaisse: Number(r[10]) || 0,
+    especesReelles: r[11] === '' ? null : Number(r[11]),
+    ecart: r[12] === '' ? null : Number(r[12]),
+    billetage: parse(r[13], {}), lignes: parse(r[14], []),
+    notes: r[15] || ''
+  })).filter(x => String(x.id) !== '');
+  if (data && data.caissier) list = list.filter(x => String(x.caissier) === String(data.caissier));
+  return { ok:true, arrets:list };
 }
 
 // ============================================================

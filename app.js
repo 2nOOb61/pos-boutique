@@ -916,6 +916,40 @@ async function loadEncaissementsFromScript() {
   } catch (e) { console.warn('load encaissements:', e); }
 }
 
+// Récupère les arrêts de caisse (clôtures) depuis le serveur → multi-appareils + vue patron.
+// admin = tous les arrêts ; sinon uniquement les siens. Fusion sans doublon (id+caissier).
+async function loadArretsFromScript() {
+  if (!APPS_SCRIPT_URL) return;
+  try {
+    const isAdmin = currentUser?.role === 'admin';
+    const params  = { action: 'getArretsCaisse', limit: 1000 };
+    if (!isAdmin) params.caissier = currentUser?.username || '';
+    const r = await apiCall(params);
+    if (!r || !r.ok || !Array.isArray(r.arrets)) return;
+    const key  = a => String(a.id) + '|' + String(a.caissier || '');
+    const have = new Set(arretsCaisse.map(key));
+    let added = 0;
+    r.arrets.forEach(sa => {
+      if (have.has(key(sa))) return;
+      // Reconstituer une date ISO à partir de dd/MM/yyyy + HH:mm:ss (le local raisonne en ISO)
+      let iso = sa.date;
+      const p = String(sa.date || '').split('/');
+      if (p.length === 3) iso = `${p[2]}-${p[1]}-${p[0]}T${sa.time || '00:00:00'}`;
+      arretsCaisse.push({ ...sa, date: iso });
+      have.add(key(sa)); added++;
+      const n = parseInt(sa.id, 10);
+      if (!isNaN(n) && n >= nextArretId) nextArretId = n + 1;   // évite les collisions d'ID entre postes
+    });
+    if (added) {
+      arretsCaisse.sort((a, b) => new Date(b.date) - new Date(a.date));
+      try {
+        localStorage.setItem('pos-arrets',      JSON.stringify(arretsCaisse));
+        localStorage.setItem('pos-nextArretId', String(nextArretId));
+      } catch (_) {}
+    }
+  } catch (e) { console.warn('load arrêts caisse:', e); }
+}
+
 // ============================================================
 // RÉSERVATIONS — UPLOAD DRIVE
 // ============================================================
@@ -4031,7 +4065,7 @@ async function apiCall(payload) {
   if (!APPS_SCRIPT_URL) return null;
 
   // ── LECTURES & LOGIN : requête GET avec params individuels ─
-  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getEncaissements', 'getDossiers', 'getTaches', 'getDashboard', 'getControlPatron', 'getComments', 'getNotifs', 'getModifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles'];
+  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getEncaissements', 'getArretsCaisse', 'getDossiers', 'getTaches', 'getDashboard', 'getControlPatron', 'getComments', 'getNotifs', 'getModifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles'];
   if (getActions.includes(payload.action)) {
     try {
       let url = APPS_SCRIPT_URL + '?action=' + payload.action;
@@ -15144,6 +15178,12 @@ function renderMonDashboard() {
 
   // Historique arrêts de caisse (section séparée dans le HTML)
   renderHistoriqueArrets();
+  // Récupère les arrêts du serveur (multi-appareils) puis rafraîchit la liste
+  loadArretsFromScript().then(() => {
+    if (document.getElementById('page-mon-dashboard')?.classList.contains('active')) {
+      renderHistoriqueArrets();
+    }
+  });
 }
 
 function _dashKpi(label, value, sub, bgColor, textColor) {
