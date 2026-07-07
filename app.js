@@ -7094,7 +7094,17 @@ function _syncDossierDates() {
     // Référence SÉQUENTIELLE (CMD-001 / RES-001) au lieu de l'uid interne — cohérente
     // partout et « qui se suit ». Normalise aussi les anciens dossiers. Affichage seul.
     const ref = _seqRefOf(d.sourceType, d.sourceId, _seq);
+    if (!ref || ref.endsWith('—')) return;           // source absente des maps → ne pas écraser
     if (d.numeroDossier !== ref) d.numeroDossier = ref;
+    // Propager la référence canonique aux tâches liées. Leur `numeroDossier` est un
+    // instantané figé à l'assignation : il divergeait de l'Attribution (qui lit le
+    // dossier live) dès que la numérotation séquentielle se décalait — p.ex. une commande
+    // synchronisée depuis un autre poste avec une date antérieure repousse tous les rangs
+    // suivants. Résultat : Attribution, Production et fiche imprimée affichaient 3 réf.
+    // différentes pour un même dossier. Ici on réaligne (mémoire seule, pas de resync GAS).
+    if (Array.isArray(taches)) {
+      taches.forEach(t => { if (t.dossierId === d.id && t.numeroDossier !== ref) t.numeroDossier = ref; });
+    }
   });
 }
 
@@ -8202,6 +8212,7 @@ function _printWindow(title, bodyHtml) {
 }
 
 function printAttributionReport() {
+  if (typeof _syncDossierDates === 'function') _syncDossierDates();  // réf. canoniques avant impression
   const moisLabel  = attrDateFilter.mois  ? _MOIS_FR[+attrDateFilter.mois]  : '';
   const anneeLabel = attrDateFilter.annee ? attrDateFilter.annee : '';
   const periodStr  = moisLabel && anneeLabel ? `${moisLabel} ${anneeLabel}`
@@ -10209,6 +10220,9 @@ function renderAttrPanel(tachesD, commentsD = []) {
 
 function printDossier(dossierId) {
   _ensureDossierLinks();
+  // Normaliser la référence (CMD-001…) AVANT l'impression : sinon la fiche pouvait afficher
+  // l'ancienne réf date/uid alors que l'Attribution montrait déjà la réf séquentielle.
+  if (typeof _syncDossierDates === 'function') _syncDossierDates();
   const d = dossiers.find(x => x.id === dossierId) || selectedDossier;
   if (!d) { showToast('Dossier introuvable', 'error'); return; }
 
@@ -13231,7 +13245,7 @@ function renderTaches() {
     return `<div class="prod-group ${isOpen?'prod-group--open':''}" id="pg-${dossierId}" style="border-color:${borderClr}">
       <div class="prod-group-header" onclick="toggleProdGroup('${dossierId}')" style="cursor:pointer">
         <div class="prod-group-left" style="min-width:0">
-          <span class="prod-group-num">${g.numeroDossier}</span>
+          <span class="prod-group-num">${(d && d.numeroDossier) || g.numeroDossier}</span>
           ${prio}
           ${client}
           ${produit}
