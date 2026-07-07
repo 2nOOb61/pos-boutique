@@ -26,7 +26,7 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20260702-caldayexpand">
+<link rel="stylesheet" href="./style.css?v=20260707-arretcockpit">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
@@ -2969,80 +2969,79 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 <!-- ARRÊT DE CAISSE MODAL                                       -->
 <!-- ============================================================ -->
 <div class="modal-overlay" id="arretCaisseModal">
-  <div class="modal" style="max-width:520px">
-    <div class="modal-title">
+  <div class="modal ac-modal">
+
+    <!-- HEADER compact -->
+    <header class="ac-head">
+      <div class="ac-logo">🧾</div>
       <div>
-        <span style="font-weight:700">Arrêt de caisse</span>
-        <div id="arretCaisseInfo" style="font-size:12px;font-weight:400;color:var(--muted);margin-top:2px"></div>
+        <h2>Arrêt de caisse</h2>
+        <div class="ac-sub" id="arretCaisseInfo"></div>
       </div>
-      <button class="modal-close" onclick="closeModal('arretCaisseModal')">✕</button>
-    </div>
+      <div class="ac-spacer"></div>
+      <button class="ac-ic" title="Imprimer le rapport" aria-label="Imprimer" onclick="_printArretDraft()">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+      </button>
+      <button class="ac-ic" title="Fermer" aria-label="Fermer" onclick="closeModal('arretCaisseModal')">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </header>
 
-    <!-- Section 1 : Résumé du jour -->
-    <div style="padding:0 0 14px">
-      <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px">Ventes du jour</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-        <div style="background:#e8f4f0;border-radius:10px;padding:11px 14px">
-          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#1a4a3a;opacity:.75;margin-bottom:3px">Espèces</div>
-          <div id="arretEspeces" style="font-size:18px;font-weight:800;color:#1a4a3a">0 Ar</div>
+    <!-- BANDEAU KPI (sticky) -->
+    <section class="ac-kpis" aria-label="Résumé de caisse">
+      <div class="ac-kpi accent"><div class="kl">Total encaissé</div><div class="kv" id="kpiArretTotal">0 Ar</div></div>
+      <div class="ac-kpi"><div class="kl">Espèces comptées</div><div class="kv" id="kpiArretComptees">—</div></div>
+      <div class="ac-kpi"><div class="kl">Espèces théoriques</div><div class="kv" id="kpiArretTheo">0 Ar</div></div>
+      <div class="ac-kpi ac-kpi-state ac-idle" id="kpiArretEcartWrap">
+        <div class="fill"><div class="kl">Écart</div><div class="kv" id="kpiArretEcart">—</div><div class="kpill" id="kpiArretEcartPill">À compter</div></div>
+      </div>
+      <div class="ac-kpi"><div class="kl">Encaissements</div><div class="kv" id="kpiArretNb">0</div></div>
+    </section>
+
+    <!-- ZONE PRINCIPALE : grille 3 colonnes (chaque colonne défile en interne) -->
+    <div class="ac-grid">
+
+      <!-- COL 1 : encaisser un solde en attente -->
+      <div class="ac-col">
+        <section class="ac-card">
+          <div class="ac-card-h">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            <h3>Encaisser un solde en attente</h3>
+            <span class="c" id="arretSoldeCount"></span>
+          </div>
+          <div class="ac-search-wrap">
+            <input id="arretSoldeSearch" class="ac-search-input" type="text" autocomplete="off"
+              placeholder="Rechercher un client, un contact ou une réf…"
+              oninput="renderArretSoldeResults(this.value)" />
+          </div>
+          <div id="arretSoldeResults"></div>
+        </section>
+
+        <details class="ac-details">
+          <summary>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            Fiche d'encaissement du jour
+            <span class="c" id="arretFicheCount" style="font-weight:600;color:var(--muted)"></span>
+            <svg class="chev" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </summary>
+          <div id="arretFicheList"></div>
+        </details>
+
+        <div class="ac-modes">
+          <span>Espèces <b id="arretEspeces">0 Ar</b></span>
+          <span>Mobile <b id="arretMobile">0 Ar</b></span>
+          <span>Chèque <b id="arretCheque">0 Ar</b></span>
         </div>
-        <div style="background:#fdf0e8;border-radius:10px;padding:11px 14px">
-          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#c2410c;opacity:.75;margin-bottom:3px">Mobile Money</div>
-          <div id="arretMobile" style="font-size:18px;font-weight:800;color:#c2410c">0 Ar</div>
-        </div>
-        <div style="background:#f0f9ff;border-radius:10px;padding:11px 14px">
-          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#1e40af;opacity:.75;margin-bottom:3px">Chèque</div>
-          <div id="arretCheque" style="font-size:18px;font-weight:800;color:#1e40af">0 Ar</div>
-        </div>
-        <div style="background:var(--surface2);border-radius:10px;padding:11px 14px">
-          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text);opacity:.6;margin-bottom:3px">Total encaissé</div>
-          <div id="arretTotal" style="font-size:18px;font-weight:800;color:var(--text)">0 Ar</div>
-        </div>
-      </div>
-      <div style="text-align:right;font-size:12px;color:var(--muted)" id="arretNbTrans">0 transaction</div>
-    </div>
-
-    <div style="height:1px;background:var(--border);margin:0 0 14px"></div>
-
-    <!-- Section 1b : Fiche d'encaissement — détail par client -->
-    <div id="arretFicheSection" style="margin-bottom:14px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px">
-        <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)">Fiche d'encaissement — détail</div>
-        <span id="arretFicheCount" style="font-size:11px;color:var(--muted)"></span>
-      </div>
-      <div id="arretFicheList" style="border:1px solid var(--border);border-radius:10px;overflow:hidden"></div>
-    </div>
-
-    <div style="height:1px;background:var(--border);margin:0 0 14px"></div>
-
-    <!-- Section 1c : Encaisser un solde différé (client revenu payer son reste) -->
-    <div id="arretSoldeSection" style="margin-bottom:14px">
-      <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:4px">Encaisser un solde en attente</div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:9px">Le client est revenu payer son reste ? Retrouvez sa commande pour l'encaisser dans cet arrêt.</div>
-      <input id="arretSoldeSearch" type="text" placeholder="Rechercher un client, un contact ou une réf…" autocomplete="off"
-        oninput="renderArretSoldeResults(this.value)"
-        style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:9px;font-size:13px;color:var(--text);background:var(--surface);box-sizing:border-box;outline:none;transition:.15s"
-        onfocus="this.style.borderColor='var(--accent)';renderArretSoldeResults(this.value)" onblur="this.style.borderColor='var(--border)'" />
-      <div id="arretSoldeResults" style="margin-top:8px"></div>
-    </div>
-
-    <div style="height:1px;background:var(--border);margin:0 0 14px"></div>
-
-    <!-- Section 2 : Fond de caisse + Billetage -->
-    <div style="margin-bottom:14px">
-      <!-- Fond de caisse -->
-      <div style="margin-bottom:12px">
-        <label style="display:block;font-size:12px;font-weight:600;color:var(--text);margin-bottom:5px">Fond de caisse (début de journée)</label>
-        <input id="arretFondCaisse" type="number" min="0" placeholder="0"
-          style="width:180px;padding:9px 12px;border:1px solid var(--border);border-radius:9px;font-size:14px;font-weight:600;color:var(--text);background:var(--surface);box-sizing:border-box;outline:none;transition:.15s"
-          oninput="updateBilletage()"
-          onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'" />
       </div>
 
-      <!-- Billetage -->
-      <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:8px">
-        Billetage — Comptage des espèces
-      </div>
+      <!-- COL 2 : billetage / comptage des espèces -->
+      <div class="ac-col">
+        <section class="ac-card">
+          <div class="ac-card-h">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/></svg>
+            <h3>Billetage · comptage des espèces</h3>
+          </div>
+          <div class="ac-card-b">
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px" id="billetsGrid">
             <!-- 20 000 -->
@@ -3119,52 +3118,75 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
             </div>
       </div>
 
-      <!-- Total billetage -->
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#e8f4f0;border:1px solid #1a4a3a22;border-radius:9px;margin-top:10px">
-        <span style="font-size:12px;font-weight:700;color:#1a4a3a">Total espèces comptées</span>
-        <span id="arretBilletageTotal" style="font-size:17px;font-weight:900;color:#1a4a3a">0 Ar</span>
-      </div>
+            <div class="ac-bill-total">
+              <span class="l">Total espèces comptées</span>
+              <span class="v" id="arretBilletageTotal">0 Ar</span>
+            </div>
+            <!-- Champ caché — auto-calculé par updateBilletage() -->
+            <input id="arretEspecesReelles" type="hidden" value="" />
+          </div><!-- /ac-card-b -->
+        </section>
+      </div><!-- /COL 2 -->
 
-      <!-- Champ caché — auto-calculé par updateBilletage() -->
-      <input id="arretEspecesReelles" type="hidden" value="" />
-    </div>
+      <!-- COL 3 : résultat, fond de caisse, notes -->
+      <div class="ac-col">
+        <section class="ac-card">
+          <div class="ac-card-h">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            <h3>Résultat &amp; clôture</h3>
+          </div>
+          <div class="ac-card-b">
+            <div class="ac-field">
+              <label for="arretFondCaisse">Fond de caisse (début de journée)</label>
+              <input id="arretFondCaisse" type="number" min="0" placeholder="0" oninput="updateBilletage()" />
+            </div>
+            <div class="ac-rrow first"><span class="rl">Espèces encaissées (jour)</span><span class="rv" id="arretEspecesEncaissees">0 Ar</span></div>
+            <div class="ac-rrow"><span class="rl">+ Fond de caisse</span><span class="rv" id="arretFondRecap">0 Ar</span></div>
+            <div class="ac-rrow"><span class="rl">= Espèces théoriques</span><span class="rv" id="arretTheoriqueVal">—</span></div>
+            <div class="ac-rrow"><span class="rl">Espèces comptées (billetage)</span><span class="rv" id="arretComptRecap">—</span></div>
+            <div class="ac-ecart ac-idle" id="arretEcartCard">
+              <div class="bdg" id="arretEcartBadge">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg>
+              </div>
+              <div>
+                <div class="et" id="arretEcartLabel">En attente du comptage</div>
+                <div class="ev" id="arretEcartBigVal">—</div>
+              </div>
+            </div>
+          </div>
+        </section>
 
-    <!-- Section 3 : Résultat / Écart -->
-    <div style="background:var(--surface2);border-radius:10px;padding:14px 16px;margin-bottom:14px">
-      <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px">Résultat</div>
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)">
-        <span style="font-size:13px;color:var(--muted)">Espèces théoriques en caisse</span>
-        <span id="arretTheoriqueVal" style="font-size:13px;font-weight:700;color:var(--text)">—</span>
-      </div>
-      <div id="arretEcartRow" style="display:none;padding-top:8px;margin-top:8px">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <span style="font-size:13px;font-weight:700;color:var(--text)">Écart de caisse</span>
-          <span id="arretEcartVal" style="font-size:20px;font-weight:900">—</span>
-        </div>
-      </div>
-    </div>
+        <section class="ac-card">
+          <div class="ac-card-h"><h3>Notes / observations</h3></div>
+          <div class="ac-card-b">
+            <div class="ac-field" style="margin:0">
+              <textarea id="arretNotes" placeholder="Observations, incidents, justification d'un écart…"></textarea>
+            </div>
+          </div>
+        </section>
+      </div><!-- /COL 3 -->
 
-    <!-- Notes -->
-    <div style="margin-bottom:4px">
-      <label style="display:block;font-size:12px;font-weight:600;color:var(--text);margin-bottom:5px">Notes / observations</label>
-      <textarea id="arretNotes" placeholder="Observations, incidents, commentaires..."
-        style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:9px;font-size:13px;color:var(--text);background:var(--surface);box-sizing:border-box;resize:vertical;min-height:60px;outline:none;transition:.15s;font-family:inherit"
-        onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'"></textarea>
-    </div>
+    </div><!-- /ac-grid -->
 
-    <div class="modal-footer">
-      <button class="btn-secondary" onclick="closeModal('arretCaisseModal')">Annuler</button>
-      <button class="btn-primary" onclick="validerArretCaisse()" style="background:var(--accent);display:flex;align-items:center;gap:7px">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+    <!-- BAS DE PAGE sticky -->
+    <footer class="ac-foot">
+      <button class="ac-btn ac-btn-ghost" onclick="closeModal('arretCaisseModal')">Annuler</button>
+      <div class="sp"></div>
+      <button class="ac-btn ac-btn-outline" onclick="_printArretDraft()">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+        Imprimer rapport
+      </button>
+      <button class="ac-btn ac-btn-primary" onclick="validerArretCaisse()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
         Valider et clôturer
       </button>
-    </div>
+    </footer>
   </div>
 </div>
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260702-caldayexpand"></script>
+<script src="./app.js?v=20260707-arretcockpit"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

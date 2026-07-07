@@ -15358,32 +15358,49 @@ function renderArretSoldeResults(q) {
       return hay.includes(query);
     });
   }
-  list = list.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0)).slice(0, 8);
+  list.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+
+  // Compteur global (indépendant de la recherche) dans l'en-tête de carte
+  const cntEl = document.getElementById('arretSoldeCount');
+  if (cntEl) {
+    const totalRap = list.reduce((a, c) => a + _cmdReste(c), 0);
+    cntEl.textContent = query ? `${list.length} résultat${list.length > 1 ? 's' : ''}` : (list.length ? `${list.length} · RAP ${fmt(totalRap)}` : '');
+  }
 
   if (!list.length) {
-    box.innerHTML = `<div style="text-align:center;padding:12px;color:var(--muted);font-size:12px">${
-      query ? 'Aucune commande à solder pour cette recherche' : 'Aucun solde en attente'
-    }</div>`;
+    box.innerHTML = `<div class="ac-empty">${query ? 'Aucune commande à solder pour cette recherche' : 'Aucun solde en attente'}</div>`;
     return;
   }
 
-  box.innerHTML = list.map(c => {
+  const VIS = 5;
+  const initial = s => ((String(s || 'C').trim()[0]) || 'C').toUpperCase();
+  const rows = list.map((c, i) => {
     const reste = _cmdReste(c);
-    return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:9px;margin-bottom:6px">
-      <div style="min-width:0;flex:1">
-        <div style="font-size:12px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(c.clientName || 'Client')}</div>
-        <div style="font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(_cmdRef(c))}${c.clientContact ? ' · ' + escapeHtml(c.clientContact) : ''}</div>
-      </div>
-      <div style="text-align:right;white-space:nowrap">
-        <div style="font-size:9px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.05em">Reste</div>
-        <div style="font-size:13px;font-weight:800;color:#dc2626">${fmt(reste)}</div>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:4px">
-        <button onclick="arretEncaisser('${c.id}')" style="padding:5px 10px;border:none;border-radius:7px;background:#1a4a3a;color:#fff;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">Encaisser</button>
-        <button onclick="arretFinaliser('${c.id}')" style="padding:5px 10px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap">Finaliser</button>
+    return `<div class="ac-cli-row${i >= VIS ? ' ac-extra ac-hidden' : ''}">
+      <div class="ac-ava">${initial(c.clientName)}</div>
+      <div class="ac-cli-n"><b>${escapeHtml(c.clientName || 'Client')}</b><span>${escapeHtml(_cmdRef(c))}${c.clientContact ? ' · ' + escapeHtml(c.clientContact) : ''}</span></div>
+      <div class="ac-cli-rap">${fmt(reste)}</div>
+      <div class="ac-cli-act">
+        <button class="ac-btn-enc" onclick="arretEncaisser('${c.id}')">Encaisser</button>
+        <button class="ac-lnk-fin" onclick="arretFinaliser('${c.id}')">Finaliser</button>
       </div>
     </div>`;
   }).join('');
+
+  const extra = list.length - VIS;
+  const more = extra > 0
+    ? `<button class="ac-more" data-n="${extra}" onclick="_arretToggleMore(this)">Voir plus (${extra}) ▾</button>`
+    : '';
+  box.innerHTML = rows + more;
+}
+
+// Déplie / replie les commandes au-delà des 5 premières dans l'arrêt de caisse
+function _arretToggleMore(btn) {
+  const box = document.getElementById('arretSoldeResults');
+  if (!box) return;
+  const willShow = !!box.querySelector('.ac-extra.ac-hidden');
+  box.querySelectorAll('.ac-extra').forEach(r => r.classList.toggle('ac-hidden', !willShow));
+  btn.textContent = willShow ? 'Voir moins ▴' : `Voir plus (${btn.dataset.n}) ▾`;
 }
 
 // Ouvre l'encaissement/finalisation AU-DESSUS de l'arrêt (z-index modal-overlay = 500)
@@ -15484,6 +15501,93 @@ function updateArretEcart() {
   } else {
     if (ecartRow) ecartRow.style.display = 'none';
   }
+  _syncArretKpis();
+}
+
+// Seuil de tolérance d'écart (Ar) : 0 = tout écart signalé en rouge.
+// Passe-le à p.ex. 2000 pour tolérer les petites différences (orange).
+const _ARRET_TOL = 0;
+
+// Alimente le cockpit (bandeau KPI + récap colonne 3 + carte écart à états couleur).
+// Point d'entrée unique appelé en fin de updateArretEcart() → couvre billetage,
+// fond de caisse, ouverture du modal et refresh serveur (tous passent par là).
+function _syncArretKpis() {
+  const wrap = document.getElementById('kpiArretEcartWrap');
+  if (!wrap) return; // cockpit non monté (sécurité)
+  const d        = _getArretData();
+  const fond     = Number(document.getElementById('arretFondCaisse')?.value) || 0;
+  const reelRaw  = document.getElementById('arretEspecesReelles')?.value ?? '';
+  const comptees = reelRaw !== '' ? Number(reelRaw) : null;
+  const theo     = fond + d.especes;
+  const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+
+  set('kpiArretTotal',    fmt(d.total));
+  set('kpiArretTheo',     fmt(theo));
+  set('kpiArretNb',       d.lignes.length);
+  set('kpiArretComptees', comptees !== null ? fmt(comptees) : '—');
+  set('arretEspecesEncaissees', fmt(d.especes));
+  set('arretFondRecap',   fmt(fond));
+  set('arretComptRecap',  comptees !== null ? fmt(comptees) : '—');
+
+  const badge  = document.getElementById('arretEcartBadge');
+  const ICON = {
+    good: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+    warn: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+    bad:  '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+    idle: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg>'
+  };
+
+  if (comptees === null) {
+    wrap.className = 'ac-kpi ac-kpi-state ac-idle';
+    set('kpiArretEcart', '—');
+    set('kpiArretEcartPill', 'À compter');
+    const card = document.getElementById('arretEcartCard'); if (card) card.className = 'ac-ecart ac-idle';
+    if (badge) badge.innerHTML = ICON.idle;
+    set('arretEcartLabel', 'En attente du comptage');
+    set('arretEcartBigVal', '—');
+    return;
+  }
+
+  const ecart = comptees - theo;
+  const abs   = Math.abs(ecart);
+  let state, label;
+  if (ecart === 0)          { state = 'good'; label = 'Caisse équilibrée'; }
+  else if (abs <= _ARRET_TOL) { state = 'warn'; label = ecart > 0 ? 'Léger surplus' : 'Léger manque'; }
+  else                      { state = 'bad';  label = ecart > 0 ? 'Surplus de caisse' : 'Manque de caisse'; }
+  const disp = (ecart > 0 ? '+' : '') + fmt(ecart);
+
+  wrap.className = 'ac-kpi ac-kpi-state ac-' + state;
+  set('kpiArretEcart', disp);
+  set('kpiArretEcartPill', state === 'good' ? '✓ Équilibré' : disp);
+  const card = document.getElementById('arretEcartCard'); if (card) card.className = 'ac-ecart ac-' + state;
+  if (badge) badge.innerHTML = ICON[state];
+  set('arretEcartLabel', label);
+  set('arretEcartBigVal', disp);
+}
+
+// Imprime le rapport d'arrêt à partir de l'état courant SANS clôturer (aperçu).
+function _printArretDraft() {
+  if (!currentUser) return;
+  const d        = _getArretData();
+  const fond     = Number(document.getElementById('arretFondCaisse')?.value) || 0;
+  const reelRaw  = document.getElementById('arretEspecesReelles')?.value ?? '';
+  const especesR = reelRaw !== '' ? Number(reelRaw) : null;
+  const notes    = document.getElementById('arretNotes')?.value?.trim() || '';
+  const billetage = {};
+  BILLETAGE_DENOMS.forEach(den => {
+    const q = Number(document.getElementById(`arretBillet_${den}`)?.value) || 0;
+    if (q > 0) billetage[den] = q;
+  });
+  printArretCaisse({
+    date: new Date().toISOString(),
+    caissier: currentUser.username,
+    caissierLabel: currentUser.label || currentUser.username,
+    nbTransactions: d.lignes.length,
+    totalEspeces: d.especes, totalMobile: d.mobile, totalCheque: d.cheque, totalGeneral: d.total,
+    fondCaisse: fond, billetage, especesReelles: especesR,
+    ecart: especesR !== null ? especesR - (fond + d.especes) : null,
+    notes, lignes: d.lignes || []
+  });
 }
 
 function validerArretCaisse() {
