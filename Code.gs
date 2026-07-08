@@ -260,7 +260,7 @@ function initSheets() {
 
   // Nouvelles feuilles production
   ensureSheet(ss, SHEET_DOSSIERS, DOSSIER_HEADERS);
-  ensureSheet(ss, SHEET_TACHES,     ['ID','DossierID','NumeroDossier','Etape','EtapeLabel','Operateur','Statut','DateAssignation','DateDebut','DateFin','Commentaire','AssignePar','Priorite','Echeance','Photos']);
+  ensureSheet(ss, SHEET_TACHES,     ['ID','DossierID','NumeroDossier','Etape','EtapeLabel','Operateur','Statut','DateAssignation','DateDebut','DateFin','Commentaire','AssignePar','Priorite','Echeance','Photos','Equipe']);
 
   return { ok:true, message:'Feuilles initialisées ' };
 }
@@ -1478,8 +1478,15 @@ function handleAttribuerTache(data) {
       : 0;
     const tId   = 'T' + String(lastId + 1).padStart(4, '0');
     const etape = ETAPES_PROD.find(function(e) { return e.code === data.etapeCode; }) || { label:data.etapeCode };
+    // Équipe (Jour/Nuit) : normalisée, colonne 16. Réparation d'en-tête à la volée
+    // si la feuille prod est antérieure à la colonne Equipe (avait 15 colonnes).
+    const shift = (data.shift === 'Nuit' || data.shift === 'Jour') ? data.shift : '';
+    if (sh.getLastColumn() < 16) sh.getRange(1, 16).setValue('Equipe');
+    // Ligne complète 16 colonnes : les colonnes 13-15 (Priorite/Echeance/Photos) restent
+    // vides pour une tâche de dossier, seul Equipe (16) est renseigné.
     sh.appendRow([tId, data.dossierId, data.numeroDossier, data.etapeCode, etape.label,
-      data.operateur, 'A_FAIRE', now, '', '', data.commentaire||'', data.assignePar||'Admin']);
+      data.operateur, 'A_FAIRE', now, '', '', data.commentaire||'', data.assignePar||'Admin',
+      '', '', '', shift]);
 
     _logAction_('TACHE_ATTRIB', data.assignePar||'admin',
       data.operateur + ' → ' + data.etapeCode + ' (dossier:' + data.dossierId + ')');
@@ -1623,6 +1630,7 @@ function handleGetTaches(data) {
       ? Utilities.formatDate(r[13], tz, 'yyyy-MM-dd')
       : String(r[13]);
     if (r[14]) { try { t.photos = JSON.parse(r[14]); } catch (e) {} }
+    if (r[15]) t.shift = String(r[15]); // Équipe : 'Jour' | 'Nuit' (col 16)
     if (data && data.operateur && data.operateur !== 'TOUS' && t.operateur !== data.operateur) continue;
     if (data && data.dossierId && t.dossierId !== data.dossierId) continue;
     list.push(t);

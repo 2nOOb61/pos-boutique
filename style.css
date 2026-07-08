@@ -2387,3 +2387,11 @@ html, body { overflow-x: hidden; max-width: 100%; }
   .ac-col{overflow:visible}
   .ac-foot{position:sticky;bottom:0;background:var(--surface)}
 }
+/* ── Équipe Jour / Nuit (dispatch + badges) ─────────────────────────── */
+.shift-badge{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:700;
+  padding:2px 7px;border-radius:10px;line-height:1.4;white-space:nowrap}
+.shift-badge.shift-jour{background:#fef3c7;color:#b45309}
+.shift-badge.shift-nuit{background:#e0e7ff;color:#4338ca}
+/* Option d'équipe sélectionnée dans la modale d'attribution */
+#attribShiftSel .attrib-shift-opt:has(input:checked){
+  border-color:var(--color-primary);background:var(--color-primary-light);color:var(--color-primary)}

@@ -8396,6 +8396,112 @@ function _prodTacheRow(t) {
   </tr>`;
 }
 
+// Petit badge Jour/Nuit réutilisable (cockpit, listes).
+function _shiftBadge(shift) {
+  if (shift === 'Nuit') return '<span class="shift-badge shift-nuit">🌙 Nuit</span>';
+  if (shift === 'Jour') return '<span class="shift-badge shift-jour">☀️ Jour</span>';
+  return '';
+}
+
+// ── FEUILLE DE TRAVAIL JOUR / NUIT (contrôle manuel imprimable) ──────────────
+// Liste les tâches encore à faire ou en cours, groupées par équipe (Jour/Nuit)
+// puis par opérateur, avec des colonnes vierges « Fait » et « Visa » pour un
+// pointage manuel sur papier. Admin/chef = tout ; opérateur = ses tâches.
+function printFeuilleTravail(shiftFilter) {
+  if (typeof _syncDossierDates === 'function') _syncDossierDates();
+  const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
+  const myLabel = currentUser?.label || currentUser?.username || '';
+
+  // Index dossier pour enrichir chaque tâche (client / produit / échéance).
+  const dMap = {};
+  (Array.isArray(dossiers) ? dossiers : []).forEach(d => { dMap[d.id] = d; });
+
+  // Tâches actives (à faire + en cours), visibles selon le rôle.
+  let list = _allTachesMerged().filter(t => t.statut === 'A_FAIRE' || t.statut === 'EN_COURS');
+  if (!isAdminOrChef) list = list.filter(t => _sameOp(t.operateur, myLabel));
+  if (shiftFilter === 'Jour' || shiftFilter === 'Nuit') list = list.filter(t => (t.shift || '') === shiftFilter);
+
+  const now      = new Date();
+  const dateStr  = now.toLocaleDateString('fr-FR', { weekday:'long', day:'2-digit', month:'long', year:'numeric' });
+  const heureStr = now.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
+
+  // Groupes d'équipe à afficher, dans l'ordre.
+  const shiftOrder = shiftFilter ? [shiftFilter] : ['Jour', 'Nuit', ''];
+  const shiftTitle = { 'Jour':'☀️  ÉQUIPE DE JOUR', 'Nuit':'🌙  ÉQUIPE DE NUIT', '':'⏱️  Sans équipe assignée' };
+
+  let sections = '';
+  shiftOrder.forEach(sh => {
+    const inShift = list.filter(t => (t.shift || '') === sh);
+    if (!inShift.length && sh === '') return; // on masque « sans équipe » s'il est vide
+    // Groupé par opérateur
+    const byOp = {};
+    inShift.forEach(t => { const op = t.operateur || 'Non assigné'; (byOp[op] = byOp[op] || []).push(t); });
+    const opBlocks = Object.entries(byOp).sort(([a],[b]) => a.localeCompare(b)).map(([op, tl]) => {
+      const rows = tl.map(t => {
+        const d = dMap[t.dossierId] || {};
+        const ref = t.dossierId && String(t.dossierId).startsWith('TL_') ? 'Libre' : (t.numeroDossier || t.dossierId || '—');
+        const prod = d.produit ? `${d.produit}${d.quantite ? ' ×' + d.quantite : ''}` : (t.titre || '—');
+        const ech  = d.echeance || d.dateLivraisonProd || d.dateLivraison || t.echeance || '';
+        const echStr = ech ? (_dispDate ? _dispDate(ech) : ech) : '—';
+        const prio = t.priorite || d.priorite || 'Normale';
+        const prioBadge = prio === 'Urgente' ? '<span class="badge badge-red">Urgente</span>'
+          : prio === 'Haute' ? '<span class="badge badge-amber">Haute</span>' : '';
+        const statut = t.statut === 'EN_COURS' ? '<span class="badge badge-amber">En cours</span>' : '';
+        return `<tr>
+          <td><strong>${ref}</strong></td>
+          <td>${d.client || '—'}</td>
+          <td>${prod}</td>
+          <td>${t.etapeLabel || t.titre || '—'} ${statut}</td>
+          <td>${echStr} ${prioBadge}</td>
+          <td class="ctrl-box"></td>
+          <td class="ctrl-visa"></td>
+        </tr>`;
+      }).join('');
+      return `<div class="op-block">
+        <div class="op-name">${op} <span class="op-count">${tl.length} tâche${tl.length > 1 ? 's' : ''}</span></div>
+        <table class="ft-table">
+          <thead><tr>
+            <th style="width:12%">N° Dossier</th><th style="width:18%">Client</th><th style="width:22%">Produit</th>
+            <th style="width:22%">Étape</th><th style="width:14%">Échéance / Prio</th>
+            <th style="width:6%">Fait ✓</th><th style="width:6%">Visa</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+    }).join('');
+    sections += `<div class="shift-section">
+      <div class="shift-head">${shiftTitle[sh]} <span class="shift-count">${inShift.length} tâche${inShift.length > 1 ? 's' : ''}</span></div>
+      ${inShift.length ? opBlocks : '<p style="color:#78716c;font-style:italic;padding:8px 0">Aucune tâche.</p>'}
+    </div>`;
+  });
+
+  if (!sections) sections = '<p style="color:#78716c;font-style:italic;text-align:center;padding:24px">Aucune tâche active à dispatcher.</p>';
+
+  _printWindow('Feuille de travail — FOREVER MG', `
+    <style>
+      .shift-section { margin-bottom:22px; page-break-inside:avoid; }
+      .shift-head { font-size:15px; font-weight:800; color:#1c1917; background:#f5f5f4; border-left:4px solid #e8834a;
+        padding:8px 12px; border-radius:4px; margin-bottom:10px; }
+      .shift-count { font-weight:600; font-size:12px; color:#78716c; }
+      .op-block { margin:0 0 14px 0; page-break-inside:avoid; }
+      .op-name { font-size:13px; font-weight:700; color:#292524; margin-bottom:4px; }
+      .op-count { font-weight:500; font-size:11px; color:#a8a29e; }
+      table.ft-table { width:100%; border-collapse:collapse; font-size:11px; }
+      table.ft-table th { background:#fafaf9; border:1px solid #d6d3d1; padding:5px 6px; text-align:left; font-size:10px; text-transform:uppercase; color:#57534e; }
+      table.ft-table td { border:1px solid #e7e5e4; padding:6px; vertical-align:top; }
+      td.ctrl-box, td.ctrl-visa { height:26px; }
+      td.ctrl-box { background:repeating-linear-gradient(45deg,#fff,#fff 6px,#fafafa 6px,#fafafa 7px); }
+    </style>
+    <div class="rpt-title">Feuille de Travail — Contrôle</div>
+    <div class="rpt-period">${dateStr} · éditée à ${heureStr}${!isAdminOrChef ? ' · ' + myLabel : ''}</div>
+    ${sections}
+    <div style="margin-top:24px;display:flex;justify-content:space-between;font-size:12px;color:#57534e">
+      <div>Chef d'atelier : _____________________</div>
+      <div>Visa contrôle : _____________________</div>
+    </div>
+  `);
+}
+
 function initModulesProduction() {
   const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
   const sel = document.getElementById('opFilterSel');
@@ -10508,11 +10614,20 @@ async function refreshComments(dossierId) {
   if (btn) btn.disabled = false;
 }
 
+// Équipe par défaut selon l'heure : Nuit de 18h à 6h, Jour sinon.
+function _defaultShift() {
+  const h = new Date().getHours();
+  return (h >= 18 || h < 6) ? 'Nuit' : 'Jour';
+}
+
 function openAttrib(etapeCode, etapeLabel) {
   if (!selectedDossier) return;
   pendingAttrib = { etapeCode, etapeLabel };
   document.getElementById('attribContextText').textContent = `${selectedDossier.numeroDossier} — ${etapeLabel}`;
   document.getElementById('attribComment').value = '';
+  // Présélection de l'équipe selon l'heure courante (l'admin peut changer).
+  const _shift = _defaultShift();
+  document.querySelectorAll('#attribShiftSel input[name=attribShift]').forEach(r => { r.checked = (r.value === _shift); });
   _renderAttribUserList();
   openModal('attribModal');
   // Recharger les utilisateurs depuis GAS en arrière-plan pour avoir la liste complète
@@ -10541,6 +10656,7 @@ async function confirmAttribution() {
   if (!checked.length) { showToast('Sélectionnez au moins un opérateur', 'error'); return; }
   const commentaire = document.getElementById('attribComment').value;
   const assignePar  = currentUser?.username || 'Admin';
+  const shift = document.querySelector('#attribShiftSel input[name=attribShift]:checked')?.value || _defaultShift();
   let allOk = true;
   for (const cb of checked) {
     const payload = {
@@ -10550,7 +10666,8 @@ async function confirmAttribution() {
       etapeCode: pendingAttrib.etapeCode,
       operateur: cb.value,
       commentaire,
-      assignePar
+      assignePar,
+      shift
     };
     let r;
     if (APPS_SCRIPT_URL) { r = await apiCall(payload); }
@@ -10573,6 +10690,7 @@ async function confirmAttribution() {
           operateur: cb.value,
           commentaire,
           assignePar,
+          shift,
           statut: 'A_FAIRE',
           dateAssignation: new Date().toLocaleDateString('fr-FR'),
           dateDebut: '',
@@ -10607,7 +10725,8 @@ async function selfAssign(etapeCode, etapeLabel) {
     etapeCode,
     operateur,
     commentaire:   '',
-    assignePar:    currentUser.username
+    assignePar:    currentUser.username,
+    shift:         _defaultShift()
   };
   let r;
   if (APPS_SCRIPT_URL) {
@@ -10632,6 +10751,7 @@ async function selfAssign(etapeCode, etapeLabel) {
         operateur,
         commentaire:     '',
         assignePar:      currentUser.username,
+        shift:           payload.shift,
         statut:          'A_FAIRE',
         dateAssignation: new Date().toLocaleDateString('fr-FR'),
         dateDebut:       '',
@@ -11208,7 +11328,7 @@ function _tacheRow(t) {
     <td class="pt-td-etape" data-label="Étape" style="${retardStyle}">
       <span class="tache-card__icon" style="background:${etape.color}15;border-color:${etape.color};color:${etape.color}">${etape.icon}</span>
       <span class="pt-td-label" style="color:${etape.color}">${isLibre?(t.titre||t.etapeLabel):t.etapeLabel}</span>
-      ${prioBadge}
+      ${prioBadge}${_shiftBadge(t.shift)}
       <svg class="pt-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
     </td>
     <td class="pt-td-client" data-label="Client">${clientChip}</td>
