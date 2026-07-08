@@ -6965,6 +6965,7 @@ let prodDateFilter = { mois: '', annee: '' };
 // État de la vue cockpit. filter = bucket d'échéance/statut ; sort = colonne + sens.
 let _cockpitFilter  = 'TOUS';   // TOUS | RETARD | AUJ | DEMAIN | SEMAINE | TERMINE
 let _cockpitOp      = 'TOUS';   // filtre responsable
+let _cockpitShift   = 'TOUS';   // filtre équipe : TOUS | Jour | Nuit
 let _cockpitEtape   = 'TOUS';   // filtre étape actuelle (code)
 let _cockpitSearch  = '';       // recherche client / produit / réf
 let _cockpitSort    = { key:'echeance', dir:'asc' }; // echeance|retard|operateur|statut|progression|priorite
@@ -13546,6 +13547,8 @@ function _cockpitFilterRows(rows) {
   let out = rows.filter(r => _cockpitBucketMatch(r, _cockpitFilter));
   if (_cockpitOp !== 'TOUS')
     out = out.filter(r => r.responsables.some(o => _sameOp(o, _cockpitOp)) || r.steps.some(s => s.te.some(t => _sameOp(t.operateur, _cockpitOp))));
+  if (_cockpitShift !== 'TOUS')
+    out = out.filter(r => r.steps.some(s => s.te.some(t => (t.shift || '') === _cockpitShift)));
   if (_cockpitEtape !== 'TOUS')
     out = out.filter(r => r.curStep && r.curStep.code === _cockpitEtape);
   const q = _cockpitSearch.trim().toLowerCase();
@@ -13584,7 +13587,7 @@ function renderProdCockpit() {
 
   container.innerHTML =
     `<div class="pcok">
-      ${_cockpitToolbar(cnt, opsSet, etapesUsed)}
+      ${_cockpitToolbar(cnt, opsSet, etapesUsed, all)}
       ${_cockpitAlertCards(all)}
       ${_cockpitOpHeatmap()}
       <div id="pcokBody"></div>
@@ -13598,7 +13601,7 @@ function _cockpitRenderBody() {
   if (!body) return;
   const filtered = _cockpitSortRows(_cockpitFilterRows(_buildDossierRows()));
   const page = filtered.slice(0, _cockpitLimit);
-  const filteredLbl = (_cockpitFilter!=='TOUS'||_cockpitOp!=='TOUS'||_cockpitEtape!=='TOUS'||_cockpitSearch) ? ' · filtré' : '';
+  const filteredLbl = (_cockpitFilter!=='TOUS'||_cockpitOp!=='TOUS'||_cockpitShift!=='TOUS'||_cockpitEtape!=='TOUS'||_cockpitSearch) ? ' · filtré' : '';
   const count = `<div class="pcok-count">${filtered.length} dossier${filtered.length>1?'s':''}${filteredLbl}</div>`;
   const more = filtered.length > _cockpitLimit
     ? `<div class="pcok-more"><button onclick="_cockpitShowMore()">Afficher plus (${filtered.length - _cockpitLimit} restants)</button></div>` : '';
@@ -13606,12 +13609,19 @@ function _cockpitRenderBody() {
   _ensureChronoTick();
 }
 
-function _cockpitToolbar(cnt, opsSet, etapesUsed) {
+function _cockpitToolbar(cnt, opsSet, etapesUsed, all) {
   const chips = [
     ['TOUS','Tous'], ['RETARD','En retard'], ['AUJ',"Aujourd'hui"], ['DEMAIN','Demain'], ['SEMAINE','Cette semaine'], ['TERMINE','Terminés']
   ].map(([k,lbl]) => {
     const active = _cockpitFilter === k;
     return `<button class="pcok-chip ${active?'pcok-chip--active':''} ${k==='RETARD'?'pcok-chip--warn':''}" onclick="_cockpitSetFilter('${k}')">${lbl}<span class="pcok-chip-n">${cnt(k)}</span></button>`;
+  }).join('');
+  // Chips équipe (Jour/Nuit) — filtre indépendant, compte les dossiers ayant ≥1 tâche du shift.
+  const shiftCnt = sh => sh === 'TOUS' ? all.length
+    : all.filter(r => r.steps.some(s => s.te.some(t => (t.shift || '') === sh))).length;
+  const shiftChips = [['TOUS','Toutes'], ['Jour','☀️ Jour'], ['Nuit','🌙 Nuit']].map(([k,lbl]) => {
+    const active = _cockpitShift === k;
+    return `<button class="pcok-chip ${active?'pcok-chip--active':''}" onclick="_cockpitSetShift('${k}')">${lbl}<span class="pcok-chip-n">${shiftCnt(k)}</span></button>`;
   }).join('');
   const opOpts = ['<option value="TOUS">Tous les opérateurs</option>']
     .concat(opsSet.map(o => `<option value="${_pcokEsc(o)}" ${_cockpitOp===o?'selected':''}>${_pcokEsc(o)}</option>`)).join('');
@@ -13622,7 +13632,7 @@ function _cockpitToolbar(cnt, opsSet, etapesUsed) {
   ].map(([k,l]) => `<option value="${k}" ${_cockpitSort.key===k?'selected':''}>Trier : ${l}</option>`).join('');
   const dirIcon = _cockpitSort.dir === 'asc' ? '↑' : '↓';
   return `<div class="pcok-toolbar">
-    <div class="pcok-chips">${chips}</div>
+    <div class="pcok-chips">${chips}<span class="pcok-chips-sep"></span>${shiftChips}</div>
     <div class="pcok-controls">
       <div class="pcok-search">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -13829,6 +13839,7 @@ function _cockpitDrawerContent(r) {
 // ── Setters cockpit ─────────────────────────────────────────────────────────
 function _cockpitSetFilter(k){ _cockpitFilter = k; _cockpitLimit = _COCKPIT_PAGE; renderProdCockpit(); }
 function _cockpitSetOp(v){ _cockpitOp = v; _cockpitLimit = _COCKPIT_PAGE; renderProdCockpit(); }
+function _cockpitSetShift(k){ _cockpitShift = k; _cockpitLimit = _COCKPIT_PAGE; renderProdCockpit(); }
 function _cockpitSetEtape(v){ _cockpitEtape = v; _cockpitLimit = _COCKPIT_PAGE; renderProdCockpit(); }
 function _cockpitSetSort(k){
   if (_cockpitSort.key === k) _cockpitSort.dir = _cockpitSort.dir==='asc' ? 'desc' : 'asc';

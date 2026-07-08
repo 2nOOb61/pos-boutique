@@ -2395,3 +2395,7 @@ html, body { overflow-x: hidden; max-width: 100%; }
 /* Option d'équipe sélectionnée dans la modale d'attribution */
 #attribShiftSel .attrib-shift-opt:has(input:checked){
   border-color:var(--color-primary);background:var(--color-primary-light);color:var(--color-primary)}
+
+/* Séparateur entre groupes de chips du cockpit (buckets | équipe) */
+.pcok-chips-sep{display:inline-block;width:1px;align-self:stretch;min-height:20px;
+  margin:0 6px;background:var(--border,#e7e5e4)}
