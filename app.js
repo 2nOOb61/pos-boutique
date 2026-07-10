@@ -15416,12 +15416,23 @@ function _getArretData() {
 
   const METHOD_LABEL = { cash: 'Espèces', mobile: 'Mobile Money', cheque: 'Chèque' };
   const TYPE_LABEL   = { comptant: 'Comptant', acompte: 'Acompte', solde: 'Solde', paiement: 'Paiement' };
+  // Retrouve les articles (nom/qté/prix unitaire) de la source d'un encaissement
+  const _itemsOf = e => {
+    let src = null;
+    if (e.source === 'commande')    src = commandes.find(c => String(c.id) === String(e.refId));
+    else if (e.source === 'vente')  src = sales.find(s => String(s.id) === String(e.refId));
+    return ((src && src.items) || []).map(i => ({
+      name: i.name, qty: Number(i.qty) || 0, price: Number(i.price) || 0
+    }));
+  };
   // Ordre chronologique (comme la feuille papier)
   const lignes = evts.slice()
     .sort((a, b) => new Date(a.date) - new Date(b.date))
     .map(e => ({
       num:       e.refLabel || ('#' + e.refId),
       client:    (e.client || '').trim() || 'Client comptant',
+      caissier:  e.caissierLabel || _arretCaissierLabel(e.caissier) || label || '—',
+      articles:  _itemsOf(e),
       methode:   METHOD_LABEL[e.method] || e.method || '—',
       typeLabel: TYPE_LABEL[e.type] || '',
       encaisse:  Number(e.montant) || 0,
@@ -15444,16 +15455,22 @@ function _renderArretFiche(lignes) {
     return;
   }
 
+  const esc = s => (_pcokEsc ? _pcokEsc(s) : s);
   const rows = lignes.map(l => {
     const obs = l.acompte
       ? `<span style="background:#fef3c7;color:#b45309;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:800">A</span>
          <span style="font-size:11px;color:#dc2626;font-weight:700;white-space:nowrap">RAP ${fmt(l.reste)}</span>`
       : `<span style="background:#dcfce7;color:#16a34a;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:800">Soldé</span>`;
-    return `<div style="display:grid;grid-template-columns:52px 1fr auto;gap:8px;align-items:center;padding:9px 12px;border-bottom:1px solid var(--border)">
-      <span style="font-size:11px;font-weight:700;color:var(--muted)">${_pcokEsc ? _pcokEsc(l.num) : l.num}</span>
+    const articles = (l.articles && l.articles.length)
+      ? `<div style="font-size:10px;color:var(--muted);margin-top:2px;line-height:1.45">${l.articles.map(a =>
+          `${esc(a.name)} <b style="color:var(--text)">×${a.qty}</b> @ ${fmt(a.price)}`).join('<br>')}</div>`
+      : '';
+    return `<div style="display:grid;grid-template-columns:52px 1fr auto;gap:8px;align-items:start;padding:9px 12px;border-bottom:1px solid var(--border)">
+      <span style="font-size:11px;font-weight:700;color:var(--muted)">${esc(l.num)}</span>
       <div style="min-width:0">
-        <div style="font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_pcokEsc ? _pcokEsc(l.client) : l.client}</div>
-        <div style="font-size:10px;color:var(--muted)">${l.methode}</div>
+        <div style="font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(l.client)}</div>
+        <div style="font-size:10px;color:var(--muted)">${l.methode}${l.caissier ? ` · <span title="Caissier">${esc(l.caissier)}</span>` : ''}</div>
+        ${articles}
       </div>
       <div style="text-align:right">
         <div style="font-size:13px;font-weight:800;color:var(--text);white-space:nowrap">${fmt(l.encaisse)}</div>
@@ -15832,17 +15849,28 @@ function printArretCaisse(arret) {
     <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#78716c;margin:16px 0 6px">Fiche d'encaissement</p>
     <table>
       <thead>
-        <tr><th style="width:60px">N° FC</th><th>Client</th><th style="text-align:right">Encaissement</th><th style="text-align:center;width:150px">Obs</th></tr>
+        <tr>
+          <th style="width:56px">N° FC</th>
+          <th>Client</th>
+          <th>Caissier</th>
+          <th>Articles</th>
+          <th style="text-align:right">Encaissement</th>
+          <th style="text-align:center;width:120px">Obs</th>
+        </tr>
       </thead>
       <tbody>
         ${arret.lignes.map(l => `<tr>
           <td>${_pcokEsc(l.num)}</td>
           <td>${_pcokEsc(l.client)}${l.methode ? `<span style="color:#a8a29e;font-size:10px"> · ${_pcokEsc(l.methode)}</span>` : ''}</td>
+          <td>${_pcokEsc(l.caissier || '—')}</td>
+          <td style="font-size:11px">${(l.articles && l.articles.length)
+            ? l.articles.map(a => `${_pcokEsc(a.name)} <strong>×${a.qty}</strong> <span style="color:#a8a29e">@ ${fmt(a.price)}</span>`).join('<br>')
+            : '<span style="color:#a8a29e">—</span>'}</td>
           <td style="text-align:right;font-weight:600">${fmt(l.encaisse)}</td>
           <td style="text-align:center">${l.acompte ? `<strong>A</strong> · RAP ${fmt(l.reste)}` : 'Soldé'}</td>
         </tr>`).join('')}
         <tr style="font-weight:700;background:#f8f7f4">
-          <td colspan="2">TOTAL${arret.lignes.reduce((a,b)=>a+(b.reste||0),0) > 0 ? ` · Reste à payer ${fmt(arret.lignes.reduce((a,b)=>a+(b.reste||0),0))}` : ''}</td>
+          <td colspan="4">TOTAL${arret.lignes.reduce((a,b)=>a+(b.reste||0),0) > 0 ? ` · Reste à payer ${fmt(arret.lignes.reduce((a,b)=>a+(b.reste||0),0))}` : ''}</td>
           <td style="text-align:right">${fmt(arret.lignes.reduce((a,b)=>a+(b.encaisse||0),0))}</td>
           <td></td>
         </tr>
