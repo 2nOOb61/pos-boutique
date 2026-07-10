@@ -15489,10 +15489,15 @@ function renderArretSoldeResults(q) {
   if (!box) return;
   const query = (q || '').trim().toLowerCase();
   const uname = currentUser?.username || '';
-  // Toutes les commandes avec un reste à encaisser, quel que soit le caissier
-  // d'origine : celui qui fait l'arrêt peut solder les commandes des collègues
-  // (le paiement tombe dans SA caisse via _recordEncaissement).
-  let list = commandes.filter(c => c.status === 'pending' && _cmdReste(c) > 0);
+  // Qui peut solder la commande d'un COLLÈGUE (arrêt consolidé) : le paiement
+  // tombe dans SA caisse via _recordEncaissement. Les autres rôles ne voient
+  // que leurs propres soldes.
+  const CAN_CLOSE_OTHERS = ['admin', 'caissier', 'commerciale', 'comptable'];
+  const canOthers = CAN_CLOSE_OTHERS.includes(currentUser?.role);
+  let list = commandes.filter(c =>
+    c.status === 'pending' && _cmdReste(c) > 0 &&
+    (canOthers || String(c.caissier || '') === String(uname))
+  );
   if (query) {
     list = list.filter(c => {
       const hay = `${c.clientName || ''} ${c.clientContact || ''} ${_cmdRef(c)} ${_arretCaissierLabel(c.caissier)} #${c.id}`.toLowerCase();
