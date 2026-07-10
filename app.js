@@ -15470,22 +15470,32 @@ function _renderArretFiche(lignes) {
     </div>`;
 }
 
+// Résout le nom lisible d'un caissier (username → label via localUsers)
+function _arretCaissierLabel(username) {
+  const u = String(username || '').trim();
+  if (!u) return '';
+  const found = (localUsers || []).find(x =>
+    String(x.username || '').toLowerCase() === u.toLowerCase());
+  return (found && (found.label || found.username)) || u;
+}
+
 // ── Encaisser un solde différé depuis l'arrêt de caisse ────────────────────
 // Le client règle son reste (souvent un autre jour que l'acompte) : on retrouve
 // sa commande, on l'encaisse/finalise, et l'événement rentre dans l'arrêt du jour.
+// N'importe quel caissier peut solder la commande d'un collègue (le paiement
+// entre dans SA caisse) → arrêt de caisse consolidé possible.
 function renderArretSoldeResults(q) {
   const box = document.getElementById('arretSoldeResults');
   if (!box) return;
-  const query   = (q || '').trim().toLowerCase();
-  const isAdmin = currentUser?.role === 'admin';
-  const uname   = currentUser?.username || '';
-  let list = commandes.filter(c =>
-    c.status === 'pending' && _cmdReste(c) > 0 &&
-    (isAdmin || String(c.caissier || '') === String(uname))
-  );
+  const query = (q || '').trim().toLowerCase();
+  const uname = currentUser?.username || '';
+  // Toutes les commandes avec un reste à encaisser, quel que soit le caissier
+  // d'origine : celui qui fait l'arrêt peut solder les commandes des collègues
+  // (le paiement tombe dans SA caisse via _recordEncaissement).
+  let list = commandes.filter(c => c.status === 'pending' && _cmdReste(c) > 0);
   if (query) {
     list = list.filter(c => {
-      const hay = `${c.clientName || ''} ${c.clientContact || ''} ${_cmdRef(c)} #${c.id}`.toLowerCase();
+      const hay = `${c.clientName || ''} ${c.clientContact || ''} ${_cmdRef(c)} ${_arretCaissierLabel(c.caissier)} #${c.id}`.toLowerCase();
       return hay.includes(query);
     });
   }
@@ -15507,9 +15517,14 @@ function renderArretSoldeResults(q) {
   const initial = s => ((String(s || 'C').trim()[0]) || 'C').toUpperCase();
   const rows = list.map((c, i) => {
     const reste = _cmdReste(c);
+    // Caissier d'origine (affiché quand ce n'est pas l'utilisateur courant)
+    const owner = _arretCaissierLabel(c.caissier);
+    const isMine = String(c.caissier || '') === String(uname);
+    const ownerTag = (!isMine && owner)
+      ? `<span class="ac-cli-owner" title="Commande de ${escapeHtml(owner)}">${escapeHtml(owner)}</span>` : '';
     return `<div class="ac-cli-row${i >= VIS ? ' ac-extra ac-hidden' : ''}">
       <div class="ac-ava">${initial(c.clientName)}</div>
-      <div class="ac-cli-n"><b>${escapeHtml(c.clientName || 'Client')}</b><span>${escapeHtml(_cmdRef(c))}${c.clientContact ? ' · ' + escapeHtml(c.clientContact) : ''}</span></div>
+      <div class="ac-cli-n"><b>${escapeHtml(c.clientName || 'Client')}${ownerTag}</b><span>${escapeHtml(_cmdRef(c))}${c.clientContact ? ' · ' + escapeHtml(c.clientContact) : ''}</span></div>
       <div class="ac-cli-rap">${fmt(reste)}</div>
       <div class="ac-cli-act">
         <button class="ac-btn-enc" onclick="arretEncaisser('${c.id}')">Encaisser</button>
