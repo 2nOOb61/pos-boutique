@@ -14220,6 +14220,21 @@ function _pcfVoirCommandes(i, ev){
 // ── Vue patron : encaissements par caissier (fiche d'encaissement centralisée) ──
 // Lit le journal `encaissements` (fusionné depuis le serveur → tous les caissiers)
 // sur la période patron sélectionnée. Détail dépliable = la fiche par caissier.
+// Nature d'une entrée d'argent, du point de vue caisse :
+//   acompte  = argent partiel reçu à la création d'une commande (reste dû plus tard)
+//   solde    = reste encaissé à la livraison / règlement d'une dette existante
+//   comptant = vente payée intégralement sur le champ
+function _encNature(e) {
+  const t = String(e && e.type || '').toLowerCase();
+  if (t === 'acompte') return 'acompte';
+  if (t === 'solde' || t === 'paiement') return 'solde';
+  return 'comptant';
+}
+
+// « Entrées d'argent réelles » (arrêt de caisse consolidé, vue patron)
+// Basé UNIQUEMENT sur le journal d'encaissements (argent physiquement reçu),
+// ≠ CA engagé du Contrôle financier. Répond à : « combien est réellement rentré
+// en caisse, et quelle part est un acompte du jour vs un solde de livraison ? »
 function renderPatronEncaissements() {
   const box = document.getElementById('patronEncaissements');
   if (!box) return;
@@ -14231,56 +14246,108 @@ function renderPatronEncaissements() {
     return t >= range.from && t <= range.to;
   };
   const list = (Array.isArray(encaissements) ? encaissements : []).filter(inRange);
-
-  const byCais = {};
-  list.forEach(e => {
-    const key = e.caissierLabel || e.caissier || 'Caissier';
-    const g = byCais[key] || (byCais[key] = { nom:key, nb:0, total:0, cash:0, mobile:0, cheque:0, lignes:[] });
-    const m = Number(e.montant) || 0;
-    g.nb++; g.total += m;
-    if (e.method === 'cash') g.cash += m; else if (e.method === 'cheque') g.cheque += m; else g.mobile += m;
-    g.lignes.push(e);
-  });
-  const groups = Object.values(byCais).sort((a, b) => b.total - a.total);
-  const gTotal  = groups.reduce((a, b) => a + b.total, 0);
-  const gCash   = groups.reduce((a, b) => a + b.cash, 0);
-  const gMobile = groups.reduce((a, b) => a + b.mobile, 0);
-  const gCheque = groups.reduce((a, b) => a + b.cheque, 0);
   const esc = _pcokEsc;
 
-  const head = `<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px">
-      <h3 style="margin:0;font-size:15px;font-weight:800;color:var(--text)">Encaissements par caissier</h3>
-      <span style="font-size:12px;color:var(--muted)">${esc(range.label)} · Total <b style="color:#16a34a">${fmt(gTotal)}</b></span>
-    </div>`;
+  // Totaux globaux (nature + moyen de paiement) + regroupements caissier / jour
+  const T = { total:0, acompte:0, solde:0, comptant:0, cash:0, mobile:0, cheque:0, nb:0 };
+  const byCais = {}, byDay = {};
+  const dayKey = d => d ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` : '—';
+  list.forEach(e => {
+    const m = Number(e.montant) || 0;
+    if (m <= 0) return;
+    const nat = _encNature(e);
+    const meth = e.method === 'cash' ? 'cash' : e.method === 'cheque' ? 'cheque' : 'mobile';
+    T.total += m; T[nat] += m; T[meth] += m; T.nb++;
 
-  if (!groups.length) {
+    const key = e.caissierLabel || e.caissier || 'Caissier';
+    const g = byCais[key] || (byCais[key] = { nom:key, nb:0, total:0, acompte:0, solde:0, comptant:0, cash:0, mobile:0, cheque:0, lignes:[] });
+    g.nb++; g.total += m; g[nat] += m; g[meth] += m; g.lignes.push(e);
+
+    const dk = dayKey(parseSaleDate(e.date));
+    const dd = byDay[dk] || (byDay[dk] = { key:dk, total:0, acompte:0, solde:0, comptant:0 });
+    dd.total += m; dd[nat] += m;
+  });
+
+  const head = `<div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:4px">
+      <h3 style="margin:0;font-size:15px;font-weight:800;color:var(--text)">Entrées d'argent réelles <span style="font-size:11px;font-weight:600;color:var(--muted)">· caisse</span></h3>
+      <span style="font-size:12px;color:var(--muted)">${esc(range.label)} · Total <b style="color:#16a34a">${fmt(T.total)}</b></span>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:14px;line-height:1.5">Argent physiquement encaissé sur la période — acomptes du jour + soldes de livraison + comptant. Différent du <b>CA engagé</b> (valeur des commandes créées).</div>`;
+
+  if (!T.nb) {
     box.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px">${head}
-      <div style="text-align:center;padding:20px;color:var(--muted);font-size:13px">Aucun encaissement sur cette période</div></div>`;
+      <div style="text-align:center;padding:20px;color:var(--muted);font-size:13px">Aucune entrée d'argent sur cette période</div></div>`;
     return;
   }
 
-  const kpi = (lbl, val, col) => `<div style="flex:1;min-width:110px;background:var(--surface2);border-radius:10px;padding:10px 12px">
+  const kpi = (lbl, val, col, sub) => `<div style="flex:1;min-width:120px;background:var(--surface2);border-radius:10px;padding:10px 12px">
       <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">${lbl}</div>
-      <div style="font-size:16px;font-weight:800;color:${col};margin-top:2px">${fmt(val)}</div></div>`;
+      <div style="font-size:16px;font-weight:800;color:${col};margin-top:2px">${fmt(val)}</div>
+      ${sub ? `<div style="font-size:10px;color:var(--muted);margin-top:1px">${sub}</div>` : ''}</div>`;
 
+  // Ventilation par NATURE (le cœur de la réponse au patron)
+  const nature = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      ${kpi('Acomptes', T.acompte, '#b45309', 'nouvelles commandes')}
+      ${kpi('Soldes / règlements', T.solde, '#1e40af', 'livraisons & restes')}
+      ${kpi('Comptant', T.comptant, '#16a34a', 'payé intégral')}
+      ${kpi('Total entré en caisse', T.total, '#0f766e', T.nb + ' encaissement' + (T.nb > 1 ? 's' : ''))}
+    </div>`;
+
+  // Ventilation par MOYEN de paiement
+  const moyen = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+      ${kpi('Espèces', T.cash, '#1a4a3a')}${kpi('Mobile Money', T.mobile, '#c2410c')}${T.cheque > 0 ? kpi('Chèque', T.cheque, '#1e40af') : ''}
+    </div>`;
+
+  // Détail par JOUR (utile car l'arrêt de caisse est quotidien) — si plusieurs jours
+  const days = Object.values(byDay).filter(d => d.key !== '—').sort((a, b) => b.key.localeCompare(a.key));
+  const dayLbl = k => { const p = k.split('-'); const d = new Date(+p[0], +p[1]-1, +p[2]); const s = d.toLocaleDateString('fr-FR', { weekday:'short', day:'2-digit', month:'short' }); return s.charAt(0).toUpperCase() + s.slice(1); };
+  const perDay = days.length > 1 ? `<div style="border:1px solid var(--border);border-radius:10px;margin-bottom:12px;overflow:hidden">
+      <div style="padding:9px 12px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);background:var(--surface2)">Entrées par jour</div>
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr style="font-size:10px;color:var(--muted);text-align:right">
+          <th style="padding:5px 10px;text-align:left">Jour</th><th style="padding:5px 8px">Acompte</th><th style="padding:5px 8px">Solde</th><th style="padding:5px 8px">Comptant</th><th style="padding:5px 10px">Total</th>
+        </tr></thead>
+        <tbody>${days.map(d => `<tr style="border-top:1px solid var(--border);font-size:12px">
+          <td style="padding:6px 10px;font-weight:600">${dayLbl(d.key)}</td>
+          <td style="padding:6px 8px;text-align:right;color:#b45309">${d.acompte ? fmt(d.acompte) : '—'}</td>
+          <td style="padding:6px 8px;text-align:right;color:#1e40af">${d.solde ? fmt(d.solde) : '—'}</td>
+          <td style="padding:6px 8px;text-align:right;color:#16a34a">${d.comptant ? fmt(d.comptant) : '—'}</td>
+          <td style="padding:6px 10px;text-align:right;font-weight:800">${fmt(d.total)}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>` : '';
+
+  const natBadge = e => {
+    const n = _encNature(e);
+    const s = 'padding:2px 7px;border-radius:20px;font-size:10px;font-weight:800;white-space:nowrap';
+    if (n === 'acompte') return `<span style="background:#fef3c7;color:#b45309;${s}">Acompte</span>`;
+    if (n === 'solde')   return `<span style="background:#dbeafe;color:#1e40af;${s}">Solde</span>`;
+    return `<span style="background:#dcfce7;color:#16a34a;${s}">Comptant</span>`;
+  };
+
+  // Détail par CAISSIER (dépliable)
+  const groups = Object.values(byCais).sort((a, b) => b.total - a.total);
   const rows = groups.map(g => {
     const ligneRows = g.lignes.slice().sort((a, b) => new Date(a.date) - new Date(b.date)).map(l => {
       const obs = (Number(l.resteApres) || 0) > 0
-        ? `<span style="color:#b45309;font-weight:700">A</span> · <span style="color:#dc2626">RAP ${fmt(l.resteApres)}</span>`
+        ? `<span style="color:#dc2626;font-weight:700">RAP ${fmt(l.resteApres)}</span>`
         : `<span style="color:#16a34a;font-weight:600">Soldé</span>`;
       const hh = l.time || (parseSaleDate(l.date) ? parseSaleDate(l.date).toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' }) : '');
       return `<tr style="border-top:1px solid var(--border)">
         <td style="padding:5px 8px;font-size:11px;color:var(--muted);white-space:nowrap">${esc(l.refLabel || ('#' + l.refId))}</td>
         <td style="padding:5px 8px;font-size:12px">${esc(l.client || 'Client comptant')}<span style="color:var(--muted);font-size:10px"> · ${esc(fmtMethLabel(l.method))}${hh ? ' · ' + hh : ''}</span></td>
+        <td style="padding:5px 8px;text-align:center">${natBadge(l)}</td>
         <td style="padding:5px 8px;text-align:right;font-weight:700;white-space:nowrap">${fmt(l.montant)}</td>
         <td style="padding:5px 8px;text-align:right;font-size:11px;white-space:nowrap">${obs}</td>
       </tr>`;
     }).join('');
+    const natSub = [g.acompte ? 'Acpt ' + fmt(g.acompte) : '', g.solde ? 'Solde ' + fmt(g.solde) : '', g.comptant ? 'Cpt ' + fmt(g.comptant) : ''].filter(Boolean).join(' · ');
     return `<details style="border:1px solid var(--border);border-radius:10px;margin-bottom:8px;overflow:hidden">
       <summary style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 14px;cursor:pointer;list-style:none">
         <div style="min-width:0">
           <div style="font-size:13px;font-weight:700;color:var(--text)">${esc(g.nom)}</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:2px">${g.nb} encaissement${g.nb > 1 ? 's' : ''} · Esp. ${fmt(g.cash)} · MM ${fmt(g.mobile)}${g.cheque > 0 ? ' · Chq ' + fmt(g.cheque) : ''}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">${g.nb} encaissement${g.nb > 1 ? 's' : ''}${natSub ? ' · ' + natSub : ''}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:1px">Esp. ${fmt(g.cash)} · MM ${fmt(g.mobile)}${g.cheque > 0 ? ' · Chq ' + fmt(g.cheque) : ''}</div>
         </div>
         <div style="font-size:15px;font-weight:800;color:#16a34a;white-space:nowrap">${fmt(g.total)}</div>
       </summary>
@@ -14292,9 +14359,10 @@ function renderPatronEncaissements() {
 
   box.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px 18px">
       ${head}
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
-        ${kpi('Espèces', gCash, '#1a4a3a')}${kpi('Mobile Money', gMobile, '#c2410c')}${gCheque > 0 ? kpi('Chèque', gCheque, '#1e40af') : ''}${kpi('Total encaissé', gTotal, '#16a34a')}
-      </div>
+      ${nature}
+      ${moyen}
+      ${perDay}
+      <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:4px 0 8px">Détail par caissier</div>
       ${rows}
     </div>`;
 }
@@ -14340,6 +14408,7 @@ async function renderControlFinance() {
         <span><span class="pcf-dot" style="background:#7be0b8"></span>Encaissé <b>${fmt(t.encaisse)}</b></span>
         <span><span class="pcf-dot" style="background:#ffb4a8"></span>Reste <b>${fmt(t.restant)}</b></span>
       </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:6px;line-height:1.4">Cumul sur les commandes de la période — <b>pas la caisse du jour</b>. Trésorerie réelle → « Entrées d'argent réelles » ci-dessous.</div>
     </div>
   </div>`;
 
