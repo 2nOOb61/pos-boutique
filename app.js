@@ -14372,14 +14372,17 @@ function fmtMethLabel(m) { return m === 'cash' ? 'Espèces' : m === 'cheque' ? '
 async function renderControlFinance() {
   const box = document.getElementById('patronControlFinance');
   if (!box) return;
+  const detail = document.getElementById('patronControlDetail');
   const range = _patronPeriodRange();
   box.innerHTML = _pcfToolbar() + `<div class="pcf-loading">Calcul en cours…</div>`;
+  if (detail) detail.innerHTML = '';
 
   let r = null;
   try { r = await apiCall({ action:'getControlPatron', from: range.from, to: range.to }); } catch(e) {}
   if (!r || !r.ok) {
     const _m = r ? (r.error || 'réponse ok=false') : 'aucune réponse (réseau)';
     box.innerHTML = _pcfToolbar() + `<div class="pcf-error">Impossible de charger le contrôle financier${APPS_SCRIPT_URL ? '' : ' (Apps Script non configuré)'} — <span style="font-family:monospace;font-size:12px">${_cfEsc(_m)}</span></div>`;
+    if (detail) detail.innerHTML = '';
     return;
   }
 
@@ -14420,7 +14423,8 @@ async function renderControlFinance() {
     ${_pcfKpi('Top caissier', topCais?_cfEsc(topCais.nom):'—', topCais?fmt(topCais.engage):'aucune vente', '#1a4a3a')}
   </div>`;
 
-  box.innerHTML = _pcfToolbar() + hero + kpis + _pcfJoursCard(jours) + _pcfCaissierCard(cais, t) + _pcfClientCard(cli, t);
+  box.innerHTML = _pcfToolbar() + hero + kpis;
+  if (detail) detail.innerHTML = _pcfJoursCard(jours) + _pcfCaissierCard(cais, t) + _pcfClientCard(cli, t);
 }
 
 // ── Carte « Ventes par jour » (scanabilité + mini-barres + voir plus) ──
