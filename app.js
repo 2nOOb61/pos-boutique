@@ -5722,9 +5722,7 @@ function _buildCommandeRows() {
     if (c.dossierId) {
       const dt = (Array.isArray(taches) ? taches : []).filter(t => t.dossierId === c.dossierId);
       if (dt.length) {
-        let done = 0;
-        ETAPES_CONFIG.forEach(e => { const te = dt.filter(t => t.etapeCode === e.code); if (te.length && te.every(t => t.statut === 'TERMINE')) done++; });
-        prodPct = Math.round(done / ETAPES_CONFIG.length * 100);
+        prodPct = _dossierPct(dt, (Array.isArray(dossiers) ? dossiers : []).find(x => x.id === c.dossierId));
       }
     }
     let bucket = 'FUTUR';
@@ -7283,6 +7281,23 @@ function _dossierClosed(d) {
   return !!d && (d.statut === 'LIVRE' || Number(d.progression) === 100);
 }
 
+// Progression réelle d'un dossier = étapes terminées ÷ étapes APPLICABLES (celles ayant
+// au moins une tâche assignée). Aligne le frontend sur le serveur (_computeDossierProgress_).
+// Corrige le double défaut de l'ancien calcul `done / 10` : sous-évaluation (un dossier
+// simple entièrement fini plafonnait à 30-40 %) ET, côté serveur, sur-évaluation (une
+// étape tardive terminée gonflait le % pour des étapes jamais travaillées).
+function _dossierPct(dt, d) {
+  if (_dossierClosed(d)) return 100;
+  let done = 0, applicable = 0;
+  for (const e of ETAPES_CONFIG) {
+    const te = dt.filter(t => t.etapeCode === e.code);
+    if (!te.length) continue;
+    applicable++;
+    if (te.every(t => t.statut === 'TERMINE')) done++;
+  }
+  return applicable ? Math.round(done / applicable * 100) : (Number(d && d.progression) || 0);
+}
+
 // Clôture administrative : passe le dossier à LIVRE / 100 % même sans attribution.
 // Réservé admin / chef d'atelier. Marque aussi ses éventuelles tâches en cours comme
 // terminées pour que le pipeline (calculé sur les tâches) reste cohérent partout.
@@ -7431,7 +7446,8 @@ function showDossierReadOnly(d) {
     return { e, status, te };
   });
   const done = steps.filter(s => s.status === 'TERMINE').length;
-  const pct  = clos ? 100 : Math.round(done / ETAPES_CONFIG.length * 100);
+  const applicable = steps.filter(s => s.te && s.te.length).length;
+  const pct  = clos ? 100 : (applicable ? Math.round(done / applicable * 100) : 0);
   const col  = s => s==='TERMINE'?'#16a34a':s==='EN_COURS'?'#d97706':s==='A_FAIRE'?'#2563eb':'#d6d3d1';
 
   const stepsHtml = steps.map(s => `
@@ -7487,7 +7503,8 @@ function _buildCardProductionSection(dossierId) {
     else if (te.some(t => t.statut === 'A_FAIRE'))                                status = 'A_FAIRE';
     return { ...e, status, tachesEtape: te };
   });
-  const pct = clos ? 100 : Math.round(doneCount / ETAPES_CONFIG.length * 100);
+  const applicable = steps.filter(s => s.tachesEtape && s.tachesEtape.length).length;
+  const pct = clos ? 100 : (applicable ? Math.round(doneCount / applicable * 100) : 0);
   const bg  = s => s==='TERMINE'?'#16a34a':s==='EN_COURS'?'#d97706':s==='A_FAIRE'?'#2563eb':'#f5f5f4';
   const bc  = s => s==='VIDE'?'#d6d3d1':bg(s);
   const tc  = s => s==='VIDE'?'#a8a29e':'#fff';
@@ -9424,9 +9441,7 @@ const _ATTR_PAGE = 80;
 function _buildAttrRow(d) {
   const dt = (Array.isArray(taches) ? taches : []).filter(t => t.dossierId === d.id);
   const clos = _dossierClosed(d); // clôture admin → 100 % même sans (ou avec partielle) attribution
-  let done = 0;
-  ETAPES_CONFIG.forEach(e => { const te = dt.filter(t => t.etapeCode === e.code); if (te.length && te.every(t => t.statut === 'TERMINE')) done++; });
-  const pct = clos ? 100 : (dt.length ? Math.round(done / ETAPES_CONFIG.length * 100) : (d.progression || 0));
+  const pct = _dossierPct(dt, d);
   const isDone = clos || pct === 100;
   // Étape actuelle = statut serveur du dossier (avance via majProgressionDossier_)
   const curStep  = ETAPES_CONFIG.find(e => e.code === d.statut) || null;
@@ -11033,7 +11048,7 @@ function _buildProgressBar(dossierId) {
     else if (te.some(t => t.statut === 'A_FAIRE'))                            status = 'A_FAIRE';
     return { ...e, status };
   });
-  const pct      = clos ? 100 : Math.round(doneCount / ETAPES_CONFIG.length * 100);
+  const pct      = _dossierPct(dt, (Array.isArray(dossiers) ? dossiers : []).find(x => x.id === dossierId));
   const pctColor = pct===100?'#16a34a':pct>0?'#e8834a':'#a8a29e';
   const bg  = s => s==='TERMINE'?'#16a34a':s==='EN_COURS'?'#d97706':s==='A_FAIRE'?'#2563eb':'#f5f5f4';
   const bc  = s => s==='VIDE'?'#e5e3df':bg(s);
@@ -13244,9 +13259,7 @@ function _buildProdDeadlines() {
     .filter(d => _canSeeAll || taches.some(t => t.dossierId === d.id && _sameOp(t.operateur, _myLabel)))
     .map(d => {
       const dt = taches.filter(t => t.dossierId === d.id);
-      let done = 0;
-      ETAPES_CONFIG.forEach(e => { const te = dt.filter(t => t.etapeCode === e.code); if (te.length && te.every(t => t.statut === 'TERMINE')) done++; });
-      const pct  = dt.length ? Math.round(done / ETAPES_CONFIG.length * 100) : (d.progression || 0);
+      const pct  = _dossierPct(dt, d);
       const days = _daysUntil(d.dateLivraisonProd);
       const opsSrc = _canSeeAll ? dt : dt.filter(t => _sameOp(t.operateur, _myLabel));
       const ops  = [...new Set(opsSrc.map(t => t.operateur).filter(Boolean))];
@@ -13496,7 +13509,8 @@ function _buildDossierRows() {
       else if (te.some(t => t.statut === 'A_FAIRE'))                            status = 'A_FAIRE';
       return { e, status, te };
     });
-    const pct = clos ? 100 : Math.round(done / ETAPES_CONFIG.length * 100);
+    const applicable = steps.filter(s => s.te && s.te.length).length;
+    const pct = clos ? 100 : (applicable ? Math.round(done / applicable * 100) : 0);
     // Étape actuelle = 1re EN_COURS, sinon 1re A_FAIRE
     const cur = steps.find(s => s.status === 'EN_COURS') || steps.find(s => s.status === 'A_FAIRE') || null;
     let responsables = [];
@@ -13932,17 +13946,13 @@ async function confirmPointage() {
     let dossierComplet = false;
     if (!isLibre && t) {
       const tachesD = taches.filter(x => x.dossierId === t.dossierId);
-      // Calculer le même pct que _buildProgressBar : chaque étape compte 1 si TOUS ses opérateurs ont terminé
-      let doneCount = 0;
-      for (const e of ETAPES_CONFIG) {
-        const te = tachesD.filter(x => x.etapeCode === e.code);
-        if (te.length > 0 && te.every(x => x.statut === 'TERMINE')) doneCount++;
-      }
-      const pct = Math.round(doneCount / ETAPES_CONFIG.length * 100);
+      // Complet = toutes les étapes APPLICABLES (ayant au moins une tâche) sont terminées
+      // (modèle _dossierPct, aligné sur le serveur). Évite qu'un dossier « se complète »
+      // via des étapes jamais assignées.
+      const d = dossiers.find(x => x.id === t.dossierId);
+      const pct = _dossierPct(tachesD, d);
       if (pct === 100) {
         dossierComplet = true;
-        // Mettre à jour le statut du dossier
-        const d = dossiers.find(x => x.id === t.dossierId);
         if (d) { d.statut = 'LIVRE'; d.progression = 100; }
       }
     }

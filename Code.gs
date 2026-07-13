@@ -206,6 +206,7 @@ function doGet(e) {
     if (action === 'getControlPatron') return jsonResp(handleGetControlPatron(e.parameter));
     if (action === 'migrateCommandeIds') return jsonResp(migrateCommandeIds());
     if (action === 'migrateDedupDossiers') return jsonResp(migrateDedupDossiers());
+    if (action === 'recalcProgression')   return jsonResp(handleRecalcProgression());
     if (action === 'diagCommandeErrors') return jsonResp(diagCommandeErrors());
     if (action === 'fixCommandeErrors')  return jsonResp(fixCommandeErrors());
     if (action === 'getComments')     return jsonResp(handleGetComments(e.parameter));
@@ -1722,12 +1723,48 @@ function handlePointerAction(data) {
   return { ok:false, error:'Tâche introuvable' };
 }
 
+// Calcule statut + progression d'un dossier À PARTIR DES TÂCHES RÉELLES.
+// Modèle « étapes applicables » : progression = étapes terminées ÷ étapes ayant au
+// moins une tâche assignée (× 100). Une étape jamais assignée ne compte pas (les
+// produits simples n'utilisent pas les 10 étapes du pipeline).
+// ⚠️ Corrige le bug historique : la progression était indexée sur la POSITION de
+// l'étape terminée dans le pipeline ((idx+1)×10) → terminer une étape tardive gonflait
+// le % pour des étapes jamais travaillées (« progression qui se complète toute seule »).
+// Retour { statut, progression }. statut=null si le dossier n'a AUCUNE tâche (ne rien
+// changer → préserve un dossier créé ou clôturé manuellement).
+// Calcul pur à partir d'un map { etapeCode: [statuts] } d'un dossier.
+function _progressFromByEtape_(byEtape) {
+  const out = { statut:null, progression:0 };
+  let applicable = 0, done = 0, firstUnfinished = null;
+  for (let k = 0; k < ETAPES_PROD.length; k++) {             // parcours DANS L'ORDRE du pipeline
+    const st = byEtape[ETAPES_PROD[k].code];
+    if (!st || !st.length) continue;                         // étape non assignée → non applicable
+    applicable++;
+    if (st.every(function(s) { return s === 'TERMINE'; })) done++;
+    else if (firstUnfinished === null) firstUnfinished = ETAPES_PROD[k].code;
+  }
+  if (applicable === 0) return out;                          // aucune tâche → ne rien changer
+  out.progression = Math.round(done / applicable * 100);
+  out.statut = (done === applicable) ? 'LIVRE' : firstUnfinished;
+  return out;
+}
+
+function _computeDossierProgress_(ss, dossierId) {
+  const shT = ss.getSheetByName(SHEET_TACHES);
+  if (!shT || shT.getLastRow() <= 1) return { statut:null, progression:0 };
+  const rows = shT.getDataRange().getValues();
+  const byEtape = {}; // etapeCode -> [statuts]
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][1]) !== String(dossierId)) continue; // col 2 = DossierId
+    const code = rows[i][3];                                 // col 4 = EtapeCode
+    (byEtape[code] = byEtape[code] || []).push(rows[i][6]);  // col 7 = Statut
+  }
+  return _progressFromByEtape_(byEtape);
+}
+
 function majProgressionDossier_(ss, dossierId, etapeCode) {
   const sh  = ss.getSheetByName(SHEET_DOSSIERS);
   if (!sh) return;
-  const idx = ETAPES_PROD.findIndex(function(e) { return e.code === etapeCode; });
-  if (idx < 0) return;
-  const next = ETAPES_PROD[idx + 1];
 
   // Recherche le dossier sur toute la feuille (pas seulement les dossiers récents :
   // un dossier ancien ne se voyait plus mettre à jour sa progression au-delà des 200
@@ -1739,12 +1776,61 @@ function majProgressionDossier_(ss, dossierId, etapeCode) {
   if (!match) return;
   const rowNum = match.getRow();
 
-  const nouveauStatut = next ? next.code : 'LIVRE';
-  const progression   = ETAPES_PROD[idx].progress;
-  sh.getRange(rowNum, 6, 1, 2).setValues([[nouveauStatut, progression]]);
-  if (nouveauStatut === 'LIVRE') {
+  // Recalcule d'après les tâches réelles (et non la position de l'étape terminée).
+  const prog = _computeDossierProgress_(ss, dossierId);
+  if (prog.statut === null) return; // dossier sans tâche : ne rien écraser
+  sh.getRange(rowNum, 6, 1, 2).setValues([[prog.statut, prog.progression]]);
+  if (prog.statut === 'LIVRE') {
     sh.getRange(rowNum, 9, 1, 1).setValue(new Date()); // DateLivraison (col 9)
   }
+}
+
+// Maintenance : recalcule statut + progression de TOUS les dossiers d'après leurs
+// tâches réelles (même modèle « étapes applicables »). Corrige les dossiers
+// historiquement sur-évalués par l'ancien calcul indexé sur la position d'étape.
+// Prudence : on NE touche PAS les dossiers déjà LIVRÉS (statut LIVRE) ni ceux sans
+// tâche → on ne « dé-livre » pas une commande réellement remise, on ne rouvre pas une
+// clôture administrative. Seuls les dossiers EN COURS sur-évalués sont réalignés.
+function handleRecalcProgression() {
+  const ss = getSS();
+  const sh = ss.getSheetByName(SHEET_DOSSIERS);
+  if (!sh || sh.getLastRow() <= 1) return { ok:true, updated:0, skipped:0, total:0, changes:[] };
+
+  // Lire la feuille Tâches UNE SEULE FOIS → map dossierId -> etapeCode -> [statuts]
+  // (évite 1 lecture complète par dossier, qui faisait dépasser le délai d'exécution).
+  const byDossier = {};
+  const shT = ss.getSheetByName(SHEET_TACHES);
+  if (shT && shT.getLastRow() > 1) {
+    const trows = shT.getDataRange().getValues();
+    for (let i = 1; i < trows.length; i++) {
+      const dId = String(trows[i][1]); if (!dId) continue;
+      const code = trows[i][3];
+      const m = (byDossier[dId] = byDossier[dId] || {});
+      (m[code] = m[code] || []).push(trows[i][6]);
+    }
+  }
+
+  const rows = sh.getDataRange().getValues();
+  let updated = 0, skipped = 0;
+  const changes = [];
+  for (let i = 1; i < rows.length; i++) {
+    const oldStatut = String(rows[i][5]);
+    if (oldStatut === 'LIVRE') { skipped++; continue; } // ne pas rouvrir un dossier livré/clôturé
+    const id   = String(rows[i][0]);
+    const prog = _progressFromByEtape_(byDossier[id] || {});
+    if (prog.statut === null) { skipped++; continue; }  // aucune tâche → laisser tel quel
+    const oldProg = Number(rows[i][6]) || 0;
+    if (oldStatut !== prog.statut || oldProg !== prog.progression) {
+      sh.getRange(i + 1, 6, 1, 2).setValues([[prog.statut, prog.progression]]);
+      if (prog.statut === 'LIVRE') sh.getRange(i + 1, 9, 1, 1).setValue(new Date());
+      changes.push({ ref:String(rows[i][1]), from:oldStatut + '/' + oldProg,
+                     to:prog.statut + '/' + prog.progression });
+      updated++;
+    }
+  }
+  CacheService.getScriptCache().remove('dashboard_v1');
+  _logAction_('RECALC_PROGRESSION', 'maintenance', updated + ' dossier(s) recalculé(s)');
+  return { ok:true, updated:updated, skipped:skipped, total:rows.length - 1, changes:changes.slice(0, 80) };
 }
 
 // ============================================================
