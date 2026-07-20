@@ -121,6 +121,7 @@ function doPost(e) {
     else if (action === 'attribuerTache')    result = handleAttribuerTache(data);
     else if (action === 'getTaches')         result = handleGetTaches(data);
     else if (action === 'deleteTache')       result = handleDeleteTache(data);
+    else if (action === 'deleteTachesDossier') result = handleDeleteTachesDossier(data);
     else if (action === 'pointerAction')     result = handlePointerAction(data);
     else if (action === 'getDashboard')      result = handleGetDashboard();
     else if (action === 'getControlPatron')  result = handleGetControlPatron(data);
@@ -170,6 +171,7 @@ function doGet(e) {
       else if (action === 'attribuerTache')    result = handleAttribuerTache(data);
       else if (action === 'pointerAction')     result = handlePointerAction(data);
       else if (action === 'deleteTache')       result = handleDeleteTache(data);
+      else if (action === 'deleteTachesDossier') result = handleDeleteTachesDossier(data);
       else if (action === 'addComment')        result = handleAddComment(data);
       else if (action === 'saveNotif')         result = handleSaveNotif(data);
       else if (action === 'saveModif')         result = handleSaveModif(data);
@@ -1652,6 +1654,50 @@ function handleDeleteTache(data) {
     }
   }
   return { ok:false, error:'Tâche introuvable' };
+}
+
+// Réinitialisation d'un dossier : supprime TOUTES ses tâches côté Sheet (assignations,
+// statuts, pointages) puis remet le dossier au début du pipeline.
+// Sans ce handler, l'action « Réinitialiser les tâches » n'était que locale : les tâches
+// restaient dans le Sheet et le polling 30 s les faisait réapparaître sur les autres
+// appareils (et revenaient sur le poste admin après vidage du localStorage) — d'où
+// l'impossibilité de réinitialiser ce que les opérateurs s'étaient assigné eux-mêmes.
+function handleDeleteTachesDossier(data) {
+  const dossierId = data && data.dossierId;
+  if (!dossierId) return { ok:false, error:'dossierId requis' };
+
+  const ss = getSS();
+  const sh = ss.getSheetByName(SHEET_TACHES);
+  if (!sh || sh.getLastRow() <= 1) return { ok:true, deleted:0 };
+
+  const rows = sh.getDataRange().getValues();
+  let deleted = 0;
+  // Parcours descendant : supprimer une ligne décale toutes celles du dessous.
+  for (let i = rows.length - 1; i >= 1; i--) {
+    if (String(rows[i][1]) !== String(dossierId)) continue; // col 2 = DossierId
+    _deleteTacheDriveFiles_(rows[i][14]);
+    sh.deleteRow(i + 1);
+    deleted++;
+  }
+
+  // Remettre le dossier au début du pipeline : sans tâche, _progressFromByEtape_ renvoie
+  // statut null (« ne rien écraser ») — on écrit donc explicitement l'état initial,
+  // sinon le dossier resterait figé à son ancienne progression.
+  if (deleted) {
+    const shD = ss.getSheetByName(SHEET_DOSSIERS);
+    const lastRow = shD ? shD.getLastRow() : 0;
+    if (lastRow > 1) {
+      const match = shD.getRange(2, 1, lastRow - 1, 1)
+        .createTextFinder(String(dossierId)).matchEntireCell(true).findNext();
+      if (match) {
+        shD.getRange(match.getRow(), 6, 1, 2).setValues([[ETAPES_PROD[0].code, 0]]);
+      }
+    }
+    CacheService.getScriptCache().remove('dashboard_v1');
+    _logAction_('TACHES_RESET', (data.operateur || data.assignePar || ''),
+      'Dossier:' + dossierId + ' tâches supprimées:' + deleted);
+  }
+  return { ok:true, deleted:deleted };
 }
 
 // Supprime (best-effort) les fichiers Drive dont les métadonnées sont stockées dans la

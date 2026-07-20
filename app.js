@@ -7250,27 +7250,67 @@ function _addToTacheBlocklist(ids) {
   ids.forEach(id => bl.add(id));
   try { localStorage.setItem('pos-tache-blocklist', JSON.stringify([...bl])); } catch(e) {}
 }
+function _removeFromTacheBlocklist(ids) {
+  if (!ids.length) return;
+  const bl = _getTacheBlocklist();
+  ids.forEach(id => bl.delete(id));
+  try { localStorage.setItem('pos-tache-blocklist', JSON.stringify([...bl])); } catch(e) {}
+}
 function _applyTacheBlocklist(list) {
   const bl = _getTacheBlocklist();
   return bl.size ? list.filter(t => !bl.has(t.id)) : list;
 }
 
-function _deleteTachesForDossier(dossierId) {
-  if (!dossierId) return;
-  // Mettre les IDs en blocklist pour bloquer le re-fetch GAS
-  const idsToBlock = taches.filter(t => t.dossierId === dossierId).map(t => t.id);
+// Supprime les tâches d'un dossier localement PUIS côté Sheet. La suppression serveur
+// n'est plus « best-effort » : la blocklist est purement locale, donc si le Sheet garde
+// les lignes, les tâches restent visibles sur les autres appareils (et le dossier garde
+// sa progression) — la réinitialisation semblait marcher sans rien réinitialiser.
+// En cas d'échec serveur on restaure l'état local pour ne pas masquer des tâches vivantes.
+async function _deleteTachesForDossier(dossierId) {
+  if (!dossierId) return { ok:false, error:'dossierId manquant' };
+  const removed    = taches.filter(t => t.dossierId === dossierId);
+  const idsToBlock = removed.map(t => t.id);
+  // Retrait optimiste (local + blocklist anti re-fetch GAS)
   _addToTacheBlocklist(idsToBlock);
-  // Retirer de la mémoire locale
   taches = taches.filter(t => t.dossierId !== dossierId);
   saveTaches();
-  // Tenter la suppression dans GAS (best-effort)
-  if (APPS_SCRIPT_URL) apiCall({ action: 'deleteTachesDossier', dossierId }).catch(() => {});
+
+  if (!APPS_SCRIPT_URL) return { ok:true, local:true };
+  try {
+    const r = await apiCall({ action: 'deleteTachesDossier', dossierId, operateur: currentUser?.username || '' });
+    if (!r || !r.ok) throw new Error(r?.error || 'réponse serveur invalide');
+    return r;
+  } catch (e) {
+    // Rollback : sinon la tâche existe encore au Sheet mais est invisible ici
+    _removeFromTacheBlocklist(idsToBlock);
+    taches = taches.concat(removed);
+    saveTaches();
+    return { ok:false, error: e.message || String(e) };
+  }
 }
 
 async function resetTachesDossier(dossierId) {
   if (!dossierId) return;
   if (!confirm('Réinitialiser toutes les tâches de ce dossier ?\nLes assignations et statuts seront effacés.')) return;
-  _deleteTachesForDossier(dossierId);
+  showLoader('Réinitialisation des tâches...');
+  const r = await _deleteTachesForDossier(dossierId);
+  hideLoader();
+  if (!r.ok) {
+    showToast(`Échec de la réinitialisation : ${r.error}`, 'error');
+    return;
+  }
+  // Remettre le dossier au début du pipeline en local (le serveur fait de même) :
+  // sans cela la carte garderait l'ancien % alors qu'il n'y a plus aucune tâche.
+  // (dossiers[] vient de GAS à chaque chargement : mise à jour en mémoire seulement)
+  const d = (Array.isArray(dossiers) ? dossiers : []).find(x => x.id === dossierId);
+  if (d && d.statut !== 'LIVRE') {
+    d.statut = ETAPES_CONFIG[0].code;
+    d.progression = 0;
+  }
+  if (selectedDossier && selectedDossier.id === dossierId && d) {
+    selectedDossier.statut = d.statut;
+    selectedDossier.progression = d.progression;
+  }
   showToast('Tâches réinitialisées', 'info');
   renderAttrPanel([], dossierComments.filter(c => c.dossierId === dossierId));
 }
