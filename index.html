@@ -26,7 +26,7 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20260710-progression">
+<link rel="stylesheet" href="./style.css?v=20260721-virement">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
@@ -1074,6 +1074,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
             <button class="btn-pay btn-cash" onclick="openPayment('cash')">Espèces</button>
             <button class="btn-pay btn-mobile" onclick="openPayment('mobile')">Mobile Money</button>
             <button class="btn-pay btn-cheque" onclick="openPayment('cheque')">Chèque</button>
+            <button class="btn-pay btn-virement" onclick="openPayment('virement')">Virement</button>
             <button class="btn-pay btn-reserve" onclick="openReservation()">Réserver</button>
             <button class="btn-pay btn-commande" onclick="openCommandeModal(true)">Commander</button>
           </div>
@@ -2274,6 +2275,8 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
       <div class="payment-tabs" style="margin-bottom:12px">
         <button class="payment-tab active" id="tabCmdCash" onclick="switchCmdPayTab('cash')">Espèces</button>
         <button class="payment-tab payment-tab-mobile" id="tabCmdMobile" onclick="switchCmdPayTab('mobile')">Mobile Money</button>
+        <button class="payment-tab payment-tab-cheque" id="tabCmdCheque" onclick="switchCmdPayTab('cheque')">Chèque</button>
+        <button class="payment-tab payment-tab-virement" id="tabCmdVirement" onclick="switchCmdPayTab('virement')">Virement</button>
       </div>
       <div id="cmdCashSection">
         <div class="form-group" style="margin-bottom:8px">
@@ -2293,6 +2296,14 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
           <button class="provider-btn" id="cmdProvBmoov" onclick="selectCmdProvider('Bmoov')">Bmoov</button>
         </div>
         <div class="form-group"><label>Référence transaction</label><input id="cmdMobileRef" placeholder="Ex: TX12345678" /></div>
+      </div>
+      <div id="cmdChequeSection" style="display:none">
+        <div class="form-group"><label>Banque</label><input id="cmdChequeBank" placeholder="Ex: BNI, BOA, BFV-SG, BMOI…" /></div>
+        <div class="form-group"><label>Numéro du chèque</label><input id="cmdChequeNumber" placeholder="Ex: 0012345" /></div>
+      </div>
+      <div id="cmdVirementSection" style="display:none">
+        <div class="form-group"><label>Banque émettrice</label><input id="cmdVirementBank" placeholder="Ex: BNI, BOA, BFV-SG, BMOI…" /></div>
+        <div class="form-group"><label>Référence du virement</label><input id="cmdVirementRef" placeholder="Ex: VIR-2026-00123" /></div>
       </div>
     </div>
 
@@ -2326,14 +2337,19 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
     </div>
     <div class="form-group">
       <label>Moyen de paiement</label>
-      <select id="encMethod" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:9px;font-size:14px;background:var(--surface);color:var(--text)">
+      <select id="encMethod" onchange="toggleEncBankField()" style="width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:9px;font-size:14px;background:var(--surface);color:var(--text)">
         <option value="cash">Espèces</option>
         <option value="mobile">Mobile Money</option>
         <option value="cheque">Chèque</option>
+        <option value="virement">Virement</option>
       </select>
     </div>
+    <div class="form-group" id="encBankGroup" style="display:none">
+      <label>Banque</label>
+      <input id="encBankInput" type="text" placeholder="Ex: BNI, BOA, BFV-SG, BMOI…" />
+    </div>
     <div class="form-group">
-      <label>Référence (n° transaction / chèque — optionnel)</label>
+      <label>Référence (n° transaction / chèque / virement — optionnel)</label>
       <input id="encRefInput" type="text" placeholder="—" />
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;background:var(--surface2);border-radius:10px;padding:10px 14px;margin-bottom:6px">
@@ -2368,7 +2384,8 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
     <div class="payment-tabs" style="margin-bottom:12px">
       <button class="payment-tab active" id="tabCmdFinCash" onclick="switchCmdFinPayTab('cash')">Espèces</button>
       <button class="payment-tab payment-tab-mobile" id="tabCmdFinMobile" onclick="switchCmdFinPayTab('mobile')">Mobile Money</button>
-      <button class="payment-tab" id="tabCmdFinCheque" onclick="switchCmdFinPayTab('cheque')">Chèque</button>
+      <button class="payment-tab payment-tab-cheque" id="tabCmdFinCheque" onclick="switchCmdFinPayTab('cheque')">Chèque</button>
+      <button class="payment-tab payment-tab-virement" id="tabCmdFinVirement" onclick="switchCmdFinPayTab('virement')">Virement</button>
     </div>
     <div id="cmdFinCashSection">
       <div class="form-group"><label>Montant remis par le client (Ar)</label><input id="cmdFinGiven" type="number" placeholder="0" oninput="calcCmdFinChange()" /></div>
@@ -2391,6 +2408,12 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
       <div class="form-group"><label>Numéro du chèque</label><input id="cmdFinChequeNumber" placeholder="Ex: 0012345" /></div>
       <div class="form-group"><label>Titulaire du chèque</label><input id="cmdFinChequeTitulaire" placeholder="Nom inscrit sur le chèque" /></div>
       <div class="form-group"><label>Date sur le chèque</label><input id="cmdFinChequeDate" type="date" /></div>
+    </div>
+    <div id="cmdFinVirementSection" style="display:none">
+      <div class="form-group"><label>Banque émettrice</label><input id="cmdFinVirementBank" placeholder="Ex: BNI, BOA, BFV-SG, BMOI…" /></div>
+      <div class="form-group"><label>Référence du virement</label><input id="cmdFinVirementRef" placeholder="Ex: VIR-2026-00123" /></div>
+      <div class="form-group"><label>Titulaire du compte émetteur</label><input id="cmdFinVirementTitulaire" placeholder="Nom du donneur d'ordre" /></div>
+      <div class="form-group"><label>Date du virement</label><input id="cmdFinVirementDate" type="date" /></div>
     </div>
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeModal('cmdFinalizeModal')">Annuler</button>
@@ -2631,7 +2654,8 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
     <div class="payment-tabs">
       <button class="payment-tab active" id="tabCash" onclick="switchPayTab('cash')">Espèces</button>
       <button class="payment-tab payment-tab-mobile" id="tabMobile" onclick="switchPayTab('mobile')">Mobile Money</button>
-      <button class="payment-tab" id="tabCheque" onclick="switchPayTab('cheque')">Chèque</button>
+      <button class="payment-tab payment-tab-cheque" id="tabCheque" onclick="switchPayTab('cheque')">Chèque</button>
+      <button class="payment-tab payment-tab-virement" id="tabVirement" onclick="switchPayTab('virement')">Virement</button>
     </div>
     <div id="cashSection">
       <div class="form-group"><label>Montant remis par le client (Ar)</label><input class="given-input" id="givenAmount" type="number" placeholder="0" oninput="calcChange()" /></div>
@@ -2652,6 +2676,14 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
     <div id="chequeSection" style="display:none">
       <div class="form-group"><label>Banque</label><input id="chequeBank" placeholder="Ex: BNI, BOA, BFV-SG, BMOI…" /></div>
       <div class="form-group"><label>Numéro du chèque</label><input id="chequeNumber" placeholder="Ex: 0012345" /></div>
+      <div class="form-group"><label>Titulaire du chèque</label><input id="chequeTitulaire" placeholder="Nom inscrit sur le chèque" /></div>
+      <div class="form-group"><label>Date sur le chèque</label><input id="chequeDate" type="date" /></div>
+    </div>
+    <div id="virementSection" style="display:none">
+      <div class="form-group"><label>Banque émettrice</label><input id="virementBank" placeholder="Ex: BNI, BOA, BFV-SG, BMOI…" /></div>
+      <div class="form-group"><label>Référence du virement</label><input id="virementRef" placeholder="Ex: VIR-2026-00123" /></div>
+      <div class="form-group"><label>Titulaire du compte émetteur</label><input id="virementTitulaire" placeholder="Nom du donneur d'ordre" /></div>
+      <div class="form-group"><label>Date du virement</label><input id="virementDate" type="date" /></div>
     </div>
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeModal('paymentModal')">Annuler</button>
@@ -2897,6 +2929,8 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
       <select id="editMethod" onchange="toggleEditPayFields()">
         <option value="cash">Espèces</option>
         <option value="mobile">Mobile Money</option>
+        <option value="cheque">Chèque</option>
+        <option value="virement">Virement</option>
       </select>
     </div>
     <div id="editMobileFields" style="display:none">
@@ -2912,6 +2946,24 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
       <div class="form-group">
         <label>Référence transaction</label>
         <input id="editRef" placeholder="Numéro de transaction" />
+      </div>
+    </div>
+    <div id="editBankFields" style="display:none">
+      <div class="form-group">
+        <label>Banque</label>
+        <input id="editBank" placeholder="Ex: BNI, BOA, BFV-SG, BMOI…" />
+      </div>
+      <div class="form-group">
+        <label id="editBankRefLabel">Numéro / référence</label>
+        <input id="editBankRef" placeholder="N° du chèque ou référence du virement" />
+      </div>
+      <div class="form-group">
+        <label>Titulaire</label>
+        <input id="editBankTitulaire" placeholder="Nom du titulaire du compte" />
+      </div>
+      <div class="form-group">
+        <label>Date de la pièce</label>
+        <input id="editBankDate" type="date" />
       </div>
     </div>
     <div style="background:rgba(255,200,0,0.07);border:1px solid rgba(255,200,0,0.2);border-radius:10px;padding:10px;font-size:12px;color:var(--muted);margin-bottom:12px">
@@ -3036,6 +3088,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
           <span>Espèces <b id="arretEspeces">0 Ar</b></span>
           <span>Mobile <b id="arretMobile">0 Ar</b></span>
           <span>Chèque <b id="arretCheque">0 Ar</b></span>
+          <span>Virement <b id="arretVirement">0 Ar</b></span>
         </div>
       </div>
 
@@ -3191,7 +3244,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260720-resettaches"></script>
+<script src="./app.js?v=20260721-virement"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

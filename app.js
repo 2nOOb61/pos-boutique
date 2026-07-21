@@ -186,11 +186,49 @@ let currentFinalizeResId = null;
 // ============================================================
 function fmt(n) { const v = Number(n); return (isNaN(v) ? 0 : v).toLocaleString('fr-MG') + ' Ar'; }
 
-// Libellé du mode de paiement d'une vente (Espèces / Mobile / Chèque)
+// ── Modes de paiement (source de vérité unique) ───────────────────────────
+// cash | mobile | cheque | virement. Tout mode inconnu ou vide retombe sur
+// 'mobile' (héritage : avant l'ajout de chèque/virement, tout ce qui n'était
+// pas 'cash' était du Mobile Money).
+const PAY_LABELS = { cash:'Espèces', mobile:'Mobile Money', cheque:'Chèque', virement:'Virement' };
+const PAY_KEYS   = ['cash','mobile','cheque','virement'];
+// Les ventes rechargées depuis le Sheet arrivent avec le LIBELLÉ de la colonne
+// Paiement (« Espèces », « Virement »…) et non la clé interne : sans cette table
+// elles retombaient toutes sur 'mobile' dans les ventilations.
+const PAY_LABEL_TO_KEY = {
+  'espèces':'cash', 'especes':'cash', 'espece':'cash',
+  'mobile money':'mobile', 'mobile':'mobile',
+  'chèque':'cheque', 'cheque':'cheque',
+  'virement':'virement'
+};
+function payKey(m) {
+  const k = String(m || '').trim().toLowerCase();
+  if (PAY_KEYS.includes(k)) return k;
+  return PAY_LABEL_TO_KEY[k] || 'mobile';
+}
+function payLabel(m) { return PAY_LABELS[payKey(m)]; }
+// Paiement bancaire (chèque / virement) : provider = banque, ref = n° ou référence
+function isBankPay(m) { const k = payKey(m); return k === 'cheque' || k === 'virement'; }
+// Titulaire / date de la pièce bancaire — champs génériques, repli sur les
+// anciens champs chequeTitulaire/chequeDate (ventes enregistrées avant le virement).
+function payTitulaire(s) { return (s && (s.payTitulaire || s.chequeTitulaire)) || ''; }
+function payDateRef(s)   { return (s && (s.payDateRef   || s.chequeDate))      || ''; }
+
+// Ventile une liste de ventes (ou tout objet {method,total}) par moyen de paiement.
+// Retourne { cash, mobile, cheque, virement } — toujours les 4 clés, à 0 par défaut.
+function _sumByMethod(list, amountOf) {
+  const get = amountOf || (v => Number(v.total) || 0);
+  const out = { cash:0, mobile:0, cheque:0, virement:0 };
+  (list || []).forEach(v => { out[payKey(v.method)] += get(v) || 0; });
+  return out;
+}
+
+// Libellé du mode de paiement d'une vente (Espèces / Mobile / Chèque / Virement)
 function _payLabel(s) {
   if (!s) return '';
-  if (s.method === 'cash')   return 'Espèces';
-  if (s.method === 'cheque') return 'Chèque' + (s.provider ? ' ' + s.provider : '') + (s.ref ? ' · N°' + s.ref : '');
+  const k = payKey(s.method);
+  if (k === 'cash') return 'Espèces';
+  if (isBankPay(k)) return PAY_LABELS[k] + (s.provider ? ' ' + s.provider : '') + (s.ref ? ' · N°' + s.ref : '');
   return s.provider || 'Mobile Money';
 }
 // Comparaison insensible à la casse et aux espaces — utilisée pour matcher les opérateurs
@@ -579,6 +617,22 @@ function getRemise()   { return Math.min(parseFloat(document.getElementById('car
 function getAccompte() { return Math.max(0, parseFloat(document.getElementById('cartAccompte')?.value)||0); }
 function getNetTotal() { return Math.max(0, getSubtotal() - getRemise()); }
 function getDue()      { return Math.max(0, getNetTotal() - getAccompte()); }
+
+// Part RÉELLEMENT encaissée sur une vente rapide.
+// Un acompte saisi = le client ne règle que cette part et repart en devant le
+// reste ; un acompte à 0 = il règle TOUT maintenant (cas normal du comptoir).
+// Avant, l'absence d'acompte était interprétée comme « rien n'a été payé » :
+// la vente sortait à 0 de l'arrêt de caisse et gonflait le reste à percevoir.
+function _saleEncaisse(total, accompte) {
+  const t = Math.max(0, Number(total)    || 0);
+  const a = Math.max(0, Number(accompte) || 0);
+  return a > 0 ? Math.min(a, t) : t;
+}
+// Reste dû d'une vente rapide, déduit du couple (total, acompte).
+function _saleReste(total, accompte) {
+  const t = Math.max(0, Number(total) || 0);
+  return Math.max(0, t - _saleEncaisse(t, accompte));
+}
 function getTotal()    { return getNetTotal(); }
 
 function updateCartTotals() {
@@ -634,15 +688,16 @@ function renderCart() {
 function openPayment(mode) {
   if(cart.length===0) { showToast('Le panier est vide !','error'); return; }
   paymentMode = mode;
-  const due = getDue();
   const acc = getAccompte();
   const net = getNetTotal();
-  document.getElementById('payAmount').textContent = fmt(due);
+  // Ce qu'on encaisse maintenant : l'acompte s'il est saisi, sinon la totalité.
+  const aPayer = _saleEncaisse(net, acc);
+  document.getElementById('payAmount').textContent = fmt(aPayer);
   const infoEl = document.getElementById('payAccompteInfo');
   if (acc > 0) {
     infoEl.style.display = 'block';
-    infoEl.textContent = `Net ${fmt(net)} — Accompte ${fmt(acc)} — Reste dû ${fmt(due)}`;
-    document.getElementById('payAmountLabel').textContent = 'Reste à régler maintenant';
+    infoEl.textContent = `Net ${fmt(net)} — Acompte ${fmt(acc)} — Reste dû ${fmt(_saleReste(net, acc))}`;
+    document.getElementById('payAmountLabel').textContent = 'Acompte à encaisser maintenant';
   } else {
     infoEl.style.display = 'none';
     document.getElementById('payAmountLabel').textContent = 'Montant à régler';
@@ -651,8 +706,9 @@ function openPayment(mode) {
   document.getElementById('changeVal').textContent='0 Ar';
   document.getElementById('changeVal').className='val';
   document.getElementById('mobileRef').value='';
-  const _cb = document.getElementById('chequeBank');   if (_cb) _cb.value = '';
-  const _cn = document.getElementById('chequeNumber'); if (_cn) _cn.value = '';
+  ['chequeBank','chequeNumber','chequeTitulaire','chequeDate',
+   'virementBank','virementRef','virementTitulaire','virementDate']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   document.getElementById('clientName').value='';
   document.getElementById('clientContact').value='';
   // Reset type client
@@ -701,27 +757,47 @@ function setDeliveryMode(mode) {
   if (isLiv) updateDeliveryTotal();
 }
 
-function updateDeliveryTotal() {
-  const fee = parseFloat(document.getElementById('deliveryFee')?.value) || 0;
-  const due = getDue();
-  const el  = document.getElementById('totalAvecLivraison');
-  if (el) el.textContent = fmt(due + fee);
+// Frais de livraison retenus pour la vente en cours : 0 en mode retrait, même si
+// un montant est resté saisi dans le champ (masqué) après une bascule de mode.
+function _payDeliveryFee() {
+  const isLiv = document.getElementById('btnModeLivraison')?.style.background === 'rgb(232, 131, 74)';
+  return isLiv ? (parseFloat(document.getElementById('deliveryFee')?.value) || 0) : 0;
 }
+
+function updateDeliveryTotal() {
+  const fee = _payDeliveryFee();
+  const el  = document.getElementById('totalAvecLivraison');
+  // « Total avec livraison » = le net à payer de la vente, frais inclus
+  // (indépendant de la part encaissée maintenant).
+  if (el) el.textContent = fmt(getNetTotal() + fee);
+}
+// Bascule générique des onglets de paiement d'un modal : `map` associe chaque
+// mode à [id de la section, id de l'onglet]. Évite d'ajouter une ligne par mode
+// dans chacun des 4 modals à chaque nouveau moyen de paiement.
+function _switchPayTabs(map, mode) {
+  Object.keys(map).forEach(k => {
+    const [secId, tabId] = map[k];
+    const sec = document.getElementById(secId);
+    if (sec) sec.style.display = (k === mode) ? 'block' : 'none';
+    const tab = document.getElementById(tabId);
+    if (tab) tab.classList.toggle('active', k === mode);
+  });
+}
+
+const _PAY_TABS_VENTE = {
+  cash:     ['cashSection',     'tabCash'],
+  mobile:   ['mobileSection',   'tabMobile'],
+  cheque:   ['chequeSection',   'tabCheque'],
+  virement: ['virementSection', 'tabVirement']
+};
 function switchPayTab(mode) {
   paymentMode = mode;
-  document.getElementById('cashSection').style.display = mode==='cash'?'block':'none';
-  document.getElementById('mobileSection').style.display = mode==='mobile'?'block':'none';
-  const chequeSec = document.getElementById('chequeSection');
-  if (chequeSec) chequeSec.style.display = mode==='cheque'?'block':'none';
-  document.getElementById('tabCash').classList.toggle('active', mode==='cash');
-  document.getElementById('tabMobile').classList.toggle('active', mode==='mobile');
-  const tabCheque = document.getElementById('tabCheque');
-  if (tabCheque) tabCheque.classList.toggle('active', mode==='cheque');
+  _switchPayTabs(_PAY_TABS_VENTE, mode);
 }
 function calcChange() {
   const given = parseFloat(document.getElementById('givenAmount').value)||0;
-  const due = getDue();
-  const change = given - due;
+  // Monnaie = ce qui est remis moins ce qui est encaissé maintenant
+  const change = given - _saleEncaisse(getNetTotal() + _payDeliveryFee(), getAccompte());
   const el = document.getElementById('changeVal');
   el.textContent = fmt(Math.abs(change));
   el.className = 'val ' + (change >= 0 ? 'positive':'negative');
@@ -758,26 +834,31 @@ function confirmPayment() {
     return;
   }
   const totalWithDelivery = net + deliveryFee;
-  const due = getDue() + deliveryFee;
+  // Montant encaissé maintenant : l'acompte s'il est saisi, sinon la totalité.
+  const aPayer = _saleEncaisse(totalWithDelivery, acc);
   if(paymentMode==='cash') {
     const given = parseFloat(document.getElementById('givenAmount').value)||0;
-    if(given < due) { showToast('Montant insuffisant !','error'); return; }
-    recordSale(totalWithDelivery, 'cash', given, given-due, null, null, rem, acc, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate, clientType, clientCompany);
-  } else if(paymentMode==='cheque') {
-    const bank   = document.getElementById('chequeBank').value.trim();
-    const number = document.getElementById('chequeNumber').value.trim();
-    if(!bank)   { showToast('Veuillez saisir la banque du chèque.', 'error'); return; }
-    if(!number) { showToast('Veuillez saisir le numéro du chèque.', 'error'); return; }
-    // provider = banque, ref = numéro du chèque (réutilise le schéma de vente)
-    recordSale(totalWithDelivery, 'cheque', due, 0, bank, number, rem, acc, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate, clientType, clientCompany);
+    if(given < aPayer) { showToast('Montant insuffisant !','error'); return; }
+    recordSale(totalWithDelivery, 'cash', given, given-aPayer, null, null, rem, acc, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate, clientType, clientCompany);
+  } else if(isBankPay(paymentMode)) {
+    // Chèque / virement : provider = banque, ref = n° du chèque ou réf. du virement
+    // (réutilise le schéma de vente) ; titulaire + date stockés en plus.
+    const isVir = paymentMode === 'virement';
+    const bank      = document.getElementById(isVir ? 'virementBank'      : 'chequeBank').value.trim();
+    const number    = document.getElementById(isVir ? 'virementRef'       : 'chequeNumber').value.trim();
+    const titulaire = document.getElementById(isVir ? 'virementTitulaire' : 'chequeTitulaire')?.value.trim() || '';
+    const dateRef   = document.getElementById(isVir ? 'virementDate'      : 'chequeDate')?.value || '';
+    if(!bank)   { showToast(isVir ? 'Veuillez saisir la banque émettrice.' : 'Veuillez saisir la banque du chèque.', 'error'); return; }
+    if(!number) { showToast(isVir ? 'Veuillez saisir la référence du virement.' : 'Veuillez saisir le numéro du chèque.', 'error'); return; }
+    recordSale(totalWithDelivery, paymentMode, aPayer, 0, bank, number, rem, acc, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate, clientType, clientCompany, { titulaire, date: dateRef });
   } else {
     let ref = document.getElementById('mobileRef').value.trim();
     if (!ref) ref = 'INT-' + Date.now(); // P1 : référence interne si non saisie (réconciliation)
-    recordSale(totalWithDelivery, 'mobile', due, 0, selectedProvider, ref, rem, acc, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate, clientType, clientCompany);
+    recordSale(totalWithDelivery, 'mobile', aPayer, 0, selectedProvider, ref, rem, acc, clientName, clientContact, deliveryMode, deliveryAddress, deliveryFee, deliveryDate, clientType, clientCompany);
   }
   } finally { _confirmingPayment = false; }
 }
-function recordSale(total, method, given, change, provider, ref, remise=0, accompte=0, clientName='', clientContact='', deliveryMode='retrait', deliveryAddress='', deliveryFee=0, deliveryDate='', clientType='particulier', clientCompany='') {
+function recordSale(total, method, given, change, provider, ref, remise=0, accompte=0, clientName='', clientContact='', deliveryMode='retrait', deliveryAddress='', deliveryFee=0, deliveryDate='', clientType='particulier', clientCompany='', bankInfo=null) {
   // Vérification stock local avant de valider
   for (const item of cart) {
     const p = products.find(pr => pr.id === item.id);
@@ -798,17 +879,22 @@ function recordSale(total, method, given, change, provider, ref, remise=0, accom
     clientName, clientContact,
     items: cart.map(i=>({name:i.name,qty:i.qty,price:i.price})),
     subtotal, remise, total, accompte,
-    due: Math.max(0, total - accompte),
+    due: _saleReste(total, accompte),
     method, given, change, provider, ref,
     deliveryMode, deliveryAddress, deliveryFee, deliveryDate,
     clientType, clientCompany
   };
+  // Chèque / virement : titulaire + date de la pièce (colonnes 13-14 du Sheet Ventes)
+  if (isBankPay(method) && bankInfo) {
+    sale.payTitulaire = bankInfo.titulaire || '';
+    sale.payDateRef   = bankInfo.date      || '';
+  }
   sales.unshift(sale);
   // Journal d'encaissement : la part RÉELLEMENT payée maintenant (total − reste dû)
   _recordEncaissement({
     source: 'vente', refId: sale.id, refLabel: '#' + sale.id,
     client: clientName || 'Client comptant',
-    montant: Math.max(0, (Number(total) || 0) - (Number(sale.due) || 0)),
+    montant: _saleEncaisse(total, accompte),
     method, provider, ref,
     type: (Number(sale.due) || 0) > 0 ? 'acompte' : 'comptant',
     resteApres: Number(sale.due) || 0
@@ -1588,8 +1674,8 @@ function printTicket(sale) {
     document.getElementById('tGiven').textContent        = fmt(sale.given);
     document.getElementById('tChangeRow').style.display = 'flex';
     document.getElementById('tChange').textContent       = fmt(sale.change);
-  } else if (sale.method === 'cheque') {
-    document.getElementById('tPayMethod').textContent    = `Chèque ${sale.provider||''}`.trim();
+  } else if (isBankPay(sale.method)) {
+    document.getElementById('tPayMethod').textContent    = `${payLabel(sale.method)} ${sale.provider||''}`.trim();
     document.getElementById('tGiven').textContent        = sale.ref ? 'N° ' + sale.ref : '';
     document.getElementById('tChangeRow').style.display = 'none';
   } else {
@@ -1631,11 +1717,11 @@ function printTicket(sale) {
       ? (sale.method==='cash'
         ? `<div class="row"><span>Espèces reçus</span><span>${fmt(sale.given)}</span></div>
            <div class="row"><span>Monnaie rendue</span><span>${fmt(sale.change)}</span></div>`
-        : sale.method==='cheque'
-        ? `<div class="row"><span>Chèque — Banque</span><span>${sale.provider||''}</span></div>
-           <div class="row"><span>N° du chèque</span><span>${sale.ref||''}</span></div>
-           ${sale.chequeTitulaire ? `<div class="row"><span>Titulaire</span><span>${sale.chequeTitulaire}</span></div>` : ''}
-           ${sale.chequeDate ? `<div class="row"><span>Date du chèque</span><span>${new Date(sale.chequeDate).toLocaleDateString('fr-FR')}</span></div>` : ''}`
+        : isBankPay(sale.method)
+        ? `<div class="row"><span>${payLabel(sale.method)} — Banque</span><span>${sale.provider||''}</span></div>
+           <div class="row"><span>${sale.method==='virement' ? 'Référence du virement' : 'N° du chèque'}</span><span>${sale.ref||''}</span></div>
+           ${payTitulaire(sale) ? `<div class="row"><span>Titulaire</span><span>${payTitulaire(sale)}</span></div>` : ''}
+           ${payDateRef(sale) ? `<div class="row"><span>${sale.method==='virement' ? 'Date du virement' : 'Date du chèque'}</span><span>${new Date(payDateRef(sale)).toLocaleDateString('fr-FR')}</span></div>` : ''}`
         : `<div class="row"><span>Paiement mobile (${sale.provider})</span><span>${sale.ref||''}</span></div>`)
       : ''}
     <hr style="${st.sepSolid}"/>
@@ -2223,15 +2309,14 @@ function _detailDay() {
   const list  = sales.filter(s => { const d = parseSaleDate(s.date); return d && d.toDateString() === today; });
   const ca    = list.reduce((s,v) => s + (Number(v.total)||0), 0);
   const due   = list.reduce((s,v) => s + (Number(v.due)||0),   0);
-  const cash   = list.filter(s => s.method==='cash').reduce((s,v) => s + (Number(v.total)||0), 0);
-  const cheque = list.filter(s => s.method==='cheque').reduce((s,v) => s + (Number(v.total)||0), 0);
-  const mob    = list.filter(s => s.method!=='cash' && s.method!=='cheque').reduce((s,v) => s + (Number(v.total)||0), 0);
+  const P = _sumByMethod(list);
   return `<div class="detail-kpi-row">
     ${_kpi('CA du jour',     fmt(ca),          'var(--accent)', 'rgba(7,61,55,0.07)')}
     ${_kpi('Transactions',   list.length,       'var(--blue)',   'rgba(237,111,44,0.07)')}
-    ${_kpi(' Espèces',     fmt(cash),         'var(--text)',   'var(--surface2)')}
-    ${_kpi(' Mobile',      fmt(mob),          'var(--text)',   'var(--surface2)')}
-    ${cheque > 0 ? _kpi(' Chèque', fmt(cheque), 'var(--text)', 'var(--surface2)') : ''}
+    ${_kpi(' Espèces',     fmt(P.cash),       'var(--text)',   'var(--surface2)')}
+    ${_kpi(' Mobile',      fmt(P.mobile),     'var(--text)',   'var(--surface2)')}
+    ${P.cheque > 0 ? _kpi(' Chèque', fmt(P.cheque), 'var(--text)', 'var(--surface2)') : ''}
+    ${P.virement > 0 ? _kpi(' Virement', fmt(P.virement), 'var(--text)', 'var(--surface2)') : ''}
     ${due > 0 ? _kpi('Reste à percevoir', fmt(due), 'var(--red)', 'rgba(255,71,87,.07)') : ''}
   </div>${_salesTableWrap(list)}`;
 }
@@ -2242,15 +2327,14 @@ function _detailMonth() {
   const list = sales.filter(s => saleDateKey(s.date).startsWith(key));
   const ca   = list.reduce((s,v) => s + (Number(v.total)||0), 0);
   const due  = list.reduce((s,v) => s + (Number(v.due)||0),   0);
-  const cash   = list.filter(s => s.method==='cash').reduce((s,v) => s + (Number(v.total)||0), 0);
-  const cheque = list.filter(s => s.method==='cheque').reduce((s,v) => s + (Number(v.total)||0), 0);
-  const mob    = list.filter(s => s.method!=='cash' && s.method!=='cheque').reduce((s,v) => s + (Number(v.total)||0), 0);
+  const P = _sumByMethod(list);
   return `<div class="detail-kpi-row">
     ${_kpi('CA du mois',     fmt(ca),           'var(--accent)', 'rgba(7,61,55,0.07)')}
     ${_kpi('Transactions',   list.length,        'var(--blue)',   'rgba(237,111,44,0.07)')}
-    ${_kpi(' Espèces',     fmt(cash),          'var(--text)',   'var(--surface2)')}
-    ${_kpi(' Mobile',      fmt(mob),           'var(--text)',   'var(--surface2)')}
-    ${cheque > 0 ? _kpi(' Chèque', fmt(cheque), 'var(--text)', 'var(--surface2)') : ''}
+    ${_kpi(' Espèces',     fmt(P.cash),        'var(--text)',   'var(--surface2)')}
+    ${_kpi(' Mobile',      fmt(P.mobile),      'var(--text)',   'var(--surface2)')}
+    ${P.cheque > 0 ? _kpi(' Chèque', fmt(P.cheque), 'var(--text)', 'var(--surface2)') : ''}
+    ${P.virement > 0 ? _kpi(' Virement', fmt(P.virement), 'var(--text)', 'var(--surface2)') : ''}
     ${due > 0 ? _kpi('Reste à percevoir', fmt(due), 'var(--red)', 'rgba(255,71,87,.07)') : ''}
   </div>${_salesTableWrap(list)}`;
 }
@@ -2819,9 +2903,7 @@ function _buildReportHtml(period, customRange) {
   }
   const ca   = list.reduce((s,v) => s + (Number(v.total)||0), 0);
   const due  = list.reduce((s,v) => s + (Number(v.due)||0),   0);
-  const cash   = list.filter(s => s.method==='cash').reduce((s,v) => s + (Number(v.total)||0), 0);
-  const cheque = list.filter(s => s.method==='cheque').reduce((s,v) => s + (Number(v.total)||0), 0);
-  const mob    = list.filter(s => s.method!=='cash' && s.method!=='cheque').reduce((s,v) => s + (Number(v.total)||0), 0);
+  const P = _sumByMethod(list);
 
   const articles   = _aggregateArticles(list);
   const grandTotal = articles.reduce((s,a) => s + (Number(a.total)||0), 0);
@@ -2846,9 +2928,10 @@ function _buildReportHtml(period, customRange) {
   <div class="kpi-row">
     <div class="kpi"><div class="kpi-label">Chiffre d'affaires</div><div class="kpi-val" style="color:#007a45">${fmt(ca)}</div></div>
     <div class="kpi"><div class="kpi-label">Transactions</div><div class="kpi-val" style="color:#1a6ec7">${list.length}</div></div>
-    <div class="kpi"><div class="kpi-label"> Espèces</div><div class="kpi-val">${fmt(cash)}</div></div>
-    <div class="kpi"><div class="kpi-label"> Mobile Money</div><div class="kpi-val">${fmt(mob)}</div></div>
-    ${cheque > 0 ? `<div class="kpi"><div class="kpi-label"> Chèque</div><div class="kpi-val">${fmt(cheque)}</div></div>` : ''}
+    <div class="kpi"><div class="kpi-label"> Espèces</div><div class="kpi-val">${fmt(P.cash)}</div></div>
+    <div class="kpi"><div class="kpi-label"> Mobile Money</div><div class="kpi-val">${fmt(P.mobile)}</div></div>
+    ${P.cheque > 0 ? `<div class="kpi"><div class="kpi-label"> Chèque</div><div class="kpi-val">${fmt(P.cheque)}</div></div>` : ''}
+    ${P.virement > 0 ? `<div class="kpi"><div class="kpi-label"> Virement</div><div class="kpi-val">${fmt(P.virement)}</div></div>` : ''}
     ${due > 0 ? `<div class="kpi"><div class="kpi-label">Reste à percevoir</div><div class="kpi-val" style="color:#c00">${fmt(due)}</div></div>` : ''}
   </div>`;
 
@@ -3150,9 +3233,15 @@ function openEditSaleModal(id) {
       </div>`).join('');
 
   toggleEditPayFields();
-  if (s.method === 'mobile') {
+  if (payKey(s.method) === 'mobile') {
     document.getElementById('editProvider').value = s.provider || 'MVola';
     document.getElementById('editRef').value      = s.ref      || '';
+  } else if (isBankPay(s.method)) {
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+    set('editBank',          s.provider || '');
+    set('editBankRef',       s.ref      || '');
+    set('editBankTitulaire', payTitulaire(s));
+    set('editBankDate',      payDateRef(s));
   }
 
   recalcEditSale();
@@ -3173,7 +3262,7 @@ function recalcEditSale() {
   const remise   = Math.max(0, Math.min(subtotal, Number(document.getElementById('editRemise').value)   || 0));
   const total    = Math.max(0, subtotal - remise);
   const accompte = Math.max(0, Math.min(total,    Number(document.getElementById('editAccompte').value) || 0));
-  const due      = Math.max(0, total - accompte);
+  const due      = _saleReste(total, accompte);   // acompte 0 = vente réglée intégralement
 
   document.getElementById('editPreviewSubtotal').textContent = fmt(subtotal);
   document.getElementById('editPreviewRemise').textContent   = fmt(remise);
@@ -3182,8 +3271,12 @@ function recalcEditSale() {
 }
 
 function toggleEditPayFields() {
-  const isMobile = document.getElementById('editMethod').value === 'mobile';
-  document.getElementById('editMobileFields').style.display = isMobile ? '' : 'none';
+  const m = document.getElementById('editMethod').value;
+  document.getElementById('editMobileFields').style.display = payKey(m) === 'mobile' ? '' : 'none';
+  const bank = document.getElementById('editBankFields');
+  if (bank) bank.style.display = isBankPay(m) ? '' : 'none';
+  const lbl = document.getElementById('editBankRefLabel');
+  if (lbl) lbl.textContent = m === 'virement' ? 'Référence du virement' : 'Numéro du chèque';
 }
 
 function saveEditSale() {
@@ -3194,7 +3287,7 @@ function saveEditSale() {
   const remise   = Math.max(0, Math.min(subtotal, Number(document.getElementById('editRemise').value)   || 0));
   const total    = Math.max(0, subtotal - remise);
   const accompte = Math.max(0, Math.min(total,    Number(document.getElementById('editAccompte').value) || 0));
-  const due      = Math.max(0, total - accompte);
+  const due      = _saleReste(total, accompte);   // acompte 0 = vente réglée intégralement
   const method   = document.getElementById('editMethod').value;
 
   s.clientName    = document.getElementById('editClientName').value.trim();
@@ -3205,9 +3298,15 @@ function saveEditSale() {
   s.accompte  = accompte;
   s.due       = due;
   s.method    = method;
-  if (method === 'mobile') {
+  if (payKey(method) === 'mobile') {
     s.provider = document.getElementById('editProvider').value;
     s.ref      = document.getElementById('editRef').value.trim();
+  } else if (isBankPay(method)) {
+    // Chèque / virement : provider = banque, ref = n° ou référence
+    s.provider     = document.getElementById('editBank')?.value.trim()          || '';
+    s.ref          = document.getElementById('editBankRef')?.value.trim()       || '';
+    s.payTitulaire = document.getElementById('editBankTitulaire')?.value.trim() || '';
+    s.payDateRef   = document.getElementById('editBankDate')?.value             || '';
   }
 
   saveData();
@@ -3527,6 +3626,7 @@ function loadData() {
     const hc = localStorage.getItem('pos-heldCarts');
     if (hc) heldCarts = JSON.parse(hc);
     if (s) sales = JSON.parse(s);
+    _repairSalesDue();
     if (ni) nextId = parseInt(ni);
     if (ns) nextSaleId = parseInt(ns);
     if (r)  reservations = JSON.parse(r);
@@ -3574,6 +3674,25 @@ function loadData() {
       if (maxResId >= nextReservationId) nextReservationId = maxResId + 1;
     }
   } catch(e) { console.warn('loadData error:', e); }
+}
+
+// Réparation des ventes rapides enregistrées avant la correction du reste dû :
+// sans acompte saisi, elles portaient `due = total` (« rien n'a été payé ») alors
+// que le client avait réglé au comptoir. Résultat : créances et « reste à
+// percevoir » gonflés, et 0 Ar remonté à l'arrêt de caisse. On ne touche ni aux
+// finalisations de commande/réservation (leur `due` est fiable) ni aux ventes
+// avec acompte (leur reste dû est légitime).
+function _repairSalesDue() {
+  if (!Array.isArray(sales)) return;
+  let n = 0;
+  sales.forEach(s => {
+    if (s.fromCommande || s.fromReservation) return;
+    if ((Number(s.accompte) || 0) > 0) return;
+    if ((Number(s.due) || 0) <= 0) return;
+    s.due = 0;
+    n++;
+  });
+  if (n > 0) console.info(`[POS] ${n} vente(s) réparée(s) : reste dû remis à 0 (aucun acompte saisi).`);
 }
 
 function saveUsers() {
@@ -5207,6 +5326,8 @@ function openCommandeModal(fromCart) {
   document.getElementById('cmdAccompte').value = '';
   document.getElementById('cmdGiven').value = '';
   document.getElementById('cmdMobileRef').value = '';
+  ['cmdChequeBank','cmdChequeNumber','cmdVirementBank','cmdVirementRef']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   document.getElementById('cmdChangeVal').textContent = '0 Ar';
   document.getElementById('cmdPhotosPreviews').innerHTML = '';
   document.getElementById('cmdPhotosInput').value = '';
@@ -5321,12 +5442,15 @@ function updateCmdTotals() {
   calcCmdChange();
 }
 
+const _PAY_TABS_CMD = {
+  cash:     ['cmdCashSection',     'tabCmdCash'],
+  mobile:   ['cmdMobileSection',   'tabCmdMobile'],
+  cheque:   ['cmdChequeSection',   'tabCmdCheque'],
+  virement: ['cmdVirementSection', 'tabCmdVirement']
+};
 function switchCmdPayTab(mode) {
   cmdPayMode = mode;
-  document.getElementById('cmdCashSection').style.display   = mode === 'cash'   ? 'block' : 'none';
-  document.getElementById('cmdMobileSection').style.display = mode === 'mobile' ? 'block' : 'none';
-  document.getElementById('tabCmdCash').classList.toggle('active', mode === 'cash');
-  document.getElementById('tabCmdMobile').classList.toggle('active', mode === 'mobile');
+  _switchPayTabs(_PAY_TABS_CMD, mode);
 }
 
 function calcCmdChange() {
@@ -5447,6 +5571,13 @@ function saveCommande() {
     if (cmdPayMode === 'cash') {
       const given = parseFloat(document.getElementById('cmdGiven').value) || 0;
       if (given < accompte) { showToast('Montant remis insuffisant !', 'error'); return; }
+    } else if (isBankPay(cmdPayMode)) {
+      // Chèque / virement : provider = banque, ref = n° du chèque ou réf. du virement
+      const isVir = cmdPayMode === 'virement';
+      depositProvider = document.getElementById(isVir ? 'cmdVirementBank' : 'cmdChequeBank')?.value.trim()   || '';
+      depositRef      = document.getElementById(isVir ? 'cmdVirementRef'  : 'cmdChequeNumber')?.value.trim() || '';
+      if (!depositProvider) { showToast(isVir ? 'Veuillez saisir la banque émettrice.' : 'Veuillez saisir la banque du chèque.', 'error'); return; }
+      if (!depositRef)      { showToast(isVir ? 'Veuillez saisir la référence du virement.' : 'Veuillez saisir le numéro du chèque.', 'error'); return; }
     } else {
       depositProvider = cmdProvider;
       depositRef = document.getElementById('cmdMobileRef').value.trim();
@@ -6074,26 +6205,24 @@ function openCmdFinalizeModal(id) {
   document.getElementById('cmdFinGiven').value = '';
   document.getElementById('cmdFinChangeVal').textContent = '0 Ar';
   document.getElementById('cmdFinMobileRef').value = '';
-  const _cb = document.getElementById('cmdFinChequeBank');       if (_cb) _cb.value = '';
-  const _cn = document.getElementById('cmdFinChequeNumber');     if (_cn) _cn.value = '';
-  const _ct = document.getElementById('cmdFinChequeTitulaire');  if (_ct) _ct.value = '';
-  const _cd = document.getElementById('cmdFinChequeDate');       if (_cd) _cd.value = '';
+  ['cmdFinChequeBank','cmdFinChequeNumber','cmdFinChequeTitulaire','cmdFinChequeDate',
+   'cmdFinVirementBank','cmdFinVirementRef','cmdFinVirementTitulaire','cmdFinVirementDate']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   cmdFinalPayMode = 'cash';
   cmdFinalProvider = 'MVola';
   switchCmdFinPayTab('cash');
   openModal('cmdFinalizeModal');
 }
 
+const _PAY_TABS_CMDFIN = {
+  cash:     ['cmdFinCashSection',     'tabCmdFinCash'],
+  mobile:   ['cmdFinMobileSection',   'tabCmdFinMobile'],
+  cheque:   ['cmdFinChequeSection',   'tabCmdFinCheque'],
+  virement: ['cmdFinVirementSection', 'tabCmdFinVirement']
+};
 function switchCmdFinPayTab(mode) {
   cmdFinalPayMode = mode;
-  document.getElementById('cmdFinCashSection').style.display  = mode==='cash'   ? 'block' : 'none';
-  document.getElementById('cmdFinMobileSection').style.display = mode==='mobile' ? 'block' : 'none';
-  const chequeSec = document.getElementById('cmdFinChequeSection');
-  if (chequeSec) chequeSec.style.display = mode==='cheque' ? 'block' : 'none';
-  document.getElementById('tabCmdFinCash').classList.toggle('active', mode==='cash');
-  document.getElementById('tabCmdFinMobile').classList.toggle('active', mode==='mobile');
-  const tabCheque = document.getElementById('tabCmdFinCheque');
-  if (tabCheque) tabCheque.classList.toggle('active', mode==='cheque');
+  _switchPayTabs(_PAY_TABS_CMDFIN, mode);
 }
 
 function calcCmdFinChange() {
@@ -6121,15 +6250,17 @@ function confirmCmdFinalize() {
     const given = parseFloat(document.getElementById('cmdFinGiven').value) || 0;
     if (given < reste) { showToast('Montant insuffisant !', 'error'); return; }
     _doCmdFinalize(c, 'cash', given, given - reste, null, null);
-  } else if (cmdFinalPayMode === 'cheque') {
-    const bank      = document.getElementById('cmdFinChequeBank').value.trim();
-    const number    = document.getElementById('cmdFinChequeNumber').value.trim();
-    const titulaire = document.getElementById('cmdFinChequeTitulaire').value.trim();
-    const dateCheque= document.getElementById('cmdFinChequeDate').value;
-    if (!bank)   { showToast('Veuillez saisir la banque du chèque.', 'error'); return; }
-    if (!number) { showToast('Veuillez saisir le numéro du chèque.', 'error'); return; }
-    // provider = banque, ref = numéro du chèque (réutilise le schéma de vente) ; titulaire + date stockés en extra
-    _doCmdFinalize(c, 'cheque', reste, 0, bank, number, { titulaire, date: dateCheque });
+  } else if (isBankPay(cmdFinalPayMode)) {
+    // provider = banque, ref = n° du chèque / réf. du virement (réutilise le schéma
+    // de vente) ; titulaire + date de la pièce stockés en extra.
+    const isVir     = cmdFinalPayMode === 'virement';
+    const bank      = document.getElementById(isVir ? 'cmdFinVirementBank'      : 'cmdFinChequeBank').value.trim();
+    const number    = document.getElementById(isVir ? 'cmdFinVirementRef'       : 'cmdFinChequeNumber').value.trim();
+    const titulaire = document.getElementById(isVir ? 'cmdFinVirementTitulaire' : 'cmdFinChequeTitulaire').value.trim();
+    const datePiece = document.getElementById(isVir ? 'cmdFinVirementDate'      : 'cmdFinChequeDate').value;
+    if (!bank)   { showToast(isVir ? 'Veuillez saisir la banque émettrice.' : 'Veuillez saisir la banque du chèque.', 'error'); return; }
+    if (!number) { showToast(isVir ? 'Veuillez saisir la référence du virement.' : 'Veuillez saisir le numéro du chèque.', 'error'); return; }
+    _doCmdFinalize(c, cmdFinalPayMode, reste, 0, bank, number, { titulaire, date: datePiece });
   } else {
     const ref = document.getElementById('cmdFinMobileRef').value.trim();
     _doCmdFinalize(c, 'mobile', reste, 0, cmdFinalProvider, ref);
@@ -6158,8 +6289,16 @@ function openEncaisseModal(id) {
   if (mEl) { mEl.value = reste || ''; mEl.max = reste; }
   const methEl = document.getElementById('encMethod');   if (methEl) methEl.value = 'cash';
   const refEl  = document.getElementById('encRefInput'); if (refEl)  refEl.value = '';
+  const bkEl   = document.getElementById('encBankInput');if (bkEl)   bkEl.value  = '';
+  toggleEncBankField();
   updateEncaisseApercu();
   openModal('encaisseModal');
+}
+
+// Le champ « Banque » n'a de sens que pour un chèque ou un virement.
+function toggleEncBankField() {
+  const g = document.getElementById('encBankGroup');
+  if (g) g.style.display = isBankPay(document.getElementById('encMethod')?.value) ? '' : 'none';
 }
 
 function updateEncaisseApercu() {
@@ -6182,6 +6321,8 @@ function validerEncaissement() {
   if (montant <= 0) { showToast('Saisissez un montant à encaisser.', 'error'); return; }
   const method  = document.getElementById('encMethod')?.value || 'cash';
   const refTxt  = document.getElementById('encRefInput')?.value?.trim() || '';
+  // Chèque / virement : la banque est le « provider » (même schéma que les ventes)
+  const bankTxt = isBankPay(method) ? (document.getElementById('encBankInput')?.value?.trim() || '') : '';
   const after   = Math.max(0, reste - montant);
 
   // Backfill : commande ancienne (aucun événement) avec acompte d'origine → l'inscrire
@@ -6201,7 +6342,7 @@ function validerEncaissement() {
   _recordEncaissement({
     source: 'commande', refId: c.id, refLabel: _cmdRef(c),
     client: c.clientName, montant,
-    method, ref: refTxt,
+    method, provider: bankTxt, ref: refTxt,
     type: after > 0 ? 'paiement' : 'solde', resteApres: after
   });
 
@@ -6226,7 +6367,7 @@ function validerEncaissement() {
   _refreshArretIfOpen();   // si lancé depuis l'arrêt de caisse : la fiche du jour intègre ce solde
 }
 
-function _doCmdFinalize(c, method, given, change, provider, ref, chequeInfo) {
+function _doCmdFinalize(c, method, given, change, provider, ref, bankInfo) {
   const sale = {
     id:            nextSaleId++,
     date:          new Date().toISOString(),
@@ -6244,11 +6385,9 @@ function _doCmdFinalize(c, method, given, change, provider, ref, chequeInfo) {
     ref:      ref      || '',
     fromCommande: c.id
   };
-  if (method === 'cheque' && chequeInfo) {
-    sale.chequeBank      = provider || '';
-    sale.chequeNumber    = ref      || '';
-    sale.chequeTitulaire = chequeInfo.titulaire || '';
-    sale.chequeDate      = chequeInfo.date      || '';
+  if (isBankPay(method) && bankInfo) {
+    sale.payTitulaire = bankInfo.titulaire || '';
+    sale.payDateRef   = bankInfo.date      || '';
   }
   c.items.forEach(item => {
     if (!item.custom) {
@@ -6799,7 +6938,7 @@ async function syncCmdUpdateToSheets(cmd) {
 let commandeMods = []; // demandes récentes (pending / approved / rejected / superseded)
 
 // Champs qu'un commercial peut demander à modifier (avec validation admin)
-const _DEPOSIT_METHOD_OPTS = [['cash','Espèces'],['mobile','Mobile Money'],['cheque','Chèque']];
+const _DEPOSIT_METHOD_OPTS = PAY_KEYS.map(k => [k, PAY_LABELS[k]]);
 function _depositLabel(v){ const o = _DEPOSIT_METHOD_OPTS.find(x => x[0] === v); return o ? o[1] : (v ? String(v) : '—'); }
 const _DELIVERY_MODE_OPTS = [['retrait','Retrait boutique'],['livraison','Livraison']];
 const CMD_MODIF_FIELDS = [
@@ -6807,8 +6946,8 @@ const CMD_MODIF_FIELDS = [
   { key:'clientContact',    label:'Contact',               type:'text' },
   { key:'accompte',         label:'Acompte (Ar)',          type:'number' },
   { key:'depositMethod',    label:'Mode de paiement acompte', type:'select', options:_DEPOSIT_METHOD_OPTS },
-  { key:'depositProvider',  label:'Opérateur Mobile Money', type:'text' },
-  { key:'depositRef',       label:'Référence Mobile Money', type:'text' },
+  { key:'depositProvider',  label:'Opérateur Mobile Money / Banque', type:'text' },
+  { key:'depositRef',       label:'Référence paiement (transaction / chèque / virement)', type:'text' },
   { key:'remise',           label:'Remise (Ar)',           type:'number' },
   { key:'deliveryMode',     label:'Mode de remise',        type:'select', options:_DELIVERY_MODE_OPTS },
   { key:'adresseLivraison', label:'Adresse de livraison',  type:'text' },
@@ -6884,7 +7023,7 @@ function exportSalesCSV() {
   }
   if (list.length === 0) { showToast('Aucune vente sur cette période', 'error'); return; }
 
-  const headers = ['ID','Date','Heure','Articles','Quantite','Prix_Unit','Sous_Total','Remise','Net_Payer','Accompte','Reste_Du','Paiement','Operateur','Reference','Caissier','Client','Contact'];
+  const headers = ['ID','Date','Heure','Articles','Quantite','Prix_Unit','Sous_Total','Remise','Net_Payer','Accompte','Reste_Du','Paiement','Operateur_Banque','Reference','Caissier','Client','Contact','Titulaire_Paiement','Date_Piece'];
   const rows = [];
   list.forEach(s => {
     const d = parseSaleDate(s.date);
@@ -6897,9 +7036,10 @@ function exportSalesCSV() {
         item.name || '', item.qty || 1, item.price || 0,
         (item.qty || 1) * (item.price || 0),
         s.remise || 0, s.total || 0, s.accompte || 0, s.due || 0,
-        s.method === 'cash' ? 'Espèces' : 'Mobile Money',
+        payLabel(s.method),
         s.provider || '', s.ref || '',
-        s.caissier || '', s.clientName || '', s.clientContact || ''
+        s.caissier || '', s.clientName || '', s.clientContact || '',
+        payTitulaire(s), payDateRef(s)
       ].map(v => '"' + String(v).replace(/"/g, '""') + '"').join(';'));
     });
   });
@@ -12908,18 +13048,20 @@ function printFicheSortie() {
   const periodLbl = _finPeriodLabel();
 
   const rows = list.map((e, i) => {
-    const m  = e.obj.depositMethod === 'mobile' ? 'mobile' : e.obj.depositMethod === 'cheque' ? 'cheque' : 'cash';
+    // Mode de l'acompte : 'cash' par défaut (une commande sans mode déclaré est
+    // encaissée en espèces au comptoir), pas 'mobile' comme pour les ventes.
+    const raw = String(e.obj.depositMethod || '').toLowerCase();
+    const m   = PAY_KEYS.includes(raw) ? raw : 'cash';
     const av = e.accompte;
     const dateAv = av > 0 ? (parseSaleDate(e.date) || new Date()).toLocaleDateString('fr-FR') : '';
+    const avCell = k => `<td class="r">${m === k && av ? fmt(av) : ''}</td>`;
     return `<tr>
       <td class="c b">${i + 1}</td>
       <td>${e.client}<div class="ref">${e.ref}</div></td>
       <td class="r b">${fmt(e.total)}</td>
       <td class="c">${dateAv}</td>
-      <td class="r">${m === 'cash'   && av ? fmt(av) : ''}</td>
-      <td class="r">${m === 'mobile' && av ? fmt(av) : ''}</td>
-      <td class="r">${m === 'cheque' && av ? fmt(av) : ''}</td>
-      <td></td><td></td><td></td>
+      ${avCell('cash')}${avCell('mobile')}${avCell('cheque')}${avCell('virement')}
+      <td></td><td></td><td></td><td></td>
       <td></td><td class="c">${_dispDate(e.deliveryDate)}</td><td></td><td></td><td></td>
     </tr>`;
   }).join('');
@@ -12944,17 +13086,17 @@ function printFicheSortie() {
       <h1>${shop} — FICHE DE SORTIE</h1>
       <div class="sub">${periodLbl} · ${list.length} opération(s) · édité le ${new Date().toLocaleDateString('fr-FR')} ${new Date().toLocaleTimeString('fr-FR')}</div>
       <table>
-        <colgroup><col style="width:3%"><col style="width:13%"><col style="width:8%"><col style="width:7%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:8%"><col style="width:7%"><col style="width:8%"><col style="width:6%"><col style="width:6%"></colgroup>
+        <colgroup><col style="width:3%"><col style="width:11%"><col style="width:7%"><col style="width:6%"><col style="width:5.5%"><col style="width:5.5%"><col style="width:5.5%"><col style="width:5.5%"><col style="width:5.5%"><col style="width:5.5%"><col style="width:5.5%"><col style="width:5.5%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:5%"><col style="width:5%"></colgroup>
         <thead>
           <tr>
             <th rowspan="2">N°</th><th rowspan="2">Client</th><th rowspan="2">Total</th>
-            <th colspan="4">Avance</th>
-            <th colspan="3">Reste à payer</th>
+            <th colspan="5">Avance</th>
+            <th colspan="4">Reste à payer</th>
             <th rowspan="2">Livreur</th><th rowspan="2">Date de sortie</th><th rowspan="2">Remarque</th><th rowspan="2">Donneur</th><th rowspan="2">Récept.</th>
           </tr>
           <tr>
-            <th>Date</th><th>Espèce</th><th>Mobile M</th><th>Chèque</th>
-            <th>Espèce</th><th>Mobile M</th><th>Chèque</th>
+            <th>Date</th><th>Espèce</th><th>Mobile M</th><th>Chèque</th><th>Virement</th>
+            <th>Espèce</th><th>Mobile M</th><th>Chèque</th><th>Virement</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -14289,18 +14431,18 @@ function renderPatronEncaissements() {
   const esc = _pcokEsc;
 
   // Totaux globaux (nature + moyen de paiement) + regroupements caissier / jour
-  const T = { total:0, acompte:0, solde:0, comptant:0, cash:0, mobile:0, cheque:0, nb:0 };
+  const T = { total:0, acompte:0, solde:0, comptant:0, cash:0, mobile:0, cheque:0, virement:0, nb:0 };
   const byCais = {}, byDay = {};
   const dayKey = d => d ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` : '—';
   list.forEach(e => {
     const m = Number(e.montant) || 0;
     if (m <= 0) return;
     const nat = _encNature(e);
-    const meth = e.method === 'cash' ? 'cash' : e.method === 'cheque' ? 'cheque' : 'mobile';
+    const meth = payKey(e.method);
     T.total += m; T[nat] += m; T[meth] += m; T.nb++;
 
     const key = e.caissierLabel || e.caissier || 'Caissier';
-    const g = byCais[key] || (byCais[key] = { nom:key, nb:0, total:0, acompte:0, solde:0, comptant:0, cash:0, mobile:0, cheque:0, lignes:[] });
+    const g = byCais[key] || (byCais[key] = { nom:key, nb:0, total:0, acompte:0, solde:0, comptant:0, cash:0, mobile:0, cheque:0, virement:0, lignes:[] });
     g.nb++; g.total += m; g[nat] += m; g[meth] += m; g.lignes.push(e);
 
     const dk = dayKey(parseSaleDate(e.date));
@@ -14335,7 +14477,7 @@ function renderPatronEncaissements() {
 
   // Ventilation par MOYEN de paiement
   const moyen = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
-      ${kpi('Espèces', T.cash, '#1a4a3a')}${kpi('Mobile Money', T.mobile, '#c2410c')}${T.cheque > 0 ? kpi('Chèque', T.cheque, '#1e40af') : ''}
+      ${kpi('Espèces', T.cash, '#1a4a3a')}${kpi('Mobile Money', T.mobile, '#c2410c')}${T.cheque > 0 ? kpi('Chèque', T.cheque, '#1e40af') : ''}${T.virement > 0 ? kpi('Virement', T.virement, '#7c3aed') : ''}
     </div>`;
 
   // Détail par JOUR (utile car l'arrêt de caisse est quotidien) — si plusieurs jours
@@ -14387,7 +14529,7 @@ function renderPatronEncaissements() {
         <div style="min-width:0">
           <div style="font-size:13px;font-weight:700;color:var(--text)">${esc(g.nom)}</div>
           <div style="font-size:11px;color:var(--muted);margin-top:2px">${g.nb} encaissement${g.nb > 1 ? 's' : ''}${natSub ? ' · ' + natSub : ''}</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:1px">Esp. ${fmt(g.cash)} · MM ${fmt(g.mobile)}${g.cheque > 0 ? ' · Chq ' + fmt(g.cheque) : ''}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:1px">Esp. ${fmt(g.cash)} · MM ${fmt(g.mobile)}${g.cheque > 0 ? ' · Chq ' + fmt(g.cheque) : ''}${g.virement > 0 ? ' · Vir ' + fmt(g.virement) : ''}</div>
         </div>
         <div style="font-size:15px;font-weight:800;color:#16a34a;white-space:nowrap">${fmt(g.total)}</div>
       </summary>
@@ -14407,7 +14549,7 @@ function renderPatronEncaissements() {
     </div>`;
 }
 
-function fmtMethLabel(m) { return m === 'cash' ? 'Espèces' : m === 'cheque' ? 'Chèque' : 'Mobile Money'; }
+function fmtMethLabel(m) { return payLabel(m); }
 
 async function renderControlFinance() {
   const box = document.getElementById('patronControlFinance');
@@ -15523,7 +15665,13 @@ function _getArretData() {
     if (covered.has(String(s.id))) return;
     if (s.fromCommande) return;   // finalisation de commande : déjà couverte par ses encaissements (acompte + solde)
     const total = Number(s.total) || 0;
-    const reste = Math.max(0, Number(s.due != null ? s.due : (total - (Number(s.accompte) || 0))) || 0);
+    // Ventes finalisées depuis une réservation : `due` fait foi (solde déjà réglé).
+    // Ventes rapides : on redéduit du couple (total, acompte) — les ventes
+    // enregistrées avant la correction portent un `due` égal au total alors que
+    // le client avait tout payé, ce qui les sortait à 0 de la caisse.
+    const reste = s.fromReservation
+      ? Math.max(0, Number(s.due) || 0)
+      : _saleReste(total, s.accompte);
     evts.push({
       id: 'S' + s.id, date: s.date, source: 'vente', refId: s.id, refLabel: '#' + s.id,
       client: (s.clientName || '').trim() || (s.clientCompany || '').trim() || 'Client comptant',
@@ -15532,13 +15680,13 @@ function _getArretData() {
     });
   });
 
-  const sumBy   = m => evts.filter(e => e.method === m).reduce((a, b) => a + (Number(b.montant) || 0), 0);
-  const especes = sumBy('cash');
-  const mobile  = sumBy('mobile');
-  const cheque  = sumBy('cheque');
+  const parMode = _sumByMethod(evts, e => Number(e.montant) || 0);
+  const especes  = parMode.cash;
+  const mobile   = parMode.mobile;
+  const cheque   = parMode.cheque;
+  const virement = parMode.virement;
 
-  const METHOD_LABEL = { cash: 'Espèces', mobile: 'Mobile Money', cheque: 'Chèque' };
-  const TYPE_LABEL   = { comptant: 'Comptant', acompte: 'Acompte', solde: 'Solde', paiement: 'Paiement' };
+  const TYPE_LABEL = { comptant: 'Comptant', acompte: 'Acompte', solde: 'Solde', paiement: 'Paiement' };
   // Retrouve les articles (nom/qté/prix unitaire) de la source d'un encaissement
   const _itemsOf = e => {
     let src = null;
@@ -15556,14 +15704,15 @@ function _getArretData() {
       client:    (e.client || '').trim() || 'Client comptant',
       caissier:  e.caissierLabel || _arretCaissierLabel(e.caissier) || label || '—',
       articles:  _itemsOf(e),
-      methode:   METHOD_LABEL[e.method] || e.method || '—',
+      methode:   payLabel(e.method),
       typeLabel: TYPE_LABEL[e.type] || '',
       encaisse:  Number(e.montant) || 0,
       reste:     Math.max(0, Number(e.resteApres) || 0),
       acompte:   (Math.max(0, Number(e.resteApres) || 0)) > 0   // reste après → badge A + RAP
     }));
 
-  return { todaySales, evts, especes, mobile, cheque, total: especes + mobile + cheque, lignes };
+  return { todaySales, evts, especes, mobile, cheque, virement,
+           total: especes + mobile + cheque + virement, lignes };
 }
 
 // Rend la fiche d'encaissement (liste détaillée) dans le modal d'arrêt de caisse
@@ -15714,6 +15863,7 @@ function _refreshArretIfOpen() {
   set('arretEspeces', fmt(d.especes));
   set('arretMobile',  fmt(d.mobile));
   set('arretCheque',  fmt(d.cheque));
+  set('arretVirement',fmt(d.virement));
   set('arretTotal',   fmt(d.total));
   set('arretNbTrans', d.lignes.length + ' encaissement' + (d.lignes.length > 1 ? 's' : ''));
   _renderArretFiche(d.lignes || []);
@@ -15735,6 +15885,7 @@ function renderArretCaisseModal() {
   set('arretEspeces', fmt(d.especes));
   set('arretMobile',  fmt(d.mobile));
   set('arretCheque',  fmt(d.cheque));
+  set('arretVirement',fmt(d.virement));
   set('arretTotal',   fmt(d.total));
   set('arretNbTrans', d.lignes.length + ' encaissement' + (d.lignes.length > 1 ? 's' : ''));
 
@@ -15874,7 +16025,8 @@ function _printArretDraft() {
     caissier: currentUser.username,
     caissierLabel: currentUser.label || currentUser.username,
     nbTransactions: d.lignes.length,
-    totalEspeces: d.especes, totalMobile: d.mobile, totalCheque: d.cheque, totalGeneral: d.total,
+    totalEspeces: d.especes, totalMobile: d.mobile, totalCheque: d.cheque,
+    totalVirement: d.virement, totalGeneral: d.total,
     fondCaisse: fond, billetage, especesReelles: especesR,
     ecart: especesR !== null ? especesR - (fond + d.especes) : null,
     notes, lignes: d.lignes || []
@@ -15907,6 +16059,7 @@ function validerArretCaisse() {
     totalEspeces:   d.especes,
     totalMobile:    d.mobile,
     totalCheque:    d.cheque,
+    totalVirement:  d.virement,
     totalGeneral:   d.total,
     fondCaisse:     fond,
     billetage,
@@ -15964,6 +16117,7 @@ function printArretCaisse(arret) {
       <div class="kpi-box"><div class="kl">Espèces</div><div class="kv">${fmt(arret.totalEspeces)}</div></div>
       <div class="kpi-box"><div class="kl">Mobile Money</div><div class="kv">${fmt(arret.totalMobile)}</div></div>
       ${arret.totalCheque > 0 ? `<div class="kpi-box"><div class="kl">Chèque</div><div class="kv">${fmt(arret.totalCheque)}</div></div>` : ''}
+      ${arret.totalVirement > 0 ? `<div class="kpi-box"><div class="kl">Virement</div><div class="kv">${fmt(arret.totalVirement)}</div></div>` : ''}
       <div class="kpi-box"><div class="kl">Total encaissé</div><div class="kv" style="color:#1a4a3a">${fmt(arret.totalGeneral)}</div></div>
       <div class="kpi-box"><div class="kl">Transactions</div><div class="kv">${arret.nbTransactions}</div></div>
     </div>

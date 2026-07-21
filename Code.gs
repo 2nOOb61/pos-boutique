@@ -236,6 +236,32 @@ function jsonResp(data) {
 function getSS() { return SpreadsheetApp.openById(SHEET_ID); }
 
 // ============================================================
+// MODES DE PAIEMENT — table unique (miroir de PAY_LABELS côté app.js)
+// cash | mobile | cheque | virement. Tout mode inconnu retombe sur 'mobile'
+// (héritage : avant chèque/virement, tout ce qui n'était pas 'cash' était du
+// Mobile Money).
+// ============================================================
+var PAY_LABELS_ = { cash:'Espèces', mobile:'Mobile Money', cheque:'Chèque', virement:'Virement' };
+// En-têtes de la feuille des arrêts de caisse. Total_Virement est en DERNIÈRE
+// position (col 17) : ajouté après coup, il ne devait décaler aucune colonne.
+var ARRET_HEADERS_ = ['ID','Date','Heure','Caissier','Caissier_Label','NbTransactions',
+  'Total_Especes','Total_Mobile','Total_Cheque','Total_General','Fond_Caisse',
+  'Especes_Reelles','Ecart','Billetage','Lignes','Notes','Total_Virement'];
+var PAY_KEYS_ = ['cash','mobile','cheque','virement'];
+function _payKey_(m)   { var k = String(m || '').toLowerCase(); return PAY_KEYS_.indexOf(k) >= 0 ? k : 'mobile'; }
+function _payLabel_(m) { return PAY_LABELS_[_payKey_(m)]; }
+// Paiement bancaire (chèque / virement) : provider = banque, ref = n° / référence
+function _isBankPay_(m) { var k = _payKey_(m); return k === 'cheque' || k === 'virement'; }
+// Libellé Sheet → clé interne (lecture des feuilles)
+function _payKeyFromLabel_(s) {
+  var t = String(s || '').trim().toLowerCase();
+  for (var i = 0; i < PAY_KEYS_.length; i++) {
+    if (PAY_LABELS_[PAY_KEYS_[i]].toLowerCase() === t) return PAY_KEYS_[i];
+  }
+  return 'cash';
+}
+
+// ============================================================
 // INIT — crée les nouvelles feuilles sans toucher aux existantes
 // ============================================================
 function initSheets() {
@@ -243,7 +269,13 @@ function initSheets() {
 
   // Feuilles existantes POS (préservées telles quelles)
   ensureSheet(ss, SHEET_PRODUCTS,   ['ID','Nom','Categorie','Emoji','Code','Prix_Vente','Prix_Achat','Stock','Stock_Min','Date_MAJ']);
-  ensureSheet(ss, SHEET_SALES,      ['ID','Date','Heure','Article','Quantite','Prix_Unitaire','Sous_Total','Total_Vente','Paiement','Fournisseur','Reference','Caissier','Titulaire_Cheque','Date_Cheque']);
+  ensureSheet(ss, SHEET_SALES,      ['ID','Date','Heure','Article','Quantite','Prix_Unitaire','Sous_Total','Total_Vente','Paiement','Fournisseur','Reference','Caissier','Titulaire_Paiement','Date_Piece']);
+  // Colonnes 13-14 renommées : elles servent maintenant aux chèques ET aux virements
+  const salesSh = ss.getSheetByName(SHEET_SALES);
+  if (salesSh && salesSh.getLastColumn() >= 14 &&
+      String(salesSh.getRange(1, 13).getValue()) === 'Titulaire_Cheque') {
+    salesSh.getRange(1, 13, 1, 2).setValues([['Titulaire_Paiement','Date_Piece']]);
+  }
   ensureSheet(ss, SHEET_STOCK_LOG,  ['Date','Article','Type','Quantite','Stock_Avant','Stock_Apres','Motif','Caissier']);
   ensureSheet(ss, SHEET_USERS,      ['Username','MotDePasse','Role','Nom','Actif']);
   // Réservations — ajouter col 22 Attachments_JSON si absente
@@ -260,6 +292,13 @@ function initSheets() {
 
   // Journal centralisé des encaissements (fiche d'encaissement / arrêt de caisse — vue patron)
   ensureSheet(ss, SHEET_ENCAISSEMENTS, ['ID','Date','Heure','Caissier','Caissier_Label','Source','Ref','Ref_Label','Client','Montant','Mode','Fournisseur','Reference','Type','Reste_Apres']);
+
+  // Arrêts de caisse (clôtures) — Total_Virement ajouté en col 17 si absent
+  const arrSh = ensureSheet(ss, SHEET_ARRETS, ARRET_HEADERS_);
+  if (arrSh.getLastColumn() < 17) {
+    arrSh.getRange(1, 17).setValue('Total_Virement')
+      .setBackground('#1a4a3a').setFontColor('#ffffff').setFontWeight('bold');
+  }
 
   // Nouvelles feuilles production
   ensureSheet(ss, SHEET_DOSSIERS, DOSSIER_HEADERS);
@@ -395,20 +434,22 @@ function handleAddSale(data) {
   const tz   = Session.getScriptTimeZone();
   const dateS = Utilities.formatDate(d, tz, 'dd/MM/yyyy');
   const timeS = Utilities.formatDate(d, tz, 'HH:mm:ss');
-  const modePaiement = sale.method === 'cash'   ? 'Espèces'
-                     : sale.method === 'cheque' ? 'Chèque'
-                     : 'Mobile Money';
+  const modePaiement = _payLabel_(sale.method);
 
-  // Infos chèque (colonnes 13-14). Pour un chèque : provider=banque, ref=numéro (déjà écrits) ;
-  // titulaire + date du chèque stockés en plus.
-  let chequeDateS = '';
-  if (sale.method === 'cheque' && sale.chequeDate) {
-    const cd = new Date(String(sale.chequeDate) + 'T00:00:00');
-    chequeDateS = isNaN(cd.getTime()) ? String(sale.chequeDate) : Utilities.formatDate(cd, tz, 'dd/MM/yyyy');
+  // Infos pièce bancaire (colonnes 13-14). Chèque ET virement : provider=banque,
+  // ref=n° du chèque ou référence du virement (déjà écrits) ; titulaire + date en plus.
+  // payTitulaire/payDateRef = champs génériques ; chequeTitulaire/chequeDate = anciens
+  // noms (ventes émises avant l'ajout du virement, ou app pas encore rafraîchie).
+  const titulaire = sale.payTitulaire || sale.chequeTitulaire || '';
+  const rawDate   = sale.payDateRef   || sale.chequeDate      || '';
+  let pieceDateS = '';
+  if (_isBankPay_(sale.method) && rawDate) {
+    const cd = new Date(String(rawDate) + 'T00:00:00');
+    pieceDateS = isNaN(cd.getTime()) ? String(rawDate) : Utilities.formatDate(cd, tz, 'dd/MM/yyyy');
   }
   // La feuille Ventes a pu être créée avant l'ajout de ces 2 colonnes → poser l'en-tête si absent.
   if (sh.getLastColumn() < 14) {
-    sh.getRange(1, 13, 1, 2).setValues([['Titulaire_Cheque','Date_Cheque']])
+    sh.getRange(1, 13, 1, 2).setValues([['Titulaire_Paiement','Date_Piece']])
       .setBackground('#1a4a3a').setFontColor('#ffffff').setFontWeight('bold');
   }
 
@@ -417,7 +458,7 @@ function handleAddSale(data) {
     sale.id, dateS, timeS, item.name, item.qty, item.price,
     item.price * item.qty, sale.total,
     modePaiement, sale.provider||'', sale.ref||'', sale.caissier||'',
-    sale.chequeTitulaire||'', chequeDateS
+    titulaire, pieceDateS
   ]);
   if (batchRows.length > 0) {
     const lastRow = sh.getLastRow();
@@ -570,8 +611,10 @@ function handleGetSales(data) {
     const id = String(r[0]);
     if (!id) continue;
     if (!map[id]) {
+      // method = clé interne (cash|mobile|cheque|virement), pas le libellé de la
+      // colonne Paiement : c'est ce que le front attend pour ventiler les totaux.
       map[id] = { id, date:r[1], time:r[2], total:Number(r[7]),
-                  method:r[8], caissier:r[11], items:[] };
+                  method:_payKeyFromLabel_(r[8]), caissier:r[11], items:[] };
       order.push(id);
     }
     map[id].items.push({ name:r[3], qty:Number(r[4]), price:Number(r[5]) });
@@ -620,7 +663,7 @@ function handleAddEncaissement(data) {
   const tz    = Session.getScriptTimeZone();
   const dateS = isNaN(d.getTime()) ? String(e.date || '') : Utilities.formatDate(d, tz, 'dd/MM/yyyy');
   const timeS = isNaN(d.getTime()) ? '' : Utilities.formatDate(d, tz, 'HH:mm:ss');
-  const modeS = e.method === 'cash' ? 'Espèces' : e.method === 'cheque' ? 'Chèque' : 'Mobile Money';
+  const modeS = _payLabel_(e.method);
 
   sh.appendRow([
     e.id, dateS, timeS, e.caissier || '', e.caissierLabel || '', e.source || '',
@@ -639,11 +682,10 @@ function handleGetEncaissements(data) {
   const PAGE  = Number(data && data.limit) || 2000;
   const start = Math.max(2, last - PAGE + 1);
   const rows  = sh.getRange(start, 1, last - start + 1, 15).getValues();
-  const METH  = { 'Espèces':'cash', 'Chèque':'cheque', 'Mobile Money':'mobile' };
   let list = rows.map(r => ({
     id: r[0], date: r[1], time: r[2], caissier: r[3], caissierLabel: r[4],
     source: r[5], refId: r[6], refLabel: r[7], client: r[8],
-    montant: Number(r[9]) || 0, method: METH[r[10]] || 'cash', provider: r[11], ref: r[12],
+    montant: Number(r[9]) || 0, method: _payKeyFromLabel_(r[10]), provider: r[11], ref: r[12],
     type: r[13], resteApres: Number(r[14]) || 0
   })).filter(x => String(x.id) !== '');
   if (data && data.caissier) list = list.filter(x => String(x.caissier) === String(data.caissier));
@@ -657,9 +699,15 @@ function handleAddArretCaisse(data) {
   if (!a || a.id == null) return { ok:false, error:'Arrêt de caisse invalide' };
   const ss = getSS();
   const sh = ss.getSheetByName(SHEET_ARRETS) ||
-    ensureSheet(ss, SHEET_ARRETS, ['ID','Date','Heure','Caissier','Caissier_Label','NbTransactions',
-      'Total_Especes','Total_Mobile','Total_Cheque','Total_General','Fond_Caisse',
-      'Especes_Reelles','Ecart','Billetage','Lignes','Notes']);
+    ensureSheet(ss, SHEET_ARRETS, ARRET_HEADERS_);
+
+  // Total_Virement (col 17) ajouté après coup : les feuilles créées avant n'ont
+  // que 16 colonnes → poser l'en-tête manquant plutôt que d'insérer une colonne
+  // au milieu (ce qui décalerait toutes les lignes existantes).
+  if (sh.getLastColumn() < 17) {
+    sh.getRange(1, 17).setValue('Total_Virement')
+      .setBackground('#1a4a3a').setFontColor('#ffffff').setFontWeight('bold');
+  }
 
   // Déduplication : même caissier + même ID = déjà enregistré (rejeu réseau)
   const last = sh.getLastRow();
@@ -686,7 +734,8 @@ function handleAddArretCaisse(data) {
     (a.ecart == null ? '' : Number(a.ecart)),
     JSON.stringify(a.billetage || {}),
     JSON.stringify(a.lignes || []),
-    a.notes || ''
+    a.notes || '',
+    Number(a.totalVirement) || 0
   ]);
   _logAction_('ARRET_CAISSE', a.caissier || 'caissier',
     'ID:' + a.id + ' total:' + (Number(a.totalGeneral)||0) + ' écart:' + (a.ecart==null?'—':a.ecart));
@@ -700,7 +749,10 @@ function handleGetArretsCaisse(data) {
   if (last <= 1) return { ok:true, arrets:[] };
   const PAGE  = Number(data && data.limit) || 1000;
   const start = Math.max(2, last - PAGE + 1);
-  const rows  = sh.getRange(start, 1, last - start + 1, 16).getValues();
+  // 17 colonnes depuis l'ajout de Total_Virement — les feuilles plus anciennes
+  // n'en ont que 16, on ne lit donc que ce qui existe (r[16] vaut alors undefined).
+  const nCols = Math.max(16, Math.min(17, sh.getLastColumn()));
+  const rows  = sh.getRange(start, 1, last - start + 1, nCols).getValues();
   const parse = (s, def) => { try { return JSON.parse(s); } catch(e) { return def; } };
   let list = rows.map(r => ({
     id: r[0], date: r[1], time: r[2], caissier: r[3], caissierLabel: r[4],
@@ -710,7 +762,8 @@ function handleGetArretsCaisse(data) {
     especesReelles: r[11] === '' ? null : Number(r[11]),
     ecart: r[12] === '' ? null : Number(r[12]),
     billetage: parse(r[13], {}), lignes: parse(r[14], []),
-    notes: r[15] || ''
+    notes: r[15] || '',
+    totalVirement: Number(r[16]) || 0
   })).filter(x => String(x.id) !== '');
   if (data && data.caissier) list = list.filter(x => String(x.caissier) === String(data.caissier));
   return { ok:true, arrets:list };
@@ -910,8 +963,7 @@ function handleAddReservation(data) {
   const accompte     = r.accompte !== undefined ? r.accompte : (r.acompte || 0);
   const restant      = r.restant  !== undefined ? r.restant  : Math.max(0, total - accompte);
   const remise       = r.remise   || 0;
-  const modeDepot    = r.depositMethod === 'cash'   ? 'Espèces'
-                     : r.depositMethod === 'mobile' ? 'Mobile Money' : '';
+  const modeDepot    = r.depositMethod ? _payLabel_(r.depositMethod) : '';
   const fournisseur  = r.depositProvider || '';
   const reference    = r.depositRef      || '';
   const caissier     = r.caissier        || '';

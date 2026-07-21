@@ -373,8 +373,10 @@ h1, h2, h3,
   .payment-amount { text-align:center; margin:16px 0; }
   .payment-amount .big { font-family:'DM Sans',sans-serif; font-size:36px; font-weight:800; color:var(--accent); }
   .payment-amount .label { font-size:13px; color:var(--muted); }
-  .payment-tabs { display:flex; gap:8px; margin-bottom:20px; }
-  .payment-tab { flex:1; padding:12px; border-radius:12px; border:2px solid var(--border); background:none; color:var(--muted); cursor:pointer; font-weight:600; transition:.2s; display:flex; align-items:center; justify-content:center; gap:6px; }
+  /* 4 modes de paiement (espèces / mobile / chèque / virement) : on autorise le
+     retour à la ligne pour que les onglets restent lisibles sur petit écran. */
+  .payment-tabs { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:20px; }
+  .payment-tab { flex:1 1 40%; min-width:100px; padding:12px; border-radius:12px; border:2px solid var(--border); background:none; color:var(--muted); cursor:pointer; font-weight:600; transition:.2s; display:flex; align-items:center; justify-content:center; gap:6px; }
   .payment-tab.active { border-color:var(--accent); color:var(--accent); background:rgba(26,74,58,0.07); }
   .payment-tab-mobile.active { border-color:var(--accent3); color:var(--accent3); background:rgba(26,74,58,0.07); }
   .given-input { font-size:20px !important; text-align:center !important; font-family:'DM Mono',monospace !important; }
@@ -942,6 +944,20 @@ body {
   border-color: #2563eb;
   color: #2563eb;
   background: rgba(37,99,235,0.07);
+}
+
+.btn-virement {
+  background: #7c3aed;
+  color: #FFFFFF;
+}
+.btn-virement:hover {
+  background: #6d28d9;
+}
+.payment-tab-virement.active,
+#tabVirement.active {
+  border-color: #7c3aed;
+  color: #7c3aed;
+  background: rgba(124,58,237,0.07);
 }
 
 /* INPUTS */
