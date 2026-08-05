@@ -2727,6 +2727,25 @@ function _editCommandeDate(id, field, label) {
       .catch(() => showToast('Erreur réseau', 'error'));
   }
 }
+// Remarque (finance) éditable à tout moment depuis le tiroir commande (pas seulement
+// à la finalisation). Persistée sur la commande + son dossier lié (via _syncDossierDates).
+function editCommandeRemarque(id){
+  const c = commandes.find(x => String(x.id) === String(id));
+  if (!c) { showToast('Commande introuvable', 'error'); return; }
+  const v = prompt("Remarque (finance) pour « " + (c.clientName || 'commande') + " » :\n(visible sur la commande ET son dossier de production)", c.remarque || '');
+  if (v === null) return; // annulé
+  c.remarque = String(v).trim();
+  saveData();
+  renderCommandes();
+  if (typeof _syncDossierDates === 'function') _syncDossierDates(); // reporte la remarque sur le dossier
+  if (APPS_SCRIPT_URL) {
+    apiCall({ action:'updateCommande', id: c.id, remarque: c.remarque })
+      .then(r => { if (r && r.ok) showToast('Remarque enregistrée'); else showToast('Erreur enregistrement', 'error'); })
+      .catch(() => showToast('Erreur réseau', 'error'));
+  } else {
+    showToast('Remarque enregistrée');
+  }
+}
 function editCommandeDateClient(id){ _editCommandeDate(id, 'dateLivraison',     'Date de livraison client'); }
 function editCommandeDateProd(id){   _editCommandeDate(id, 'dateLivraisonProd', 'Date de livraison production'); }
 function editCommandeDateBAT(id){     _editCommandeDate(id, 'dateBAT',           'Date de BAT'); }
@@ -6161,6 +6180,7 @@ function _cmdDrawerActions(c) {
   if (c.status === 'pending')
     btns.push(`<button class="pcok-btn pcok-btn--primary" onclick="closeDrawers();openCmdFinalizeModal('${c.id}')">Finaliser</button>`);
   btns.push(`<button class="pcok-btn" onclick="printCommandeTicket(commandes.find(x=>String(x.id)==='${c.id}'))">Imprimer</button>`);
+  btns.push(`<button class="pcok-btn" style="color:#2563eb;border-color:rgba(37,99,235,.4)" onclick="closeDrawers();editCommandeRemarque('${c.id}')">Remarque</button>`);
   if (c.dossierId && canAttrib)
     btns.push(`<button class="pcok-btn" onclick="closeDrawers();openAttribForDossier('${c.dossierId}')">Production →</button>`);
   // Modifications de dates (toujours utiles)
