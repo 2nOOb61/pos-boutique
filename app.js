@@ -6137,6 +6137,7 @@ function _cmdDrawerContent(c) {
     <div class="pcok-drawer-pipe-title">Livraison</div>
     <div class="pcok-drawer-items">${modeHtml}${datesHtml}</div>
     ${c.notes?`<div class="pcok-drawer-note">${_pcokEsc(c.notes)}</div>`:''}
+    ${c.remarque?`<div class="pcok-drawer-note" style="background:#eef6ff;border-left-color:#2563eb;color:#1c1917"><b style="color:#1d4ed8">Remarque finance :</b> ${_pcokEsc(c.remarque)}</div>`:''}
     ${photosHtml}
     ${pipe}
     ${_cmdDrawerActions(c)}`;
@@ -6208,6 +6209,7 @@ function openCmdFinalizeModal(id) {
   document.getElementById('cmdFinGiven').value = '';
   document.getElementById('cmdFinChangeVal').textContent = '0 Ar';
   document.getElementById('cmdFinMobileRef').value = '';
+  { const _rem = document.getElementById('cmdFinRemarque'); if (_rem) _rem.value = c.remarque || ''; }
   ['cmdFinChequeBank','cmdFinChequeNumber','cmdFinChequeTitulaire','cmdFinChequeDate',
    'cmdFinVirementBank','cmdFinVirementRef','cmdFinVirementTitulaire','cmdFinVirementDate']
     .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
@@ -6248,6 +6250,8 @@ function selectCmdFinProvider(p) {
 function confirmCmdFinalize() {
   const c = commandes.find(x => String(x.id) === String(currentCmdFinalizeId));
   if (!c) return;
+  // Remarque finance : saisie ici, persistée sur la commande + affichée sur le dossier lié
+  c.remarque = document.getElementById('cmdFinRemarque')?.value.trim() || '';
   const reste = _cmdReste(c);   // reste réel (journal) — robuste aux refresh serveur
   if (cmdFinalPayMode === 'cash') {
     const given = parseFloat(document.getElementById('cmdFinGiven').value) || 0;
@@ -6932,7 +6936,7 @@ async function _uploadCommandeAttachments(commandeId, photos) {
 
 async function syncCmdUpdateToSheets(cmd) {
   if (!APPS_SCRIPT_URL) return;
-  await apiCall({ action: 'updateCommande', id: cmd.id, status: cmd.status, dateFinalisation: cmd.dateFinalisation || '', saleId: cmd.saleId || '', accompte: cmd.accompte, restant: cmd.restant });
+  await apiCall({ action: 'updateCommande', id: cmd.id, status: cmd.status, dateFinalisation: cmd.dateFinalisation || '', saleId: cmd.saleId || '', accompte: cmd.accompte, restant: cmd.restant, remarque: cmd.remarque || '' });
 }
 
 // ============================================================
@@ -7270,6 +7274,7 @@ function _syncDossierDates() {
     if (prod) d.dateLivraisonProd = prod;
     if (bat)  d.dateBAT           = bat;
     if (src.caissier) d.caissier  = src.caissier; // commercial créateur (pour l'affichage)
+    if (typeof src.remarque === 'string') d.remarque = src.remarque; // remarque finance → visible sur le dossier
     // Référence SÉQUENTIELLE (CMD-001 / RES-001) au lieu de l'uid interne — cohérente
     // partout et « qui se suit ». Normalise aussi les anciens dossiers. Affichage seul.
     const ref = _seqRefOf(d.sourceType, d.sourceId, _seq);
@@ -9577,6 +9582,16 @@ function _renderDossierRow(d) {
       : '';
   })();
 
+  const remarqueHtml = (function(){
+    const src = d.sourceType==='reservation'
+      ? reservations.find(r => String(r.id)===String(d.sourceId))
+      : commandes.find(c => String(c.id)===String(d.sourceId));
+    const rem = (src && src.remarque) || d.remarque;
+    return rem
+      ? `<div style="font-size:10px;color:#1d4ed8;background:#eef6ff;border-radius:5px;padding:2px 6px;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px" title="${String(rem).replace(/"/g,'&quot;')}">💬 ${rem}</div>`
+      : '';
+  })();
+
   return `<div class="dossier-row ${isSelected?'dossier-row--selected':''}" onclick="selectDossier('${d.id}')">
     <div class="dossier-row__prio" style="background:${prioColor}"></div>
     <div class="dossier-row__main">
@@ -9589,6 +9604,7 @@ function _renderDossierRow(d) {
       <div class="dossier-row__client">${d.client}</div>
       <div class="dossier-row__produit">${d.produit} × ${d.quantite}</div>
       ${noteHtml}
+      ${remarqueHtml}
     </div>
     <div class="dossier-row__right">
       <div class="dossier-row__pipe">${pipeDots}</div>
@@ -10305,6 +10321,16 @@ function renderAttrPanel(tachesD, commentsD = []) {
            </div>`
         : '';
 
+      const remarqueRow = (src.remarque || d.remarque)
+        ? `<div style="margin-top:10px;padding:10px 12px;background:#eef6ff;border-radius:9px;border:1.5px solid #2563eb">
+             <div style="display:flex;align-items:center;gap:5px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#1d4ed8;margin-bottom:5px">
+               <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+               Remarque finance
+             </div>
+             <div style="font-size:12.5px;color:#1c1917;line-height:1.55;white-space:pre-wrap">${escapeHtml(src.remarque || d.remarque)}</div>
+           </div>`
+        : '';
+
       // Pièces jointes du dossier = pièces Drive (src.attachments, visibles par tous)
       // + photos base64 locales legacy/en attente d'upload (src.photos).
       const attachList = [
@@ -10358,6 +10384,7 @@ function renderAttrPanel(tachesD, commentsD = []) {
           ${itemsHtml}
           ${contactLine}
           ${notesRow}
+          ${remarqueRow}
           ${attachRow}
         </div>`;
     }
@@ -10670,6 +10697,11 @@ function printDossier(dossierId) {
   const notesHtml = src?.notes
     ? `<div style="padding:10px 14px;background:#fef3c7;border-left:3px solid #d97706;border-radius:6px;margin-bottom:14px;font-size:11pt;color:#1c1917"><strong>Notes :</strong> ${src.notes}</div>`
     : '';
+  // ── Remarque finance
+  const _remTxt = (src && src.remarque) || d.remarque || '';
+  const remarqueHtmlPrint = _remTxt
+    ? `<div style="padding:10px 14px;background:#eef6ff;border-left:3px solid #2563eb;border-radius:6px;margin-bottom:14px;font-size:11pt;color:#1c1917"><strong>Remarque finance :</strong> ${escapeHtml(_remTxt)}</div>`
+    : '';
 
   // ── Priorité / statut
   const prioColor = d.priorite==='Urgente'?'#dc2626':d.priorite==='Haute'?'#d97706':'#16a34a';
@@ -10730,6 +10762,7 @@ function printDossier(dossierId) {
 
     ${deliveryHtml}
     ${notesHtml}
+    ${remarqueHtmlPrint}
 
     <!-- ARTICLES -->
     <div style="margin-bottom:28px">

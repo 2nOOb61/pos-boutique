@@ -2433,6 +2433,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
       <div class="form-group"><label>Titulaire du compte émetteur</label><input id="cmdFinVirementTitulaire" placeholder="Nom du donneur d'ordre" /></div>
       <div class="form-group"><label>Date du virement</label><input id="cmdFinVirementDate" type="date" /></div>
     </div>
+    <div class="form-group"><label>Remarque (finance)</label><textarea id="cmdFinRemarque" rows="2" placeholder="Remarque de validation / finalisation (visible sur le dossier)…"></textarea></div>
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeModal('cmdFinalizeModal')">Annuler</button>
       <button class="btn-primary" onclick="confirmCmdFinalize()">Valider et encaisser</button>
@@ -3262,7 +3263,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260805-achatstatut"></script>
+<script src="./app.js?v=20260805-remarque"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

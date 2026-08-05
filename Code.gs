@@ -1120,6 +1120,7 @@ function handleGetCommandes() {
         dateLivraisonProd: _fmtDateCell_(r[22]),
         dateBAT: _fmtDateCell_(r[23]),
         attachments: _parseAttachments_(r[24]),
+        remarque: String(r[25]||''),
         photos: []
       };
       order.push(id);
@@ -1326,7 +1327,8 @@ function handleAddCommande(data) {
     'En attente', '', '',
     c.dateLivraisonProd||'',
     c.dateBAT||'',
-    JSON.stringify(Array.isArray(c.attachments) ? c.attachments : [])
+    JSON.stringify(Array.isArray(c.attachments) ? c.attachments : []),
+    c.remarque||''   // col 26 = Remarque (finance)
   ]);
   // Forcer nom + contact en TEXTE (un contact "+261 34…" serait sinon évalué en formule → #ERROR!)
   const _r = sh.getLastRow();
@@ -1385,6 +1387,11 @@ function handleUpdateCommande(data) {
       const need = 25 - sh.getMaxColumns();
       if (need > 0) sh.insertColumnsAfter(sh.getMaxColumns(), need);
       sh.getRange(i+1, 25).setValue(JSON.stringify(Array.isArray(data.attachments) ? data.attachments : []));
+    }
+    if (data.remarque !== undefined) {                                                         // col 26 = Remarque (finance)
+      const need = 26 - sh.getMaxColumns();
+      if (need > 0) sh.insertColumnsAfter(sh.getMaxColumns(), need);
+      sh.getRange(i+1, 26).setValue(String(data.remarque || ''));
     }
     updated = true;
   }
