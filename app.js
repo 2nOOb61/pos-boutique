@@ -14192,9 +14192,48 @@ async function confirmPointage() {
 // ============================================================
 const _ACHAT_PRIO_WEIGHT = { urgente:0, haute:1, normale:2 };
 const DEMANDE_ACHAT_MOTIFS = ['Commande','Stock','Réassort','Autre'];
+// Cycle d'un achat : À acheter → En cours → Commandé → Reçu (Reçu = terminal).
+// 'ACHETE' est l'ancien code terminal (avant Commandé/Reçu) → traité comme Reçu.
+const DEMANDE_STATUTS = [
+  { code:'A_ACHETER', label:'À acheter', color:'#2563eb', bg:'#dbeafe' },
+  { code:'EN_COURS',  label:'En cours',  color:'#d97706', bg:'#fef3c7' },
+  { code:'COMMANDE',  label:'Commandé',  color:'#7c3aed', bg:'#ede9fe' },
+  { code:'RECU',      label:'Reçu',      color:'#16a34a', bg:'#dcfce7' },
+];
+function _daStatut(code) {
+  return DEMANDE_STATUTS.find(s => s.code === code)
+    || (code === 'ACHETE' ? DEMANDE_STATUTS[3] : DEMANDE_STATUTS[0]);
+}
+function _daNextStatut(code) {
+  const c = code === 'ACHETE' ? 'RECU' : code;
+  const i = DEMANDE_STATUTS.findIndex(s => s.code === c);
+  return (i >= 0 && i < DEMANDE_STATUTS.length - 1) ? DEMANDE_STATUTS[i + 1].code : null;
+}
+function _daIsDone(code) { return code === 'RECU' || code === 'ACHETE'; }
+// Montant d'une ligne = prix UNITAIRE × quantité.
+function _daMontant(prix, qty) { return (Number(prix) || 0) * (Number(qty) || 1); }
 let demandesAchat = [];
 let _daImages = [];                       // images de travail de la modale (dataURL ou meta Drive)
 let _daCtx    = { dossierId:'', demandeId:'' };
+let _achatsPrintDate = '';                // date sélectionnée pour l'impression (YYYY-MM-DD)
+
+// Normalise une date (ISO, jj/mm/aaaa, jj.mm.aa, etc.) en clé "YYYY-MM-DD" pour
+// comparer par jour quel que soit le format saisi. '' si non reconnue.
+function _daDayKey(str) {
+  if (!str) return '';
+  str = String(str).trim();
+  let m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = str.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})/);
+  if (m) {
+    let d = m[1], mo = m[2], y = m[3];
+    if (y.length === 2) y = '20' + y;
+    return `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+  }
+  const dt = new Date(str);
+  return isNaN(dt) ? '' : `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+}
+function _todayISO() { const t = new Date(); return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`; }
 
 function saveDemandesAchatLocal() { try { localStorage.setItem('pos-demandes-achat', JSON.stringify(demandesAchat)); } catch(e) {} }
 function loadDemandesAchatLocal() { try { const r = localStorage.getItem('pos-demandes-achat'); if (r) demandesAchat = JSON.parse(r); } catch(e) {} }
@@ -14251,8 +14290,8 @@ function renderAchats() {
 
   // Demandes d'achat libres (non liées à un dossier)
   const libres     = (Array.isArray(demandesAchat) ? demandesAchat : []).filter(d => !d.dossierId);
-  const libresOpen = libres.filter(d => d.statut !== 'ACHETE');
-  const libresDone = libres.filter(d => d.statut === 'ACHETE');
+  const libresOpen = libres.filter(d => !_daIsDone(d.statut));
+  const libresDone = libres.filter(d => _daIsDone(d.statut));
 
   const _todayMid = new Date(); _todayMid.setHours(0,0,0,0);
   const _isLate = ech => { const d = _parseFrDate(ech); return d && d < _todayMid; };
@@ -14271,14 +14310,14 @@ function renderAchats() {
   const nbLate    = queue.filter(r => _isLate(r.echeance)).length + libresOpen.filter(d => _isLate(d.dateLivraisonClient)).length;
   const nbTotal   = queue.length + libresOpen.length;
 
-  // Agrégats cockpit : montant total à acheter + répartition par fournisseur.
+  // Agrégats cockpit : montant total à acheter (prix unitaire × qté) + répartition par fournisseur.
   const openItems = [
-    ...queue.map(r => { const dem = _demandeForDossier(r.t.dossierId); return { prix:Number(dem?.prix)||0, fournisseur:(dem?.fournisseur||'').trim() }; }),
-    ...libresOpen.map(d => ({ prix:Number(d.prix)||0, fournisseur:(d.fournisseur||'').trim() }))
+    ...queue.map(r => { const dem = _demandeForDossier(r.t.dossierId); return { montant:_daMontant(dem?.prix, dem?.quantite || r.qty), fournisseur:(dem?.fournisseur||'').trim() }; }),
+    ...libresOpen.map(d => ({ montant:_daMontant(d.prix, d.quantite), fournisseur:(d.fournisseur||'').trim() }))
   ];
-  const montantTotal = openItems.reduce((s, x) => s + x.prix, 0);
+  const montantTotal = openItems.reduce((s, x) => s + x.montant, 0);
   const byFourn = {};
-  openItems.forEach(x => { const f = x.fournisseur || '—'; (byFourn[f] = byFourn[f] || { n:0, montant:0 }); byFourn[f].n++; byFourn[f].montant += x.prix; });
+  openItems.forEach(x => { const f = x.fournisseur || '—'; (byFourn[f] = byFourn[f] || { n:0, montant:0 }); byFourn[f].n++; byFourn[f].montant += x.montant; });
   const fournRows = Object.entries(byFourn).sort((a, b) => b[1].montant - a[1].montant || b[1].n - a[1].n).slice(0, 6);
 
   const _kpiCard = (val, label, color) => `
@@ -14301,9 +14340,12 @@ function renderAchats() {
     const enCours = r.t.statut === 'EN_COURS';
     const canAct  = isAdminOrChef || _sameOp(r.operateur, myLabel);
     const dem     = _demandeForDossier(r.t.dossierId);
-    const statusBadge = enCours
-      ? `<span style="font-size:10px;font-weight:700;background:#fef3c7;color:#d97706;padding:3px 9px;border-radius:9px;white-space:nowrap">Achat en cours</span>`
-      : `<span style="font-size:10px;font-weight:700;background:#dbeafe;color:#2563eb;padding:3px 9px;border-radius:9px;white-space:nowrap">À acheter</span>`;
+    const _s      = dem ? _daStatut(dem.statut) : null;
+    const statusBadge = _s
+      ? `<span style="font-size:10px;font-weight:700;background:${_s.bg};color:${_s.color};padding:3px 9px;border-radius:9px;white-space:nowrap">${_s.label}</span>`
+      : (enCours
+        ? `<span style="font-size:10px;font-weight:700;background:#fef3c7;color:#d97706;padding:3px 9px;border-radius:9px;white-space:nowrap">Achat en cours</span>`
+        : `<span style="font-size:10px;font-weight:700;background:#dbeafe;color:#2563eb;padding:3px 9px;border-radius:9px;white-space:nowrap">À acheter</span>`);
     let action = '';
     if (canAct && !enCours)      action = `<button onclick="pointerStart('${r.t.id}')" style="background:var(--color-primary);color:#fff;border:none;padding:8px 14px;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap">Démarrer</button>`;
     else if (canAct && enCours)  action = `<button onclick="openPointage('${r.t.id}','ACHAT','${String(r.ref).replace(/'/g,"\\'")}')" style="background:#16a34a;color:#fff;border:none;padding:8px 14px;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap">Terminer</button>`;
@@ -14323,7 +14365,7 @@ function renderAchats() {
               ${r.echeance ? `<span>·</span><span style="color:${late?'#dc2626':'var(--muted)'};font-weight:${late?'700':'400'}">Livraison ${escapeHtml(r.echeance)}${late?' (retard)':''}</span>` : ''}
               <span>·</span><span>Acheteur : ${escapeHtml(r.operateur||'—')}</span>
               ${dem?.fournisseur ? `<span>·</span><span>Fourn. : ${escapeHtml(dem.fournisseur)}${dem.contact?' ('+escapeHtml(dem.contact)+')':''}</span>` : ''}
-              ${dem?.prix ? `<span>·</span><span style="font-weight:700;color:var(--color-primary)">${fmt(dem.prix)}</span>` : ''}
+              ${dem?.prix ? `<span>·</span><span style="font-weight:700;color:var(--color-primary)">${fmt(_daMontant(dem.prix, dem.quantite||r.qty))}</span><span style="opacity:.7">(${fmt(dem.prix)}/u × ${dem.quantite||r.qty})</span>` : ''}
             </div>
             ${dem?.notes ? `<div style="font-size:12px;color:var(--text);margin-top:6px;white-space:pre-wrap">${escapeHtml(dem.notes)}</div>` : ''}
             ${_achatImgThumbs(dem?.images)}
@@ -14335,14 +14377,13 @@ function renderAchats() {
 
   // Ligne : demande d'achat libre
   const _rowLibre = d => {
-    const late    = _isLate(d.dateLivraisonClient);
-    const enCours = d.statut === 'EN_COURS';
-    const statusBadge = enCours
-      ? `<span style="font-size:10px;font-weight:700;background:#fef3c7;color:#d97706;padding:3px 9px;border-radius:9px;white-space:nowrap">En cours</span>`
-      : `<span style="font-size:10px;font-weight:700;background:#dbeafe;color:#2563eb;padding:3px 9px;border-radius:9px;white-space:nowrap">À acheter</span>`;
-    const action = enCours
-      ? `<button onclick="demandeAchatSetStatut('${d.id}','ACHETE')" style="background:#16a34a;color:#fff;border:none;padding:8px 14px;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer">Terminer</button>`
-      : `<button onclick="demandeAchatSetStatut('${d.id}','EN_COURS')" style="background:var(--color-primary);color:#fff;border:none;padding:8px 14px;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer">Démarrer</button>`;
+    const late  = _isLate(d.dateLivraisonClient);
+    const _s    = _daStatut(d.statut);
+    const next  = _daNextStatut(d.statut);
+    const statusBadge = `<span style="font-size:10px;font-weight:700;background:${_s.bg};color:${_s.color};padding:3px 9px;border-radius:9px;white-space:nowrap">${_s.label}</span>`;
+    const action = next
+      ? `<button onclick="demandeAchatSetStatut('${d.id}','${next}')" style="background:var(--color-primary);color:#fff;border:none;padding:8px 14px;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap">▸ ${_daStatut(next).label}</button>`
+      : '';
     return `
       <div style="background:var(--surface);border:1px solid var(--color-border);border-left:4px solid ${late?'#dc2626':'#0891b2'};border-radius:12px;padding:13px 16px">
         <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
@@ -14358,7 +14399,7 @@ function renderAchats() {
               ${d.dateLivraisonClient ? `<span style="color:${late?'#dc2626':'var(--muted)'};font-weight:${late?'700':'400'}">Livraison ${escapeHtml(d.dateLivraisonClient)}${late?' (retard)':''}</span><span>·</span>` : ''}
               <span>Demandé le ${escapeHtml(d.dateDemande||'—')}</span>
               ${d.fournisseur ? `<span>·</span><span>Fourn. : ${escapeHtml(d.fournisseur)}${d.contact?' ('+escapeHtml(d.contact)+')':''}</span>` : ''}
-              ${d.prix ? `<span>·</span><span style="font-weight:700;color:var(--color-primary)">${fmt(d.prix)}</span>` : ''}
+              ${d.prix ? `<span>·</span><span style="font-weight:700;color:var(--color-primary)">${fmt(_daMontant(d.prix, d.quantite))}</span><span style="opacity:.7">(${fmt(d.prix)}/u × ${d.quantite||1})</span>` : ''}
             </div>
             ${d.notes ? `<div style="font-size:12px;color:var(--text);margin-top:6px;white-space:pre-wrap">${escapeHtml(d.notes)}</div>` : ''}
             ${_achatImgThumbs(d.images)}
@@ -14401,7 +14442,14 @@ function renderAchats() {
     </details>` : '';
 
   container.innerHTML = `
-    <div style="display:flex;justify-content:flex-end;margin-bottom:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <input type="date" value="${_achatsPrintDate || _todayISO()}" onchange="_achatsPrintDate=this.value" title="Date de demande à imprimer" style="padding:8px 10px;border:1px solid var(--color-border);border-radius:8px;background:var(--color-surface);color:var(--color-text-primary);font-size:13px"/>
+        <button onclick="printAchatsParDate()" style="background:var(--surface2);color:var(--color-text-primary);border:1px solid var(--color-border);padding:8px 14px;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+          Imprimer par date
+        </button>
+      </div>
       <button onclick="openDemandeAchat('','')" style="background:var(--color-primary);color:#fff;border:none;padding:9px 16px;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         Nouvelle demande d'achat
@@ -14457,7 +14505,7 @@ function deleteDemandeAchat(id) {
 function openDemandeAchat(dossierId, demandeId) {
   _daCtx = { dossierId: dossierId || '', demandeId: demandeId || '' };
   _daImages = [];
-  let pre = { ref:'', besoin:'', quantite:1, dateLivraisonClient:'', motif:'Commande', dateDemande:'', notes:'', prix:'', fournisseur:'', contact:'' };
+  let pre = { ref:'', besoin:'', quantite:1, dateLivraisonClient:'', motif:'Commande', dateDemande:'', notes:'', prix:'', fournisseur:'', contact:'', statut:'A_ACHETER' };
 
   if (demandeId) {
     const d = demandesAchat.find(x => String(x.id) === String(demandeId));
@@ -14494,11 +14542,16 @@ function openDemandeAchat(dossierId, demandeId) {
           <div><label style="${_lbl}">Date livraison client</label><input id="daDateLiv" type="text" value="${escapeHtml(pre.dateLivraisonClient||'')}" placeholder="23.07.26" style="${_inp}"/></div>
           <div><label style="${_lbl}">Date de demande</label><input id="daDateDem" type="text" value="${escapeHtml(pre.dateDemande||'')}" placeholder="22.07.26" style="${_inp}"/></div>
         </div>
-        <div><label style="${_lbl}">Motif</label>
-          <select id="daMotif" style="${_inp}">${DEMANDE_ACHAT_MOTIFS.map(m => `<option value="${m}" ${(pre.motif||'').toLowerCase()===m.toLowerCase()?'selected':''}>${m}</option>`).join('')}</select>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:11px">
+          <div><label style="${_lbl}">Motif</label>
+            <select id="daMotif" style="${_inp}">${DEMANDE_ACHAT_MOTIFS.map(m => `<option value="${m}" ${(pre.motif||'').toLowerCase()===m.toLowerCase()?'selected':''}>${m}</option>`).join('')}</select>
+          </div>
+          <div><label style="${_lbl}">Statut</label>
+            <select id="daStatut" style="${_inp}">${DEMANDE_STATUTS.map(s => `<option value="${s.code}" ${(pre.statut===s.code || (pre.statut==='ACHETE'&&s.code==='RECU'))?'selected':''}>${s.label}</option>`).join('')}</select>
+          </div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:11px">
-          <div><label style="${_lbl}">Prix estimé (Ar)</label><input id="daPrix" type="number" min="0" step="any" value="${pre.prix!=null&&pre.prix!==''?Number(pre.prix):''}" placeholder="0" style="${_inp}"/></div>
+          <div><label style="${_lbl}">Prix unitaire (Ar)</label><input id="daPrix" type="number" min="0" step="any" value="${pre.prix!=null&&pre.prix!==''?Number(pre.prix):''}" placeholder="0" style="${_inp}"/></div>
           <div><label style="${_lbl}">Fournisseur</label><input id="daFournisseur" type="text" value="${escapeHtml(pre.fournisseur||'')}" placeholder="Nom du fournisseur" style="${_inp}"/></div>
         </div>
         <div><label style="${_lbl}">Contact fournisseur</label><input id="daContact" type="text" value="${escapeHtml(pre.contact||'')}" placeholder="Téléphone / email" style="${_inp}"/></div>
@@ -14569,6 +14622,7 @@ async function saveDemandeAchatForm() {
   d.dateLivraisonClient = document.getElementById('daDateLiv')?.value.trim() || '';
   d.dateDemande         = document.getElementById('daDateDem')?.value.trim() || '';
   d.motif               = document.getElementById('daMotif')?.value || '';
+  d.statut              = document.getElementById('daStatut')?.value || d.statut || 'A_ACHETER';
   d.prix                = parseFloat(document.getElementById('daPrix')?.value) || 0;
   d.fournisseur         = document.getElementById('daFournisseur')?.value.trim() || '';
   d.contact             = document.getElementById('daContact')?.value.trim() || '';
@@ -14580,6 +14634,54 @@ async function saveDemandeAchatForm() {
   closeDemandeAchat();
   renderAchats();
   showToast('Demande d\'achat enregistrée');
+}
+
+// ── Impression des demandes d'achat d'une date (par date de demande) ──
+function printAchatsParDate() {
+  const iso = _achatsPrintDate || _todayISO();
+  const list = (Array.isArray(demandesAchat) ? demandesAchat : []).filter(d => _daDayKey(d.dateDemande) === iso);
+  const [Y, M, D] = iso.split('-');
+  const dLabel = `${D}/${M}/${Y}`;
+  if (!list.length) { showToast(`Aucune demande d'achat pour le ${dLabel}`, 'info'); return; }
+  list.sort((a, b) => (a.fournisseur||'').localeCompare(b.fournisseur||'') || (a.besoin||'').localeCompare(b.besoin||''));
+
+  let totalMontant = 0;
+  const rows = list.map(d => {
+    const montant = _daMontant(d.prix, d.quantite);
+    totalMontant += montant;
+    const s = _daStatut(d.statut);
+    const cls = _daIsDone(d.statut) ? 'badge-green' : d.statut === 'COMMANDE' ? 'badge-blue' : d.statut === 'EN_COURS' ? 'badge-amber' : 'badge-stone';
+    return `<tr>
+      <td>${escapeHtml(d.ref||'—')}</td>
+      <td>${escapeHtml(d.besoin||'—')}</td>
+      <td style="text-align:center">${d.quantite||1}</td>
+      <td>${escapeHtml(d.motif||'—')}</td>
+      <td>${escapeHtml(d.fournisseur||'—')}</td>
+      <td>${escapeHtml(d.contact||'—')}</td>
+      <td style="text-align:right">${d.prix?fmt(d.prix):'—'}</td>
+      <td style="text-align:right;font-weight:600">${montant?fmt(montant):'—'}</td>
+      <td>${escapeHtml(d.dateLivraisonClient||'—')}</td>
+      <td><span class="badge ${cls}">${s.label}</span></td>
+    </tr>`;
+  }).join('');
+
+  const nbRecus = list.filter(d => _daIsDone(d.statut)).length;
+  const kpis = `<div class="kpi-row">
+    <div class="kpi-box"><div class="kl">Demandes</div><div class="kv">${list.length}</div></div>
+    <div class="kpi-box"><div class="kl">Reçus</div><div class="kv" style="color:#16a34a">${nbRecus}</div></div>
+    <div class="kpi-box"><div class="kl">Montant total</div><div class="kv">${fmt(totalMontant)}</div></div>
+  </div>`;
+  const table = `<table>
+    <thead><tr><th>Réf</th><th>Besoin</th><th>Qté</th><th>Motif</th><th>Fournisseur</th><th>Contact</th><th>Prix unit.</th><th>Montant</th><th>Livraison</th><th>Statut</th></tr></thead>
+    <tbody>${rows}</tbody>
+    <tfoot><tr><td colspan="7" style="text-align:right;font-weight:700;border-top:2px solid #e5e3df">TOTAL</td><td style="text-align:right;font-weight:700;border-top:2px solid #e5e3df">${fmt(totalMontant)}</td><td colspan="2" style="border-top:2px solid #e5e3df"></td></tr></tfoot>
+  </table>`;
+  _printWindow(`Demandes d'achat — ${dLabel}`, `
+    <div class="rpt-title">Demandes d'achat</div>
+    <div class="rpt-period">Date de demande : ${dLabel}</div>
+    ${kpis}
+    ${table}
+  `);
 }
 
 // ============================================================
