@@ -14271,6 +14271,16 @@ function renderAchats() {
   const nbLate    = queue.filter(r => _isLate(r.echeance)).length + libresOpen.filter(d => _isLate(d.dateLivraisonClient)).length;
   const nbTotal   = queue.length + libresOpen.length;
 
+  // Agrégats cockpit : montant total à acheter + répartition par fournisseur.
+  const openItems = [
+    ...queue.map(r => { const dem = _demandeForDossier(r.t.dossierId); return { prix:Number(dem?.prix)||0, fournisseur:(dem?.fournisseur||'').trim() }; }),
+    ...libresOpen.map(d => ({ prix:Number(d.prix)||0, fournisseur:(d.fournisseur||'').trim() }))
+  ];
+  const montantTotal = openItems.reduce((s, x) => s + x.prix, 0);
+  const byFourn = {};
+  openItems.forEach(x => { const f = x.fournisseur || '—'; (byFourn[f] = byFourn[f] || { n:0, montant:0 }); byFourn[f].n++; byFourn[f].montant += x.prix; });
+  const fournRows = Object.entries(byFourn).sort((a, b) => b[1].montant - a[1].montant || b[1].n - a[1].n).slice(0, 6);
+
   const _kpiCard = (val, label, color) => `
     <div style="flex:1;min-width:120px;background:var(--surface);border:1px solid var(--color-border);border-radius:12px;padding:12px 14px">
       <div style="font-size:22px;font-weight:800;color:${color};line-height:1">${val}</div>
@@ -14312,6 +14322,8 @@ function renderAchats() {
               <span>${escapeHtml(r.ref)}</span><span>·</span><span>${escapeHtml(r.client)}</span>
               ${r.echeance ? `<span>·</span><span style="color:${late?'#dc2626':'var(--muted)'};font-weight:${late?'700':'400'}">Livraison ${escapeHtml(r.echeance)}${late?' (retard)':''}</span>` : ''}
               <span>·</span><span>Acheteur : ${escapeHtml(r.operateur||'—')}</span>
+              ${dem?.fournisseur ? `<span>·</span><span>Fourn. : ${escapeHtml(dem.fournisseur)}${dem.contact?' ('+escapeHtml(dem.contact)+')':''}</span>` : ''}
+              ${dem?.prix ? `<span>·</span><span style="font-weight:700;color:var(--color-primary)">${fmt(dem.prix)}</span>` : ''}
             </div>
             ${dem?.notes ? `<div style="font-size:12px;color:var(--text);margin-top:6px;white-space:pre-wrap">${escapeHtml(dem.notes)}</div>` : ''}
             ${_achatImgThumbs(dem?.images)}
@@ -14345,6 +14357,8 @@ function renderAchats() {
               ${d.ref ? `<span>${escapeHtml(d.ref)}</span><span>·</span>` : ''}
               ${d.dateLivraisonClient ? `<span style="color:${late?'#dc2626':'var(--muted)'};font-weight:${late?'700':'400'}">Livraison ${escapeHtml(d.dateLivraisonClient)}${late?' (retard)':''}</span><span>·</span>` : ''}
               <span>Demandé le ${escapeHtml(d.dateDemande||'—')}</span>
+              ${d.fournisseur ? `<span>·</span><span>Fourn. : ${escapeHtml(d.fournisseur)}${d.contact?' ('+escapeHtml(d.contact)+')':''}</span>` : ''}
+              ${d.prix ? `<span>·</span><span style="font-weight:700;color:var(--color-primary)">${fmt(d.prix)}</span>` : ''}
             </div>
             ${d.notes ? `<div style="font-size:12px;color:var(--text);margin-top:6px;white-space:pre-wrap">${escapeHtml(d.notes)}</div>` : ''}
             ${_achatImgThumbs(d.images)}
@@ -14393,12 +14407,27 @@ function renderAchats() {
         Nouvelle demande d'achat
       </button>
     </div>
-    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px">
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
       ${_kpiCard(nbTotal, 'À acheter', 'var(--color-primary)')}
       ${_kpiCard(nbEnCours, 'En cours', '#d97706')}
       ${_kpiCard(nbUrgent, 'Prioritaires', '#dc2626')}
       ${_kpiCard(nbLate, 'En retard', '#dc2626')}
+      ${_kpiCard(fmt(montantTotal), 'Montant estimé', '#0891b2')}
     </div>
+    ${fournRows.length ? `
+      <div style="background:var(--surface);border:1px solid var(--color-border);border-radius:12px;padding:14px 16px;margin-bottom:18px">
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;margin-bottom:10px">Répartition par fournisseur</div>
+        <div style="display:flex;flex-direction:column;gap:7px">
+          ${fournRows.map(([f, v]) => {
+            const pct = montantTotal > 0 ? Math.round(v.montant / montantTotal * 100) : 0;
+            return `<div style="display:flex;align-items:center;gap:10px">
+              <span style="flex:0 0 130px;font-size:12.5px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(f)}</span>
+              <div style="flex:1;height:8px;background:var(--surface2);border-radius:6px;overflow:hidden"><div style="width:${pct}%;height:100%;background:var(--color-primary)"></div></div>
+              <span style="flex:0 0 auto;font-size:11.5px;color:var(--muted)">${v.n} · <b style="color:var(--text)">${fmt(v.montant)}</b></span>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>` : ''}
     <div style="display:flex;flex-direction:column;gap:10px">${rowsHtml}</div>
     ${doneHtml}`;
 }
@@ -14428,7 +14457,7 @@ function deleteDemandeAchat(id) {
 function openDemandeAchat(dossierId, demandeId) {
   _daCtx = { dossierId: dossierId || '', demandeId: demandeId || '' };
   _daImages = [];
-  let pre = { ref:'', besoin:'', quantite:1, dateLivraisonClient:'', motif:'Commande', dateDemande:'', notes:'' };
+  let pre = { ref:'', besoin:'', quantite:1, dateLivraisonClient:'', motif:'Commande', dateDemande:'', notes:'', prix:'', fournisseur:'', contact:'' };
 
   if (demandeId) {
     const d = demandesAchat.find(x => String(x.id) === String(demandeId));
@@ -14468,7 +14497,12 @@ function openDemandeAchat(dossierId, demandeId) {
         <div><label style="${_lbl}">Motif</label>
           <select id="daMotif" style="${_inp}">${DEMANDE_ACHAT_MOTIFS.map(m => `<option value="${m}" ${(pre.motif||'').toLowerCase()===m.toLowerCase()?'selected':''}>${m}</option>`).join('')}</select>
         </div>
-        <div><label style="${_lbl}">Détails / notes</label><textarea id="daNotes" rows="2" placeholder="Spécifications, fournisseur, référence produit…" style="${_inp};resize:vertical">${escapeHtml(pre.notes||'')}</textarea></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:11px">
+          <div><label style="${_lbl}">Prix estimé (Ar)</label><input id="daPrix" type="number" min="0" step="any" value="${pre.prix!=null&&pre.prix!==''?Number(pre.prix):''}" placeholder="0" style="${_inp}"/></div>
+          <div><label style="${_lbl}">Fournisseur</label><input id="daFournisseur" type="text" value="${escapeHtml(pre.fournisseur||'')}" placeholder="Nom du fournisseur" style="${_inp}"/></div>
+        </div>
+        <div><label style="${_lbl}">Contact fournisseur</label><input id="daContact" type="text" value="${escapeHtml(pre.contact||'')}" placeholder="Téléphone / email" style="${_inp}"/></div>
+        <div><label style="${_lbl}">Détails / notes</label><textarea id="daNotes" rows="2" placeholder="Spécifications, référence produit…" style="${_inp};resize:vertical">${escapeHtml(pre.notes||'')}</textarea></div>
         <div>
           <label style="${_lbl}">Images</label>
           <div id="daImgGrid" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"></div>
@@ -14535,6 +14569,9 @@ async function saveDemandeAchatForm() {
   d.dateLivraisonClient = document.getElementById('daDateLiv')?.value.trim() || '';
   d.dateDemande         = document.getElementById('daDateDem')?.value.trim() || '';
   d.motif               = document.getElementById('daMotif')?.value || '';
+  d.prix                = parseFloat(document.getElementById('daPrix')?.value) || 0;
+  d.fournisseur         = document.getElementById('daFournisseur')?.value.trim() || '';
+  d.contact             = document.getElementById('daContact')?.value.trim() || '';
   d.notes               = document.getElementById('daNotes')?.value.trim() || '';
   d.images              = images;
   if (!existing) demandesAchat.unshift(d);

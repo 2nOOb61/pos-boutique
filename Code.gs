@@ -2212,7 +2212,17 @@ function _safeParse(val, fallback) {
 // ============================================================
 const SHEET_DEMANDES_ACHAT  = 'DemandesAchat';
 const DEMANDE_ACHAT_HEADERS = ['ID','Ref','DossierID','Besoin','Quantite',
-  'DateLivraisonClient','Motif','DateDemande','Statut','Images','Notes','CreePar','Timestamp'];
+  'DateLivraisonClient','Motif','DateDemande','Statut','Images','Notes','CreePar','Timestamp',
+  'Prix','Fournisseur','Contact'];
+
+// Ajoute les colonnes manquantes à une feuille DemandesAchat déjà créée (migration
+// en douceur : Prix/Fournisseur/Contact ajoutés après coup).
+function _ensureDemandeHeaders_(sh) {
+  if (sh.getLastColumn() < DEMANDE_ACHAT_HEADERS.length) {
+    sh.getRange(1, 1, 1, DEMANDE_ACHAT_HEADERS.length).setValues([DEMANDE_ACHAT_HEADERS])
+      .setBackground('#1a4a3a').setFontColor('#ffffff').setFontWeight('bold');
+  }
+}
 
 // Un champ date saisi en "05/08/2026" est auto-converti en Date par Sheets →
 // le renvoyer en jj/mm/aaaa (sinon String(Date) = "Wed Aug 05 2026 …"). Les
@@ -2224,6 +2234,7 @@ function _daDateStr_(v) {
 function handleGetDemandesAchat(data) {
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const sh = ensureSheet(ss, SHEET_DEMANDES_ACHAT, DEMANDE_ACHAT_HEADERS);
+  _ensureDemandeHeaders_(sh);
   const rows = sh.getDataRange().getValues().slice(1);
   const demandes = rows.filter(r => r[0]).map(r => ({
     id:                  String(r[0]),
@@ -2238,7 +2249,10 @@ function handleGetDemandesAchat(data) {
     images:              _safeParse(r[9], []),
     notes:               String(r[10] || ''),
     creePar:             String(r[11] || ''),
-    timestamp:           String(r[12] || '')
+    timestamp:           String(r[12] || ''),
+    prix:                Number(r[13]) || 0,
+    fournisseur:         String(r[14] || ''),
+    contact:             String(r[15] || '')
   }));
   return { ok:true, demandes };
 }
@@ -2248,6 +2262,7 @@ function handleSaveDemandeAchat(data) {
   if (!d || !d.id) return { ok:false, error:'demande.id requis' };
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const sh = ensureSheet(ss, SHEET_DEMANDES_ACHAT, DEMANDE_ACHAT_HEADERS);
+  _ensureDemandeHeaders_(sh);
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(6000);
@@ -2256,7 +2271,8 @@ function handleSaveDemandeAchat(data) {
       d.quantite != null ? d.quantite : '', d.dateLivraisonClient || '',
       d.motif || '', d.dateDemande || '', d.statut || 'A_ACHETER',
       JSON.stringify(d.images || []), d.notes || '', d.creePar || '',
-      d.timestamp || new Date().toISOString()
+      d.timestamp || new Date().toISOString(),
+      d.prix != null ? d.prix : '', d.fournisseur || '', d.contact || ''
     ];
     const rows = sh.getDataRange().getValues();
     for (let i = 1; i < rows.length; i++) {
