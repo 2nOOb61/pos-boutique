@@ -119,6 +119,7 @@ const PAGE_LABELS = {
   commandes:       'Commandes',
   livraisons:      'Livraisons',
   stock:           'Stock',
+  achats:          'Achats',
   stats:           'Statistiques',
   finances:        'Finances',
   'mon-dashboard': 'Mon tableau de bord',
@@ -135,13 +136,14 @@ const PAGE_ACCESS = {
   commandes:      ['admin','caissier','commerciale','gestionnaire','comptable','livreur'],
   livraisons:     ['admin','caissier','commerciale','gestionnaire','comptable','livreur','chef_atelier','operateur_prod','machiniste','finition'],
   stock:          ['admin','gestionnaire'],
+  achats:         ['admin','gestionnaire','chef_atelier'],
   stats:          ['admin','comptable'],
   finances:       ['admin','comptable','gestionnaire'],
   perf:           ['admin','chef_atelier','gestionnaire'],
   'mon-dashboard':['admin','caissier','commerciale','utilisateur','gestionnaire','comptable'],
   config:         ['admin'],
   users:          ['admin'],
-  attribution:    ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','commerciale'],
+  attribution:    ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','commerciale','gestionnaire'],
   blocages:       ['admin','chef_atelier','commerciale','gestionnaire'],
   production:     ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
   calendrier:     ['admin','commerciale','chef_atelier','gestionnaire'],
@@ -469,6 +471,7 @@ function showPage(id, btn, bnavBtn) {
   if (id==='livraisons')   { renderLivraisons(); if (APPS_SCRIPT_URL) Promise.all([loadCommandesFromScript(), loadReservationsFromScript()]).then(() => { updateDeliveryBadge(); renderLivraisons(); }).catch(()=>{}); }
   if (id==='finances')     { _ensureDossierLinks(); renderFinances(); if (APPS_SCRIPT_URL) loadCommandesFromScript().then(() => { _ensureDossierLinks(); renderFinances(); }).catch(()=>{}); }
   if (id==='perf')         { _ensureDossierLinks(); renderPerf(); if (APPS_SCRIPT_URL) _loadTachesQuietly().then(() => { _ensureDossierLinks(); renderPerf(); }).catch(()=>{}); }
+  if (id==='achats')       { _ensureDossierLinks(); renderAchats(); if (APPS_SCRIPT_URL) Promise.all([loadDossiers(), _loadTachesQuietly()]).then(() => { _ensureDossierLinks(); renderAchats(); }).catch(()=>renderAchats()); }
   // Garde d'accès (rôle ou overrides personnalisés)
   if (currentUser) {
     const ep = _effectivePages(currentUser);
@@ -10455,6 +10458,7 @@ function renderAttrPanel(tachesD, commentsD = []) {
         machiniste:     ['PRODUCTION','BAT'],
         finition:       ['FINITION','BAT'],
         livreur:        ['LIVRE'],
+        gestionnaire:   ['ACHAT'],
       };
       const userEtapes = ROLE_ETAPE_MAP[currentUser_role] || [];
       const canSelfAssign = !canAssign && !etapeComplete && !alreadySelfAssigned && userEtapes.includes(e.code);
@@ -14104,6 +14108,7 @@ async function pointerStart(tacheId) {
         : `${currentUser?.label} a commencé l'étape "${t.etapeLabel}" — dossier ${t.numeroDossier}`,
     });
     renderTaches();
+    if (document.getElementById('page-achats')?.classList.contains('active')) renderAchats();
     showToast('Tâche démarrée');
   }
 }
@@ -14168,9 +14173,143 @@ async function confirmPointage() {
       });
     }
     renderTaches();
+    if (document.getElementById('page-achats')?.classList.contains('active')) renderAchats();
     closeModal('pointageModal');
     showToast(dossierComplet ? 'Dossier complet à 100% — prêt à livrer !' : 'Tâche terminée ');
   }
+}
+
+// ============================================================
+// PAGE ACHATS — cockpit du gestionnaire de stock / acheteur
+// Liste les dossiers arrivés à l'étape ACHAT (tâches non terminées) avec
+// article + quantité + client + échéance. Une ligne = une tâche ACHAT.
+// Réutilise le modèle de tâches : Démarrer = pointerStart, Terminer =
+// openPointage → confirmPointage (action END, avance la progression du dossier).
+// Les boutons ne s'affichent que pour l'acheteur assigné (ou admin/chef) ;
+// un nouvel achat se crée en s'assignant l'étape ACHAT depuis l'Attribution.
+// ============================================================
+const _ACHAT_PRIO_WEIGHT = { urgente:0, haute:1, normale:2 };
+function _achatEnrich(t) {
+  const d = (Array.isArray(dossiers) ? dossiers : []).find(x => x.id === t.dossierId);
+  return {
+    t, d,
+    ref:      (d && d.numeroDossier) || t.numeroDossier || t.dossierId || '—',
+    article:  (d && d.produit)  || t.etapeLabel || '—',
+    qty:      (d && d.quantite) || 1,
+    client:   (d && d.client)   || '—',
+    echeance: (d && (d.dateLivraison || d.dateLivraisonProd)) || '',
+    priorite: (d && d.priorite) || 'Normale',
+    operateur:(t.operateur || '').trim(),
+  };
+}
+function renderAchats() {
+  const container = document.getElementById('achatsContainer');
+  if (!container) return;
+
+  const myLabel       = currentUser?.label || currentUser?.username || '';
+  const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
+
+  const achatTaches = (Array.isArray(taches) ? taches : []).filter(t => t.etapeCode === 'ACHAT');
+  const queue = achatTaches.filter(t => t.statut !== 'TERMINE').map(_achatEnrich);
+  const done  = achatTaches.filter(t => t.statut === 'TERMINE').map(_achatEnrich);
+
+  const _todayMid = new Date(); _todayMid.setHours(0,0,0,0);
+  const _isLate = r => { const d = _parseFrDate(r.echeance); return d && d < _todayMid; };
+
+  // Tri : priorité (urgente→normale) puis échéance la plus proche.
+  queue.sort((a, b) => {
+    const pa = _ACHAT_PRIO_WEIGHT[(a.priorite||'normale').toLowerCase()] ?? 2;
+    const pb = _ACHAT_PRIO_WEIGHT[(b.priorite||'normale').toLowerCase()] ?? 2;
+    if (pa !== pb) return pa - pb;
+    const da = _parseFrDate(a.echeance) || new Date(8640000000000000);
+    const db = _parseFrDate(b.echeance) || new Date(8640000000000000);
+    return da - db;
+  });
+
+  const nbEnCours = queue.filter(r => r.t.statut === 'EN_COURS').length;
+  const nbUrgent  = queue.filter(r => /urgent|haute/i.test(r.priorite)).length;
+  const nbLate    = queue.filter(_isLate).length;
+
+  const _kpiCard = (val, label, color) => `
+    <div style="flex:1;min-width:120px;background:var(--surface);border:1px solid var(--color-border);border-radius:12px;padding:12px 14px">
+      <div style="font-size:22px;font-weight:800;color:${color};line-height:1">${val}</div>
+      <div style="font-size:11.5px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:.03em">${label}</div>
+    </div>`;
+
+  const _prioBadge = p => {
+    const low = (p||'').toLowerCase();
+    if (/urgent/.test(low)) return `<span style="font-size:9.5px;font-weight:800;background:#fee2e2;color:#dc2626;padding:2px 7px;border-radius:8px">URGENT</span>`;
+    if (/haute/.test(low))  return `<span style="font-size:9.5px;font-weight:800;background:#fef3c7;color:#d97706;padding:2px 7px;border-radius:8px">HAUTE</span>`;
+    return '';
+  };
+
+  const _row = r => {
+    const late     = _isLate(r);
+    const enCours  = r.t.statut === 'EN_COURS';
+    const canAct   = isAdminOrChef || _sameOp(r.operateur, myLabel);
+    const statusBadge = enCours
+      ? `<span style="font-size:10px;font-weight:700;background:#fef3c7;color:#d97706;padding:3px 9px;border-radius:9px;white-space:nowrap">Achat en cours</span>`
+      : `<span style="font-size:10px;font-weight:700;background:#dbeafe;color:#2563eb;padding:3px 9px;border-radius:9px;white-space:nowrap">À acheter</span>`;
+    let action = '';
+    if (canAct && !enCours) {
+      action = `<button onclick="pointerStart('${r.t.id}')" style="background:var(--color-primary);color:#fff;border:none;padding:8px 14px;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap">Démarrer l'achat</button>`;
+    } else if (canAct && enCours) {
+      action = `<button onclick="openPointage('${r.t.id}','ACHAT','${String(r.ref).replace(/'/g,"\\'")}')" style="background:#16a34a;color:#fff;border:none;padding:8px 14px;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap">Terminer l'achat</button>`;
+    } else {
+      action = `<span style="font-size:11.5px;color:var(--muted);white-space:nowrap">Assigné à ${escapeHtml(r.operateur||'—')}</span>`;
+    }
+    return `
+      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--color-border);border-left:4px solid ${late?'#dc2626':'var(--color-primary)'};border-radius:12px;padding:13px 16px">
+        <div style="flex:1;min-width:180px">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="font-size:14.5px;font-weight:700;color:var(--text)">${escapeHtml(r.article)}</span>
+            <span style="font-size:12px;font-weight:700;color:var(--color-primary);background:var(--color-primary-light);padding:1px 8px;border-radius:8px">× ${r.qty}</span>
+            ${_prioBadge(r.priorite)}
+          </div>
+          <div style="font-size:12px;color:var(--muted);margin-top:4px;display:flex;gap:10px;flex-wrap:wrap">
+            <span>${escapeHtml(r.ref)}</span>
+            <span>·</span>
+            <span>${escapeHtml(r.client)}</span>
+            ${r.echeance ? `<span>·</span><span style="color:${late?'#dc2626':'var(--muted)'};font-weight:${late?'700':'400'}">Échéance ${escapeHtml(r.echeance)}${late?' (en retard)':''}</span>` : ''}
+            <span>·</span>
+            <span>Acheteur : ${escapeHtml(r.operateur||'—')}</span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">${statusBadge}${action}</div>
+      </div>`;
+  };
+
+  const queueHtml = queue.length
+    ? queue.map(_row).join('')
+    : `<div style="text-align:center;color:var(--muted);padding:48px 20px;background:var(--surface);border:1px dashed var(--color-border);border-radius:14px">
+         <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" style="margin:0 auto 12px;display:block;opacity:.4"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+         <p style="font-size:14px;margin:0 0 4px;font-weight:600;color:var(--text)">Aucun achat en attente</p>
+         <p style="font-size:12.5px;margin:0">Un achat apparaît ici quand l'étape « Achat » d'un dossier est assignée (depuis la page Attribution).</p>
+       </div>`;
+
+  const doneHtml = done.length
+    ? `<details style="margin-top:22px">
+         <summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--muted);padding:6px 0">Achats terminés (${done.length})</summary>
+         <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+           ${done.slice(-30).reverse().map(r => `
+             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--surface2);border:1px solid var(--color-border);border-radius:10px;padding:10px 14px;opacity:.85">
+               <span style="font-size:13px;font-weight:600;color:var(--text)">${escapeHtml(r.article)}</span>
+               <span style="font-size:11.5px;color:var(--muted)">× ${r.qty} · ${escapeHtml(r.ref)} · ${escapeHtml(r.client)}</span>
+               <span style="margin-left:auto;font-size:10px;font-weight:700;background:#dcfce7;color:#16a34a;padding:3px 9px;border-radius:9px">Acheté</span>
+             </div>`).join('')}
+         </div>
+       </details>`
+    : '';
+
+  container.innerHTML = `
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px">
+      ${_kpiCard(queue.length, 'À acheter', 'var(--color-primary)')}
+      ${_kpiCard(nbEnCours, 'En cours', '#d97706')}
+      ${_kpiCard(nbUrgent, 'Prioritaires', '#dc2626')}
+      ${_kpiCard(nbLate, 'En retard', '#dc2626')}
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px">${queueHtml}</div>
+    ${doneHtml}`;
 }
 
 // ============================================================
