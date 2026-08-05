@@ -471,7 +471,7 @@ function showPage(id, btn, bnavBtn) {
   if (id==='livraisons')   { renderLivraisons(); if (APPS_SCRIPT_URL) Promise.all([loadCommandesFromScript(), loadReservationsFromScript()]).then(() => { updateDeliveryBadge(); renderLivraisons(); }).catch(()=>{}); }
   if (id==='finances')     { _ensureDossierLinks(); renderFinances(); if (APPS_SCRIPT_URL) loadCommandesFromScript().then(() => { _ensureDossierLinks(); renderFinances(); }).catch(()=>{}); }
   if (id==='perf')         { _ensureDossierLinks(); renderPerf(); if (APPS_SCRIPT_URL) _loadTachesQuietly().then(() => { _ensureDossierLinks(); renderPerf(); }).catch(()=>{}); }
-  if (id==='achats')       { _ensureDossierLinks(); renderAchats(); if (APPS_SCRIPT_URL) Promise.all([loadDossiers(), _loadTachesQuietly()]).then(() => { _ensureDossierLinks(); renderAchats(); }).catch(()=>renderAchats()); }
+  if (id==='achats')       { _ensureDossierLinks(); renderAchats(); if (APPS_SCRIPT_URL) Promise.all([loadDossiers(), _loadTachesQuietly(), loadDemandesAchatFromScript()]).then(() => { _ensureDossierLinks(); renderAchats(); }).catch(()=>renderAchats()); }
   // Garde d'accès (rôle ou overrides personnalisés)
   if (currentUser) {
     const ep = _effectivePages(currentUser);
@@ -7070,6 +7070,7 @@ loadUsers();
 _migrateLocalUserPasswords(); // hash les mots de passe en clair au premier démarrage
 loadTachesLibres();
 loadCommentsLocal();
+loadDemandesAchatLocal();
 loadNotifications();
 initPWA();
 _autoClearCache();
@@ -14181,14 +14182,49 @@ async function confirmPointage() {
 
 // ============================================================
 // PAGE ACHATS — cockpit du gestionnaire de stock / acheteur
-// Liste les dossiers arrivés à l'étape ACHAT (tâches non terminées) avec
-// article + quantité + client + échéance. Une ligne = une tâche ACHAT.
-// Réutilise le modèle de tâches : Démarrer = pointerStart, Terminer =
-// openPointage → confirmPointage (action END, avance la progression du dossier).
-// Les boutons ne s'affichent que pour l'acheteur assigné (ou admin/chef) ;
-// un nouvel achat se crée en s'assignant l'étape ACHAT depuis l'Attribution.
+// Deux sources fusionnées :
+//  1) Tâches à l'étape ACHAT d'un dossier (Démarrer/Terminer via le modèle
+//     de tâches : pointerStart / openPointage → progression du dossier).
+//  2) Demandes d'achat libres (feuille DemandesAchat, synchro GAS) avec
+//     détails (Besoin/Qtté/Motif/dates) + images (Drive, vues par tous).
+// Chaque tâche ACHAT peut porter une demande liée (par dossierId) qui ajoute
+// motif + notes + images. Bouton « Détails / Images » sur chaque ligne.
 // ============================================================
 const _ACHAT_PRIO_WEIGHT = { urgente:0, haute:1, normale:2 };
+const DEMANDE_ACHAT_MOTIFS = ['Commande','Stock','Réassort','Autre'];
+let demandesAchat = [];
+let _daImages = [];                       // images de travail de la modale (dataURL ou meta Drive)
+let _daCtx    = { dossierId:'', demandeId:'' };
+
+function saveDemandesAchatLocal() { try { localStorage.setItem('pos-demandes-achat', JSON.stringify(demandesAchat)); } catch(e) {} }
+function loadDemandesAchatLocal() { try { const r = localStorage.getItem('pos-demandes-achat'); if (r) demandesAchat = JSON.parse(r); } catch(e) {} }
+async function loadDemandesAchatFromScript() {
+  if (!APPS_SCRIPT_URL) return;
+  try {
+    const r = await apiCall({ action:'getDemandesAchat' });
+    if (r && r.ok && Array.isArray(r.demandes)) { demandesAchat = r.demandes; saveDemandesAchatLocal(); }
+  } catch(e) { /* silencieux : cache local conservé */ }
+}
+async function _syncDemandeAchat(d) {
+  saveDemandesAchatLocal();
+  if (APPS_SCRIPT_URL) { try { await apiCall({ action:'saveDemandeAchat', demande:d }); } catch(e) { console.warn('[Achat] sync échouée', d.id); } }
+}
+function _demandeForDossier(dossierId) {
+  return (Array.isArray(demandesAchat) ? demandesAchat : []).find(x => x.dossierId && String(x.dossierId) === String(dossierId));
+}
+// Vignettes cliquables (ouvrent l'image plein écran via viewUrl/dlUrl/data).
+function _achatImgThumbs(images) {
+  const imgs = (Array.isArray(images) ? images : []).filter(a => (a.type||'').startsWith('image/') || a.fileId || a.data);
+  if (!imgs.length) return '';
+  return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${
+    imgs.slice(0,8).map(a => {
+      const src  = _driveImgSrc(a);
+      const fb   = _driveImgFallback(a);
+      const href = a.viewUrl || a.dlUrl || a.data || src;
+      return `<a href="${href}" target="_blank" rel="noopener" title="${escapeHtml(a.name||'image')}"><img src="${src}" ${fb?`onerror="this.onerror=null;this.src='${fb}'"`:''} style="width:52px;height:52px;object-fit:cover;border-radius:8px;border:1px solid var(--color-border)"/></a>`;
+    }).join('')
+  }</div>`;
+}
 function _achatEnrich(t) {
   const d = (Array.isArray(dossiers) ? dossiers : []).find(x => x.id === t.dossierId);
   return {
@@ -14213,10 +14249,14 @@ function renderAchats() {
   const queue = achatTaches.filter(t => t.statut !== 'TERMINE').map(_achatEnrich);
   const done  = achatTaches.filter(t => t.statut === 'TERMINE').map(_achatEnrich);
 
-  const _todayMid = new Date(); _todayMid.setHours(0,0,0,0);
-  const _isLate = r => { const d = _parseFrDate(r.echeance); return d && d < _todayMid; };
+  // Demandes d'achat libres (non liées à un dossier)
+  const libres     = (Array.isArray(demandesAchat) ? demandesAchat : []).filter(d => !d.dossierId);
+  const libresOpen = libres.filter(d => d.statut !== 'ACHETE');
+  const libresDone = libres.filter(d => d.statut === 'ACHETE');
 
-  // Tri : priorité (urgente→normale) puis échéance la plus proche.
+  const _todayMid = new Date(); _todayMid.setHours(0,0,0,0);
+  const _isLate = ech => { const d = _parseFrDate(ech); return d && d < _todayMid; };
+
   queue.sort((a, b) => {
     const pa = _ACHAT_PRIO_WEIGHT[(a.priorite||'normale').toLowerCase()] ?? 2;
     const pb = _ACHAT_PRIO_WEIGHT[(b.priorite||'normale').toLowerCase()] ?? 2;
@@ -14226,9 +14266,10 @@ function renderAchats() {
     return da - db;
   });
 
-  const nbEnCours = queue.filter(r => r.t.statut === 'EN_COURS').length;
+  const nbEnCours = queue.filter(r => r.t.statut === 'EN_COURS').length + libresOpen.filter(d => d.statut === 'EN_COURS').length;
   const nbUrgent  = queue.filter(r => /urgent|haute/i.test(r.priorite)).length;
-  const nbLate    = queue.filter(_isLate).length;
+  const nbLate    = queue.filter(r => _isLate(r.echeance)).length + libresOpen.filter(d => _isLate(d.dateLivraisonClient)).length;
+  const nbTotal   = queue.length + libresOpen.length;
 
   const _kpiCard = (val, label, color) => `
     <div style="flex:1;min-width:120px;background:var(--surface);border:1px solid var(--color-border);border-radius:12px;padding:12px 14px">
@@ -14242,74 +14283,266 @@ function renderAchats() {
     if (/haute/.test(low))  return `<span style="font-size:9.5px;font-weight:800;background:#fef3c7;color:#d97706;padding:2px 7px;border-radius:8px">HAUTE</span>`;
     return '';
   };
+  const _detailsBtn = onclick => `<button onclick="${onclick}" style="background:var(--surface2);color:var(--color-text-primary);border:1px solid var(--color-border);padding:7px 12px;border-radius:9px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">Détails / Images</button>`;
 
-  const _row = r => {
-    const late     = _isLate(r);
-    const enCours  = r.t.statut === 'EN_COURS';
-    const canAct   = isAdminOrChef || _sameOp(r.operateur, myLabel);
+  // Ligne : tâche ACHAT d'un dossier (+ demande liée éventuelle)
+  const _rowTask = r => {
+    const late    = _isLate(r.echeance);
+    const enCours = r.t.statut === 'EN_COURS';
+    const canAct  = isAdminOrChef || _sameOp(r.operateur, myLabel);
+    const dem     = _demandeForDossier(r.t.dossierId);
     const statusBadge = enCours
       ? `<span style="font-size:10px;font-weight:700;background:#fef3c7;color:#d97706;padding:3px 9px;border-radius:9px;white-space:nowrap">Achat en cours</span>`
       : `<span style="font-size:10px;font-weight:700;background:#dbeafe;color:#2563eb;padding:3px 9px;border-radius:9px;white-space:nowrap">À acheter</span>`;
     let action = '';
-    if (canAct && !enCours) {
-      action = `<button onclick="pointerStart('${r.t.id}')" style="background:var(--color-primary);color:#fff;border:none;padding:8px 14px;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap">Démarrer l'achat</button>`;
-    } else if (canAct && enCours) {
-      action = `<button onclick="openPointage('${r.t.id}','ACHAT','${String(r.ref).replace(/'/g,"\\'")}')" style="background:#16a34a;color:#fff;border:none;padding:8px 14px;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap">Terminer l'achat</button>`;
-    } else {
-      action = `<span style="font-size:11.5px;color:var(--muted);white-space:nowrap">Assigné à ${escapeHtml(r.operateur||'—')}</span>`;
-    }
+    if (canAct && !enCours)      action = `<button onclick="pointerStart('${r.t.id}')" style="background:var(--color-primary);color:#fff;border:none;padding:8px 14px;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap">Démarrer</button>`;
+    else if (canAct && enCours)  action = `<button onclick="openPointage('${r.t.id}','ACHAT','${String(r.ref).replace(/'/g,"\\'")}')" style="background:#16a34a;color:#fff;border:none;padding:8px 14px;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer;white-space:nowrap">Terminer</button>`;
+    else                          action = `<span style="font-size:11.5px;color:var(--muted);white-space:nowrap">Assigné à ${escapeHtml(r.operateur||'—')}</span>`;
     return `
-      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--color-border);border-left:4px solid ${late?'#dc2626':'var(--color-primary)'};border-radius:12px;padding:13px 16px">
-        <div style="flex:1;min-width:180px">
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <span style="font-size:14.5px;font-weight:700;color:var(--text)">${escapeHtml(r.article)}</span>
-            <span style="font-size:12px;font-weight:700;color:var(--color-primary);background:var(--color-primary-light);padding:1px 8px;border-radius:8px">× ${r.qty}</span>
-            ${_prioBadge(r.priorite)}
+      <div style="background:var(--surface);border:1px solid var(--color-border);border-left:4px solid ${late?'#dc2626':'var(--color-primary)'};border-radius:12px;padding:13px 16px">
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+          <div style="flex:1;min-width:180px">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <span style="font-size:14.5px;font-weight:700;color:var(--text)">${escapeHtml(dem?.besoin || r.article)}</span>
+              <span style="font-size:12px;font-weight:700;color:var(--color-primary);background:var(--color-primary-light);padding:1px 8px;border-radius:8px">× ${dem?.quantite || r.qty}</span>
+              ${_prioBadge(r.priorite)}
+              ${dem?.motif ? `<span style="font-size:9.5px;font-weight:700;background:var(--surface2);color:var(--muted);padding:2px 7px;border-radius:8px">${escapeHtml(dem.motif)}</span>` : ''}
+            </div>
+            <div style="font-size:12px;color:var(--muted);margin-top:4px;display:flex;gap:10px;flex-wrap:wrap">
+              <span>${escapeHtml(r.ref)}</span><span>·</span><span>${escapeHtml(r.client)}</span>
+              ${r.echeance ? `<span>·</span><span style="color:${late?'#dc2626':'var(--muted)'};font-weight:${late?'700':'400'}">Livraison ${escapeHtml(r.echeance)}${late?' (retard)':''}</span>` : ''}
+              <span>·</span><span>Acheteur : ${escapeHtml(r.operateur||'—')}</span>
+            </div>
+            ${dem?.notes ? `<div style="font-size:12px;color:var(--text);margin-top:6px;white-space:pre-wrap">${escapeHtml(dem.notes)}</div>` : ''}
+            ${_achatImgThumbs(dem?.images)}
           </div>
-          <div style="font-size:12px;color:var(--muted);margin-top:4px;display:flex;gap:10px;flex-wrap:wrap">
-            <span>${escapeHtml(r.ref)}</span>
-            <span>·</span>
-            <span>${escapeHtml(r.client)}</span>
-            ${r.echeance ? `<span>·</span><span style="color:${late?'#dc2626':'var(--muted)'};font-weight:${late?'700':'400'}">Échéance ${escapeHtml(r.echeance)}${late?' (en retard)':''}</span>` : ''}
-            <span>·</span>
-            <span>Acheteur : ${escapeHtml(r.operateur||'—')}</span>
-          </div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">${statusBadge}${_detailsBtn(`openDemandeAchat('${r.t.dossierId}')`)}${action}</div>
         </div>
-        <div style="display:flex;align-items:center;gap:12px">${statusBadge}${action}</div>
       </div>`;
   };
 
-  const queueHtml = queue.length
-    ? queue.map(_row).join('')
-    : `<div style="text-align:center;color:var(--muted);padding:48px 20px;background:var(--surface);border:1px dashed var(--color-border);border-radius:14px">
-         <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" style="margin:0 auto 12px;display:block;opacity:.4"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
-         <p style="font-size:14px;margin:0 0 4px;font-weight:600;color:var(--text)">Aucun achat en attente</p>
-         <p style="font-size:12.5px;margin:0">Un achat apparaît ici quand l'étape « Achat » d'un dossier est assignée (depuis la page Attribution).</p>
-       </div>`;
+  // Ligne : demande d'achat libre
+  const _rowLibre = d => {
+    const late    = _isLate(d.dateLivraisonClient);
+    const enCours = d.statut === 'EN_COURS';
+    const statusBadge = enCours
+      ? `<span style="font-size:10px;font-weight:700;background:#fef3c7;color:#d97706;padding:3px 9px;border-radius:9px;white-space:nowrap">En cours</span>`
+      : `<span style="font-size:10px;font-weight:700;background:#dbeafe;color:#2563eb;padding:3px 9px;border-radius:9px;white-space:nowrap">À acheter</span>`;
+    const action = enCours
+      ? `<button onclick="demandeAchatSetStatut('${d.id}','ACHETE')" style="background:#16a34a;color:#fff;border:none;padding:8px 14px;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer">Terminer</button>`
+      : `<button onclick="demandeAchatSetStatut('${d.id}','EN_COURS')" style="background:var(--color-primary);color:#fff;border:none;padding:8px 14px;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer">Démarrer</button>`;
+    return `
+      <div style="background:var(--surface);border:1px solid var(--color-border);border-left:4px solid ${late?'#dc2626':'#0891b2'};border-radius:12px;padding:13px 16px">
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+          <div style="flex:1;min-width:180px">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <span style="font-size:14.5px;font-weight:700;color:var(--text)">${escapeHtml(d.besoin||'—')}</span>
+              <span style="font-size:12px;font-weight:700;color:var(--color-primary);background:var(--color-primary-light);padding:1px 8px;border-radius:8px">× ${d.quantite||1}</span>
+              ${d.motif ? `<span style="font-size:9.5px;font-weight:700;background:var(--surface2);color:var(--muted);padding:2px 7px;border-radius:8px">${escapeHtml(d.motif)}</span>` : ''}
+              <span style="font-size:9.5px;font-weight:700;background:#e0f2fe;color:#0891b2;padding:2px 7px;border-radius:8px">Demande libre</span>
+            </div>
+            <div style="font-size:12px;color:var(--muted);margin-top:4px;display:flex;gap:10px;flex-wrap:wrap">
+              ${d.ref ? `<span>${escapeHtml(d.ref)}</span><span>·</span>` : ''}
+              ${d.dateLivraisonClient ? `<span style="color:${late?'#dc2626':'var(--muted)'};font-weight:${late?'700':'400'}">Livraison ${escapeHtml(d.dateLivraisonClient)}${late?' (retard)':''}</span><span>·</span>` : ''}
+              <span>Demandé le ${escapeHtml(d.dateDemande||'—')}</span>
+            </div>
+            ${d.notes ? `<div style="font-size:12px;color:var(--text);margin-top:6px;white-space:pre-wrap">${escapeHtml(d.notes)}</div>` : ''}
+            ${_achatImgThumbs(d.images)}
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            ${statusBadge}
+            <button onclick="openDemandeAchat('','${d.id}')" style="background:var(--surface2);color:var(--color-text-primary);border:1px solid var(--color-border);padding:7px 12px;border-radius:9px;font-size:12px;font-weight:600;cursor:pointer">Modifier</button>
+            ${action}
+            <button onclick="deleteDemandeAchat('${d.id}')" title="Supprimer" style="background:none;color:#dc2626;border:1px solid var(--color-border);padding:7px 10px;border-radius:9px;font-size:12px;font-weight:600;cursor:pointer">✕</button>
+          </div>
+        </div>
+      </div>`;
+  };
 
-  const doneHtml = done.length
-    ? `<details style="margin-top:22px">
-         <summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--muted);padding:6px 0">Achats terminés (${done.length})</summary>
-         <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
-           ${done.slice(-30).reverse().map(r => `
-             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--surface2);border:1px solid var(--color-border);border-radius:10px;padding:10px 14px;opacity:.85">
-               <span style="font-size:13px;font-weight:600;color:var(--text)">${escapeHtml(r.article)}</span>
-               <span style="font-size:11.5px;color:var(--muted)">× ${r.qty} · ${escapeHtml(r.ref)} · ${escapeHtml(r.client)}</span>
-               <span style="margin-left:auto;font-size:10px;font-weight:700;background:#dcfce7;color:#16a34a;padding:3px 9px;border-radius:9px">Acheté</span>
-             </div>`).join('')}
-         </div>
-       </details>`
-    : '';
+  const rowsHtml = (queue.map(_rowTask).join('') + libresOpen.map(_rowLibre).join('')) || `
+    <div style="text-align:center;color:var(--muted);padding:48px 20px;background:var(--surface);border:1px dashed var(--color-border);border-radius:14px">
+      <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" style="margin:0 auto 12px;display:block;opacity:.4"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+      <p style="font-size:14px;margin:0 0 4px;font-weight:600;color:var(--text)">Aucun achat en attente</p>
+      <p style="font-size:12.5px;margin:0">Créez une demande d'achat, ou assignez l'étape « Achat » d'un dossier depuis l'Attribution.</p>
+    </div>`;
+
+  const doneCount = done.length + libresDone.length;
+  const doneHtml = doneCount ? `
+    <details style="margin-top:22px">
+      <summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--muted);padding:6px 0">Achats terminés (${doneCount})</summary>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+        ${done.slice(-30).reverse().map(r => `
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--surface2);border:1px solid var(--color-border);border-radius:10px;padding:10px 14px;opacity:.85">
+            <span style="font-size:13px;font-weight:600;color:var(--text)">${escapeHtml(r.article)}</span>
+            <span style="font-size:11.5px;color:var(--muted)">× ${r.qty} · ${escapeHtml(r.ref)} · ${escapeHtml(r.client)}</span>
+            <span style="margin-left:auto;font-size:10px;font-weight:700;background:#dcfce7;color:#16a34a;padding:3px 9px;border-radius:9px">Acheté</span>
+          </div>`).join('')}
+        ${libresDone.slice(-30).reverse().map(d => `
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--surface2);border:1px solid var(--color-border);border-radius:10px;padding:10px 14px;opacity:.85">
+            <span style="font-size:13px;font-weight:600;color:var(--text)">${escapeHtml(d.besoin||'—')}</span>
+            <span style="font-size:11.5px;color:var(--muted)">× ${d.quantite||1}${d.ref?' · '+escapeHtml(d.ref):''} · Demande libre</span>
+            <button onclick="deleteDemandeAchat('${d.id}')" title="Supprimer" style="margin-left:auto;background:none;color:#dc2626;border:1px solid var(--color-border);padding:4px 8px;border-radius:8px;font-size:11px;cursor:pointer">✕</button>
+          </div>`).join('')}
+      </div>
+    </details>` : '';
 
   container.innerHTML = `
+    <div style="display:flex;justify-content:flex-end;margin-bottom:14px">
+      <button onclick="openDemandeAchat('','')" style="background:var(--color-primary);color:#fff;border:none;padding:9px 16px;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Nouvelle demande d'achat
+      </button>
+    </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px">
-      ${_kpiCard(queue.length, 'À acheter', 'var(--color-primary)')}
+      ${_kpiCard(nbTotal, 'À acheter', 'var(--color-primary)')}
       ${_kpiCard(nbEnCours, 'En cours', '#d97706')}
       ${_kpiCard(nbUrgent, 'Prioritaires', '#dc2626')}
       ${_kpiCard(nbLate, 'En retard', '#dc2626')}
     </div>
-    <div style="display:flex;flex-direction:column;gap:10px">${queueHtml}</div>
+    <div style="display:flex;flex-direction:column;gap:10px">${rowsHtml}</div>
     ${doneHtml}`;
+}
+
+// ── Statut d'une demande libre (Démarrer / Terminer) ────────
+function demandeAchatSetStatut(id, statut) {
+  const d = demandesAchat.find(x => String(x.id) === String(id));
+  if (!d) return;
+  d.statut = statut;
+  _syncDemandeAchat(d);
+  renderAchats();
+  showToast(statut === 'ACHETE' ? 'Achat marqué comme terminé' : 'Achat démarré');
+}
+
+function deleteDemandeAchat(id) {
+  const d = demandesAchat.find(x => String(x.id) === String(id));
+  if (!d) return;
+  if (!confirm(`Supprimer la demande d'achat « ${d.besoin||''} » ?`)) return;
+  demandesAchat = demandesAchat.filter(x => String(x.id) !== String(id));
+  saveDemandesAchatLocal();
+  if (APPS_SCRIPT_URL) { apiCall({ action:'deleteDemandeAchat', id }).catch(()=>{}); }
+  renderAchats();
+  showToast('Demande supprimée', 'info');
+}
+
+// ── Modale demande d'achat (création libre OU liée à un dossier) ──
+function openDemandeAchat(dossierId, demandeId) {
+  _daCtx = { dossierId: dossierId || '', demandeId: demandeId || '' };
+  _daImages = [];
+  let pre = { ref:'', besoin:'', quantite:1, dateLivraisonClient:'', motif:'Commande', dateDemande:'', notes:'' };
+
+  if (demandeId) {
+    const d = demandesAchat.find(x => String(x.id) === String(demandeId));
+    if (d) { pre = { ...pre, ...d }; _daImages = Array.isArray(d.images) ? d.images.slice() : []; }
+  } else if (dossierId) {
+    const dos = (Array.isArray(dossiers) ? dossiers : []).find(x => x.id === dossierId);
+    const existing = _demandeForDossier(dossierId);
+    if (existing) { _daCtx.demandeId = existing.id; pre = { ...pre, ...existing }; _daImages = Array.isArray(existing.images) ? existing.images.slice() : []; }
+    else if (dos) pre = { ...pre, ref:dos.numeroDossier||'', besoin:dos.produit||'', quantite:dos.quantite||1, dateLivraisonClient:dos.dateLivraison||'' };
+  }
+  if (!pre.dateDemande) { const t = new Date(); pre.dateDemande = `${String(t.getDate()).padStart(2,'0')}/${String(t.getMonth()+1).padStart(2,'0')}/${t.getFullYear()}`; }
+
+  const isLinked = !!_daCtx.dossierId;
+  const _inp = 'width:100%;padding:9px 11px;border:1.5px solid var(--color-border);border-radius:8px;font-size:13.5px;font-family:inherit;outline:none;color:var(--color-text-primary);background:var(--color-surface)';
+  const _lbl = 'font-size:11.5px;font-weight:600;color:var(--color-text-secondary);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.03em';
+
+  let modal = document.getElementById('demandeAchatModal');
+  if (!modal) { modal = document.createElement('div'); modal.id = 'demandeAchatModal'; document.body.appendChild(modal); }
+  modal.style.cssText = 'display:flex;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;align-items:center;justify-content:center;padding:16px';
+  modal.onclick = e => { if (e.target === modal) closeDemandeAchat(); };
+  modal.innerHTML = `
+    <div style="background:var(--color-surface);border-radius:16px;width:100%;max-width:520px;max-height:92vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,.25)">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--color-border)">
+        <h3 style="margin:0;font-size:15px;font-weight:700;color:var(--color-text-primary)">${demandeId||isLinked ? 'Détails de l\'achat' : 'Nouvelle demande d\'achat'}</h3>
+        <button onclick="closeDemandeAchat()" style="background:none;border:none;cursor:pointer;font-size:22px;color:var(--color-text-muted);line-height:1">×</button>
+      </div>
+      <div style="padding:18px 20px;display:flex;flex-direction:column;gap:13px">
+        <div><label style="${_lbl}">Besoin (article à acheter) *</label><input id="daBesoin" type="text" value="${escapeHtml(pre.besoin||'')}" placeholder="Ex: Chop à bière" style="${_inp}"/></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:11px">
+          <div><label style="${_lbl}">Quantité *</label><input id="daQty" type="number" min="1" value="${Number(pre.quantite)||1}" style="${_inp}"/></div>
+          <div><label style="${_lbl}">Réf. commande</label><input id="daRef" type="text" value="${escapeHtml(pre.ref||'')}" placeholder="CMD-332" ${isLinked?'readonly':''} style="${_inp}${isLinked?';opacity:.7':''}"/></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:11px">
+          <div><label style="${_lbl}">Date livraison client</label><input id="daDateLiv" type="text" value="${escapeHtml(pre.dateLivraisonClient||'')}" placeholder="23.07.26" style="${_inp}"/></div>
+          <div><label style="${_lbl}">Date de demande</label><input id="daDateDem" type="text" value="${escapeHtml(pre.dateDemande||'')}" placeholder="22.07.26" style="${_inp}"/></div>
+        </div>
+        <div><label style="${_lbl}">Motif</label>
+          <select id="daMotif" style="${_inp}">${DEMANDE_ACHAT_MOTIFS.map(m => `<option value="${m}" ${(pre.motif||'').toLowerCase()===m.toLowerCase()?'selected':''}>${m}</option>`).join('')}</select>
+        </div>
+        <div><label style="${_lbl}">Détails / notes</label><textarea id="daNotes" rows="2" placeholder="Spécifications, fournisseur, référence produit…" style="${_inp};resize:vertical">${escapeHtml(pre.notes||'')}</textarea></div>
+        <div>
+          <label style="${_lbl}">Images</label>
+          <div id="daImgGrid" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"></div>
+          <label style="display:inline-flex;align-items:center;gap:7px;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--color-primary);background:var(--color-primary-light);padding:8px 13px;border-radius:8px">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Ajouter des images
+            <input type="file" accept="image/*" multiple style="display:none" onchange="_daAddImages(this.files)"/>
+          </label>
+        </div>
+      </div>
+      <div style="padding:14px 20px;border-top:1px solid var(--color-border);display:flex;gap:10px;justify-content:flex-end">
+        <button onclick="closeDemandeAchat()" style="padding:9px 16px;border:1.5px solid var(--color-border);background:none;border-radius:8px;font-size:13.5px;font-weight:500;color:var(--color-text-secondary);cursor:pointer">Annuler</button>
+        <button onclick="saveDemandeAchatForm()" style="padding:9px 18px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:13.5px;font-weight:700;cursor:pointer">Enregistrer</button>
+      </div>
+    </div>`;
+  _daRenderImgGrid();
+  setTimeout(() => document.getElementById('daBesoin')?.focus(), 80);
+}
+function closeDemandeAchat() { const m = document.getElementById('demandeAchatModal'); if (m) m.style.display = 'none'; }
+
+function _daRenderImgGrid() {
+  const grid = document.getElementById('daImgGrid');
+  if (!grid) return;
+  grid.innerHTML = _daImages.map((a, i) => `
+    <div style="position:relative;width:56px;height:56px">
+      <img src="${_driveImgSrc(a)}" ${_driveImgFallback(a)?`onerror="this.onerror=null;this.src='${_driveImgFallback(a)}'"`:''} style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid var(--color-border)"/>
+      <button onclick="_daRemoveImage(${i})" title="Retirer" style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;background:#dc2626;color:#fff;border:none;font-size:11px;line-height:1;cursor:pointer">×</button>
+    </div>`).join('');
+}
+function _daRemoveImage(i) { _daImages.splice(i, 1); _daRenderImgGrid(); }
+function _daAddImages(files) {
+  [...(files||[])].forEach(file => {
+    if (!file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = e => { _daImages.push({ name:file.name, type:file.type, data:e.target.result }); _daRenderImgGrid(); };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function saveDemandeAchatForm() {
+  const besoin = document.getElementById('daBesoin')?.value.trim();
+  const qty    = parseInt(document.getElementById('daQty')?.value) || 0;
+  if (!besoin) { showToast('Le besoin (article) est requis', 'error'); return; }
+  if (qty <= 0) { showToast('Quantité invalide', 'error'); return; }
+
+  showToast('Enregistrement…', 'info');
+  // Upload des nouvelles images (celles sans fileId) sur Drive → visibles par tous
+  const images = [];
+  for (const a of _daImages) {
+    if (a.fileId) { images.push(a); continue; }
+    if (!a.data)  continue;
+    try {
+      const r = await apiCall({ action:'uploadFile', fileName:a.name || `achat-${Date.now()}.jpg`, mimeType:a.type || 'image/jpeg', base64Data:a.data });
+      images.push(r && r.ok ? { name:r.fileName||a.name, type:a.type||'image/jpeg', fileId:r.fileId, viewUrl:r.viewUrl, dlUrl:r.dlUrl } : { name:a.name, type:a.type, data:a.data });
+    } catch(e) { images.push({ name:a.name, type:a.type, data:a.data }); }
+  }
+
+  const existing = _daCtx.demandeId ? demandesAchat.find(x => String(x.id) === String(_daCtx.demandeId)) : null;
+  const d = existing || { id: 'DA_' + Date.now() + '_' + Math.random().toString(36).slice(2,6), statut:'A_ACHETER', creePar: currentUser?.label || 'Gestionnaire', timestamp: new Date().toISOString() };
+  d.dossierId           = _daCtx.dossierId || d.dossierId || '';
+  d.ref                 = document.getElementById('daRef')?.value.trim() || '';
+  d.besoin              = besoin;
+  d.quantite            = qty;
+  d.dateLivraisonClient = document.getElementById('daDateLiv')?.value.trim() || '';
+  d.dateDemande         = document.getElementById('daDateDem')?.value.trim() || '';
+  d.motif               = document.getElementById('daMotif')?.value || '';
+  d.notes               = document.getElementById('daNotes')?.value.trim() || '';
+  d.images              = images;
+  if (!existing) demandesAchat.unshift(d);
+
+  await _syncDemandeAchat(d);
+  closeDemandeAchat();
+  renderAchats();
+  showToast('Demande d\'achat enregistrée');
 }
 
 // ============================================================

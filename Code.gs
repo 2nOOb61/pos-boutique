@@ -135,6 +135,9 @@ function doPost(e) {
     else if (action === 'getModifs')         result = handleGetModifs(data);
     else if (action === 'saveShopConfig')    result = handleSaveShopConfig(data);
     else if (action === 'saveRythme')        result = handleSaveRythme(data);
+    else if (action === 'saveDemandeAchat')  result = handleSaveDemandeAchat(data);
+    else if (action === 'getDemandesAchat')  result = handleGetDemandesAchat(data);
+    else if (action === 'deleteDemandeAchat') result = handleDeleteDemandeAchat(data);
     else result = { ok:false, error:'Action inconnue: ' + action };
 
     return jsonResp(result);
@@ -183,6 +186,8 @@ function doGet(e) {
       else if (action === 'setTacheLibrePhotos') result = handleSetTacheLibrePhotos(data);
       else if (action === 'saveDossier')       result = handleSaveDossier(data);
       else if (action === 'creerDossierManuel') result = handleCreerDossierManuel(data);
+      else if (action === 'saveDemandeAchat')  result = handleSaveDemandeAchat(data);
+      else if (action === 'deleteDemandeAchat') result = handleDeleteDemandeAchat(data);
       else if (action === 'getControlPatron')   result = handleGetControlPatron(data);
       else result = { ok:false, error:'Action payload inconnue: ' + action };
       return jsonResp(result);
@@ -222,6 +227,7 @@ function doGet(e) {
     if (action === 'getJournal')        return jsonResp(handleGetJournal(e.parameter));
     if (action === 'getDriveFolderUrl') return jsonResp(handleGetDriveFolderUrl());
     if (action === 'getSharedFiles')    return jsonResp(handleGetSharedFiles());
+    if (action === 'getDemandesAchat')  return jsonResp(handleGetDemandesAchat(e.parameter));
     return jsonResp({ ok:false, error:'Action GET inconnue: ' + action });
   } catch(err) {
     return jsonResp({ ok:false, error:'GET error: ' + err.message });
@@ -2197,6 +2203,76 @@ function handleAddComment(data) {
 
 function _safeParse(val, fallback) {
   try { return val ? JSON.parse(val) : fallback; } catch(e) { return fallback; }
+}
+
+// ============================================================
+// DEMANDES D'ACHAT — partagées entre tous (gestionnaire de stock)
+// Images stockées via l'action générique 'uploadFile' (Drive partagé) →
+// on ne persiste ici que les métadonnées {name,type,fileId,viewUrl,dlUrl}.
+// ============================================================
+const SHEET_DEMANDES_ACHAT  = 'DemandesAchat';
+const DEMANDE_ACHAT_HEADERS = ['ID','Ref','DossierID','Besoin','Quantite',
+  'DateLivraisonClient','Motif','DateDemande','Statut','Images','Notes','CreePar','Timestamp'];
+
+function handleGetDemandesAchat(data) {
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sh = ensureSheet(ss, SHEET_DEMANDES_ACHAT, DEMANDE_ACHAT_HEADERS);
+  const rows = sh.getDataRange().getValues().slice(1);
+  const demandes = rows.filter(r => r[0]).map(r => ({
+    id:                  String(r[0]),
+    ref:                 String(r[1]  || ''),
+    dossierId:           String(r[2]  || ''),
+    besoin:              String(r[3]  || ''),
+    quantite:            r[4],
+    dateLivraisonClient: String(r[5]  || ''),
+    motif:               String(r[6]  || ''),
+    dateDemande:         String(r[7]  || ''),
+    statut:              String(r[8]  || 'A_ACHETER'),
+    images:              _safeParse(r[9], []),
+    notes:               String(r[10] || ''),
+    creePar:             String(r[11] || ''),
+    timestamp:           String(r[12] || '')
+  }));
+  return { ok:true, demandes };
+}
+
+function handleSaveDemandeAchat(data) {
+  const d = data.demande;
+  if (!d || !d.id) return { ok:false, error:'demande.id requis' };
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sh = ensureSheet(ss, SHEET_DEMANDES_ACHAT, DEMANDE_ACHAT_HEADERS);
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(6000);
+    const row = [
+      String(d.id), d.ref || '', d.dossierId || '', d.besoin || '',
+      d.quantite != null ? d.quantite : '', d.dateLivraisonClient || '',
+      d.motif || '', d.dateDemande || '', d.statut || 'A_ACHETER',
+      JSON.stringify(d.images || []), d.notes || '', d.creePar || '',
+      d.timestamp || new Date().toISOString()
+    ];
+    const rows = sh.getDataRange().getValues();
+    for (let i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) === String(d.id)) {
+        sh.getRange(i + 1, 1, 1, row.length).setValues([row]);
+        return { ok:true, updated:true };
+      }
+    }
+    sh.appendRow(row);
+    return { ok:true, created:true };
+  } finally { try { lock.releaseLock(); } catch(e) {} }
+}
+
+function handleDeleteDemandeAchat(data) {
+  const id = data.id;
+  if (!id) return { ok:false, error:'id requis' };
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sh = ensureSheet(ss, SHEET_DEMANDES_ACHAT, DEMANDE_ACHAT_HEADERS);
+  const rows = sh.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(id)) { sh.deleteRow(i + 1); return { ok:true, deleted:true }; }
+  }
+  return { ok:true, deleted:false };
 }
 
 // ============================================================
