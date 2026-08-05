@@ -12759,7 +12759,20 @@ function _buildSeqMaps() {
   const mk = arr => {
     const m = new Map();
     (Array.isArray(arr) ? arr : []).slice()
-      .sort((a, b) => (parseSaleDate(a.date) || 0) - (parseSaleDate(b.date) || 0))
+      .sort((a, b) => {
+        const diff = (parseSaleDate(a.date) || 0) - (parseSaleDate(b.date) || 0);
+        if (diff) return diff;
+        // Départage DÉTERMINISTE par id quand les dates sont égales. Après un aller-retour
+        // GAS les dates sont tronquées à la seconde → plusieurs commandes d'une même seconde
+        // ont une date identique. Sans ce tie-break, elles étaient départagées par leur
+        // POSITION dans le tableau `commandes`, qui varie selon la provenance (localStorage /
+        // fetch GAS / fusion du polling 30 s). Le rang d'un même dossier basculait alors de N
+        // à N±1 entre deux rendus → la fiche imprimée affichait CMD-400 pendant que la vue PAO
+        // montrait CMD-399. Les ids `_genUid` encodent l'instant de création en base36 → tri
+        // stable ET ~chronologique, donc print / Attribution / PAO calculent le même rang.
+        const ia = String(a.id), ib = String(b.id);
+        return ia < ib ? -1 : ia > ib ? 1 : 0;
+      })
       .forEach((o, i) => m.set(String(o.id), i + 1));
     return m;
   };
