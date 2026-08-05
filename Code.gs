@@ -2214,6 +2214,13 @@ const SHEET_DEMANDES_ACHAT  = 'DemandesAchat';
 const DEMANDE_ACHAT_HEADERS = ['ID','Ref','DossierID','Besoin','Quantite',
   'DateLivraisonClient','Motif','DateDemande','Statut','Images','Notes','CreePar','Timestamp'];
 
+// Un champ date saisi en "05/08/2026" est auto-converti en Date par Sheets →
+// le renvoyer en jj/mm/aaaa (sinon String(Date) = "Wed Aug 05 2026 …"). Les
+// dates au format libre (ex "23.07.26") restent des chaînes et sont conservées.
+function _daDateStr_(v) {
+  if (v instanceof Date && !isNaN(v)) return Utilities.formatDate(v, Session.getScriptTimeZone(), 'dd/MM/yyyy');
+  return String(v || '');
+}
 function handleGetDemandesAchat(data) {
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const sh = ensureSheet(ss, SHEET_DEMANDES_ACHAT, DEMANDE_ACHAT_HEADERS);
@@ -2224,9 +2231,9 @@ function handleGetDemandesAchat(data) {
     dossierId:           String(r[2]  || ''),
     besoin:              String(r[3]  || ''),
     quantite:            r[4],
-    dateLivraisonClient: String(r[5]  || ''),
+    dateLivraisonClient: _daDateStr_(r[5]),
     motif:               String(r[6]  || ''),
-    dateDemande:         String(r[7]  || ''),
+    dateDemande:         _daDateStr_(r[7]),
     statut:              String(r[8]  || 'A_ACHETER'),
     images:              _safeParse(r[9], []),
     notes:               String(r[10] || ''),
