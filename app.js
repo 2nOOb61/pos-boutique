@@ -4273,7 +4273,8 @@ async function apiCall(payload) {
   if (getActions.includes(payload.action)) {
     const buildUrl = () => {
       let url = APPS_SCRIPT_URL + '?action=' + payload.action;
-      if (payload.limit)     url += '&limit='     + encodeURIComponent(payload.limit);
+      if (payload.limit)        url += '&limit='  + encodeURIComponent(payload.limit);
+      if (payload.offset != null) url += '&offset=' + encodeURIComponent(payload.offset);
       if (payload.username)  url += '&username='  + encodeURIComponent(payload.username);
       if (payload.password)  url += '&password='  + encodeURIComponent(payload.password);
       if (payload.statut)    url += '&statut='    + encodeURIComponent(payload.statut);
@@ -7086,7 +7087,26 @@ async function loadModifsFromScript() {
 
 async function loadCommandesFromScript() {
   if (!APPS_SCRIPT_URL) return;
-  const r = await apiCall({ action: 'getCommandes' });
+  // Chargement EN TRANCHES : la réponse complète (~450 Ko) timeout sur réseau
+  // faible → l'URL /macros/echo à usage unique renvoyait 404/HTML. On récupère
+  // par pages de PAGE commandes (réponses ~90 Ko, fiables), puis on fusionne.
+  const PAGE = 100;
+  let remote = [], offset = 0, gotResponse = false;
+  for (let guard = 0; guard < 500; guard++) { // garde-fou anti-boucle infinie
+    const rp = await apiCall({ action: 'getCommandes', limit: PAGE, offset });
+    if (!rp || !rp.ok || !Array.isArray(rp.commandes)) break;
+    gotResponse = true;
+    remote = remote.concat(rp.commandes);
+    if (rp.commandes.length < PAGE) break;                       // dernière page
+    if (typeof rp.total === 'number' && remote.length >= rp.total) break;
+    offset += PAGE;
+  }
+  // Échec réseau total (aucune page reçue) → garder le cache local intact
+  if (!gotResponse) return;
+  // Dédoublonnage (une commande ajoutée pendant la pagination peut décaler l'offset)
+  const _seen = new Set();
+  remote = remote.filter(c => { const k = String(c.id); if (_seen.has(k)) return false; _seen.add(k); return true; });
+  const r = { ok:true, commandes: remote };
   if (r && r.ok && Array.isArray(r.commandes) && r.commandes.length > 0) {
     const sheetIds  = new Set(r.commandes.map(c => String(c.id)));
     const localOnly = commandes.filter(c => !sheetIds.has(String(c.id)));

@@ -105,7 +105,7 @@ function doPost(e) {
     else if (action === 'getReservations')   result = handleGetReservations();
     else if (action === 'addCommande')       result = handleAddCommande(data);
     else if (action === 'updateCommande')    result = handleUpdateCommande(data);
-    else if (action === 'getCommandes')      result = handleGetCommandes();
+    else if (action === 'getCommandes')      result = handleGetCommandes(data);
     else if (action === 'addEncaissement')   result = handleAddEncaissement(data);
     else if (action === 'getEncaissements')  result = handleGetEncaissements(data);
     else if (action === 'addArretCaisse')    result = handleAddArretCaisse(data);
@@ -204,7 +204,7 @@ function doGet(e) {
     if (action === 'getSales')        return jsonResp(handleGetSales(e.parameter));
     if (action === 'getUsers')        return jsonResp(handleGetUsers());
     if (action === 'getReservations') return jsonResp(handleGetReservations());
-    if (action === 'getCommandes')    return jsonResp(handleGetCommandes());
+    if (action === 'getCommandes')    return jsonResp(handleGetCommandes(e.parameter));
     if (action === 'getEncaissements') return jsonResp(handleGetEncaissements(e.parameter));
     if (action === 'getArretsCaisse')  return jsonResp(handleGetArretsCaisse(e.parameter));
     if (action === 'getDossiers')     return jsonResp(handleGetDossiers(e.parameter));
@@ -1088,13 +1088,13 @@ function _fmtDateFr_(v) {
   return String(v);
 }
 
-function handleGetCommandes() {
+function handleGetCommandes(data) {
   const sh = getSS().getSheetByName(SHEET_COMMANDES);
-  if (!sh) return { ok:true, commandes:[] };
+  if (!sh) return { ok:true, commandes:[], total:0 };
   const rows = sh.getDataRange().getValues();
   // Détecter l'ancien format (colonne 3 = Fournisseur) vs nouveau (colonne 3 = Caissier)
   const isOldFormat = rows.length > 0 && String(rows[0][2] || '').toLowerCase() === 'fournisseur';
-  if (isOldFormat) return { ok:true, commandes:[] };
+  if (isOldFormat) return { ok:true, commandes:[], total:0 };
   const map = {}, order = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
@@ -1134,7 +1134,15 @@ function handleGetCommandes() {
       }).filter(i => i.name);
     }
   }
-  return { ok:true, commandes: order.map(id => map[id]).reverse() };
+  // Ordre canonique : plus récent en tête (reverse de l'ordre feuille)
+  const all = order.map(id => map[id]).reverse();
+  // Pagination optionnelle (chargement en tranches côté client pour éviter que la
+  // réponse complète — ~450 Ko — ne timeout sur réseau faible). Sans `limit`,
+  // renvoie tout (rétro-compatible avec l'ancien frontend).
+  const offset = Math.max(0, Number(data && data.offset) || 0);
+  const limit  = Number(data && data.limit) || 0;
+  const page   = limit > 0 ? all.slice(offset, offset + limit) : all;
+  return { ok:true, commandes: page, total: all.length };
 }
 
 // Détecte les cellules en erreur (#ERROR!, #REF!…) de la feuille Commandes + leur formule
