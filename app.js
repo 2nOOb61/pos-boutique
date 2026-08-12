@@ -249,15 +249,74 @@ function escapeHtml(str) {
     .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
-// ── Stockage local sécurisé (protection QuotaExceededError) ──
-function safeLocalSet(key, value) {
+// ── Récupération d'espace localStorage ──
+// Cause n°1 de saturation : les images base64 (produits/commandes) restent
+// stockées sous leur propre clé même après suppression du produit/commande.
+// Ces clés « orphelines » s'accumulent sans limite → quota dépassé pour ce
+// navigateur uniquement (d'où « ça ne marche que pour un seul utilisateur »).
+// Retourne le nombre de clés libérées.
+function _reclaimOrphanStorage() {
+  let freed = 0;
   try {
-    localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
-  } catch(e) {
-    if (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED') {
-      showToast(' Stockage local saturé — synchronisation forcée recommandée', 'error');
-      console.error('localStorage quota exceeded pour la clé:', key);
+    const prodIds = new Set((Array.isArray(products)  ? products  : []).map(p => String(p.id)));
+    const cmdIds  = new Set((Array.isArray(commandes) ? commandes : []).map(c => String(c.id)));
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      if (k.indexOf('pos-prod-img-') === 0) {
+        if (!prodIds.has(k.slice(13))) { localStorage.removeItem(k); freed++; }
+      } else if (k.indexOf('pos-cmd-photos-') === 0) {
+        if (!cmdIds.has(k.slice(15))) { localStorage.removeItem(k); freed++; }
+      }
     }
+  } catch(e) { console.warn('[Storage] purge orphelins:', e); }
+  return freed;
+}
+
+// Dernier recours : réduit l'historique local déjà présent sur le serveur.
+// Ne touche JAMAIS pos-pending-sales (ventes hors-ligne non synchronisées).
+// sales/encaissements sont ordonnés du plus récent au plus ancien (unshift + tri
+// desc) → on garde le DÉBUT du tableau (les plus récents), le serveur garde tout.
+function _trimLocalHistory() {
+  let trimmed = 0;
+  try {
+    if (Array.isArray(sales) && sales.length > 1000) {
+      sales = sales.slice(0, 1000);
+      try { localStorage.setItem('pos-sales', JSON.stringify(sales)); trimmed++; } catch(e) {}
+    }
+    if (Array.isArray(encaissements) && encaissements.length > 1000) {
+      encaissements = encaissements.slice(0, 1000);
+      try { localStorage.setItem('pos-encaissements', JSON.stringify(encaissements)); trimmed++; } catch(e) {}
+    }
+  } catch(e) { console.warn('[Storage] trim historique:', e); }
+  return trimmed;
+}
+
+// ── Stockage local sécurisé (protection QuotaExceededError) ──
+// En cas de saturation : libère l'espace (orphelins puis historique) et réessaie,
+// pour que l'appareil reparte tout seul au lieu de rester bloqué sur l'erreur.
+function safeLocalSet(key, value) {
+  const str = typeof value === 'string' ? value : JSON.stringify(value);
+  try {
+    localStorage.setItem(key, str);
+    return true;
+  } catch(e) {
+    if (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22) {
+      console.warn('[Storage] quota atteint pour', key, '→ récupération d\'espace');
+      const freed = _reclaimOrphanStorage()
+                  + (typeof _compactCommentsStorage === 'function' && _compactCommentsStorage() ? 1 : 0)
+                  + _trimLocalHistory();
+      try {
+        localStorage.setItem(key, str);
+        if (freed > 0) console.log('[Storage] espace récupéré, écriture OK pour', key);
+        return true;
+      } catch(e2) {
+        showToast(' Stockage local saturé — synchronisation forcée recommandée', 'error');
+        console.error('localStorage quota toujours dépassé pour la clé:', key);
+        return false;
+      }
+    }
+    return false;
   }
 }
 function showToast(msg, type='success') {
@@ -3695,6 +3754,10 @@ function loadData() {
       const maxResId = Math.max(...reservations.map(r => Number(r.id) || 0));
       if (maxResId >= nextReservationId) nextReservationId = maxResId + 1;
     }
+    // Nettoyage proactif : libère les images/photos orphelines accumulées
+    // (produits/commandes supprimés) qui saturent le localStorage avec le temps.
+    const _freed = _reclaimOrphanStorage();
+    if (_freed > 0) console.log('[Storage] démarrage — ' + _freed + ' média(s) orphelin(s) purgé(s)');
   } catch(e) { console.warn('loadData error:', e); }
 }
 
@@ -8782,11 +8845,58 @@ function _driveImgFallback(att) {
   return fileId ? 'https://lh3.googleusercontent.com/d/' + fileId + '=w400' : '';
 }
 
+// Retire tout base64 résiduel des pièces jointes EN MÉMOIRE (aperçus jamais
+// uploadés d'anciennes sessions). Ces base64 gonflaient pos-comments jusqu'à
+// saturer le localStorage (~4 Mo observés). Retourne true si de l'espace libéré.
+function _compactCommentsStorage() {
+  let hadData = false;
+  try {
+    if (Array.isArray(dossierComments)) {
+      dossierComments.forEach(c => {
+        if (c && Array.isArray(c.attachments)) {
+          c.attachments = c.attachments.map(a => {
+            if (a && a.data) { hadData = true; const { data, ...rest } = a; return rest; }
+            return a;
+          });
+        }
+      });
+      if (hadData) { try { localStorage.setItem('pos-comments', JSON.stringify(dossierComments)); } catch(e) {} }
+    }
+  } catch(e) { console.warn('[Storage] compact commentaires:', e); }
+  return hadData;
+}
+
 function saveComments() {
-  try { localStorage.setItem('pos-comments', JSON.stringify(dossierComments)); } catch(e) {}
+  // Ne JAMAIS persister le base64 des pièces jointes : c'est un aperçu transitoire
+  // avant upload Drive (les vraies PJ = fileId/viewUrl). Un upload en échec laissait
+  // sinon le base64 (plusieurs Mo) figé dans pos-comments → localStorage saturé.
+  try {
+    const light = dossierComments.map(c => {
+      if (!c || !c.attachments || !c.attachments.length) return c;
+      return { ...c, attachments: c.attachments.map(a => {
+        if (a && a.data) { const { data, ...rest } = a; return rest; }
+        return a;
+      }) };
+    });
+    localStorage.setItem('pos-comments', JSON.stringify(light));
+  } catch(e) {
+    // Dernier recours : compacter la mémoire puis réessayer
+    _compactCommentsStorage();
+    try { localStorage.setItem('pos-comments', JSON.stringify(dossierComments)); }
+    catch(e2) { console.warn('[Storage] saveComments impossible:', e2); }
+  }
 }
 function loadCommentsLocal() {
-  try { const r = localStorage.getItem('pos-comments'); if (r) dossierComments = JSON.parse(r); } catch(e) {}
+  try {
+    const r = localStorage.getItem('pos-comments');
+    if (r) {
+      dossierComments = JSON.parse(r);
+      // Compaction au chargement : purge le base64 résiduel des anciennes sessions
+      // (uploads Drive échoués) → libère immédiatement l'espace saturé.
+      const freed = _compactCommentsStorage();
+      if (freed) console.log('[Storage] commentaires compactés (base64 résiduel purgé)');
+    }
+  } catch(e) {}
 }
 
 async function loadCommentsForDossier(dossierId) {
