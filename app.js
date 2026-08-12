@@ -24,10 +24,15 @@ async function _migrateLocalUserPasswords() {
 }
 
 // ============================================================
-// VERSION APP — incrémenter à chaque déploiement pour déclencher
-// le vidage automatique du cache sur tous les navigateurs clients
+// VERSION APP — affichée dans la barre du haut (badge « vXXX ») pour
+// vérifier d'un coup d'œil que TOUS les postes tournent sur la même build.
+// ⚠️ À BUMPER À CHAQUE DÉPLOIEMENT, en même temps que les 2 autres marqueurs :
+//   1) APP_VERSION ci-dessous           (déclenche le vidage auto du cache client)
+//   2) sw.js  → CACHE_NAME 'boutique-pos-vXXX'
+//   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
+// Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '2.1.0';
+const APP_VERSION = '130 · 2026-08-12';
 
 // ============================================================
 // RYTHME DE PRODUCTION — déclaré ici pour être sûrement initialisé
@@ -3493,6 +3498,35 @@ function showUpdateBanner() {
       _refresh();
     }
   }, 1000);
+}
+
+// ── Badge de version (barre du haut) : lisible par tous, permet de vérifier
+//    que tous les postes sont sur la même build. Cliquer force la mise à jour. ──
+function _renderVersionBadge() {
+  const el = document.getElementById('topbarVersion');
+  if (el) el.textContent = 'v' + APP_VERSION;
+  const vLabel = document.getElementById('appVersionLabel');
+  if (vLabel) vLabel.textContent = 'v' + APP_VERSION;
+}
+
+// Force une mise à jour propre (vide le cache SW + recharge) — pour aligner
+// un poste resté sur une ancienne version sans attendre le prochain déploiement.
+async function forceAppRefresh() {
+  try { showToast('Mise à jour en cours…', 'info'); } catch(e) {}
+  try {
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_CACHE' });
+    }
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r => r.unregister()));
+    }
+  } catch(e) { console.warn('[forceAppRefresh]', e); }
+  setTimeout(() => window.location.reload(true), 600);
 }
 
 // ── Vider le cache automatiquement si la version a changé ──
@@ -7204,6 +7238,7 @@ loadCommentsLocal();
 loadDemandesAchatLocal();
 loadNotifications();
 initPWA();
+_renderVersionBadge();
 _autoClearCache();
 // Charger la config depuis GAS au démarrage (sync multi-postes)
 loadConfigFromGAS(); // Vide le cache automatiquement si nouvelle version déployée
