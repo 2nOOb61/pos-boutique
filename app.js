@@ -4271,7 +4271,7 @@ async function apiCall(payload) {
   // ── LECTURES & LOGIN : requête GET avec params individuels ─
   const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getEncaissements', 'getArretsCaisse', 'getDossiers', 'getTaches', 'getDashboard', 'getControlPatron', 'getComments', 'getNotifs', 'getModifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles'];
   if (getActions.includes(payload.action)) {
-    try {
+    const buildUrl = () => {
       let url = APPS_SCRIPT_URL + '?action=' + payload.action;
       if (payload.limit)     url += '&limit='     + encodeURIComponent(payload.limit);
       if (payload.username)  url += '&username='  + encodeURIComponent(payload.username);
@@ -4283,13 +4283,37 @@ async function apiCall(payload) {
       if (payload.from != null) url += '&from=' + encodeURIComponent(payload.from);
       if (payload.to   != null) url += '&to='   + encodeURIComponent(payload.to);
       // Cache-buster : GAS edge-cache les GET ~15 s → renverrait des données périmées
-      // juste après une écriture (ex. date modifiée). URL unique = réponse fraîche.
-      url += '&_cb=' + Date.now();
-      const res  = await fetch(url);
-      const text = await res.text();
-      try { return JSON.parse(text); }
-      catch(e) { console.warn('GET réponse non-JSON:', text.substring(0,200)); return null; }
-    } catch(e) { console.warn('GET error:', e.message); return null; }
+      // juste après une écriture (ex. date modifiée). URL unique = réponse fraîche
+      // (et nouvelle URL /macros/echo à chaque tentative → pas de rejeu 404).
+      url += '&_cb=' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+      return url;
+    };
+    // Les réponses de lecture peuvent être lourdes (getCommandes/getComments ~450 Ko,
+    // ~7-10 s). Sur réseau faible, l'URL /macros/echo à usage unique de Google peut
+    // échouer (404 → page HTML au lieu de JSON) → « ne voit pas les mises à jour ».
+    // On réessaie UNE fois avec une URL neuve avant d'abandonner (lecture idempotente).
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res  = await fetch(buildUrl());
+        const text = await res.text();
+        if (res.ok) {
+          try { return JSON.parse(text); }
+          catch(e) {
+            if (attempt === 0) { await new Promise(r => setTimeout(r, 700)); continue; }
+            console.warn('GET réponse non-JSON (' + payload.action + '):', text.substring(0, 160));
+            return null;
+          }
+        }
+        if (attempt === 0) { await new Promise(r => setTimeout(r, 700)); continue; }
+        console.warn('GET HTTP ' + res.status + ' (' + payload.action + ')');
+        return null;
+      } catch(e) {
+        if (attempt === 0) { await new Promise(r => setTimeout(r, 700)); continue; }
+        console.warn('GET error (' + payload.action + '):', e.message);
+        return null;
+      }
+    }
+    return null;
   }
 
   // ── UPLOADS / GROS PAYLOADS : POST (route vers doPost) ──
