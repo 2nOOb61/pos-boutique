@@ -950,6 +950,9 @@ function handleGetReservations() {
       });
     }
   }
+  // Numéro de séquence STABLE (RES-NNN) = position dans l'ordre de création,
+  // calculé côté serveur → identique sur tous les postes (cf. handleGetCommandes).
+  order.forEach((id, idx) => { map[id].seq = idx + 1; });
   const list = order.map(id => map[id]);
   return { ok:true, reservations: list.reverse() };
 }
@@ -1134,6 +1137,13 @@ function handleGetCommandes(data) {
       }).filter(i => i.name);
     }
   }
+  // Numéro de séquence STABLE (CMD-NNN) = position dans l'ordre d'insertion de la
+  // feuille (= ordre de création), calculé sur la liste COMPLÈTE côté serveur.
+  // ⇒ identique sur TOUS les postes, même quand le client charge par tranches
+  // (pagination) ou n'a pas encore synchronisé toutes les commandes. Remplace le
+  // rang recalculé localement (variait d'un opérateur à l'autre selon les données
+  // chargées → réf. incohérentes en Attribution/Production).
+  order.forEach((id, idx) => { map[id].seq = idx + 1; });
   // Ordre canonique : plus récent en tête (reverse de l'ordre feuille)
   const all = order.map(id => map[id]).reverse();
   // Pagination optionnelle (chargement en tranches côté client pour éviter que la

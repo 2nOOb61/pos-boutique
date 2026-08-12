@@ -12970,22 +12970,28 @@ function toggleFinItem(id) { if (_finItemOpen.has(id)) _finItemOpen.delete(id); 
 function _buildSeqMaps() {
   const mk = arr => {
     const m = new Map();
-    (Array.isArray(arr) ? arr : []).slice()
+    const list = (Array.isArray(arr) ? arr : []).slice();
+    // 1) SOURCE DE VÉRITÉ = le `seq` persisté par le serveur (position dans l'ordre
+    //    de création de la feuille, calculé sur la liste COMPLÈTE). Identique sur
+    //    tous les postes → règle le bug « réf. différente sur un autre opérateur »,
+    //    y compris quand le client charge les commandes par tranches (pagination).
+    let maxSeq = 0;
+    list.forEach(o => {
+      const s = Number(o && o.seq);
+      if (s > 0) { m.set(String(o.id), s); if (s > maxSeq) maxSeq = s; }
+    });
+    // 2) REPLI (rang local) UNIQUEMENT pour les enregistrements sans `seq` — créés
+    //    hors-ligne et pas encore synchronisés, ou ancien backend sans seq. Numéros
+    //    attribués APRÈS le max serveur, tri déterministe (date puis id) pour rester
+    //    stable entre deux rendus sur un même poste.
+    list.filter(o => !(Number(o && o.seq) > 0))
       .sort((a, b) => {
         const diff = (parseSaleDate(a.date) || 0) - (parseSaleDate(b.date) || 0);
         if (diff) return diff;
-        // Départage DÉTERMINISTE par id quand les dates sont égales. Après un aller-retour
-        // GAS les dates sont tronquées à la seconde → plusieurs commandes d'une même seconde
-        // ont une date identique. Sans ce tie-break, elles étaient départagées par leur
-        // POSITION dans le tableau `commandes`, qui varie selon la provenance (localStorage /
-        // fetch GAS / fusion du polling 30 s). Le rang d'un même dossier basculait alors de N
-        // à N±1 entre deux rendus → la fiche imprimée affichait CMD-400 pendant que la vue PAO
-        // montrait CMD-399. Les ids `_genUid` encodent l'instant de création en base36 → tri
-        // stable ET ~chronologique, donc print / Attribution / PAO calculent le même rang.
         const ia = String(a.id), ib = String(b.id);
         return ia < ib ? -1 : ia > ib ? 1 : 0;
       })
-      .forEach((o, i) => m.set(String(o.id), i + 1));
+      .forEach(o => { m.set(String(o.id), ++maxSeq); });
     return m;
   };
   return { cmd: mk(commandes), res: mk(reservations) };
