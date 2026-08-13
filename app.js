@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '130 · 2026-08-12';
+const APP_VERSION = '131 · 2026-08-13';
 
 // ============================================================
 // RYTHME DE PRODUCTION — déclaré ici pour être sûrement initialisé
@@ -44,6 +44,11 @@ var _notifPollInterval = null;
 // File de reprise : uploads Drive des photos de tâches libres échoués (réseau/GAS down).
 // Persistée en localStorage → survit au rechargement, vidangée par _startNotifPolling.
 var _tlPhotoQueue = (function(){ try { return JSON.parse(localStorage.getItem('pos-tl-photo-queue')||'[]'); } catch(e){ return []; } })();
+// File de reprise : persistance dans le Sheet (updateCommande) des métadonnées Drive
+// des pièces jointes de commande. Sans elle, une persistance échouée (réseau faible /
+// timeout GAS) laissait les PJ visibles UNIQUEMENT sur l'appareil qui les a insérées
+// (base64 local), invisibles pour tous les autres postes qui lisent le Sheet.
+var _cmdAttQueue = (function(){ try { return JSON.parse(localStorage.getItem('pos-cmd-att-queue')||'[]'); } catch(e){ return []; } })();
 var _notifPopupArmed   = false; // pop-ups activés après le chargement initial (évite le backlog au login ; insensible aux horloges)
 var _notifAudioCtx     = null; // contexte Web Audio pour le son de notification
 // Pop-ups à l'écran : file navigable (les plus récentes en tête) + page courante.
@@ -7069,9 +7074,17 @@ async function _uploadCommandeAttachments(commandeId, photos) {
   if (selectedDossier && String(selectedDossier.sourceId) === String(cmd.id)) {
     try { selectDossier(selectedDossier.id); } catch(e) {}
   }
-  // Persister les metadata Drive dans le Sheet → visibles par tous les postes
+  // Persister les metadata Drive dans le Sheet → visibles par tous les postes.
+  // ⚠️ CRITIQUE : si cet appel échoue et n'est pas rejoué, la PJ reste visible
+  // uniquement sur CE poste (base64 local) → « personne ne voit sauf l'inséreur ».
+  // On met donc en file de reprise persistante (rejouée par le polling 30s).
   const driveAtts = cmd.attachments.filter(a => a && a.fileId);
-  if (driveAtts.length) apiCall({ action:'updateCommande', id:cmd.id, attachments:driveAtts }).catch(()=>{});
+  if (driveAtts.length) {
+    try {
+      const rUp = await apiCall({ action:'updateCommande', id:cmd.id, attachments:driveAtts });
+      if (!rUp || !rUp.ok) _enqueueCmdAttJob(cmd.id, driveAtts);
+    } catch(e) { _enqueueCmdAttJob(cmd.id, driveAtts); }
+  }
   const okCount = uploaded.filter(a => a.fileId).length;
   if (okCount) showToast(`${okCount} pièce(s) jointe(s) partagée(s) avec l'atelier`);
 }
@@ -7150,11 +7163,20 @@ async function loadCommandesFromScript() {
       // Édition de date très récente non encore propagée (GAS peut renvoyer l'ancienne
       // valeur le temps que l'écriture + l'edge-cache se règlent) → garder le local 20 s.
       const freshEdit = local && local._dateEditedAt && (Date.now() - local._dateEditedAt < 20000);
+      // Pièces jointes = UNION dédupliquée serveur (Drive/Sheet) + local. Ne jamais
+      // écraser : le local peut détenir des PJ déjà sur Drive mais pas encore persistées
+      // au Sheet (persistance échouée) ; le serveur peut détenir des PJ d'un autre poste.
+      const mergedAtts = _mergeAttById(c.attachments, local?.attachments);
+      // Auto-réparation rétroactive : PJ déjà sur Drive (fileId) présentes en local mais
+      // absentes du Sheet → reprogrammer la persistance pour qu'elles deviennent visibles
+      // par TOUS les postes (répare les commandes cassées par un ancien échec de sync).
+      const _srvIds = new Set((c.attachments || []).map(a => a && a.fileId).filter(Boolean));
+      const _localDrive = (local?.attachments || []).filter(a => a && a.fileId && !_srvIds.has(a.fileId));
+      if (_localDrive.length) _enqueueCmdAttJob(c.id, mergedAtts);
       return {
         ...c,
         photos:      (local?.photos?.length      ? local.photos      : c.photos)      || [],
-        // Pièces jointes : GAS (Drive) fait autorité, fallback local si non encore synchro
-        attachments: (c.attachments?.length ? c.attachments : (local?.attachments || [])) || [],
+        attachments: mergedAtts,
         dossierId: local?.dossierId || c.dossierId || '',
         ...(freshEdit ? {
           dateLivraison:     local.dateLivraison,
@@ -8022,6 +8044,7 @@ function _startNotifPolling() {
     if (document.hidden) return; // ne pas polluer quand l'onglet est en arrière-plan
     _flushNotifRetryQueue();
     _flushTlPhotoQueue();
+    _flushCmdAttQueue(); // reprise persistance PJ commande → visibles par tous les postes
     const newCount = await loadNotifsFromGAS(true);
     if (newCount > 0 && document.getElementById('notifPanel')?.classList.contains('open')) {
       _renderNotifPanelList(); // rafraîchit le panneau si ouvert
@@ -8466,6 +8489,51 @@ async function _flushTlPhotoQueue() {
     const ok = await _uploadAndSyncTacheLibrePhotos(tasks, job.photos);
     if (!ok) { _tlPhotoQueue.push(job); _saveTlPhotoQueue(); } // toujours KO → remettre en file
   }
+}
+
+// ── File de reprise : persistance des pièces jointes de commande dans le Sheet ──
+// Sans reprise, une persistance updateCommande échouée rendait les PJ visibles
+// seulement sur le poste qui les a insérées (base64 local) → invisibles ailleurs.
+function _saveCmdAttQueue() {
+  try { localStorage.setItem('pos-cmd-att-queue', JSON.stringify(_cmdAttQueue)); } catch(e) {}
+}
+// Union dédupliquée par fileId (repli viewUrl/name) — ne perd ni n'écrase aucune PJ.
+function _mergeAttById(a, b) {
+  const out = [], seen = new Set();
+  [...(a || []), ...(b || [])].forEach(x => {
+    if (!x) return;
+    const k = x.fileId || x.viewUrl || x.name;
+    if (!k || seen.has(k)) return;
+    seen.add(k); out.push(x);
+  });
+  return out;
+}
+function _enqueueCmdAttJob(id, attachments) {
+  const atts = (attachments || []).filter(a => a && a.fileId);
+  if (!id || !atts.length) return;
+  _cmdAttQueue = _cmdAttQueue.filter(j => String(j.id) !== String(id)); // 1 job/commande (le plus récent)
+  _cmdAttQueue.push({ id, attachments: atts, ts: Date.now() });
+  if (_cmdAttQueue.length > 30) _cmdAttQueue = _cmdAttQueue.slice(-30); // borne mémoire
+  _saveCmdAttQueue();
+}
+// Rejoue la persistance en attente. Appelée par le polling 30s + au retour de connexion.
+async function _flushCmdAttQueue() {
+  if (!APPS_SCRIPT_URL || !_cmdAttQueue.length) return;
+  const jobs = _cmdAttQueue.splice(0);
+  _saveCmdAttQueue();
+  let changed = false;
+  for (const job of jobs) {
+    const cmd  = commandes.find(c => String(c.id) === String(job.id));
+    // Fusionner avec l'état courant (le poste a pu recevoir d'autres PJ entre-temps)
+    const atts = _mergeAttById(cmd ? cmd.attachments : [], job.attachments);
+    let ok = false;
+    try { const r = await apiCall({ action:'updateCommande', id: job.id, attachments: atts }); ok = !!(r && r.ok); }
+    catch(e) { ok = false; }
+    if (ok) { if (cmd) { cmd.attachments = atts; changed = true; } }
+    else    { _cmdAttQueue.push(job); } // toujours KO → remettre en file
+  }
+  _saveCmdAttQueue();
+  if (changed) { try { saveData(); } catch(e) {} }
 }
 
 // <img> pour une photo de tâche libre — gère les 2 formats : chaîne base64 (local/legacy)
