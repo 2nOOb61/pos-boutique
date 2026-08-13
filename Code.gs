@@ -110,6 +110,8 @@ function doPost(e) {
     else if (action === 'getEncaissements')  result = handleGetEncaissements(data);
     else if (action === 'addArretCaisse')    result = handleAddArretCaisse(data);
     else if (action === 'getArretsCaisse')   result = handleGetArretsCaisse(data);
+    else if (action === 'logActivity')       result = handleLogActivity(data);
+    else if (action === 'getJournal')        result = handleGetJournal(data);
     // Nouveaux modules
     else if (action === 'getDossiers')       result = handleGetDossiers(data);
     else if (action === 'saveDossier')       result = handleSaveDossier(data);
@@ -179,6 +181,7 @@ function doGet(e) {
       else if (action === 'saveNotif')         result = handleSaveNotif(data);
       else if (action === 'saveModif')         result = handleSaveModif(data);
       else if (action === 'resolveModif')      result = handleResolveModif(data);
+      else if (action === 'logActivity')       result = handleLogActivity(data);
       else if (action === 'saveShopConfig')    result = handleSaveShopConfig(data);
       else if (action === 'saveRythme')        result = handleSaveRythme(data);
       else if (action === 'clearAllData')      result = handleClearAllData(data);
@@ -776,6 +779,135 @@ function handleGetArretsCaisse(data) {
 }
 
 // ============================================================
+// JOURNAL D'ACTIVITÉ (audit) — lecture unifiée pour la vue patron/admin.
+// RÉUTILISE la feuille existante `JournalAcces` (écrite par _logAction_ sur
+// presque toutes les actions : VENTE, ENCAISSEMENT, ARRET_CAISSE, USER_*,
+// TACHE_*, DOSSIER_*, LOGIN_*) + ENRICHIT avec ModifsCommandes (demandes de
+// modification + validations, formulation lisible). Aucune feuille en double,
+// aucune migration → historique complet immédiat.
+// ============================================================
+
+// Journalisation déclenchée par le FRONT pour les actions qui n'existent que
+// côté client (édition / annulation directe d'une commande par l'admin).
+// Réutilise _logAction_ → même feuille JournalAcces que le reste.
+function handleLogActivity(data) {
+  try {
+    _logAction_(
+      String((data && (data.auditAction || data.act)) || 'ACTION'),
+      (data && (data.user || data.userLabel)) || 'anonyme',
+      String((data && data.detail) || '')
+    );
+  } catch (e) { /* ne jamais planter pour un log */ }
+  return { ok: true };
+}
+
+// Métadonnées d'affichage par code d'action : [catégorie, libellé lisible].
+const _JMETA_ = {
+  LOGIN_OK:['Accès','Connexion'], LOGIN_FAIL:['Accès','Échec de connexion'],
+  VENTE:['Argent','Vente'], VENTE_SUPPR:['Argent','Vente supprimée'],
+  ENCAISSEMENT:['Argent','Encaissement'], ARRET_CAISSE:['Argent','Arrêt de caisse'],
+  COMMANDE_CREATE:['Commande','Commande créée'], COMMANDE_EDIT:['Commande','Commande modifiée'],
+  COMMANDE_CANCEL:['Commande','Commande annulée'], COMMANDE_FINALISE:['Commande','Commande finalisée'],
+  USER_CREATE:['Utilisateur','Utilisateur créé'], USER_UPDATE:['Utilisateur','Utilisateur modifié'],
+  USER_DELETE:['Utilisateur','Utilisateur supprimé'],
+  PRODUIT_DELETE:['Stock','Produit supprimé'],
+  DOSSIER_CREATE:['Production','Dossier créé'], DOSSIER_MANUEL:['Production','Dossier manuel'],
+  DOSSIER_CLOTURE:['Production','Dossier clôturé'],
+  TACHE_ATTRIB:['Production','Tâche attribuée'], TACHE_LIBRE_CREATE:['Production','Tâche créée'],
+  TACHE_START:['Production','Tâche démarrée'], TACHE_FIN:['Production','Tâche terminée'],
+  TACHES_RESET:['Production','Tâches réinitialisées'],
+  RECALC_PROGRESSION:['Système','Recalcul progression'],
+  BACKUP_AUTO:['Système','Sauvegarde'], BACKUP_ERREUR:['Système','Erreur sauvegarde']
+};
+function _jMeta_(code) { return _JMETA_[code] || ['Autre', code || 'Action']; }
+
+function _jEpoch_(d) {
+  try {
+    if (d instanceof Date) return d.getTime();
+    const t = Date.parse(String(d || ''));
+    return isNaN(t) ? 0 : t;
+  } catch (e) { return 0; }
+}
+function _jFieldLabel_(k) {
+  const M = {
+    clientName:'nom client', clientContact:'contact', accompte:'acompte', depositMethod:'mode de paiement',
+    depositProvider:'opérateur', depositRef:'référence', remise:'remise', deliveryMode:'mode de remise',
+    adresseLivraison:'adresse', fraisLivraison:'frais livraison', dateLivraison:'date livraison',
+    dateLivraisonProd:'date production', dateBAT:'date BAT', notes:'notes', items:'articles'
+  };
+  return M[k] || k;
+}
+
+function handleGetJournal(data) {
+  const ss  = getSS();
+  const CAP = Number(data && data.limit) || 3000;
+  const events = [];
+
+  // 1) JournalAcces — audit natif déjà écrit par _logAction_
+  const jSh = ss.getSheetByName(SHEET_JOURNAL); // 'JournalAcces'
+  if (jSh) {
+    const last = jSh.getLastRow();
+    if (last > 1) {
+      const start = Math.max(2, last - CAP + 1);
+      // Colonnes : Timestamp, Utilisateur, Action, Detail, IP_Approx
+      jSh.getRange(start, 1, last - start + 1, 5).getValues().forEach(r => {
+        if (r[0] === '' || r[0] == null) return;
+        const code = String(r[2] || '');
+        const meta = _jMeta_(code);
+        events.push({
+          ts: _jEpoch_(r[0]), user: String(r[1] || ''), action: code,
+          cat: meta[0], label: meta[1], details: String(r[3] || '')
+        });
+      });
+    }
+  }
+
+  // 2) ModifsCommandes — demande + validation/refus (formulation lisible)
+  const mSh = ss.getSheetByName(SHEET_MODIFS);
+  if (mSh) {
+    const last = mSh.getLastRow();
+    if (last > 1) {
+      const start = Math.max(2, last - CAP + 1);
+      mSh.getRange(start, 1, last - start + 1, 12).getValues().forEach(r => {
+        if (r[0] === '' || r[0] == null) return;
+        const cmdId   = String(r[1] || '');
+        const changes = (function () { try { return JSON.parse(r[6] || '{}'); } catch (e) { return {}; } })();
+        const champs  = Object.keys(changes).map(_jFieldLabel_).join(', ');
+        const type    = String(r[5] || 'edit');
+        events.push({
+          ts: _jEpoch_(r[2]), user: String(r[4] || r[3] || ''),
+          action: type === 'cancel' ? 'MODIF_CANCEL_REQ' : 'MODIF_REQUEST', cat: 'Commande',
+          label: type === 'cancel' ? 'Annulation demandée' : 'Modification demandée',
+          details: 'CMD #' + cmdId + ' — ' +
+                   (type === 'cancel' ? 'annulation' : (champs || '—')) +
+                   (r[7] ? ' (' + String(r[7]) + ')' : '')
+        });
+        const statut = String(r[8] || '');
+        if ((statut === 'approved' || statut === 'rejected') && r[10]) {
+          events.push({
+            ts: _jEpoch_(r[10]), user: String(r[9] || ''),
+            action: statut === 'approved' ? 'MODIF_VALIDATE' : 'MODIF_REJECT', cat: 'Commande',
+            label: statut === 'approved' ? 'Modification validée' : 'Modification refusée',
+            details: 'CMD #' + cmdId + (r[11] ? ' — ' + String(r[11]) : '')
+          });
+        }
+      });
+    }
+  }
+
+  // Filtre date optionnel (from/to en YYYY-MM-DD, bornes incluses)
+  let list = events;
+  const from = data && data.from ? Date.parse(data.from + 'T00:00:00') : null;
+  const to   = data && data.to   ? Date.parse(data.to   + 'T23:59:59') : null;
+  if (from) list = list.filter(e => e.ts >= from);
+  if (to)   list = list.filter(e => e.ts <= to);
+
+  list.sort((a, b) => b.ts - a.ts);
+  const MAX = Number(data && data.max) || 2500;
+  return { ok: true, events: list.slice(0, MAX), total: list.length };
+}
+
+// ============================================================
 // STOCK
 // ============================================================
 function handleStockMove(data) {
@@ -1352,6 +1484,8 @@ function handleAddCommande(data) {
   const _r = sh.getLastRow();
   _setTextCell_(sh, _r, 4, c.clientName||'');
   _setTextCell_(sh, _r, 5, c.clientContact||'');
+  _logAction_('COMMANDE_CREATE', c.caissier || 'caissier',
+    'CMD #' + id + ' — ' + (c.clientName || 'client') + ' — ' + (Number(c.total)||0) + ' Ar');
   return { ok:true, id };
 }
 
@@ -2717,29 +2851,8 @@ function handleSaveRythme(data) {
   return { ok: true };
 }
 
-// ── Lecture du journal d'audit (admin uniquement côté frontend) ──
-function handleGetJournal(params) {
-  const ss = getSS();
-  const sh = ss.getSheetByName(SHEET_JOURNAL);
-  if (!sh) return { ok:true, entries:[] };
-  const lastRow = sh.getLastRow();
-  if (lastRow <= 1) return { ok:true, entries:[] };
-  const limit   = Math.min(Number(params && params.limit) || 100, 500);
-  const start   = Math.max(2, lastRow - limit + 1);
-  const nRows   = lastRow - start + 1;
-  const rows    = sh.getRange(start, 1, nRows, 5).getValues();
-  const tz      = Session.getScriptTimeZone();
-  const entries = rows
-    .filter(r => r[0])
-    .map(r => ({
-      ts:      r[0] ? Utilities.formatDate(new Date(r[0]), tz, 'dd/MM/yyyy HH:mm:ss') : '',
-      user:    String(r[1]),
-      action:  String(r[2]),
-      detail:  String(r[3])
-    }))
-    .reverse(); // plus récent en premier
-  return { ok:true, entries };
-}
+// (Ancien handleGetJournal simple — remplacé par la version enrichie plus haut,
+//  qui fusionne JournalAcces + ModifsCommandes et renvoie { events } avec cat/label.)
 
 function handleGetRythme() {
   const ss = getSS();

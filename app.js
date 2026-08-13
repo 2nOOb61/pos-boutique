@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '132 · 2026-08-13';
+const APP_VERSION = '133 · 2026-08-13';
 
 // ============================================================
 // RYTHME DE PRODUCTION — déclaré ici pour être sûrement initialisé
@@ -153,6 +153,7 @@ const PAGE_ACCESS = {
   'mon-dashboard':['admin','caissier','commerciale','utilisateur','gestionnaire','comptable'],
   config:         ['admin'],
   users:          ['admin'],
+  journal:        ['admin'],
   attribution:    ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','commerciale','gestionnaire'],
   blocages:       ['admin','chef_atelier','commerciale','gestionnaire'],
   production:     ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
@@ -536,6 +537,7 @@ function showPage(id, btn, bnavBtn) {
   if (id==='calendrier')   { _ensureDossierLinks(); renderCalendrier(); if (APPS_SCRIPT_URL) Promise.all([loadCommandesFromScript(), loadReservationsFromScript()]).then(() => { _ensureDossierLinks(); renderCalendrier(); }).catch(()=>{}); }
   if (id==='messagerie')   { loadMessagerie(); _autoRefreshMessagerie(); }
   if (id==='patron')       { renderControlFinance(); renderPatronEncaissements(); renderPatronDashboard(); _autoRefreshPatron(); loadEncaissementsFromScript().then(renderPatronEncaissements).catch(()=>{}); }
+  if (id==='journal')      { loadJournal(); }
   if (id==='commandes')    { _ensureDossierLinks(); renderCommandes(); _lastCmdRefresh = 0; _autoRefreshCommandes(); _loadTachesQuietly().then(renderCommandes); }
   if (id==='livraisons')   { renderLivraisons(); if (APPS_SCRIPT_URL) Promise.all([loadCommandesFromScript(), loadReservationsFromScript()]).then(() => { updateDeliveryBadge(); renderLivraisons(); }).catch(()=>{}); }
   if (id==='finances')     { _ensureDossierLinks(); renderFinances(); if (APPS_SCRIPT_URL) loadCommandesFromScript().then(() => { _ensureDossierLinks(); renderFinances(); }).catch(()=>{}); }
@@ -4308,7 +4310,7 @@ async function apiCall(payload) {
   if (!APPS_SCRIPT_URL) return null;
 
   // ── LECTURES & LOGIN : requête GET avec params individuels ─
-  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getEncaissements', 'getArretsCaisse', 'getDossiers', 'getTaches', 'getDashboard', 'getControlPatron', 'getComments', 'getNotifs', 'getModifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles'];
+  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getEncaissements', 'getArretsCaisse', 'getJournal', 'getDossiers', 'getTaches', 'getDashboard', 'getControlPatron', 'getComments', 'getNotifs', 'getModifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles'];
   if (getActions.includes(payload.action)) {
     const buildUrl = () => {
       let url = APPS_SCRIPT_URL + '?action=' + payload.action;
@@ -6660,6 +6662,7 @@ function _applyCommandeCancel(c) {
     message:       `Commande #${c.id} annulée — ${c.clientName}`
   });
   _deleteTachesForDossier(c.dossierId);
+  logActivity('COMMANDE_CANCEL', `CMD #${c.id} — ${c.clientName || 'client'}`);
 }
 
 function cancelCommande(id) {
@@ -6942,6 +6945,11 @@ function _applyCommandeChanges(c, changes) {
       subtotal: c.subtotal, total: c.total, restant: c.restant
     }).catch(() => {});
   }
+  // Audit : quels champs ont été modifiés (édition directe admin ou validation appliquée)
+  const _champs = Object.keys(changes || {})
+    .map(k => (CMD_MODIF_FIELDS.find(f => f.key === k) || {}).label || k)
+    .join(', ');
+  logActivity('COMMANDE_EDIT', `CMD #${c.id} — ${_champs || 'mise à jour'}`);
 }
 
 // ── Validation admin ───────────────────────────────────────
@@ -7092,6 +7100,166 @@ async function _uploadCommandeAttachments(commandeId, photos) {
 async function syncCmdUpdateToSheets(cmd) {
   if (!APPS_SCRIPT_URL) return;
   await apiCall({ action: 'updateCommande', id: cmd.id, status: cmd.status, dateFinalisation: cmd.dateFinalisation || '', saleId: cmd.saleId || '', accompte: cmd.accompte, restant: cmd.restant, remarque: cmd.remarque || '' });
+}
+
+// Journalise une action côté client (édition / annulation directe d'une commande
+// par l'admin) dans l'audit centralisé — feuille JournalAcces via l'action GAS
+// logActivity → _logAction_. Les ventes/encaissements/users/tâches/modifs sont
+// déjà journalisés côté serveur, inutile de les re-logger ici.
+function logActivity(auditAction, detail) {
+  if (!APPS_SCRIPT_URL) return;
+  const u = currentUser ? (currentUser.username || currentUser.label || '') : '';
+  apiCall({ action: 'logActivity', auditAction: auditAction, user: u, detail: String(detail || '') }).catch(() => {});
+}
+
+// ============================================================
+// JOURNAL D'ACTIVITÉ (audit) — page patron/admin : qui a fait quoi, quand
+// Source = handleGetJournal (fusion JournalAcces + ModifsCommandes côté serveur).
+// ============================================================
+let journalEvents   = [];    // événements bruts chargés du serveur (déjà triés desc)
+let _journalLoading = false;
+
+const _JCAT_COLORS = {
+  'Commande':['#2563eb','#eaf1fe'], 'Argent':['#16a34a','#e7f6ec'],
+  'Production':['#e8834a','#fdf0e8'], 'Utilisateur':['#7c3aed','#f1eafe'],
+  'Accès':['#0891b2','#e5f6fa'], 'Stock':['#b45309','#fdf3e0'],
+  'Système':['#64748b','#eef1f5'], 'Autre':['#64748b','#eef1f5']
+};
+
+async function loadJournal(force) {
+  const body = document.getElementById('journalBody');
+  if (!APPS_SCRIPT_URL) { if (body) body.innerHTML = _journalEmpty('Backend non configuré.'); return; }
+  if (_journalLoading) return;
+  _journalLoading = true;
+  const icon = document.getElementById('journalRefreshIcon');
+  if (icon) icon.style.animation = 'spin 0.8s linear infinite';
+  if (body && (force || !journalEvents.length)) body.innerHTML = _journalSkeleton();
+  try {
+    const r = await apiCall({ action: 'getJournal' });
+    if (r && r.ok && Array.isArray(r.events)) {
+      journalEvents = r.events;
+      _populateJournalFilters();
+      renderJournal();
+    } else if (body) {
+      body.innerHTML = _journalEmpty('Impossible de charger le journal.');
+    }
+  } catch (e) {
+    if (body) body.innerHTML = _journalEmpty('Erreur réseau — réessayez.');
+  } finally {
+    _journalLoading = false;
+    if (icon) icon.style.animation = '';
+  }
+}
+
+function _journalFiltered() {
+  const from = document.getElementById('journalFrom')?.value || '';
+  const to   = document.getElementById('journalTo')?.value || '';
+  const user = document.getElementById('journalUser')?.value || '';
+  const cat  = document.getElementById('journalCat')?.value || '';
+  const q    = (document.getElementById('journalSearch')?.value || '').toLowerCase().trim();
+  const fromT = from ? new Date(from + 'T00:00:00').getTime() : null;
+  const toT   = to   ? new Date(to   + 'T23:59:59').getTime() : null;
+  return journalEvents.filter(e => {
+    if (fromT && e.ts < fromT) return false;
+    if (toT   && e.ts > toT)   return false;
+    if (user && e.user !== user) return false;
+    if (cat  && e.cat  !== cat)  return false;
+    if (q) {
+      const hay = ((e.user||'') + ' ' + (e.label||'') + ' ' + (e.details||'') + ' ' + (e.action||'')).toLowerCase();
+      if (hay.indexOf(q) === -1) return false;
+    }
+    return true;
+  });
+}
+
+function _populateJournalFilters() {
+  const users = [...new Set(journalEvents.map(e => e.user).filter(Boolean))].sort((a,b)=>String(a).localeCompare(String(b)));
+  const cats  = [...new Set(journalEvents.map(e => e.cat).filter(Boolean))].sort();
+  const uSel = document.getElementById('journalUser');
+  const cSel = document.getElementById('journalCat');
+  if (uSel) { const cur = uSel.value; uSel.innerHTML = '<option value="">Tous</option>' + users.map(u=>`<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join(''); uSel.value = cur; }
+  if (cSel) { const cur = cSel.value; cSel.innerHTML = '<option value="">Toutes</option>' + cats.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join(''); cSel.value = cur; }
+}
+
+function _journalDateParts(ts) {
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return { day:'Date inconnue', time:'', key:'—' };
+  return {
+    day:  d.toLocaleDateString('fr-FR', { weekday:'long', day:'2-digit', month:'long', year:'numeric' }),
+    time: d.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' }),
+    key:  d.toLocaleDateString('fr-FR')
+  };
+}
+
+function renderJournal() {
+  const body = document.getElementById('journalBody');
+  if (!body) return;
+  const list = _journalFiltered();
+  const countEl = document.getElementById('journalCount');
+  if (countEl) countEl.textContent = list.length + ' action' + (list.length>1?'s':'') + (journalEvents.length!==list.length ? ` / ${journalEvents.length}` : '');
+  if (!list.length) { body.innerHTML = _journalEmpty('Aucune action pour ces filtres.'); return; }
+  let html = '', lastKey = null;
+  list.forEach(e => {
+    const dp = _journalDateParts(e.ts);
+    if (dp.key !== lastKey) {
+      if (lastKey !== null) html += '</div></div>';
+      html += `<div class="journal-daygroup"><div class="journal-dayhead">${escapeHtml(dp.day)}</div><div class="journal-daybody">`;
+      lastKey = dp.key;
+    }
+    const col = _JCAT_COLORS[e.cat] || _JCAT_COLORS['Autre'];
+    html += `<div class="journal-row">
+      <div class="journal-time">${dp.time}</div>
+      <div class="journal-cat" style="color:${col[0]};background:${col[1]}">${escapeHtml(e.cat||'')}</div>
+      <div class="journal-main">
+        <div class="journal-user">${escapeHtml(e.user||'—')} <span class="journal-lbl">${escapeHtml(e.label||e.action||'')}</span></div>
+        ${e.details ? `<div class="journal-det">${escapeHtml(e.details)}</div>` : ''}
+      </div>
+    </div>`;
+  });
+  if (lastKey !== null) html += '</div></div>';
+  body.innerHTML = html;
+}
+
+function resetJournalFilters() {
+  ['journalFrom','journalTo','journalSearch','journalUser','journalCat'].forEach(id => { const el=document.getElementById(id); if (el) el.value=''; });
+  renderJournal();
+}
+
+function _journalEmpty(msg) {
+  return `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:70px 0;color:var(--color-text-muted)">
+    <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:.3;margin-bottom:12px"><path d="M12 8v4l3 2"/><circle cx="12" cy="12" r="9"/></svg>
+    <p style="font-size:14px">${escapeHtml(msg)}</p></div>`;
+}
+function _journalSkeleton() {
+  return '<div style="padding:40px 0;text-align:center;color:var(--color-text-muted);font-size:14px">Chargement du journal…</div>';
+}
+
+function printJournal() {
+  const list = _journalFiltered();
+  if (!list.length) { showToast('Aucune action à imprimer', 'error'); return; }
+  const from = document.getElementById('journalFrom')?.value || '';
+  const to   = document.getElementById('journalTo')?.value || '';
+  const periode = (from||to) ? `Période : ${from||'…'} → ${to||'…'}` : 'Toutes les actions';
+  const rows = list.map(e => {
+    const dp = _journalDateParts(e.ts);
+    return `<tr><td>${dp.key} ${dp.time}</td><td>${escapeHtml(e.user||'—')}</td><td>${escapeHtml(e.cat||'')}</td><td>${escapeHtml(e.label||e.action||'')}</td><td>${escapeHtml(e.details||'')}</td></tr>`;
+  }).join('');
+  const w = window.open('', '_blank');
+  if (!w) { showToast('Autorisez les pop-ups pour imprimer', 'error'); return; }
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Journal d'activité</title>
+    <style>
+      body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:24px}
+      h1{font-size:18px;margin:0 0 4px} .sub{color:#555;font-size:12px;margin:0 0 16px}
+      table{width:100%;border-collapse:collapse;font-size:11px}
+      th,td{border:1px solid #ccc;padding:5px 7px;text-align:left;vertical-align:top}
+      th{background:#f3f3f3} tr:nth-child(even){background:#fafafa}
+    </style></head><body>
+    <h1>Journal d'activité — FOREVER MG</h1>
+    <p class="sub">${escapeHtml(periode)} · ${list.length} action(s) · Édité le ${new Date().toLocaleString('fr-FR')}</p>
+    <table><thead><tr><th>Date / Heure</th><th>Utilisateur</th><th>Catégorie</th><th>Action</th><th>Détail</th></tr></thead>
+    <tbody>${rows}</tbody></table></body></html>`);
+  w.document.close();
+  setTimeout(() => { w.focus(); w.print(); }, 300);
 }
 
 // ============================================================

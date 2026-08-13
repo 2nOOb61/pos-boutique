@@ -26,7 +26,7 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20260721-virement">
+<link rel="stylesheet" href="./style.css?v=20260813-journal">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
@@ -950,6 +950,10 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
           <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></span>
           <span class="sidebar-label">Vue patron</span>
         </button>
+        <button class="nav-btn sidebar-btn" data-roles="admin" onclick="showPage('journal',this)" aria-label="Journal d'activité" style="border-left:2px solid transparent">
+          <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l3 2"/><circle cx="12" cy="12" r="9"/></svg></span>
+          <span class="sidebar-label">Journal d'activité</span>
+        </button>
         <button class="nav-btn sidebar-btn active" data-roles="admin,caissier,utilisateur,gestionnaire" onclick="showPage('caisse',this)" aria-label="Caisse">
           <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg></span>
           <span class="sidebar-label">Caisse</span>
@@ -1501,6 +1505,46 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
         <p style="font-size:14px">Chargement du tableau de bord...</p>
       </div>
     </div>
+  </div>
+
+  <!-- ══ JOURNAL D'ACTIVITÉ (audit — patron/admin) ══ -->
+  <div class="page" id="page-journal" data-roles="admin">
+    <div class="page-topbar">
+      <div>
+        <h1 class="page-title">Journal d'activité</h1>
+        <p class="page-subtitle" id="journalSubtitle">Qui a fait quoi, et quand</p>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span id="journalCount" style="font-size:11px;color:var(--color-text-muted)"></span>
+        <button onclick="printJournal()" style="display:flex;align-items:center;gap:6px;padding:7px 14px;background:#fff;color:var(--color-primary);border:1px solid var(--color-border);border-radius:8px;font-size:13px;font-weight:600;cursor:pointer" aria-label="Imprimer le journal">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+          Imprimer
+        </button>
+        <button onclick="loadJournal(true)" style="display:flex;align-items:center;gap:6px;padding:7px 14px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer" aria-label="Actualiser">
+          <svg id="journalRefreshIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+          Actualiser
+        </button>
+      </div>
+    </div>
+    <div class="journal-filters" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px">
+      <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--color-text-secondary);font-weight:600">Du
+        <input type="date" id="journalFrom" onchange="renderJournal()" style="padding:7px 9px;border:1px solid var(--color-border);border-radius:8px;font-size:13px">
+      </label>
+      <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--color-text-secondary);font-weight:600">Au
+        <input type="date" id="journalTo" onchange="renderJournal()" style="padding:7px 9px;border:1px solid var(--color-border);border-radius:8px;font-size:13px">
+      </label>
+      <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--color-text-secondary);font-weight:600">Utilisateur
+        <select id="journalUser" onchange="renderJournal()" style="padding:7px 9px;border:1px solid var(--color-border);border-radius:8px;font-size:13px;min-width:130px"><option value="">Tous</option></select>
+      </label>
+      <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--color-text-secondary);font-weight:600">Catégorie
+        <select id="journalCat" onchange="renderJournal()" style="padding:7px 9px;border:1px solid var(--color-border);border-radius:8px;font-size:13px;min-width:130px"><option value="">Toutes</option></select>
+      </label>
+      <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--color-text-secondary);font-weight:600;flex:1;min-width:160px">Recherche
+        <input type="text" id="journalSearch" oninput="renderJournal()" placeholder="client, réf, détail…" style="padding:7px 9px;border:1px solid var(--color-border);border-radius:8px;font-size:13px">
+      </label>
+      <button onclick="resetJournalFilters()" style="padding:8px 12px;background:none;border:1px solid var(--color-border);border-radius:8px;font-size:12px;color:var(--color-text-secondary);cursor:pointer">Réinitialiser</button>
+    </div>
+    <div id="journalBody" style="padding-bottom:32px"></div>
   </div>
 
   <!-- CONFIG -->
@@ -3264,7 +3308,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260813-badgewhite"></script>
+<script src="./app.js?v=20260813-journal"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
