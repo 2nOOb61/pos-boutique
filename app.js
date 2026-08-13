@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '131 · 2026-08-13';
+const APP_VERSION = '132 · 2026-08-13';
 
 // ============================================================
 // RYTHME DE PRODUCTION — déclaré ici pour être sûrement initialisé
