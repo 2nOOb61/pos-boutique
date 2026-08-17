@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '135 · 2026-08-17';
+const APP_VERSION = '136 · 2026-08-17';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -6385,6 +6385,30 @@ function openCmdDrawer(id) {
   _ensureChronoTick();
 }
 
+// Classe / déclasse une commande dans un pôle atelier depuis le tiroir de détail.
+// Fonctionne pour n'importe quelle commande (y compris les anciennes non classées).
+function _cmdTogglePole(id, key){
+  const c = commandes.find(x => String(x.id) === String(id));
+  if (!c) return;
+  const set = _normPoles(c.poles);
+  const i = set.indexOf(key);
+  if (i >= 0) set.splice(i, 1); else set.push(key);
+  c.poles = set;
+  saveData();
+  // Re-render le tiroir en place (sans le fermer) pour refléter la sélection
+  const body = document.getElementById('cmdDrawerBody');
+  if (body) body.innerHTML = _cmdDrawerContent(c);
+  // Rafraîchir le calendrier s'il est visible (pastilles / filtre)
+  const calPage = document.getElementById('page-calendrier');
+  if (calPage && calPage.classList.contains('active') && typeof renderCalendrier === 'function') renderCalendrier();
+  // Persistance serveur (colonne Poles) → synchro multi-postes
+  if (APPS_SCRIPT_URL){
+    apiCall({ action:'updateCommande', id: c.id, poles: set })
+      .then(r => { if (!r || !r.ok) showToast('Sync pôles échouée — enregistré localement', 'warning'); })
+      .catch(() => showToast('Erreur réseau (pôles)', 'error'));
+  }
+}
+
 function _cmdDrawerContent(c) {
   const r = _buildCommandeRows().find(x => String(x.id) === String(c.id)) || {};
   const _pmod = _pendingModFor(c.id); // demande en attente → bandeau + boutons valider/refuser (admin)
@@ -6410,6 +6434,17 @@ function _cmdDrawerContent(c) {
     ? `<img src="${a.img}" onclick="window.open('${a.href||a.img}','_blank')" title="${_pcokEsc(a.name)}" />`
     : `<a href="${a.href}" target="_blank" title="${_pcokEsc(a.name)}">${(a.name||'').split('.').pop().toUpperCase()}</a>`).join('')}</div>` : '';
   const pipe = r.dossierId ? _cmdPipelineHtml(r.dossierId) : '';
+  // Pôles atelier — éditables en place (utile pour étiqueter d'anciennes commandes)
+  const _canEditPoles = ['admin','commerciale','chef_atelier','gestionnaire'].includes(currentUser?.role);
+  const _cPoles = _normPoles(c.poles);
+  const polesChips = ATELIER_POLES.map(p => {
+    const on = _cPoles.includes(p.key);
+    if (_canEditPoles)
+      return `<button type="button" class="cmd-pole-chip${on?' on':''}" style="${on?`--pc:${p.color};border-color:${p.color};color:${p.color}`:''}" onclick="event.stopPropagation();_cmdTogglePole('${c.id}','${p.key}')"><span class="cmd-pole-dot" style="background:${p.color}"></span>${_pcokEsc(p.label)}</button>`;
+    return on ? `<span class="cmd-pole-chip on" style="--pc:${p.color};border-color:${p.color};color:${p.color}"><span class="cmd-pole-dot" style="background:${p.color}"></span>${_pcokEsc(p.label)}</span>` : '';
+  }).filter(Boolean).join('');
+  const polesBlock = `<div class="pcok-drawer-pipe-title">Pôles atelier${_canEditPoles?' <span style="font-weight:400;color:var(--color-text-muted);font-size:11px">(cliquez pour classer)</span>':''}</div>
+    <div class="cmd-poles" style="margin-bottom:12px">${polesChips || '<span class="pcok-muted" style="font-size:12px">Aucun pôle</span>'}</div>`;
   return `<div class="pcok-drawer-head">
       <div style="min-width:0">
         <div class="pcok-drawer-ref">${_pcokEsc(r.ref||'')}${r.commercial?' · '+_pcokEsc(r.commercial):''}</div>
@@ -6435,6 +6470,7 @@ function _cmdDrawerContent(c) {
     <div class="pcok-drawer-items">${modeHtml}${datesHtml}</div>
     ${c.notes?`<div class="pcok-drawer-note">${_pcokEsc(c.notes)}</div>`:''}
     ${c.remarque?`<div class="pcok-drawer-note" style="background:#eef6ff;border-left-color:#2563eb;color:#1c1917"><b style="color:#1d4ed8">Remarque finance :</b> ${_pcokEsc(c.remarque)}</div>`:''}
+    ${polesBlock}
     ${photosHtml}
     ${pipe}
     ${_cmdDrawerActions(c)}`;
