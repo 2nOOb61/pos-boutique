@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '137 · 2026-08-17';
+const APP_VERSION = '138 · 2026-08-17';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -228,6 +228,7 @@ let products = [];
 let sales = [];
 let arretsCaisse = [];
 let encaissements = [];   // journal des entrées d'argent (ventes + acomptes/soldes commandes)
+let bats = [];            // suivi BAT (épreuves) : 1 entrée = 1 version de BAT d'un dossier
 
 let nextId = 1;
 // Id GLOBALEMENT unique (timestamp + aléatoire) — évite les collisions entre postes/caissiers
@@ -584,6 +585,7 @@ function showPage(id, btn, bnavBtn) {
       if (_ap) _ap.innerHTML = `<div style="text-align:center;color:var(--color-text-muted);padding:60px 24px"><svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin:0 auto 12px;display:block;opacity:.4"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg><p style="font-size:14px">Sélectionnez un dossier<br>pour assigner les étapes</p></div>`;
     }
     loadDossiers(); initModulesProduction();
+    if (APPS_SCRIPT_URL) loadBatsFromScript().then(() => { if (selectedDossier) _refreshBatUi(selectedDossier.id); }).catch(()=>{});
   }
   if (id==='blocages')     { renderBlocages(); if (APPS_SCRIPT_URL) Promise.all([loadDossiers(), _loadTachesQuietly()]).then(renderBlocages).catch(()=>renderBlocages()); }
   if (id==='production')   { _setupProdViewToggle(); loadTaches(); _autoRefreshProduction(); initModulesProduction(); }
@@ -1127,6 +1129,40 @@ async function loadEncaissementsFromScript() {
     });
     if (added) { try { localStorage.setItem('pos-encaissements', JSON.stringify(encaissements)); } catch (_) {} }
   } catch (e) { console.warn('load encaissements:', e); }
+}
+
+// ── Suivi BAT : sync serveur (upsert) ──────────────────────
+async function syncBatToScript(b) {
+  if (!APPS_SCRIPT_URL) return;
+  try { await apiCall({ action: 'addBat', bat: b }); }
+  catch (err) { console.warn('Sync BAT GAS:', err); _batRetryQueue.push(b); }
+}
+let _batRetryQueue = [];
+function _flushBatQueue() {
+  if (!APPS_SCRIPT_URL || !_batRetryQueue.length) return;
+  const q = _batRetryQueue.splice(0, _batRetryQueue.length);
+  q.forEach(b => syncBatToScript(b));
+}
+
+// Charge les BAT du serveur et les fusionne (upsert par id : le serveur fait foi
+// pour un id déjà connu, car chaque changement local est poussé immédiatement).
+async function loadBatsFromScript() {
+  if (!APPS_SCRIPT_URL) return;
+  try {
+    const r = await apiCall({ action: 'getBats' });
+    if (!r || !r.ok || !Array.isArray(r.bats)) return;
+    const byId = {};
+    bats.forEach(b => { byId[String(b.id)] = b; });
+    let changed = false;
+    r.bats.forEach(sb => {
+      const k = String(sb.id);
+      if (!byId[k] || JSON.stringify(byId[k]) !== JSON.stringify(sb)) { byId[k] = sb; changed = true; }
+    });
+    if (changed) {
+      bats = Object.values(byId);
+      try { localStorage.setItem('pos-bats', JSON.stringify(bats)); } catch (_) {}
+    }
+  } catch (e) { console.warn('load BATs:', e); }
 }
 
 // Récupère les arrêts de caisse (clôtures) depuis le serveur → multi-appareils + vue patron.
@@ -3779,6 +3815,8 @@ function saveData() {
     // Journal des encaissements
     safeLocalSet('pos-encaissements', JSON.stringify(encaissements));
     localStorage.setItem('pos-nextEncId', String(nextEncId));
+    // Suivi BAT
+    safeLocalSet('pos-bats', JSON.stringify(bats));
   } catch(e) { console.warn('localStorage full?', e); }
 }
 
@@ -3826,6 +3864,8 @@ function loadData() {
     const nai = localStorage.getItem('pos-nextArretId');
     if (ar)  arretsCaisse = JSON.parse(ar);
     if (nai) nextArretId  = parseInt(nai);
+    const _bats = localStorage.getItem('pos-bats');
+    if (_bats) bats = JSON.parse(_bats);
     const enc  = localStorage.getItem('pos-encaissements');
     const nei  = localStorage.getItem('pos-nextEncId');
     if (enc) encaissements = JSON.parse(enc);
@@ -4363,7 +4403,7 @@ async function apiCall(payload) {
   if (!APPS_SCRIPT_URL) return null;
 
   // ── LECTURES & LOGIN : requête GET avec params individuels ─
-  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getEncaissements', 'getArretsCaisse', 'getJournal', 'getDossiers', 'getTaches', 'getDashboard', 'getControlPatron', 'getComments', 'getNotifs', 'getModifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles'];
+  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getEncaissements', 'getBats', 'getArretsCaisse', 'getJournal', 'getDossiers', 'getTaches', 'getDashboard', 'getControlPatron', 'getComments', 'getNotifs', 'getModifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles'];
   if (getActions.includes(payload.action)) {
     const buildUrl = () => {
       let url = APPS_SCRIPT_URL + '?action=' + payload.action;
@@ -8401,6 +8441,11 @@ function _startNotifPolling() {
     _flushNotifRetryQueue();
     _flushTlPhotoQueue();
     _flushCmdAttQueue(); // reprise persistance PJ commande → visibles par tous les postes
+    _flushBatQueue();    // reprise sync BAT
+    // Suivi BAT : rafraîchir en direct si le panneau Attribution est ouvert
+    if (APPS_SCRIPT_URL && document.getElementById('page-attribution')?.classList.contains('active')) {
+      loadBatsFromScript().then(() => { if (selectedDossier) _refreshBatUi(selectedDossier.id); }).catch(()=>{});
+    }
     const newCount = await loadNotifsFromGAS(true);
     if (newCount > 0 && document.getElementById('notifPanel')?.classList.contains('open')) {
       _renderNotifPanelList(); // rafraîchit le panneau si ouvert
@@ -10916,6 +10961,204 @@ function backToDossierList() {
   renderDossiers();
 }
 
+// ============================================================
+// SUIVI BAT (épreuves) — cycle PAO → Commercial → Client → (retours)
+// Le commercial marque envoyé / validé / retours ; la PAO (re)fait le BAT.
+// « À qui la balle » = état dérivé du dernier BAT du dossier.
+// ============================================================
+const BAT_STATES = {
+  pao:        { label:'PAO — BAT à préparer',            color:'#7c3aed', bg:'#f3ecfe' },
+  refaire:    { label:'PAO — retours à traiter',         color:'#7c3aed', bg:'#f3ecfe' },
+  commercial: { label:'Commercial — à envoyer au client', color:'#d97706', bg:'#fef3c7' },
+  client:     { label:'Client — en attente de réponse',  color:'#2563eb', bg:'#dbeafe' },
+  valide:     { label:'BAT validé',                      color:'#16a34a', bg:'#dcfce7' },
+};
+const BAT_STATUS_LABEL = {
+  a_envoyer:'À envoyer au client', envoye_client:'Envoyé au client', valide:'Validé', retour:'Retours demandés'
+};
+
+function _dossierBats(dossierId){
+  return bats.filter(b => String(b.dossierId) === String(dossierId))
+             .sort((a,b) => (Number(a.version)||0) - (Number(b.version)||0));
+}
+function _latestBat(dossierId){ const l = _dossierBats(dossierId); return l.length ? l[l.length-1] : null; }
+
+// État « à qui la balle » dérivé du dernier BAT.
+function _batBallState(dossierId){
+  const b = _latestBat(dossierId);
+  if (!b)                         return { code:'pao',        ...BAT_STATES.pao,        since:null,        bat:null };
+  if (b.status === 'a_envoyer')    return { code:'commercial', ...BAT_STATES.commercial, since:b.createdAt,  bat:b };
+  if (b.status === 'envoye_client')return { code:'client',     ...BAT_STATES.client,     since:b.sentAt,     bat:b };
+  if (b.status === 'retour')       return { code:'refaire',    ...BAT_STATES.refaire,    since:b.decidedAt,  bat:b };
+  if (b.status === 'valide')       return { code:'valide',     ...BAT_STATES.valide,     since:b.decidedAt,  bat:b };
+  return { code:'pao', ...BAT_STATES.pao, since:null, bat:b };
+}
+function _canPaoBat(){ return ['pao','admin','chef_atelier'].includes(currentUser?.role); }
+function _canCommercialBat(){ return ['commerciale','admin'].includes(currentUser?.role); }
+function _batWhen(iso){ if(!iso) return ''; const d=new Date(iso); return isNaN(d.getTime())?'':d.toLocaleString('fr-FR',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}); }
+function _batDaysSince(iso){ if(!iso) return null; const d=new Date(iso); if(isNaN(d.getTime())) return null; return Math.floor((Date.now()-d.getTime())/86400000); }
+function _batReadFile(f){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(f); }); }
+
+// ── Actions ────────────────────────────────────────────────
+function batCreate(dossierId){
+  if (!_canPaoBat()) { showToast('Réservé à la PAO / responsable', 'error'); return; }
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = 'image/*,.pdf';
+  inp.onchange = async () => {
+    const f = inp.files && inp.files[0];
+    if (!f) return;
+    if (f.size > 12 * 1024 * 1024) { showToast('Fichier trop lourd (max 12 Mo)', 'error'); return; }
+    showToast('Envoi du BAT…');
+    let fileMeta = null;
+    try {
+      const dataUrl = await _batReadFile(f);
+      if (APPS_SCRIPT_URL) {
+        const ext = (f.name.split('.').pop() || 'jpg');
+        const r = await apiCall({ action:'uploadFile', fileName:`BAT-${dossierId}-${Date.now()}.${ext}`, mimeType:f.type || 'application/octet-stream', base64Data:dataUrl });
+        if (r && r.ok) fileMeta = { name:f.name, viewUrl:r.viewUrl || '', dlUrl:r.dlUrl || '', type:f.type || '' };
+        else showToast('Upload du fichier échoué — BAT créé sans fichier', 'warning');
+      }
+    } catch(e){ showToast('Upload impossible — BAT créé sans fichier', 'warning'); }
+    _batCreateRound(dossierId, fileMeta);
+  };
+  inp.click();
+}
+
+function _batCreateRound(dossierId, fileMeta){
+  const d = dossiers.find(x => x.id === dossierId) || selectedDossier;
+  const prev = _dossierBats(dossierId);
+  const version = prev.length ? Math.max(...prev.map(b => Number(b.version) || 0)) + 1 : 1;
+  const bat = {
+    id: _genUid('BAT'), dossierId, numeroDossier: (d && d.numeroDossier) || '',
+    version, status: 'a_envoyer',
+    fileName: fileMeta ? fileMeta.name : '', fileUrl: fileMeta ? fileMeta.viewUrl : '',
+    fileDlUrl: fileMeta ? fileMeta.dlUrl : '', fileType: fileMeta ? fileMeta.type : '',
+    retours: '', createdBy: _myOpLabel(), createdAt: new Date().toISOString(),
+    sentBy: '', sentAt: '', decidedBy: '', decidedAt: ''
+  };
+  bats.push(bat);
+  saveData();
+  syncBatToScript(bat);
+  _addNotification({ dossierId, numeroDossier: bat.numeroDossier, etapeCode:'BAT', etapeLabel:'BAT à envoyer', operateur:_myOpLabel(),
+    message:`BAT v${version} prêt — à envoyer au client (${bat.numeroDossier || 'dossier'}) — par ${_myOpLabel()}` });
+  showToast(`BAT v${version} créé — le commercial est notifié`);
+  _refreshBatUi(dossierId);
+}
+
+function batMarkSent(batId){
+  if (!_canCommercialBat()) { showToast('Réservé au commercial', 'error'); return; }
+  const b = bats.find(x => x.id === batId); if (!b) return;
+  b.status = 'envoye_client'; b.sentBy = _myOpLabel(); b.sentAt = new Date().toISOString();
+  saveData(); syncBatToScript(b);
+  showToast('BAT marqué « envoyé au client »');
+  _refreshBatUi(b.dossierId);
+}
+
+function batValidate(batId){
+  if (!_canCommercialBat()) { showToast('Réservé au commercial', 'error'); return; }
+  const b = bats.find(x => x.id === batId); if (!b) return;
+  b.status = 'valide'; b.decidedBy = _myOpLabel(); b.decidedAt = new Date().toISOString();
+  saveData(); syncBatToScript(b);
+  _addNotification({ dossierId:b.dossierId, numeroDossier:b.numeroDossier, etapeCode:'BAT', etapeLabel:'BAT validé', operateur:_myOpLabel(),
+    message:`BAT v${b.version} VALIDÉ par le client (${b.numeroDossier || 'dossier'}) — la production peut démarrer` });
+  showToast('BAT validé — production peut démarrer');
+  _refreshBatUi(b.dossierId);
+}
+
+function batReturn(batId){
+  if (!_canCommercialBat()) { showToast('Réservé au commercial', 'error'); return; }
+  const b = bats.find(x => x.id === batId); if (!b) return;
+  const txt = prompt("Retours du client — ce qu'il faut modifier :", b.retours || '');
+  if (txt === null) return;
+  b.status = 'retour'; b.retours = String(txt).trim(); b.decidedBy = _myOpLabel(); b.decidedAt = new Date().toISOString();
+  saveData(); syncBatToScript(b);
+  _addNotification({ dossierId:b.dossierId, numeroDossier:b.numeroDossier, etapeCode:'BAT', etapeLabel:'Retours BAT', operateur:_myOpLabel(),
+    message:`Retours client sur BAT v${b.version} (${b.numeroDossier || 'dossier'}) : ${b.retours || '—'} → PAO à refaire` });
+  showToast('Retours enregistrés — la PAO est notifiée');
+  _refreshBatUi(b.dossierId);
+}
+
+function _refreshBatUi(dossierId){
+  const el = document.getElementById('batSection_' + dossierId);
+  const d  = dossiers.find(x => x.id === dossierId) || selectedDossier;
+  if (el && d) el.innerHTML = _batSectionInner(d);
+}
+
+// ── Rendu ──────────────────────────────────────────────────
+function _batSectionHtml(d){
+  return `<div class="attr-bat" id="batSection_${d.id}">${_batSectionInner(d)}</div>`;
+}
+
+function _batSectionInner(d){
+  const st = _batBallState(d.id);
+  const rounds = _dossierBats(d.id).slice().reverse();  // plus récent en tête
+  const isPao = _canPaoBat(), isCom = _canCommercialBat();
+  const latest = st.bat;
+
+  // Compteur d'attente (en attente client)
+  let waitTxt = '';
+  if (st.code === 'client' && st.since){
+    const nb = _batDaysSince(st.since);
+    if (nb != null) waitTxt = nb <= 0 ? "aujourd'hui" : nb === 1 ? 'depuis 1 jour' : `depuis ${nb} jours`;
+  }
+
+  // Bloc « à qui la balle »
+  const ball = `<div class="bat-ball" style="background:${st.bg};border-color:${st.color}55">
+      <span class="bat-ball-dot" style="background:${st.color}"></span>
+      <span class="bat-ball-lbl" style="color:${st.color}">${st.label}</span>
+      ${waitTxt ? `<span class="bat-ball-since">${waitTxt}</span>` : ''}
+    </div>`;
+
+  // Boutons d'action selon l'état + le rôle
+  let actions = '';
+  if (st.code === 'pao' || st.code === 'refaire'){
+    if (isPao) actions += `<button class="bat-btn bat-btn--pao" onclick="batCreate('${d.id}')">${st.code==='refaire'?'Refaire le BAT (v'+((latest?latest.version:0)+1)+')':'Créer le 1ᵉʳ BAT'}</button>`;
+    else actions += `<span class="bat-hint">En attente de la PAO…</span>`;
+  } else if (st.code === 'commercial'){
+    if (isCom) actions += `<button class="bat-btn bat-btn--send" onclick="batMarkSent('${latest.id}')">Marquer « envoyé au client »</button>`;
+    else actions += `<span class="bat-hint">À envoyer au client par le commercial…</span>`;
+  } else if (st.code === 'client'){
+    if (isCom){
+      actions += `<button class="bat-btn bat-btn--ok" onclick="batValidate('${latest.id}')">✅ Le client a validé</button>`;
+      actions += `<button class="bat-btn bat-btn--ret" onclick="batReturn('${latest.id}')">🔄 Retours du client</button>`;
+    } else actions += `<span class="bat-hint">En attente de la réponse du client…</span>`;
+  } else if (st.code === 'valide'){
+    actions += `<span class="bat-hint" style="color:#16a34a">BAT validé — production lancée.</span>`;
+    if (isPao) actions += `<button class="bat-btn" onclick="batCreate('${d.id}')">Nouveau BAT</button>`;
+  }
+
+  // Liste des versions
+  const roundsHtml = rounds.length ? rounds.map(b => {
+    const sColor = b.status==='valide' ? '#16a34a' : b.status==='retour' ? '#dc2626' : b.status==='envoye_client' ? '#2563eb' : '#d97706';
+    const sBg    = b.status==='valide' ? '#dcfce7' : b.status==='retour' ? '#fee2e2' : b.status==='envoye_client' ? '#dbeafe' : '#fef3c7';
+    const fileLink = b.fileUrl
+      ? `<a href="${b.fileUrl}" target="_blank" class="bat-file">📎 ${escapeHtml(b.fileName || 'Voir le BAT')}</a>`
+      : '<span class="bat-nofile">Pas de fichier joint</span>';
+    const timeline = [
+      b.createdAt ? `Créé ${_batWhen(b.createdAt)}${b.createdBy?' · '+escapeHtml(b.createdBy):''}` : '',
+      b.sentAt ? `Envoyé ${_batWhen(b.sentAt)}${b.sentBy?' · '+escapeHtml(b.sentBy):''}` : '',
+      b.decidedAt ? `${b.status==='valide'?'Validé':'Retour'} ${_batWhen(b.decidedAt)}${b.decidedBy?' · '+escapeHtml(b.decidedBy):''}` : ''
+    ].filter(Boolean).join(' — ');
+    return `<div class="bat-round">
+        <div class="bat-round-top">
+          <span class="bat-ver">BAT v${b.version}</span>
+          <span class="bat-stat" style="color:${sColor};background:${sBg}">${BAT_STATUS_LABEL[b.status]||b.status}</span>
+          ${fileLink}
+        </div>
+        ${b.retours ? `<div class="bat-retours"><b>Retours client :</b> ${escapeHtml(b.retours)}</div>` : ''}
+        ${timeline ? `<div class="bat-time">${timeline}</div>` : ''}
+      </div>`;
+  }).join('') : '<div class="bat-empty">Aucun BAT pour l\'instant.</div>';
+
+  return `
+    <div class="bat-head">
+      <span class="bat-title">Suivi BAT (épreuves)</span>
+      ${ball}
+    </div>
+    <div class="bat-actions">${actions}</div>
+    <div class="bat-rounds">${roundsHtml}</div>`;
+}
+
 function renderAttrPanel(tachesD, commentsD = []) {
   const panel = document.getElementById('attrPanel');
   if (!panel || !selectedDossier) return;
@@ -11181,6 +11424,7 @@ function renderAttrPanel(tachesD, commentsD = []) {
       </div>`;
     }).join('')}
       </div>
+      ${_batSectionHtml(d)}
       <div style="padding:14px 0 2px;border-top:1px solid var(--color-border);margin-top:12px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
           <div style="font-size:11px;font-weight:700;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:.06em;display:flex;align-items:center;gap:6px">

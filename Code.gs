@@ -14,6 +14,8 @@ const SHEET_RESERVATIONS = 'Réservations';
 const SHEET_COMMANDES    = 'Commandes';
 const SHEET_ENCAISSEMENTS = 'Encaissements'; // journal centralisé des entrées d'argent (patron)
 const SHEET_ARRETS        = 'ArretsCaisse';   // clôtures de caisse centralisées (multi-appareils + vue patron)
+const SHEET_BATS          = 'BATs';           // suivi des BAT (épreuves) : versions, envoi client, retours, validation
+const BAT_HEADERS_        = ['ID','DossierId','NumeroDossier','Version','Statut','Retours','FileName','FileUrl','FileDlUrl','FileType','CreatedBy','CreatedAt','SentBy','SentAt','DecidedBy','DecidedAt'];
 
 // Nouvelles feuilles
 const SHEET_DOSSIERS   = 'Dossiers';
@@ -108,6 +110,8 @@ function doPost(e) {
     else if (action === 'getCommandes')      result = handleGetCommandes(data);
     else if (action === 'addEncaissement')   result = handleAddEncaissement(data);
     else if (action === 'getEncaissements')  result = handleGetEncaissements(data);
+    else if (action === 'addBat')            result = handleAddBat(data);
+    else if (action === 'getBats')           result = handleGetBats(data);
     else if (action === 'addArretCaisse')    result = handleAddArretCaisse(data);
     else if (action === 'getArretsCaisse')   result = handleGetArretsCaisse(data);
     else if (action === 'logActivity')       result = handleLogActivity(data);
@@ -170,6 +174,7 @@ function doGet(e) {
       else if (action === 'addCommande')       result = handleAddCommande(data);
       else if (action === 'updateCommande')    result = handleUpdateCommande(data);
       else if (action === 'addEncaissement')   result = handleAddEncaissement(data);
+      else if (action === 'addBat')            result = handleAddBat(data);
       else if (action === 'addArretCaisse')    result = handleAddArretCaisse(data);
       else if (action === 'updateDossier')     result = handleUpdateDossier(data);
       else if (action === 'cloturerDossier')   result = handleCloturerDossier(data);
@@ -209,6 +214,7 @@ function doGet(e) {
     if (action === 'getReservations') return jsonResp(handleGetReservations());
     if (action === 'getCommandes')    return jsonResp(handleGetCommandes(e.parameter));
     if (action === 'getEncaissements') return jsonResp(handleGetEncaissements(e.parameter));
+    if (action === 'getBats')          return jsonResp(handleGetBats(e.parameter));
     if (action === 'getArretsCaisse')  return jsonResp(handleGetArretsCaisse(e.parameter));
     if (action === 'getDossiers')     return jsonResp(handleGetDossiers(e.parameter));
     if (action === 'getTaches')       return jsonResp(handleGetTaches(e.parameter));
@@ -699,6 +705,54 @@ function handleGetEncaissements(data) {
   })).filter(x => String(x.id) !== '');
   if (data && data.caissier) list = list.filter(x => String(x.caissier) === String(data.caissier));
   return { ok:true, encaissements:list };
+}
+
+// ── Suivi BAT (épreuves) ───────────────────────────────────
+// UPSERT par ID : un même BAT est mis à jour au fil de son cycle
+// (à envoyer → envoyé client → validé / retour). 16 colonnes = BAT_HEADERS_.
+function handleAddBat(data) {
+  const b = data.bat;
+  if (!b || !b.id) return { ok:false, error:'BAT invalide' };
+  const ss = getSS();
+  const sh = ss.getSheetByName(SHEET_BATS) || ensureSheet(ss, SHEET_BATS, BAT_HEADERS_);
+  const row = [
+    String(b.id), String(b.dossierId || ''), String(b.numeroDossier || ''),
+    Number(b.version) || 1, String(b.status || ''), String(b.retours || ''),
+    String(b.fileName || ''), String(b.fileUrl || ''), String(b.fileDlUrl || ''), String(b.fileType || ''),
+    String(b.createdBy || ''), String(b.createdAt || ''),
+    String(b.sentBy || ''), String(b.sentAt || ''),
+    String(b.decidedBy || ''), String(b.decidedAt || '')
+  ];
+  const last = sh.getLastRow();
+  if (last > 1) {
+    const ids = sh.getRange(2, 1, last - 1, 1).getValues();
+    for (let i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]) === String(b.id)) {
+        sh.getRange(i + 2, 1, 1, row.length).setValues([row]);   // mise à jour de la ligne existante
+        return { ok:true, id:b.id, updated:true };
+      }
+    }
+  }
+  sh.appendRow(row);
+  return { ok:true, id:b.id };
+}
+
+function handleGetBats(data) {
+  const sh = getSS().getSheetByName(SHEET_BATS);
+  if (!sh) return { ok:true, bats:[] };
+  const last = sh.getLastRow();
+  if (last <= 1) return { ok:true, bats:[] };
+  const rows = sh.getRange(2, 1, last - 1, BAT_HEADERS_.length).getValues();
+  let list = rows.map(r => ({
+    id: String(r[0]), dossierId: String(r[1]), numeroDossier: String(r[2]),
+    version: Number(r[3]) || 1, status: String(r[4]), retours: String(r[5]),
+    fileName: String(r[6]), fileUrl: String(r[7]), fileDlUrl: String(r[8]), fileType: String(r[9]),
+    createdBy: String(r[10]), createdAt: String(r[11]),
+    sentBy: String(r[12]), sentAt: String(r[13]),
+    decidedBy: String(r[14]), decidedAt: String(r[15])
+  })).filter(x => x.id);
+  if (data && data.dossierId) list = list.filter(x => String(x.dossierId) === String(data.dossierId));
+  return { ok:true, bats:list };
 }
 
 // ── Arrêts de caisse (clôtures) : persistance Sheet ────────
