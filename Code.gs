@@ -1192,6 +1192,15 @@ function _parseAttachments_(cell) {
   catch (e) { return []; }
 }
 
+// Pôles atelier stockés en JSON (["print","bois"]) ou liste "print,bois". → array de clés.
+function _parsePoles_(cell) {
+  if (!cell) return [];
+  const s = String(cell).trim();
+  if (!s) return [];
+  if (s[0] === '[') { try { const a = JSON.parse(s); if (Array.isArray(a)) return a.map(String).map(x=>x.trim()).filter(Boolean); } catch (e) {} }
+  return s.split(',').map(x => x.trim()).filter(Boolean);
+}
+
 // Formate une cellule de date en ISO 'yyyy-MM-dd'. Les cellules saisies via
 // <input type="date"> ('2026-06-28') sont auto-converties en objets Date par Sheets
 // (à minuit dans le fuseau du classeur) ; un simple String() renverrait une chaîne
@@ -1256,6 +1265,7 @@ function handleGetCommandes(data) {
         dateBAT: _fmtDateCell_(r[23]),
         attachments: _parseAttachments_(r[24]),
         remarque: String(r[25]||''),
+        poles: _parsePoles_(r[26]),   // col 27 = Poles (JSON array de clés)
         photos: []
       };
       order.push(id);
@@ -1478,7 +1488,8 @@ function handleAddCommande(data) {
     c.dateLivraisonProd||'',
     c.dateBAT||'',
     JSON.stringify(Array.isArray(c.attachments) ? c.attachments : []),
-    c.remarque||''   // col 26 = Remarque (finance)
+    c.remarque||'',   // col 26 = Remarque (finance)
+    JSON.stringify(Array.isArray(c.poles) ? c.poles : [])   // col 27 = Poles (pôles atelier)
   ]);
   // Forcer nom + contact en TEXTE (un contact "+261 34…" serait sinon évalué en formule → #ERROR!)
   const _r = sh.getLastRow();
@@ -1544,6 +1555,11 @@ function handleUpdateCommande(data) {
       const need = 26 - sh.getMaxColumns();
       if (need > 0) sh.insertColumnsAfter(sh.getMaxColumns(), need);
       sh.getRange(i+1, 26).setValue(String(data.remarque || ''));
+    }
+    if (data.poles !== undefined) {                                                            // col 27 = Poles (pôles atelier)
+      const need = 27 - sh.getMaxColumns();
+      if (need > 0) sh.insertColumnsAfter(sh.getMaxColumns(), need);
+      sh.getRange(i+1, 27).setValue(JSON.stringify(Array.isArray(data.poles) ? data.poles : []));
     }
     updated = true;
   }

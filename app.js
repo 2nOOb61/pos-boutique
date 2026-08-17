@@ -32,7 +32,31 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '133 · 2026-08-13';
+const APP_VERSION = '134 · 2026-08-17';
+
+// ============================================================
+// PÔLES ATELIER — domaines de production. Le commercial coche un ou
+// plusieurs pôles à la création d'une commande ; le calendrier peut
+// ensuite être filtré par pôle (chaque pôle = un atelier/équipe).
+// ============================================================
+const ATELIER_POLES = [
+  { key:'etiquettes', label:'Étiquettes', color:'#d97706' },
+  { key:'bois',       label:'Bois',       color:'#92400e' },
+  { key:'print',      label:'Print',      color:'#2563eb' },
+  { key:'textiles',   label:'Textiles',   color:'#0d9488' }
+];
+function _poleLabel(key){ const p = ATELIER_POLES.find(x => x.key === key); return p ? p.label : key; }
+function _poleColor(key){ const p = ATELIER_POLES.find(x => x.key === key); return p ? p.color : '#64748b'; }
+// Normalise la valeur des pôles (array, JSON, ou liste séparée par virgules) → array de clés.
+function _normPoles(v){
+  if (Array.isArray(v)) return v.map(String).map(s => s.trim()).filter(Boolean);
+  if (typeof v === 'string' && v.trim()){
+    const s = v.trim();
+    if (s[0] === '[') { try { const j = JSON.parse(s); if (Array.isArray(j)) return j.map(String).map(x=>x.trim()).filter(Boolean); } catch(e){} }
+    return s.split(',').map(x => x.trim()).filter(Boolean);
+  }
+  return [];
+}
 
 // ============================================================
 // RYTHME DE PRODUCTION — déclaré ici pour être sûrement initialisé
@@ -5439,6 +5463,7 @@ let commandes = [];
 let nextCommandeId = 1;
 let cmdModalItems = [];
 let cmdModalPhotos = [];
+let cmdModalPoles = [];   // pôles atelier cochés pour la commande en cours de création
 let cmdPayMode = 'cash';
 let cmdProvider = 'MVola';
 let currentCmdFinalizeId = null;
@@ -5461,6 +5486,7 @@ document.addEventListener('click', e => {
 function openCommandeModal(fromCart) {
   cmdModalItems = [];
   cmdModalPhotos = [];
+  cmdModalPoles = [];
   cmdPayMode = 'cash';
   cmdProvider = 'MVola';
 
@@ -5490,9 +5516,30 @@ function openCommandeModal(fromCart) {
   }
 
   renderCmdItemsTable();
+  renderCmdPoles();
   updateCmdTotals();
   switchCmdPayTab('cash');
   openModal('commandeModal');
+}
+
+// Rend les puces de sélection des pôles atelier dans le modal commande.
+function renderCmdPoles(){
+  const c = document.getElementById('cmdPolesList');
+  if (!c) return;
+  c.innerHTML = ATELIER_POLES.map(p => {
+    const on = cmdModalPoles.includes(p.key);
+    return `<button type="button" class="cmd-pole-chip${on ? ' on' : ''}"
+      style="${on ? `--pc:${p.color};border-color:${p.color};color:${p.color}` : ''}"
+      onclick="toggleCmdPole('${p.key}')" aria-pressed="${on}">
+      <span class="cmd-pole-dot" style="background:${p.color}"></span>${p.label}</button>`;
+  }).join('');
+}
+
+// Coche / décoche un pôle atelier.
+function toggleCmdPole(key){
+  const i = cmdModalPoles.indexOf(key);
+  if (i >= 0) cmdModalPoles.splice(i, 1); else cmdModalPoles.push(key);
+  renderCmdPoles();
 }
 
 function renderCmdItemsTable() {
@@ -5747,6 +5794,7 @@ function saveCommande() {
     dateLivraisonProd: dateLivProd,
     dateBAT:           dateBAT,
     items:            cmdModalItems.map(i => ({ name: i.name.trim(), qty: i.qty, price: i.price, custom: !!i.custom })),
+    poles:            [...cmdModalPoles],
     notes,
     photos:           [...cmdModalPhotos],
     subtotal, remise, total: netTotal, accompte, restant,
@@ -7031,6 +7079,7 @@ async function syncCommandeToSheets(cmd) {
     depositProvider: cmd.depositProvider,
     depositRef:      cmd.depositRef,
     notes:           cmd.notes,
+    poles:           _normPoles(cmd.poles),
     // Pièces jointes déjà sur Drive (metadata seulement, jamais le base64)
     attachments:     (cmd.attachments || []).filter(a => a && a.fileId),
   };
@@ -12385,6 +12434,7 @@ function _collectDeliveries() {
       notes:      c.notes || '',
       dateClient: _toIsoDate(c.dateLivraison || ''),
       dateProd:   _toIsoDate(c.dateLivraisonProd || ''),
+      poles:      _normPoles(c.poles),
       dossierId:  c.dossierId || ''
     });
   });
@@ -12404,6 +12454,7 @@ function _collectDeliveries() {
       notes:      r.notes || '',
       dateClient: _toIsoDate(r.deliveryDate || ''),
       dateProd:   '',
+      poles:      _normPoles(r.poles),
       dossierId:  r.dossierId || ''
     });
   });
@@ -12499,7 +12550,7 @@ const _CAL_DOWS   = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
 const _CAL_LINK_SVG = '<span class="cal-chip-link" title="Lié à sa livraison"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12a4 4 0 0 0 5.7 0l2.6-2.6a4 4 0 0 0-5.7-5.7l-.8.8"/><path d="M15 12a4 4 0 0 0-5.7 0L6.7 14.6a4 4 0 0 0 5.7 5.7l.8-.8"/></svg></span>';
 
 // État des filtres communs aux deux calendriers.
-let _calFilters = { client:'', status:'', resp:'', type:'', q:'' };
+let _calFilters = { client:'', status:'', resp:'', type:'', pole:'', q:'' };
 // Cache des paires production↔livraison + délais courts, recalculé à chaque rendu.
 let _calPair = { linked:{}, short:{} };
 // Journées dépliées (clé = 'prod:iso' / 'client:iso') → affiche toutes les commandes du jour.
@@ -12523,6 +12574,7 @@ function _calMatchesBase(e){
   const f = _calFilters;
   if(f.client && e.client !== f.client) return false;
   if(f.resp && (e.commercial||'') !== f.resp) return false;
+  if(f.pole && !(Array.isArray(e.poles) && e.poles.includes(f.pole))) return false;
   if(f.type){
     if((f.type==='commande'||f.type==='reservation') && e.kind !== f.type) return false;
     if((f.type==='livraison'||f.type==='retrait') && e.mode !== f.type) return false;
@@ -12593,6 +12645,7 @@ function _calPopulateFilters(){
   fill('calFilterResp',   'Responsable', resps, _calFilters.resp);
   const st = document.getElementById('calFilterStatut'); if(st) st.value = _calFilters.status;
   const tp = document.getElementById('calFilterType');   if(tp) tp.value = _calFilters.type;
+  const pl = document.getElementById('calFilterPole');   if(pl) pl.value = _calFilters.pole;
 }
 
 // Injecte les valeurs des KPI dans la ligne compacte.
@@ -12622,7 +12675,7 @@ function _calEvents(kind){
     return {
       ymd, client:x.client, ref:x.ref, total:x.total, status:x.status,
       kind:x.kind, id:x.id, dossierId:x.dossierId||'', commercial:x.commercial||'',
-      items:x.items||[],
+      items:x.items||[], poles:x.poles||[],
       progression: dos ? (Number(dos.progression)||0) : null
     };
   }).filter(Boolean);
@@ -12683,9 +12736,11 @@ function _calRenderMonth(kind){
       const qty   = items.reduce((s,i)=>s+(Number(i.qty)||1),0);
       const dot   = done?'#9ca3af':late?'#d97706':short?'#dc2626':(kind==='prod'?'#7c3aed':'#0d9488');
       const art   = items.map(i=>`${i.name} ×${i.qty||1}`).join(', ');
-      const tip   = `${e.client}${art?' — '+art:''}${short?' — délai court (production proche de la livraison)':''}`;
+      const poleDots = (e.poles||[]).map(pk=>`<span class="cal-pole-dot" style="background:${_poleColor(pk)}" title="${escapeHtml(_poleLabel(pk))}"></span>`).join('');
+      const poleTip  = (e.poles||[]).length ? ' — Pôles : '+e.poles.map(_poleLabel).join(', ') : '';
+      const tip   = `${e.client}${art?' — '+art:''}${poleTip}${short?' — délai court (production proche de la livraison)':''}`;
       return `<button type="button" class="cal-chip cal-chip--${cls}${linked?' cal-chip-linked':''}${short?' cal-chip-urgent':''}" onclick="_calOpenDetail('${e.kind}','${e.id}','${e.dossierId}')" title="${escapeHtml(tip)}">
-        <span class="cal-chip-head"><span class="cal-chip-client">${escapeHtml(e.client)}</span><span class="cal-chip-badges">${linked?_CAL_LINK_SVG:''}${qty?`<span class="cal-chip-qty">×${qty}</span>`:''}</span></span>
+        <span class="cal-chip-head"><span class="cal-chip-client">${escapeHtml(e.client)}</span><span class="cal-chip-badges">${poleDots}${linked?_CAL_LINK_SVG:''}${qty?`<span class="cal-chip-qty">×${qty}</span>`:''}</span></span>
         ${first?`<span class="cal-chip-items">${escapeHtml(first)}</span>`:''}
         <span class="cal-chip-foot"><span class="cal-dot" style="background:${dot}"></span>${short?'<span class="cal-chip-warn">Délai court</span>':''}</span></button>`;
     }).join('');
@@ -12745,6 +12800,10 @@ function _calOpenDetail(kind, id, dossierId){
   const dCli  = _dispDate(x.dateClient) || 'Non planifiée';
   const gap   = _calGapDays(x.dateProd, x.dateClient);
   const modeLabel = x.mode==='livraison' ? 'Livraison' + (x.address?' — '+x.address:'') : 'Retrait boutique';
+  const poles = _normPoles(x.poles);
+  const polesHtml = poles.length
+    ? poles.map(pk=>`<span class="cal-dt-pole" style="border-color:${_poleColor(pk)};color:${_poleColor(pk)}"><span class="cal-pole-dot" style="background:${_poleColor(pk)}"></span>${escapeHtml(_poleLabel(pk))}</span>`).join('')
+    : '<span style="color:var(--muted)">Aucun pôle</span>';
   const svg = (p)=>`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
   body.innerHTML = `
     <div class="cal-dt-head">
@@ -12762,6 +12821,7 @@ function _calOpenDetail(kind, id, dossierId){
       <div class="cal-dt-f"><label>${svg('<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>')}Client</label><span>${escapeHtml(x.client)}${x.contact?` · ${escapeHtml(x.contact)}`:''}</span></div>
       <div class="cal-dt-f"><label>${svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/>')}Produit / tâche</label><span>${escapeHtml(prod)}</span></div>
       <div class="cal-dt-f"><label>${svg('<path d="M3 7h18"/><path d="M6 7v13h12V7"/><path d="M9 7V4h6v3"/>')}Quantité</label><span>${qty}</span></div>
+      <div class="cal-dt-f"><label>${svg('<path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/>')}Pôles atelier</label><span class="cal-dt-poles">${polesHtml}</span></div>
       <div class="cal-dt-f"><label>${svg('<path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/>')}Date production</label><span>${dProd}</span></div>
       <div class="cal-dt-f"><label>${svg('<rect x="1" y="6" width="13" height="11" rx="1"/><path d="M14 9h4l3 3v5h-7z"/>')}Date livraison</label><span>${dCli}${lateLiv?' · <span style="color:#a32d2d">en retard</span>':''}</span></div>
       <div class="cal-dt-f"><label>${svg('<path d="M12 3v3"/><circle cx="12" cy="9" r="3"/><path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/>')}Mode</label><span>${escapeHtml(modeLabel)}</span></div>
