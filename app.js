@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '141 · 2026-08-17';
+const APP_VERSION = '142 · 2026-08-17';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -11283,6 +11283,134 @@ async function renderSuiviBat(force){
 
   cont.innerHTML = `<div class="batb-chips">${chips}</div><div class="batb-list">${list}</div>`;
   _updateBatNavBadge();
+  _applyBatView();
+}
+
+// ============================================================
+// CALENDRIER DES DÉLAIS BAT — vue mensuelle des épreuves positionnées
+// sur l'échéance de livraison du dossier (le BAT doit être validé avant).
+// Bascule Liste / Calendrier dans la page « Suivi BAT ».
+// ============================================================
+let _batView = 'list';                                   // 'list' | 'cal'
+let _batCalRef = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+
+function setBatView(v){
+  _batView = (v === 'cal') ? 'cal' : 'list';
+  _applyBatView();
+}
+function _applyBatView(){
+  const listEl = document.getElementById('suiviBatContent');
+  const calEl  = document.getElementById('batCalContent');
+  document.querySelectorAll('#batViewToggle .batv-tab').forEach(t => t.classList.toggle('on', t.dataset.view === _batView));
+  if (listEl) listEl.style.display = _batView === 'list' ? '' : 'none';
+  if (calEl){ calEl.style.display = _batView === 'cal' ? '' : 'none'; if (_batView === 'cal') renderBatCalendar(); }
+}
+function batCalShift(delta){ _batCalRef = new Date(_batCalRef.getFullYear(), _batCalRef.getMonth()+delta, 1); renderBatCalendar(); }
+function batCalToday(){ const n = new Date(); _batCalRef = new Date(n.getFullYear(), n.getMonth(), 1); renderBatCalendar(); }
+
+// Échéance de livraison d'un dossier, lue depuis SA source (commande/réservation),
+// via la même liaison que _batBoardRows (d.sourceType/d.sourceId) — robuste aux
+// réécritures de dossierId par _ensureDossierLinks.
+function _batDossierDeadline(d){
+  let src = null;
+  if (d.sourceType && d.sourceId){
+    src = d.sourceType === 'reservation'
+      ? reservations.find(x => String(x.id) === String(d.sourceId))
+      : commandes.find(x => String(x.id) === String(d.sourceId));
+  }
+  const raw = (src && (src.dateLivraison || src.deliveryDate)) || d.dateLivraison || d.deliveryDate || '';
+  return _toIsoDate(raw) || '';
+}
+// Un événement BAT = un dossier avec ≥1 BAT, positionné sur son échéance.
+function _batCalEvents(){
+  return _batBoardRows().map(r => ({
+    dossierId: r.d.id, ref: r.d.numeroDossier || '', client: r.client, commercial: r.commercial,
+    ymd: _batDossierDeadline(r.d),
+    st: r.st, bucket: r.bucket, days: r.days, version: r.version
+  }));
+}
+function _batCalChip(e, iso, todayIso){
+  const urgent = (e.bucket === 'client' && e.days != null && e.days >= 3) || (iso && iso < todayIso && e.bucket !== 'valide');
+  const daysTxt = e.days != null ? (e.bucket === 'client'
+      ? 'attente ' + (e.days <= 0 ? "auj." : e.days + ' j')
+      : (e.days <= 0 ? "auj." : e.days + ' j')) : '';
+  const tip = `${e.ref || '—'} — ${e.client} · ${e.st.label}${e.days != null ? ` · ${e.days} j` : ''}`;
+  return `<button type="button" class="cal-chip bcal-chip${urgent ? ' bcal-chip-urgent' : ''}" style="border-left:3px solid ${e.st.color}"
+      onclick="openAttribForDossier('${e.dossierId}')" title="${escapeHtml(tip)}">
+      <span class="cal-chip-head"><span class="cal-chip-client">${escapeHtml(e.ref || e.client)}</span>
+        <span class="cal-chip-badges"><span class="cal-dot" style="background:${e.st.color}"></span></span></span>
+      <span class="cal-chip-items">${escapeHtml(e.client)}${daysTxt ? ' · ' + daysTxt : ''}</span></button>`;
+}
+
+function renderBatCalendar(){
+  const cont = document.getElementById('batCalContent');
+  if (!cont) return;
+  const year = _batCalRef.getFullYear(), month = _batCalRef.getMonth();
+  const todayIso = _calTodayIso();
+  const evs = _batCalEvents();
+
+  // Regroupe par jour (mois affiché) ; met de côté ceux sans échéance.
+  const byDay = {}; const noDate = [];
+  evs.forEach(e => {
+    if (!e.ymd){ noDate.push(e); return; }
+    const d = new Date(e.ymd + 'T00:00:00');
+    if (isNaN(d.getTime())){ noDate.push(e); return; }
+    if (d.getFullYear() !== year || d.getMonth() !== month) return;   // autre mois
+    (byDay[e.ymd] = byDay[e.ymd] || []).push(e);
+  });
+
+  // Grille mensuelle (réutilise les classes .cal-*).
+  const first = new Date(year, month, 1);
+  const startDow = (first.getDay()+6)%7;
+  const dim = new Date(year, month+1, 0).getDate();
+  const totalCells = Math.ceil((startDow+dim)/7)*7;
+  let grid = ''; let day = 1 - startDow;
+  for (let i=0;i<totalCells;i++,day++){
+    if (day<1 || day>dim){ grid += '<div class="cal-day cal-day-out"></div>'; continue; }
+    const iso = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    const list = byDay[iso] || [];
+    const isToday = iso === todayIso;
+    const chips = list.map(e => _batCalChip(e, iso, todayIso)).join('');
+    grid += `<div class="cal-day${isToday?' cal-day-today':''}${list.length?' cal-day-has':''}">
+      <span class="cal-daynum">${day}</span><div class="cal-chips">${chips}</div></div>`;
+  }
+  const head = '<div class="cal-week-head">'+_CAL_DOWS.map(d=>`<div class="cal-dow">${d}</div>`).join('')+'</div>';
+
+  // Compteurs : en retard (échéance passée, non validé) et attente client ≥3 j.
+  const nbLate = evs.filter(e => e.ymd && e.ymd < todayIso && e.bucket !== 'valide').length;
+  const nbWait = evs.filter(e => e.bucket === 'client' && e.days != null && e.days >= 3).length;
+
+  const noDateHtml = noDate.length ? `
+    <div class="bcal-nodate">
+      <div class="bcal-nodate-h">Sans échéance de livraison (${noDate.length})</div>
+      ${noDate.map(e => `<button type="button" class="bcal-nd-row" onclick="openAttribForDossier('${e.dossierId}')" title="${escapeHtml(e.st.label)}">
+        <span class="cal-dot" style="background:${e.st.color}"></span>
+        <b>${escapeHtml(e.ref || '—')}</b><span class="bcal-nd-cli">${escapeHtml(e.client)}</span>
+        <span class="bcal-nd-state" style="color:${e.st.color}">${e.st.label}${e.days!=null?` · ${e.days} j`:''}</span></button>`).join('')}
+    </div>` : '';
+
+  cont.innerHTML = `
+    <div class="bcal-bar">
+      <div class="bcal-nav">
+        <button class="bcal-navbtn" onclick="batCalShift(-1)" aria-label="Mois précédent">‹</button>
+        <span class="bcal-month">${_CAL_MONTHS[month]} ${year}</span>
+        <button class="bcal-navbtn" onclick="batCalShift(1)" aria-label="Mois suivant">›</button>
+        <button class="bcal-today" onclick="batCalToday()">Aujourd'hui</button>
+      </div>
+      <div class="bcal-stats">
+        <span class="bcal-stat bcal-stat--late" title="Échéance dépassée, BAT non validé">⚠ ${nbLate} en retard</span>
+        <span class="bcal-stat bcal-stat--wait" title="Attente client ≥ 3 jours">🔵 ${nbWait} attente client</span>
+      </div>
+    </div>
+    <div class="bcal-legend">
+      <span><i style="background:${BAT_STATES.pao.color}"></i>PAO</span>
+      <span><i style="background:${BAT_STATES.commercial.color}"></i>À envoyer</span>
+      <span><i style="background:${BAT_STATES.client.color}"></i>Attente client</span>
+      <span><i style="background:${BAT_STATES.valide.color}"></i>Validé</span>
+      <span class="bcal-legend-hint">Positionné sur l'échéance de livraison du dossier</span>
+    </div>
+    <div class="bcal-grid">${head}<div class="cal-days">${grid}</div></div>
+    ${noDateHtml}`;
 }
 
 function renderAttrPanel(tachesD, commentsD = []) {
