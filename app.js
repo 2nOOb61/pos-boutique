@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '140 · 2026-08-17';
+const APP_VERSION = '141 · 2026-08-17';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -3976,6 +3976,44 @@ function applyRolePermissions(role) {
     const anyVisible = Array.from(group.querySelectorAll('.sidebar-btn'))
       .some(b => b.style.display !== 'none');
     group.style.display = anyVisible ? '' : 'none';
+  });
+  restoreSidebarGroups();
+}
+
+// ============================================================
+// CATÉGORIES RÉTRACTABLES DE LA SIDEBAR
+// ============================================================
+const SIDEBAR_GROUPS_KEY = 'pos-sidebar-collapsed-groups';
+
+function _getCollapsedGroups() {
+  try { return JSON.parse(localStorage.getItem(SIDEBAR_GROUPS_KEY) || '[]'); }
+  catch (e) { return []; }
+}
+function _setGroupCollapsed(name, collapsed) {
+  let list = _getCollapsedGroups().filter(n => n !== name);
+  if (collapsed) list.push(name);
+  try { localStorage.setItem(SIDEBAR_GROUPS_KEY, JSON.stringify(list)); } catch (e) {}
+}
+
+// Plie/déplie une catégorie au clic sur son en-tête
+function toggleSidebarGroup(titleEl) {
+  const group = titleEl.closest('.sidebar-group');
+  if (!group) return;
+  const collapsed = group.classList.toggle('collapsed');
+  titleEl.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  _setGroupCollapsed(group.dataset.group, collapsed);
+}
+
+// Restaure l'état plié/déplié ; déplie toujours le groupe de la page active
+function restoreSidebarGroups() {
+  const collapsed = _getCollapsedGroups();
+  document.querySelectorAll('.sidebar-group').forEach(group => {
+    const name = group.dataset.group;
+    const title = group.querySelector('.sidebar-group-title');
+    const hasActive = !!group.querySelector('.sidebar-btn.active');
+    const isCollapsed = collapsed.includes(name) && !hasActive;
+    group.classList.toggle('collapsed', isCollapsed);
+    if (title) title.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
   });
 }
 

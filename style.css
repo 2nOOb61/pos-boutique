@@ -1850,17 +1850,44 @@ html, body { overflow-x: hidden; max-width: 100%; }
   margin-top: 12px;
 }
 .sidebar-group-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
   color: rgba(255,255,255,0.40);
-  padding: 4px 12px 5px;
+  padding: 5px 12px;
+  margin: 0;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  text-align: left;
   white-space: nowrap;
   overflow: hidden;
-  transition: opacity 0.18s;
+  cursor: pointer;
+  transition: opacity 0.18s, background 0.15s, color 0.15s;
 }
-/* En mode réduit : titres remplacés par un fin séparateur */
+.sidebar-group-title:hover {
+  background: rgba(255,255,255,0.06);
+  color: rgba(255,255,255,0.72);
+}
+.sidebar-group-caret {
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+  opacity: 0.7;
+}
+.sidebar-group.collapsed .sidebar-group-caret {
+  transform: rotate(-90deg);
+}
+/* Groupe plié : masque ses boutons (garde l'en-tête visible) */
+.sidebar-group.collapsed .sidebar-btn {
+  display: none !important;
+}
+/* En mode réduit : titres remplacés par un fin séparateur, pliage désactivé */
 .sidebar.collapsed .sidebar-group + .sidebar-group {
   margin-top: 6px;
 }
@@ -1870,8 +1897,16 @@ html, body { overflow-x: hidden; max-width: 100%; }
   padding: 0;
   height: 0;
   margin: 6px 12px;
+  border-radius: 0;
   border-top: 1px solid rgba(255,255,255,0.12);
   pointer-events: none;
+}
+.sidebar.collapsed .sidebar-group-caret {
+  display: none;
+}
+/* En mode réduit, on ignore le pliage utilisateur : les icônes restent visibles */
+.sidebar.collapsed .sidebar-group.collapsed .sidebar-btn {
+  display: flex !important;
 }
 /* Le premier séparateur en mode réduit est superflu */
 .sidebar.collapsed .sidebar-group:first-child .sidebar-group-title {
