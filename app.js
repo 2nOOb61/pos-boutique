@@ -32,21 +32,50 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '134 · 2026-08-17';
+const APP_VERSION = '135 · 2026-08-17';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
 // plusieurs pôles à la création d'une commande ; le calendrier peut
 // ensuite être filtré par pôle (chaque pôle = un atelier/équipe).
+// La LISTE est configurable dans les Paramètres et stockée dans
+// shopConfig.poles → synchronisée automatiquement sur tous les postes
+// (cf. _applyPolesFromConfig / renderPolesConfig). Les 4 pôles ci-dessous
+// ne servent que de valeurs par défaut si aucune config n'existe encore.
 // ============================================================
-const ATELIER_POLES = [
+const DEFAULT_ATELIER_POLES = [
   { key:'etiquettes', label:'Étiquettes', color:'#d97706' },
   { key:'bois',       label:'Bois',       color:'#92400e' },
   { key:'print',      label:'Print',      color:'#2563eb' },
   { key:'textiles',   label:'Textiles',   color:'#0d9488' }
 ];
+let ATELIER_POLES = DEFAULT_ATELIER_POLES.map(p => ({ ...p }));
+// Palette utilisée pour attribuer une couleur aux nouveaux pôles créés sans couleur.
+const _POLE_PALETTE = ['#d97706','#92400e','#2563eb','#0d9488','#7c3aed','#dc2626','#0891b2','#65a30d','#db2777','#4f46e5','#ea580c','#0284c7'];
 function _poleLabel(key){ const p = ATELIER_POLES.find(x => x.key === key); return p ? p.label : key; }
 function _poleColor(key){ const p = ATELIER_POLES.find(x => x.key === key); return p ? p.color : '#64748b'; }
+// Génère une clé stable (slug) à partir d'un libellé de pôle.
+function _poleSlug(label){
+  return String(label || '').toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'pole';
+}
+// Recharge ATELIER_POLES depuis shopConfig.poles (repli = défauts). Appelée
+// après le chargement de la config (local + GAS) et après chaque enregistrement.
+function _applyPolesFromConfig(){
+  const raw = (typeof shopConfig !== 'undefined' && shopConfig && Array.isArray(shopConfig.poles)) ? shopConfig.poles : null;
+  if (raw && raw.length){
+    ATELIER_POLES = raw
+      .filter(p => p && (p.key || p.label))
+      .map((p, i) => ({
+        key:   String(p.key || _poleSlug(p.label)),
+        label: String(p.label || p.key),
+        color: String(p.color || _POLE_PALETTE[i % _POLE_PALETTE.length])
+      }));
+  } else {
+    ATELIER_POLES = DEFAULT_ATELIER_POLES.map(p => ({ ...p }));
+  }
+}
 // Normalise la valeur des pôles (array, JSON, ou liste séparée par virgules) → array de clés.
 function _normPoles(v){
   if (Array.isArray(v)) return v.map(String).map(s => s.trim()).filter(Boolean);
@@ -544,7 +573,7 @@ function showPage(id, btn, bnavBtn) {
   });
   if (id==='stats')           { renderStats(); Promise.all([loadSalesFromScript(true, true), loadReservationsFromScript(), loadCommandesFromScript()]).then(renderStats).catch(()=>renderStats()); _loadProdStats(); }
   if (id==='mon-dashboard')  { renderMonDashboard(); }
-  if (id==='config')         { renderConfigPage(); renderRythmeConfig(); renderObjectifsConfig(); }
+  if (id==='config')         { renderConfigPage(); renderRythmeConfig(); renderObjectifsConfig(); renderPolesConfig(); }
   if (id==='users')        renderUsersPage();
   if (id==='reservations') { _ensureDossierLinks(); renderReservations(); _lastResRefresh = 0; _autoRefreshReservations(); _loadTachesQuietly().then(renderReservations); }
   if (id==='attribution')  {
@@ -5074,6 +5103,7 @@ function loadConfig() {
     }
     if (k) categories = JSON.parse(k);
   } catch(e) {}
+  _applyPolesFromConfig();
 }
 
 async function loadConfigFromGAS() {
@@ -5084,12 +5114,16 @@ async function loadConfigFromGAS() {
     if (r && r.ok && r.config && typeof r.config === 'object') {
       shopConfig = { ...shopConfig, ...r.config };
       _persistConfig();
+      _applyPolesFromConfig();   // pôles synchronisés depuis un autre poste
       // Sauvegarder l'URL du dossier Drive si présente
       if (r.config.driveFolderUrl) {
         localStorage.setItem('pos-drive-folder-url', r.config.driveFolderUrl);
       }
-      // Rafraîchir la page config si ouverte
+      // Rafraîchir les UIs qui dépendent de la liste des pôles
       if (document.getElementById('cfgShopName')) renderConfigPage();
+      if (document.getElementById('polesConfigContainer')) renderPolesConfig();
+      if (document.getElementById('cmdPolesList')) renderCmdPoles();
+      if (document.getElementById('page-calendrier') && document.getElementById('page-calendrier').classList.contains('active')) renderCalendrier();
     }
   } catch(e) { /* silencieux — GAS peut ne pas supporter cette action */ }
 }
@@ -5210,6 +5244,73 @@ function importConfig() {
     reader.readAsText(file);
   };
   input.click();
+}
+
+// ============================================================
+// PÔLES ATELIER — éditeur dans les Paramètres (admin/chef_atelier).
+// La liste est stockée dans shopConfig.poles et synchronisée sur tous
+// les postes via syncConfigToGAS (même canal que le reste de la config).
+// ============================================================
+let _polesEdit = [];   // copie éditable affichée dans les paramètres
+
+function renderPolesConfig(){
+  const c = document.getElementById('polesConfigContainer');
+  if (!c) return;
+  // Repart de la liste effective courante (préserve les clés existantes)
+  _polesEdit = ATELIER_POLES.map(p => ({ key: p.key, label: p.label, color: p.color }));
+  _renderPolesEditor();
+}
+
+function _renderPolesEditor(){
+  const c = document.getElementById('polesConfigContainer');
+  if (!c) return;
+  const rows = _polesEdit.map((p, i) => `
+    <div class="pole-cfg-row">
+      <input type="color" class="pole-cfg-color" value="${p.color || '#64748b'}" onchange="_poleEditChange(${i},'color',this.value)" title="Couleur du pôle" />
+      <input type="text" class="pole-cfg-label" value="${String(p.label || '').replace(/"/g,'&quot;')}" placeholder="Nom du pôle (ex. Signalétique)" oninput="_poleEditChange(${i},'label',this.value)" />
+      <button type="button" class="pole-cfg-del" onclick="_poleEditRemove(${i})" title="Supprimer ce pôle" aria-label="Supprimer">×</button>
+    </div>`).join('');
+  c.innerHTML = `
+    <div class="pole-cfg-list">${rows || '<div style="font-size:12px;color:var(--muted);padding:6px 0">Aucun pôle — ajoutez-en un.</div>'}</div>
+    <div class="pole-cfg-actions">
+      <button type="button" class="btn-add-product" onclick="_poleEditAdd()">+ Ajouter un pôle</button>
+      <button type="button" class="pole-cfg-save" onclick="savePolesConfig()">Enregistrer les pôles</button>
+      <span id="polesCfgStatus" class="pole-cfg-status"></span>
+    </div>
+    <p style="font-size:11px;color:#a8a29e;margin-top:10px">Synchronisé automatiquement sur tous les postes. Renommer un pôle conserve les commandes déjà classées ; supprimer un pôle n'efface pas les commandes (elles gardent l'étiquette existante).</p>`;
+}
+
+function _poleEditChange(i, key, val){ if (_polesEdit[i]) _polesEdit[i][key] = val; }
+function _poleEditAdd(){
+  _polesEdit.push({ key: '', label: '', color: _POLE_PALETTE[_polesEdit.length % _POLE_PALETTE.length] });
+  _renderPolesEditor();
+}
+function _poleEditRemove(i){ _polesEdit.splice(i, 1); _renderPolesEditor(); }
+
+function savePolesConfig(){
+  const seen = {};
+  const out = [];
+  for (const p of _polesEdit){
+    const label = String(p.label || '').trim();
+    if (!label) continue;                                  // ignore les lignes vides
+    let key = String(p.key || '').trim() || _poleSlug(label);
+    let base = key, n = 2;
+    while (seen[key]) { key = base + '-' + n; n++; }        // unicité des clés
+    seen[key] = true;
+    out.push({ key, label, color: String(p.color || '#64748b') });
+  }
+  if (!out.length){ showToast('Ajoutez au moins un pôle', 'error'); return; }
+  shopConfig.poles = out;
+  _persistConfig();
+  _applyPolesFromConfig();
+  syncConfigToGAS();                                        // → tous les postes
+  // Rafraîchir les UIs dépendantes
+  if (document.getElementById('cmdPolesList')) renderCmdPoles();
+  if (document.getElementById('page-calendrier')) renderCalendrier();
+  _renderPolesEditor();
+  const st = document.getElementById('polesCfgStatus');
+  if (st){ st.textContent = ' Enregistré — synchronisé'; st.style.color = '#16a34a'; setTimeout(() => { if (st) st.textContent = ''; }, 3500); }
+  showToast('Pôles enregistrés — synchronisés sur tous les postes', 'success');
 }
 
 function renderConfigPage() {
@@ -12645,7 +12746,14 @@ function _calPopulateFilters(){
   fill('calFilterResp',   'Responsable', resps, _calFilters.resp);
   const st = document.getElementById('calFilterStatut'); if(st) st.value = _calFilters.status;
   const tp = document.getElementById('calFilterType');   if(tp) tp.value = _calFilters.type;
-  const pl = document.getElementById('calFilterPole');   if(pl) pl.value = _calFilters.pole;
+  const pl = document.getElementById('calFilterPole');
+  if(pl){
+    const cur = _calFilters.pole;
+    pl.innerHTML = '<option value="">Pôle atelier</option>' +
+      ATELIER_POLES.map(p => `<option value="${escapeHtml(p.key)}">${escapeHtml(p.label)}</option>`).join('');
+    pl.value = ATELIER_POLES.some(p => p.key === cur) ? cur : '';
+    if (pl.value !== cur) _calFilters.pole = pl.value;   // pôle supprimé → réinitialise le filtre
+  }
 }
 
 // Injecte les valeurs des KPI dans la ligne compacte.
