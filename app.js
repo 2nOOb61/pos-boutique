@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '136 · 2026-08-17';
+const APP_VERSION = '137 · 2026-08-17';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -6495,6 +6495,8 @@ function _cmdDrawerActions(c) {
     btns.push(`<button class="pcok-btn pcok-btn--primary" onclick="closeDrawers();openCmdFinalizeModal('${c.id}')">Finaliser</button>`);
   btns.push(`<button class="pcok-btn" onclick="printCommandeTicket(commandes.find(x=>String(x.id)==='${c.id}'))">Imprimer</button>`);
   btns.push(`<button class="pcok-btn" style="color:#2563eb;border-color:rgba(37,99,235,.4)" onclick="closeDrawers();editCommandeRemarque('${c.id}')">Remarque</button>`);
+  if (c.dossierId)
+    btns.push(`<button class="pcok-btn" onclick="closeDrawers();printFicheTravailDossier('${c.dossierId}')">Fiche travail</button>`);
   if (c.dossierId && canAttrib)
     btns.push(`<button class="pcok-btn" onclick="closeDrawers();openAttribForDossier('${c.dossierId}')">Production →</button>`);
   // Modifications de dates (toujours utiles)
@@ -10248,6 +10250,7 @@ function _renderDossierRow(d) {
       <button class="kebab-btn" aria-label="Plus d'actions" aria-haspopup="true" onclick="toggleKebab('dos${d.id}',event)">${_dotsRow}</button>
       <div class="kebab-menu" id="kb-dos${d.id}" role="menu">
         <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();selectDossier('${d.id}')">${_kebabIcon('eye')}<span>Ouvrir / attribuer</span></button>
+        <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printFicheTravailDossier('${d.id}')">${_kebabIcon('print')}<span>Fiche de travail (à remplir)</span></button>
         <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printDossier('${d.id}')">${_kebabIcon('print')}<span>Imprimer le dossier</span></button>
         ${['admin','chef_atelier'].includes(currentUser?.role) && !_dossierClosed(d) ? `<button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();cloturerDossier('${d.id}')"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#16a34a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><span>Clôturer le dossier</span></button>` : ''}
         ${['admin','chef_atelier'].includes(currentUser?.role) ? `<button class="kebab-item danger" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();resetTachesDossier('${d.id}')">${_kebabIcon('reset')}<span>Réinitialiser les tâches</span></button>` : ''}
@@ -10401,6 +10404,7 @@ function _attrRow(r) {
   const _dots = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>';
   const kebab = `<div class="kebab-wrap"><button class="kebab-btn" aria-label="Plus d'actions" onclick="toggleKebab('dos${r.id}',event)">${_dots}</button><div class="kebab-menu" id="kb-dos${r.id}" role="menu">
     <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();selectDossier('${r.id}')">${_kebabIcon('eye')}<span>Ouvrir / attribuer</span></button>
+    <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printFicheTravailDossier('${r.id}')">${_kebabIcon('print')}<span>Fiche de travail (à remplir)</span></button>
     <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printDossier('${r.id}')">${_kebabIcon('print')}<span>Imprimer le dossier</span></button>
     ${['admin','chef_atelier'].includes(currentUser?.role) ? `<button class="kebab-item danger" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();resetTachesDossier('${r.id}')">${_kebabIcon('reset')}<span>Réinitialiser les tâches</span></button>` : ''}
   </div></div>`;
@@ -11046,6 +11050,11 @@ function renderAttrPanel(tachesD, commentsD = []) {
           ${_cleanDate(d.dateCreation)?`<span>·</span><span>${_cleanDate(d.dateCreation)}</span>`:''}
         </div>
         <div style="display:flex;gap:6px;align-items:center">
+          <button onclick="printFicheTravailDossier('${d.id}')" title="Fiche de travail à remplir à la main (collaborateurs + signatures)"
+            style="display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:7px;background:var(--surface2);color:var(--text);border:1px solid var(--border);cursor:pointer;font-size:11px;font-weight:600;flex-shrink:0">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            Fiche travail
+          </button>
           <button onclick="printDossier('${d.id}')" title="Imprimer le dossier"
             style="display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:7px;background:var(--color-primary);color:#fff;border:none;cursor:pointer;font-size:11px;font-weight:600;flex-shrink:0">
             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
@@ -11217,6 +11226,91 @@ function renderAttrPanel(tachesD, commentsD = []) {
   // Initialiser le fil de commentaires (le footer de saisie est déjà rendu ci-dessus)
   commentAttachments = [];
   renderCommentsSection(d.id, commentsD);
+}
+
+// Fiche de travail À REMPLIR À LA MAIN : en-tête pré-rempli (client, dates,
+// commercial, délai estimé) + tableau des collaborateurs ayant travaillé sur le
+// dossier avec colonnes vierges (heure début/fin + signatures op. & responsable).
+function printFicheTravailDossier(dossierId) {
+  _ensureDossierLinks();
+  if (typeof _syncDossierDates === 'function') _syncDossierDates();
+  const d = dossiers.find(x => x.id === dossierId) || selectedDossier;
+  if (!d) { showToast('Dossier introuvable', 'error'); return; }
+  let src = null;
+  if (d.sourceType && d.sourceId) {
+    src = d.sourceType === 'reservation'
+      ? reservations.find(r => String(r.id) === String(d.sourceId))
+      : commandes.find(c => String(c.id) === String(d.sourceId));
+  }
+  const client     = (src && (src.clientName || src.client)) || d.client || '—';
+  const commercial = _resolveOperatorLabel((src && src.caissier) || d.caissier || d.commercial || '') || '—';
+  const prodIso = _toIsoDate((src && src.dateLivraisonProd) || d.dateLivraisonProd || '');
+  const livIso  = _toIsoDate((src && (src.dateLivraison || src.deliveryDate)) || d.dateLivraison || '');
+  const dProd = _dispDate(prodIso) || '—';
+  const dLiv  = _dispDate(livIso)  || '—';
+  const gap   = (prodIso && livIso) ? _calGapDays(prodIso, livIso) : null;
+  const delai = (gap != null && gap >= 0) ? (gap + ' jour' + (gap > 1 ? 's' : '')) : '';
+
+  // Collaborateurs distincts ayant une tâche sur le dossier (+ leurs étapes)
+  const tachesD = taches.filter(t => t.dossierId === d.id && t.operateur);
+  const opsMap = {};
+  tachesD.forEach(t => {
+    const lbl = t.operateur;
+    const et  = t.etapeLabel || (ETAPES_CONFIG.find(e => e.code === t.etapeCode) || {}).label || '';
+    (opsMap[lbl] = opsMap[lbl] || []).push(et);
+  });
+  const ops = Object.keys(opsMap);
+
+  const cell = 'border:1px solid #b8bab6;height:36px;';
+  const rowFor = (name, stepArr) => {
+    const steps = stepArr ? [...new Set(stepArr.filter(Boolean))].join(', ') : '';
+    return `<tr>
+      <td style="${cell}padding:4px 8px;vertical-align:middle">
+        <span style="font-weight:600">${name}</span>
+        ${steps ? `<div style="font-size:8pt;color:#78716c;font-weight:400">${escapeHtml(steps)}</div>` : ''}
+      </td>
+      <td style="${cell}width:92px"></td>
+      <td style="${cell}width:92px"></td>
+      <td style="${cell}width:150px"></td>
+      <td style="${cell}width:150px"></td>
+    </tr>`;
+  };
+  const opRows    = ops.map(o => rowFor(escapeHtml(o), opsMap[o])).join('');
+  const blankRows = Array.from({ length: Math.max(3, 8 - ops.length) }, () => rowFor('&nbsp;', null)).join('');
+
+  const infoCell = (label, val) =>
+    `<td style="border:1px solid #e5e3df;padding:8px 12px;vertical-align:top">
+       <div style="font-size:9pt;color:#78716c;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">${label}</div>
+       <div style="font-size:12.5pt;font-weight:700;color:#1c1917">${val}</div>
+     </td>`;
+
+  const body = `
+    <div class="rpt-title">Fiche de travail${d.numeroDossier ? ' — ' + escapeHtml(d.numeroDossier) : ''}</div>
+    <div class="rpt-period">Collaborateurs ayant travaillé sur le dossier — à remplir et signer à la main</div>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+      <tr>${infoCell('Nom du client', escapeHtml(client))}${infoCell('Commercial', escapeHtml(commercial))}</tr>
+      <tr>${infoCell('Date de production', dProd)}${infoCell('Date de livraison', dLiv)}</tr>
+      <tr><td colspan="2" style="border:1px solid #e5e3df;padding:8px 12px">
+        <div style="font-size:9pt;color:#78716c;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Délai de production estimé</div>
+        <div style="font-size:12.5pt;font-weight:700;color:#1c1917">${delai || '<span style="color:#b8bab6">_______________ jours</span>'}</div>
+      </td></tr>
+    </table>
+    <div class="section-title">Pointage & signatures</div>
+    <table style="width:100%;border-collapse:collapse">
+      <thead><tr>
+        <th style="border:1px solid #b8bab6;background:#f8f7f4">Collaborateur</th>
+        <th style="border:1px solid #b8bab6;background:#f8f7f4;text-align:center">Heure début</th>
+        <th style="border:1px solid #b8bab6;background:#f8f7f4;text-align:center">Heure fin</th>
+        <th style="border:1px solid #b8bab6;background:#f8f7f4;text-align:center">Signature opérateur</th>
+        <th style="border:1px solid #b8bab6;background:#f8f7f4;text-align:center">Signature responsable</th>
+      </tr></thead>
+      <tbody>${opRows}${blankRows}</tbody>
+    </table>
+    <div style="margin-top:26px;display:flex;justify-content:space-between;gap:40px">
+      <div style="flex:1"><div style="border-bottom:1px solid #1c1917;height:40px"></div><div style="font-size:9pt;color:#78716c;margin-top:4px">Visa Responsable atelier</div></div>
+      <div style="flex:1"><div style="border-bottom:1px solid #1c1917;height:40px"></div><div style="font-size:9pt;color:#78716c;margin-top:4px">Date</div></div>
+    </div>`;
+  _printWindow('Fiche de travail' + (d.numeroDossier ? ' — ' + d.numeroDossier : ''), body);
 }
 
 function printDossier(dossierId) {
@@ -12149,6 +12243,7 @@ function _tacheRow(t) {
   const kbItems = [];
   if (!isLibre) {
     kbItems.push(`<button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();openAttribForDossier('${t.dossierId}')">${_kebabIcon('eye')}<span>Voir le dossier</span></button>`);
+    kbItems.push(`<button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printFicheTravailDossier('${t.dossierId}')">${_kebabIcon('print')}<span>Fiche de travail (à remplir)</span></button>`);
     kbItems.push(`<button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printDossier('${t.dossierId}')">${_kebabIcon('print')}<span>Imprimer le dossier</span></button>`);
   }
   if (isLibre && isAdminOrChef && !isDone) {
@@ -14734,6 +14829,7 @@ function _cockpitDrawerContent(r) {
     <div class="pcok-drawer-actions">
       ${canAttrib?`<button class="pcok-btn pcok-btn--primary" onclick="closeProdDrawer();openAttribForDossier('${r.dossierId}')">Gérer l'attribution →</button>`:''}
       ${['admin','chef_atelier'].includes(currentUser?.role) && !r.isDone ? `<button class="pcok-btn" style="color:#16a34a;border-color:rgba(22,163,74,.4)" onclick="cloturerDossier('${r.dossierId}')">✓ Clôturer</button>` : ''}
+      <button class="pcok-btn" onclick="printFicheTravailDossier('${r.dossierId}')">Fiche travail</button>
       <button class="pcok-btn" onclick="printDossier('${r.dossierId}')">Imprimer</button>
     </div>`;
 }
