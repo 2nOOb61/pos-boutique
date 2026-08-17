@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '138 · 2026-08-17';
+const APP_VERSION = '139 · 2026-08-17';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -211,6 +211,7 @@ const PAGE_ACCESS = {
   blocages:       ['admin','chef_atelier','commerciale','gestionnaire'],
   production:     ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
   calendrier:     ['admin','commerciale','chef_atelier','gestionnaire'],
+  'suivi-bat':    ['admin','commerciale','chef_atelier','pao','gestionnaire'],
   messagerie:     ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
 };
 let editingUserId = null; // index dans localUsers
@@ -590,6 +591,7 @@ function showPage(id, btn, bnavBtn) {
   if (id==='blocages')     { renderBlocages(); if (APPS_SCRIPT_URL) Promise.all([loadDossiers(), _loadTachesQuietly()]).then(renderBlocages).catch(()=>renderBlocages()); }
   if (id==='production')   { _setupProdViewToggle(); loadTaches(); _autoRefreshProduction(); initModulesProduction(); }
   if (id==='calendrier')   { _ensureDossierLinks(); renderCalendrier(); if (APPS_SCRIPT_URL) Promise.all([loadCommandesFromScript(), loadReservationsFromScript()]).then(() => { _ensureDossierLinks(); renderCalendrier(); }).catch(()=>{}); }
+  if (id==='suivi-bat')    { renderSuiviBat(); if (APPS_SCRIPT_URL) Promise.all([loadBatsFromScript(), loadDossiers(), loadCommandesFromScript()]).then(() => renderSuiviBat()).catch(()=>{}); }
   if (id==='messagerie')   { loadMessagerie(); _autoRefreshMessagerie(); }
   if (id==='patron')       { renderControlFinance(); renderPatronEncaissements(); renderPatronDashboard(); _autoRefreshPatron(); loadEncaissementsFromScript().then(renderPatronEncaissements).catch(()=>{}); }
   if (id==='journal')      { loadJournal(); }
@@ -1162,6 +1164,7 @@ async function loadBatsFromScript() {
       bats = Object.values(byId);
       try { localStorage.setItem('pos-bats', JSON.stringify(bats)); } catch (_) {}
     }
+    if (typeof _updateBatNavBadge === 'function') _updateBatNavBadge();
   } catch (e) { console.warn('load BATs:', e); }
 }
 
@@ -8442,9 +8445,12 @@ function _startNotifPolling() {
     _flushTlPhotoQueue();
     _flushCmdAttQueue(); // reprise persistance PJ commande → visibles par tous les postes
     _flushBatQueue();    // reprise sync BAT
-    // Suivi BAT : rafraîchir en direct si le panneau Attribution est ouvert
+    // Suivi BAT : rafraîchir en direct si l'Attribution ou le tableau de bord est ouvert
     if (APPS_SCRIPT_URL && document.getElementById('page-attribution')?.classList.contains('active')) {
       loadBatsFromScript().then(() => { if (selectedDossier) _refreshBatUi(selectedDossier.id); }).catch(()=>{});
+    }
+    if (APPS_SCRIPT_URL && document.getElementById('page-suivi-bat')?.classList.contains('active')) {
+      loadBatsFromScript().then(() => renderSuiviBat()).catch(()=>{});
     }
     const newCount = await loadNotifsFromGAS(true);
     if (newCount > 0 && document.getElementById('notifPanel')?.classList.contains('open')) {
@@ -11157,6 +11163,82 @@ function _batSectionInner(d){
     </div>
     <div class="bat-actions">${actions}</div>
     <div class="bat-rounds">${roundsHtml}</div>`;
+}
+
+// ============================================================
+// TABLEAU DE BORD « Suivi BAT » — tous les dossiers avec un BAT en cours.
+// ============================================================
+let _batBoardFilter = 'all';   // all | pao | commercial | client | valide
+function setBatBoardFilter(f){ _batBoardFilter = f; renderSuiviBat(); }
+function _batBucket(code){ return (code === 'pao' || code === 'refaire') ? 'pao' : code; }
+
+function _batBoardRows(){
+  if (typeof _ensureDossierLinks === 'function') _ensureDossierLinks();
+  const rows = [];
+  (Array.isArray(dossiers) ? dossiers : []).forEach(d => {
+    const list = _dossierBats(d.id);
+    if (!list.length) return;
+    const st  = _batBallState(d.id);
+    const src = (d.sourceType && d.sourceId)
+      ? (d.sourceType === 'reservation' ? reservations.find(r => String(r.id) === String(d.sourceId)) : commandes.find(c => String(c.id) === String(d.sourceId)))
+      : null;
+    const client     = (src && (src.clientName || src.client)) || d.client || '—';
+    const commercial = _resolveOperatorLabel((src && src.caissier) || d.caissier || '') || '—';
+    const days = st.since ? _batDaysSince(st.since) : null;
+    rows.push({ d, st, bucket:_batBucket(st.code), client, commercial, version: st.bat ? st.bat.version : 0, nbVersions:list.length, days });
+  });
+  const rank = { client:0, commercial:1, pao:2, valide:3 };
+  rows.sort((a,b) => { const r = (rank[a.bucket] ?? 9) - (rank[b.bucket] ?? 9); return r || ((b.days ?? -1) - (a.days ?? -1)); });
+  return rows;
+}
+
+function _updateBatNavBadge(){
+  const badge = document.getElementById('navBatBadge');
+  if (!badge) return;
+  const n = _batBoardRows().filter(r => r.bucket !== 'valide').length;
+  if (n > 0) { badge.textContent = n; badge.style.display = ''; } else badge.style.display = 'none';
+}
+
+async function renderSuiviBat(force){
+  if (force && APPS_SCRIPT_URL) { try { await loadBatsFromScript(); } catch(e){} }
+  const cont = document.getElementById('suiviBatContent');
+  if (!cont) return;
+  const all = _batBoardRows();
+  const counts = { all:all.length, pao:0, commercial:0, client:0, valide:0 };
+  all.forEach(r => { counts[r.bucket] = (counts[r.bucket] || 0) + 1; });
+  const chips = [
+    ['all','Tous','#57534e'],
+    ['pao','🟣 PAO','#7c3aed'],
+    ['commercial','🟠 À envoyer','#d97706'],
+    ['client','🔵 Attente client','#2563eb'],
+    ['valide','🟢 Validés','#16a34a'],
+  ].map(([k,lbl,c]) => `<button class="batb-chip${_batBoardFilter===k?' on':''}" style="${_batBoardFilter===k?`border-color:${c};color:${c}`:''}" onclick="setBatBoardFilter('${k}')">${lbl} <span class="batb-chip-n">${counts[k]||0}</span></button>`).join('');
+
+  const rows = _batBoardFilter === 'all' ? all : all.filter(r => r.bucket === _batBoardFilter);
+  const list = rows.length ? rows.map(r => {
+    const st = r.st;
+    const urgent = r.bucket === 'client' && r.days != null && r.days >= 3;
+    let since = '';
+    if (r.days != null) {
+      if (r.bucket === 'client') since = 'en attente ' + (r.days <= 0 ? "aujourd'hui" : r.days === 1 ? '1 jour' : r.days + ' jours');
+      else since = r.days <= 0 ? "aujourd'hui" : r.days === 1 ? 'il y a 1 j' : 'il y a ' + r.days + ' j';
+    }
+    return `<div class="batb-row${urgent?' batb-row--urgent':''}">
+      <div class="batb-main">
+        <div class="batb-ref">${escapeHtml(r.d.numeroDossier||'')}</div>
+        <div class="batb-client">${escapeHtml(r.client)}</div>
+        <div class="batb-sub">Commercial : ${escapeHtml(r.commercial)} · BAT v${r.version} · ${r.nbVersions} version${r.nbVersions>1?'s':''}</div>
+      </div>
+      <div class="batb-state">
+        <span class="batb-badge" style="background:${st.bg};color:${st.color};border-color:${st.color}55">${st.label}</span>
+        ${since?`<span class="batb-since${urgent?' urgent':''}">${since}</span>`:''}
+      </div>
+      <button class="batb-open" onclick="openAttribForDossier('${r.d.id}')">Ouvrir →</button>
+    </div>`;
+  }).join('') : `<div class="batb-empty">Aucun dossier dans cet état.</div>`;
+
+  cont.innerHTML = `<div class="batb-chips">${chips}</div><div class="batb-list">${list}</div>`;
+  _updateBatNavBadge();
 }
 
 function renderAttrPanel(tachesD, commentsD = []) {

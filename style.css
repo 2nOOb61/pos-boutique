@@ -1417,6 +1417,27 @@ tr:hover td {
 .bat-time { margin-top:5px; font-size:10.5px; color:var(--color-text-muted); }
 .bat-empty { font-size:12px; color:var(--color-text-muted); font-style:italic; padding:4px 0; }
 
+/* Tableau de bord Suivi BAT */
+.batb-chips { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; }
+.batb-chip { display:inline-flex; align-items:center; gap:7px; padding:8px 14px; border-radius:999px; border:1.5px solid var(--border); background:var(--surface2); color:var(--muted); font-family:'DM Sans',sans-serif; font-weight:700; font-size:13px; cursor:pointer; transition:.15s; }
+.batb-chip:hover { color:var(--text); }
+.batb-chip.on { background:var(--surface); }
+.batb-chip-n { font-size:11px; font-weight:800; background:rgba(0,0,0,.07); border-radius:20px; padding:1px 8px; }
+.batb-list { display:flex; flex-direction:column; gap:10px; }
+.batb-row { display:flex; align-items:center; gap:14px; padding:14px 16px; border:1px solid var(--border); border-radius:12px; background:var(--surface); flex-wrap:wrap; }
+.batb-row--urgent { border-color:#dc2626; box-shadow:inset 3px 0 0 #dc2626; }
+.batb-main { flex:1; min-width:180px; }
+.batb-ref { font-size:11px; font-weight:700; color:var(--muted); letter-spacing:.03em; }
+.batb-client { font-size:15px; font-weight:700; color:var(--text); margin:1px 0; }
+.batb-sub { font-size:12px; color:var(--muted); }
+.batb-state { display:flex; flex-direction:column; align-items:flex-start; gap:4px; min-width:170px; }
+.batb-badge { font-size:12px; font-weight:700; padding:4px 11px; border-radius:999px; border:1.5px solid; }
+.batb-since { font-size:11.5px; font-weight:600; color:var(--muted); }
+.batb-since.urgent { color:#dc2626; font-weight:800; }
+.batb-open { padding:8px 14px; border-radius:9px; border:1px solid var(--border); background:var(--surface2); color:var(--text); font-family:'DM Sans',sans-serif; font-weight:700; font-size:12.5px; cursor:pointer; white-space:nowrap; }
+.batb-open:hover { background:var(--color-primary,#1a4a3a); color:#fff; }
+.batb-empty { font-size:13px; color:var(--muted); font-style:italic; padding:24px; text-align:center; border:1px dashed var(--border); border-radius:12px; }
+
 .cmd-photos-zone {
   border: 2px dashed var(--border);
   border-radius: 12px;
