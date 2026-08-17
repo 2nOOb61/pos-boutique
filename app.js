@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '139 · 2026-08-17';
+const APP_VERSION = '140 · 2026-08-17';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -3971,6 +3971,12 @@ function applyRolePermissions(role) {
   });
   const sheetsBtn = document.querySelector('[onclick="openScriptSettings()"]');
   if (sheetsBtn) sheetsBtn.style.display = isAdmin ? '' : 'none';
+  // Masque les groupes/catégories de la sidebar dont aucun bouton n'est visible
+  document.querySelectorAll('.sidebar-group').forEach(group => {
+    const anyVisible = Array.from(group.querySelectorAll('.sidebar-btn'))
+      .some(b => b.style.display !== 'none');
+    group.style.display = anyVisible ? '' : 'none';
+  });
 }
 
 // ============================================================

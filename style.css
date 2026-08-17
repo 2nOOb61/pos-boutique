@@ -1840,6 +1840,45 @@ html, body { overflow-x: hidden; max-width: 100%; }
   flex: 1;
 }
 
+/* Groupes de catégories (menus) */
+.sidebar-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sidebar-group + .sidebar-group {
+  margin-top: 12px;
+}
+.sidebar-group-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.40);
+  padding: 4px 12px 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: opacity 0.18s;
+}
+/* En mode réduit : titres remplacés par un fin séparateur */
+.sidebar.collapsed .sidebar-group + .sidebar-group {
+  margin-top: 6px;
+}
+.sidebar.collapsed .sidebar-group-title {
+  font-size: 0;
+  letter-spacing: 0;
+  padding: 0;
+  height: 0;
+  margin: 6px 12px;
+  border-top: 1px solid rgba(255,255,255,0.12);
+  pointer-events: none;
+}
+/* Le premier séparateur en mode réduit est superflu */
+.sidebar.collapsed .sidebar-group:first-child .sidebar-group-title {
+  margin-top: 0;
+  border-top: none;
+}
+
 .sidebar-btn {
   display: flex !important;
   align-items: center;
