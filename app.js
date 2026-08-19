@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '147 · 2026-08-19';
+const APP_VERSION = '148 · 2026-08-19';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -17590,8 +17590,34 @@ function _getArretData() {
       acompte:   (Math.max(0, Number(e.resteApres) || 0)) > 0   // reste après → badge A + RAP
     }));
 
+  // Détail ligne par ligne des paiements non-espèces (chèques + mobile money).
+  // Chaque paiement porte sa propre référence — les montants proviennent des commandes/ventes.
+  // Le titulaire (émetteur) d'un chèque vit sur la vente liée (payTitulaire), pas sur l'événement.
+  const _titulaireOf = e => {
+    let s = null;
+    if (e.source === 'vente')          s = sales.find(x => String(x.id) === String(e.refId));
+    else if (e.source === 'commande')  s = sales.find(x => x.fromCommande != null && String(x.fromCommande) === String(e.refId));
+    return s ? payTitulaire(s) : '';
+  };
+  const chequeDetails = evts.filter(e => payKey(e.method) === 'cheque').map(e => ({
+    ref:      e.refLabel || ('#' + e.refId),
+    client:   (e.client || '').trim(),
+    banque:   e.provider || '',
+    numero:   e.ref || '',
+    emetteur: _titulaireOf(e) || (e.client || '').trim(),
+    montant:  Number(e.montant) || 0
+  }));
+  const mobileDetails = evts.filter(e => payKey(e.method) === 'mobile').map(e => ({
+    ref:       e.refLabel || ('#' + e.refId),
+    client:    (e.client || '').trim(),
+    provider:  e.provider || 'Mobile Money',
+    reference: e.ref || '',
+    montant:   Number(e.montant) || 0
+  }));
+
   return { todaySales, evts, especes, mobile, cheque, virement,
            total: especes + mobile + cheque + virement, lignes,
+           chequeDetails, mobileDetails,
            scope, periodStart: (scope === 'lastArret' && cutoffTs > 0) ? cutoffTs : null };
 }
 
@@ -17748,7 +17774,7 @@ function _refreshArretIfOpen() {
   set('arretNbTrans', d.lignes.length + ' encaissement' + (d.lignes.length > 1 ? 's' : ''));
   _renderArretFiche(d.lignes || []);
   updateArretEcart();
-  updateArretModesReel();
+  _renderArretModesDetail(d);
   _updateArretScopeHint(d);
   const sEl = document.getElementById('arretSoldeSearch');
   renderArretSoldeResults(sEl ? sEl.value : '');
@@ -17779,12 +17805,11 @@ function renderArretCaisseModal() {
   if (soldeSearch) soldeSearch.value = '';
   renderArretSoldeResults('');
 
-  // Reset fond de caisse + notes + vérification chèques/mobile money
-  ['arretFondCaisse', 'arretNotes', 'arretMobileReel', 'arretChequeReel', 'arretChequeNb',
-   'arretChequeBanque', 'arretChequeNumero', 'arretChequeEmetteur'].forEach(id => {
+  // Reset fond de caisse + notes
+  ['arretFondCaisse', 'arretNotes'].forEach(id => {
     const el = document.getElementById(id); if (el) el.value = '';
   });
-  updateArretModesReel();
+  _renderArretModesDetail(d);
   // Reset billetage
   BILLETAGE_DENOMS.forEach(d => {
     const inp = document.getElementById(`arretBillet_${d}`);
@@ -17800,24 +17825,49 @@ function renderArretCaisseModal() {
   _updateArretScopeHint(d);
 }
 
-// Vérification des encaissements non-espèces (Mobile Money & Chèques) :
-// compare le montant réellement reçu au montant attendu (journal du jour) → écart par mode.
-// Met aussi à jour les libellés « attendu ». Appelé à l'ouverture, au refresh serveur et à chaque saisie.
-function updateArretModesReel() {
-  const d = _getArretData();
-  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-  set('arretMobileAttendu', fmt(d.mobile));
-  set('arretChequeAttendu', fmt(d.cheque));
-  [{ attendu: d.mobile, reelId: 'arretMobileReel', ecId: 'arretMobileEcart' },
-   { attendu: d.cheque, reelId: 'arretChequeReel', ecId: 'arretChequeEcart' }].forEach(r => {
-    const el = document.getElementById(r.ecId);
-    if (!el) return;
-    const raw = document.getElementById(r.reelId)?.value ?? '';
-    if (raw === '') { el.textContent = '—'; el.style.color = 'var(--muted)'; return; }
-    const ec = Number(raw) - r.attendu;
-    if (ec === 0) { el.textContent = 'Équilibré'; el.style.color = '#16a34a'; }
-    else          { el.textContent = (ec > 0 ? '+' : '') + fmt(ec); el.style.color = ec > 0 ? '#16a34a' : '#dc2626'; }
-  });
+// Détail des encaissements non-espèces (Mobile Money & Chèques) : chaque paiement est
+// listé avec sa propre référence (banque/émetteur/n° pour un chèque, provider/réf pour
+// mobile money). Les montants viennent des commandes/ventes du périmètre — lecture seule.
+function _renderArretModesDetail(d) {
+  const host = document.getElementById('arretModesDetail');
+  if (!host) return;
+  d = d || _getArretData();
+  const esc = s => (_pcokEsc ? _pcokEsc(s) : (s == null ? '' : String(s)));
+  const cheques = d.chequeDetails || [];
+  const mobiles = d.mobileDetails || [];
+
+  const section = (title, count, total, rowsHtml) => `
+    <div class="ac-mode-block">
+      <div class="ac-mode-head">
+        <span class="ac-mode-title">${title}</span>
+        <span class="ac-mode-tot">${count} · ${fmt(total)}</span>
+      </div>
+      ${rowsHtml}
+    </div>`;
+
+  const mobRows = mobiles.length ? mobiles.map(m => `
+    <div class="ac-mode-row">
+      <div class="ac-mode-main">
+        <span class="ac-mode-prov">${esc(m.provider)}</span>
+        ${m.reference ? `<span class="ac-mode-ref">réf ${esc(m.reference)}</span>` : ''}
+        ${m.client ? `<span class="ac-mode-cli">${esc(m.client)}</span>` : ''}
+      </div>
+      <span class="ac-mode-amt">${fmt(m.montant)}</span>
+    </div>`).join('') : `<div class="ac-mode-empty">Aucun paiement Mobile Money</div>`;
+
+  const chqRows = cheques.length ? cheques.map(c => `
+    <div class="ac-mode-row">
+      <div class="ac-mode-main">
+        <span class="ac-mode-prov">${esc(c.banque) || 'Chèque'}</span>
+        ${c.emetteur ? `<span class="ac-mode-cli">${esc(c.emetteur)}</span>` : ''}
+        ${c.numero ? `<span class="ac-mode-ref">n° ${esc(c.numero)}</span>` : ''}
+      </div>
+      <span class="ac-mode-amt">${fmt(c.montant)}</span>
+    </div>`).join('') : `<div class="ac-mode-empty">Aucun chèque</div>`;
+
+  host.innerHTML =
+    section('Mobile Money', mobiles.length, d.mobile, mobRows) +
+    section('Chèques', cheques.length, d.cheque, chqRows);
 }
 
 function updateArretEcart() {
@@ -17925,14 +17975,6 @@ function _printArretDraft() {
     const q = Number(document.getElementById(`arretBillet_${den}`)?.value) || 0;
     if (q > 0) billetage[den] = q;
   });
-  const _mob = document.getElementById('arretMobileReel')?.value ?? '';
-  const _chq = document.getElementById('arretChequeReel')?.value ?? '';
-  const mobileReel = _mob !== '' ? Number(_mob) : null;
-  const chequeReel = _chq !== '' ? Number(_chq) : null;
-  const chequeNb   = Number(document.getElementById('arretChequeNb')?.value) || 0;
-  const chequeBanque   = document.getElementById('arretChequeBanque')?.value?.trim() || '';
-  const chequeNumero   = document.getElementById('arretChequeNumero')?.value?.trim() || '';
-  const chequeEmetteur = document.getElementById('arretChequeEmetteur')?.value?.trim() || '';
   printArretCaisse({
     date: new Date().toISOString(),
     caissier: currentUser.username,
@@ -17942,9 +17984,7 @@ function _printArretDraft() {
     totalVirement: d.virement, totalGeneral: d.total,
     fondCaisse: fond, billetage, especesReelles: especesR,
     ecart: especesR !== null ? especesR - (fond + d.especes) : null,
-    mobileReel, mobileEcart: mobileReel !== null ? mobileReel - d.mobile : null,
-    chequeReel, chequeEcart: chequeReel !== null ? chequeReel - d.cheque : null, chequeNb,
-    chequeBanque, chequeNumero, chequeEmetteur,
+    chequeDetails: d.chequeDetails || [], mobileDetails: d.mobileDetails || [],
     scope: d.scope, periodStart: d.periodStart,
     notes, lignes: d.lignes || []
   });
@@ -17967,18 +18007,6 @@ function validerArretCaisse() {
     if (qty > 0) billetage[denom] = qty;
   });
 
-  // Vérification chèques + Mobile Money (montants réellement reçus vs attendus)
-  const _mob = document.getElementById('arretMobileReel')?.value ?? '';
-  const _chq = document.getElementById('arretChequeReel')?.value ?? '';
-  const mobileReel  = _mob !== '' ? Number(_mob) : null;
-  const chequeReel  = _chq !== '' ? Number(_chq) : null;
-  const chequeNb    = Number(document.getElementById('arretChequeNb')?.value) || 0;
-  const chequeBanque   = document.getElementById('arretChequeBanque')?.value?.trim() || '';
-  const chequeNumero   = document.getElementById('arretChequeNumero')?.value?.trim() || '';
-  const chequeEmetteur = document.getElementById('arretChequeEmetteur')?.value?.trim() || '';
-  const mobileEcart = mobileReel !== null ? mobileReel - d.mobile : null;
-  const chequeEcart = chequeReel !== null ? chequeReel - d.cheque : null;
-
   const arret = {
     id:             nextArretId++,
     date:           new Date().toISOString(),
@@ -17994,9 +18022,8 @@ function validerArretCaisse() {
     billetage,
     especesReelles: especesR,
     ecart,
-    mobileReel, mobileEcart,
-    chequeReel, chequeEcart, chequeNb,
-    chequeBanque, chequeNumero, chequeEmetteur,
+    chequeDetails:  d.chequeDetails || [],
+    mobileDetails:  d.mobileDetails || [],
     scope:          d.scope,
     periodStart:    d.periodStart,
     notes,
@@ -18108,27 +18135,28 @@ function printArretCaisse(arret) {
       </tbody>
     </table>
 
-    ${(arret.mobileReel != null || arret.chequeReel != null || arret.chequeBanque || arret.chequeNumero || arret.chequeEmetteur) ? (() => {
-      const _ecBadge = ec => ec === 0 ? `<span class="badge badge-green">Équilibré</span>`
-        : ec > 0 ? `<span class="badge badge-green">+${fmt(ec)}</span>`
-        : `<span class="badge badge-red">${fmt(ec)}</span>`;
-      const mobRow = arret.mobileReel != null
-        ? `<tr><td>Mobile Money reçu</td><td style="text-align:right">${fmt(arret.totalMobile)}</td><td style="text-align:right">${fmt(arret.mobileReel)}</td><td style="text-align:right">${_ecBadge(arret.mobileEcart || 0)}</td></tr>` : '';
-      const chqRow = arret.chequeReel != null
-        ? `<tr><td>Chèques reçus${arret.chequeNb ? ` <span style="color:#a8a29e">(${arret.chequeNb} chèque${arret.chequeNb > 1 ? 's' : ''})</span>` : ''}</td><td style="text-align:right">${fmt(arret.totalCheque)}</td><td style="text-align:right">${fmt(arret.chequeReel)}</td><td style="text-align:right">${_ecBadge(arret.chequeEcart || 0)}</td></tr>` : '';
-      const _cd = [
-        arret.chequeBanque   ? `Banque : <strong>${_pcokEsc(arret.chequeBanque)}</strong>` : '',
-        arret.chequeNumero   ? `N° chèque : <strong>${_pcokEsc(arret.chequeNumero)}</strong>` : '',
-        arret.chequeEmetteur ? `Émetteur : <strong>${_pcokEsc(arret.chequeEmetteur)}</strong>` : ''
-      ].filter(Boolean).join(' &nbsp;·&nbsp; ');
-      const chqDetails = _cd ? `<p style="font-size:11px;color:#78716c;margin:4px 0 0">${_cd}</p>` : '';
-      return `
-    <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#78716c;margin:16px 0 6px">Vérification chèques &amp; Mobile Money</p>
+    ${(() => {
+      const mob = arret.mobileDetails || [];
+      const chq = arret.chequeDetails || [];
+      if (!mob.length && !chq.length) return '';
+      const mobTable = mob.length ? `
+    <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#78716c;margin:16px 0 6px">Mobile Money — ${mob.length} paiement${mob.length > 1 ? 's' : ''} · ${fmt(arret.totalMobile)}</p>
     <table>
-      <thead><tr><th>Mode</th><th style="text-align:right">Attendu</th><th style="text-align:right">Reçu</th><th style="text-align:right">Écart</th></tr></thead>
-      <tbody>${mobRow}${chqRow}</tbody>
-    </table>${chqDetails}`;
-    })() : ''}
+      <thead><tr><th>Opérateur</th><th>Référence</th><th>Client</th><th style="text-align:right">Montant</th></tr></thead>
+      <tbody>
+        ${mob.map(m => `<tr><td>${_pcokEsc(m.provider)}</td><td>${_pcokEsc(m.reference) || '—'}</td><td>${_pcokEsc(m.client) || '—'}</td><td style="text-align:right;font-weight:600">${fmt(m.montant)}</td></tr>`).join('')}
+      </tbody>
+    </table>` : '';
+      const chqTable = chq.length ? `
+    <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#78716c;margin:16px 0 6px">Chèques — ${chq.length} chèque${chq.length > 1 ? 's' : ''} · ${fmt(arret.totalCheque)}</p>
+    <table>
+      <thead><tr><th>Banque</th><th>Émetteur</th><th>N° chèque</th><th style="text-align:right">Montant</th></tr></thead>
+      <tbody>
+        ${chq.map(c => `<tr><td>${_pcokEsc(c.banque) || '—'}</td><td>${_pcokEsc(c.emetteur) || '—'}</td><td>${_pcokEsc(c.numero) || '—'}</td><td style="text-align:right;font-weight:600">${fmt(c.montant)}</td></tr>`).join('')}
+      </tbody>
+    </table>` : '';
+      return mobTable + chqTable;
+    })()}
 
     ${arret.billetage && Object.keys(arret.billetage).length > 0 ? `
     <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#78716c;margin:16px 0 6px">Détail du billetage</p>

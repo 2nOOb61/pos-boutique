@@ -26,7 +26,7 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20260819-arretscope">
+<link rel="stylesheet" href="./style.css?v=20260819-arretpaydetail">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
@@ -3372,42 +3372,14 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
           </div>
         </section>
 
-        <!-- Vérification des encaissements non-espèces (chèques + Mobile Money) -->
+        <!-- Détail des encaissements non-espèces (chèques + Mobile Money), depuis les commandes -->
         <section class="ac-card">
           <div class="ac-card-h">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
-            <h3>Vérification chèques &amp; Mobile Money</h3>
+            <h3>Chèques &amp; Mobile Money — détail</h3>
           </div>
           <div class="ac-card-b">
-            <!-- Mobile Money -->
-            <div class="ac-field">
-              <label for="arretMobileReel">Mobile Money reçu — attendu <b id="arretMobileAttendu">0 Ar</b></label>
-              <input id="arretMobileReel" type="number" min="0" placeholder="0" oninput="updateArretModesReel()" />
-            </div>
-            <div class="ac-rrow"><span class="rl">Écart Mobile Money</span><span class="rv" id="arretMobileEcart">—</span></div>
-
-            <!-- Chèques -->
-            <div class="ac-field" style="margin-top:12px">
-              <label for="arretChequeReel">Chèques reçus — attendu <b id="arretChequeAttendu">0 Ar</b></label>
-              <input id="arretChequeReel" type="number" min="0" placeholder="0" oninput="updateArretModesReel()" />
-            </div>
-            <div class="ac-field">
-              <label for="arretChequeNb">Nombre de chèques</label>
-              <input id="arretChequeNb" type="number" min="0" placeholder="0" />
-            </div>
-            <div class="ac-field">
-              <label for="arretChequeBanque">Banque</label>
-              <input id="arretChequeBanque" type="text" placeholder="Ex : BNI, BOA, BFV…" autocomplete="off" />
-            </div>
-            <div class="ac-field">
-              <label for="arretChequeNumero">Numéro du chèque</label>
-              <input id="arretChequeNumero" type="text" placeholder="N° du chèque" autocomplete="off" />
-            </div>
-            <div class="ac-field">
-              <label for="arretChequeEmetteur">Émetteur</label>
-              <input id="arretChequeEmetteur" type="text" placeholder="Nom du titulaire / émetteur" autocomplete="off" />
-            </div>
-            <div class="ac-rrow"><span class="rl">Écart chèques</span><span class="rv" id="arretChequeEcart">—</span></div>
+            <div id="arretModesDetail"></div>
           </div>
         </section>
 
@@ -3441,7 +3413,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260819-arretscope"></script>
+<script src="./app.js?v=20260819-arretpaydetail"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
