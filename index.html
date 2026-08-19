@@ -26,7 +26,7 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20260817-batcal">
+<link rel="stylesheet" href="./style.css?v=20260819-gestperms">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
@@ -1124,7 +1124,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
             <button class="btn-pay btn-commande" onclick="openCommandeModal(true)">Commander</button>
           </div>
           <button class="btn-clear" onclick="clearCart()" aria-label="Vider le panier">Vider le panier</button>
-          <button class="btn-arret-caisse" onclick="openArretCaisse()" data-roles="admin,caissier,commerciale" aria-label="Arrêt de caisse" title="Clôturer la session de caisse du jour">
+          <button class="btn-arret-caisse" onclick="openArretCaisse()" data-roles="admin,caissier,commerciale,gestionnaire" aria-label="Arrêt de caisse" title="Clôturer la session de caisse du jour">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
             Arrêt de caisse
           </button>
@@ -1399,7 +1399,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
           <option value="month" selected>Ce mois</option>
           <option value="year">Cette année</option>
         </select>
-        <button onclick="openArretCaisse()" data-roles="admin,caissier,commerciale"
+        <button onclick="openArretCaisse()" data-roles="admin,caissier,commerciale,gestionnaire"
           style="display:inline-flex;align-items:center;gap:7px;padding:9px 16px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;transition:.2s"
           onmouseover="this.style.background='#153d30'" onmouseout="this.style.background='var(--accent)'">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
@@ -2611,7 +2611,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
         <option value="caissier">Caissier — caisse + réservations + commandes</option>
         <option value="commerciale">Commerciale — caisse + réservations + commandes</option>
         <option value="utilisateur">Utilisateur — caisse + réservations</option>
-        <option value="gestionnaire">Gestionnaire Stock — caisse + stock + commandes</option>
+        <option value="gestionnaire">Gestionnaire Stock — caisse + stock + commandes + stats + arrêt de caisse</option>
         <option value="comptable">Comptable — statistiques + commandes + réservations</option>
         <option value="chef_atelier">Chef Atelier — attribution + production</option>
         <option value="operateur_prod">Opérateur Prod — suivi production</option>
@@ -3391,7 +3391,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260817-batcal"></script>
+<script src="./app.js?v=20260819-gestperms"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

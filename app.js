@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '142 · 2026-08-17';
+const APP_VERSION = '143 · 2026-08-19';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -200,7 +200,7 @@ const PAGE_ACCESS = {
   livraisons:     ['admin','caissier','commerciale','gestionnaire','comptable','livreur','chef_atelier','operateur_prod','machiniste','finition'],
   stock:          ['admin','gestionnaire'],
   achats:         ['admin','gestionnaire','chef_atelier'],
-  stats:          ['admin','comptable'],
+  stats:          ['admin','comptable','gestionnaire'],
   finances:       ['admin','comptable','gestionnaire'],
   perf:           ['admin','chef_atelier','gestionnaire'],
   'mon-dashboard':['admin','caissier','commerciale','utilisateur','gestionnaire','comptable'],
