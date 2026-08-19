@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '144 · 2026-08-19';
+const APP_VERSION = '145 · 2026-08-19';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -17694,6 +17694,7 @@ function _refreshArretIfOpen() {
   set('arretNbTrans', d.lignes.length + ' encaissement' + (d.lignes.length > 1 ? 's' : ''));
   _renderArretFiche(d.lignes || []);
   updateArretEcart();
+  updateArretModesReel();
   const sEl = document.getElementById('arretSoldeSearch');
   renderArretSoldeResults(sEl ? sEl.value : '');
 }
@@ -17723,10 +17724,11 @@ function renderArretCaisseModal() {
   if (soldeSearch) soldeSearch.value = '';
   renderArretSoldeResults('');
 
-  // Reset fond de caisse + notes
-  ['arretFondCaisse', 'arretNotes'].forEach(id => {
+  // Reset fond de caisse + notes + vérification chèques/mobile money
+  ['arretFondCaisse', 'arretNotes', 'arretMobileReel', 'arretChequeReel', 'arretChequeNb'].forEach(id => {
     const el = document.getElementById(id); if (el) el.value = '';
   });
+  updateArretModesReel();
   // Reset billetage
   BILLETAGE_DENOMS.forEach(d => {
     const inp = document.getElementById(`arretBillet_${d}`);
@@ -17739,6 +17741,26 @@ function renderArretCaisseModal() {
   const realEl = document.getElementById('arretEspecesReelles');
   if (realEl) realEl.value = '';
   updateArretEcart();
+}
+
+// Vérification des encaissements non-espèces (Mobile Money & Chèques) :
+// compare le montant réellement reçu au montant attendu (journal du jour) → écart par mode.
+// Met aussi à jour les libellés « attendu ». Appelé à l'ouverture, au refresh serveur et à chaque saisie.
+function updateArretModesReel() {
+  const d = _getArretData();
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set('arretMobileAttendu', fmt(d.mobile));
+  set('arretChequeAttendu', fmt(d.cheque));
+  [{ attendu: d.mobile, reelId: 'arretMobileReel', ecId: 'arretMobileEcart' },
+   { attendu: d.cheque, reelId: 'arretChequeReel', ecId: 'arretChequeEcart' }].forEach(r => {
+    const el = document.getElementById(r.ecId);
+    if (!el) return;
+    const raw = document.getElementById(r.reelId)?.value ?? '';
+    if (raw === '') { el.textContent = '—'; el.style.color = 'var(--muted)'; return; }
+    const ec = Number(raw) - r.attendu;
+    if (ec === 0) { el.textContent = 'Équilibré'; el.style.color = '#16a34a'; }
+    else          { el.textContent = (ec > 0 ? '+' : '') + fmt(ec); el.style.color = ec > 0 ? '#16a34a' : '#dc2626'; }
+  });
 }
 
 function updateArretEcart() {
@@ -17846,6 +17868,11 @@ function _printArretDraft() {
     const q = Number(document.getElementById(`arretBillet_${den}`)?.value) || 0;
     if (q > 0) billetage[den] = q;
   });
+  const _mob = document.getElementById('arretMobileReel')?.value ?? '';
+  const _chq = document.getElementById('arretChequeReel')?.value ?? '';
+  const mobileReel = _mob !== '' ? Number(_mob) : null;
+  const chequeReel = _chq !== '' ? Number(_chq) : null;
+  const chequeNb   = Number(document.getElementById('arretChequeNb')?.value) || 0;
   printArretCaisse({
     date: new Date().toISOString(),
     caissier: currentUser.username,
@@ -17855,6 +17882,8 @@ function _printArretDraft() {
     totalVirement: d.virement, totalGeneral: d.total,
     fondCaisse: fond, billetage, especesReelles: especesR,
     ecart: especesR !== null ? especesR - (fond + d.especes) : null,
+    mobileReel, mobileEcart: mobileReel !== null ? mobileReel - d.mobile : null,
+    chequeReel, chequeEcart: chequeReel !== null ? chequeReel - d.cheque : null, chequeNb,
     notes, lignes: d.lignes || []
   });
 }
@@ -17876,6 +17905,15 @@ function validerArretCaisse() {
     if (qty > 0) billetage[denom] = qty;
   });
 
+  // Vérification chèques + Mobile Money (montants réellement reçus vs attendus)
+  const _mob = document.getElementById('arretMobileReel')?.value ?? '';
+  const _chq = document.getElementById('arretChequeReel')?.value ?? '';
+  const mobileReel  = _mob !== '' ? Number(_mob) : null;
+  const chequeReel  = _chq !== '' ? Number(_chq) : null;
+  const chequeNb    = Number(document.getElementById('arretChequeNb')?.value) || 0;
+  const mobileEcart = mobileReel !== null ? mobileReel - d.mobile : null;
+  const chequeEcart = chequeReel !== null ? chequeReel - d.cheque : null;
+
   const arret = {
     id:             nextArretId++,
     date:           new Date().toISOString(),
@@ -17891,6 +17929,8 @@ function validerArretCaisse() {
     billetage,
     especesReelles: especesR,
     ecart,
+    mobileReel, mobileEcart,
+    chequeReel, chequeEcart, chequeNb,
     notes,
     lignes:         d.lignes || []   // fiche d'encaissement détaillée
   };
@@ -17992,6 +18032,22 @@ function printArretCaisse(arret) {
         ${ecartVal !== null ? `<tr style="font-weight:700"><td>Écart de caisse</td><td style="text-align:right">${ecartBadge}</td></tr>` : ''}
       </tbody>
     </table>
+
+    ${(arret.mobileReel != null || arret.chequeReel != null) ? (() => {
+      const _ecBadge = ec => ec === 0 ? `<span class="badge badge-green">Équilibré</span>`
+        : ec > 0 ? `<span class="badge badge-green">+${fmt(ec)}</span>`
+        : `<span class="badge badge-red">${fmt(ec)}</span>`;
+      const mobRow = arret.mobileReel != null
+        ? `<tr><td>Mobile Money reçu</td><td style="text-align:right">${fmt(arret.totalMobile)}</td><td style="text-align:right">${fmt(arret.mobileReel)}</td><td style="text-align:right">${_ecBadge(arret.mobileEcart || 0)}</td></tr>` : '';
+      const chqRow = arret.chequeReel != null
+        ? `<tr><td>Chèques reçus${arret.chequeNb ? ` <span style="color:#a8a29e">(${arret.chequeNb} chèque${arret.chequeNb > 1 ? 's' : ''})</span>` : ''}</td><td style="text-align:right">${fmt(arret.totalCheque)}</td><td style="text-align:right">${fmt(arret.chequeReel)}</td><td style="text-align:right">${_ecBadge(arret.chequeEcart || 0)}</td></tr>` : '';
+      return `
+    <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#78716c;margin:16px 0 6px">Vérification chèques &amp; Mobile Money</p>
+    <table>
+      <thead><tr><th>Mode</th><th style="text-align:right">Attendu</th><th style="text-align:right">Reçu</th><th style="text-align:right">Écart</th></tr></thead>
+      <tbody>${mobRow}${chqRow}</tbody>
+    </table>`;
+    })() : ''}
 
     ${arret.billetage && Object.keys(arret.billetage).length > 0 ? `
     <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#78716c;margin:16px 0 6px">Détail du billetage</p>
