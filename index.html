@@ -26,7 +26,7 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20260819-arretmodes">
+<link rel="stylesheet" href="./style.css?v=20260819-chqdetails">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
@@ -3384,6 +3384,18 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
               <label for="arretChequeNb">Nombre de chèques</label>
               <input id="arretChequeNb" type="number" min="0" placeholder="0" />
             </div>
+            <div class="ac-field">
+              <label for="arretChequeBanque">Banque</label>
+              <input id="arretChequeBanque" type="text" placeholder="Ex : BNI, BOA, BFV…" autocomplete="off" />
+            </div>
+            <div class="ac-field">
+              <label for="arretChequeNumero">Numéro du chèque</label>
+              <input id="arretChequeNumero" type="text" placeholder="N° du chèque" autocomplete="off" />
+            </div>
+            <div class="ac-field">
+              <label for="arretChequeEmetteur">Émetteur</label>
+              <input id="arretChequeEmetteur" type="text" placeholder="Nom du titulaire / émetteur" autocomplete="off" />
+            </div>
             <div class="ac-rrow"><span class="rl">Écart chèques</span><span class="rv" id="arretChequeEcart">—</span></div>
           </div>
         </section>
@@ -3418,7 +3430,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260819-arretmodes"></script>
+<script src="./app.js?v=20260819-chqdetails"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
