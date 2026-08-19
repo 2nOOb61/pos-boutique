@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '143 · 2026-08-19';
+const APP_VERSION = '144 · 2026-08-19';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -8724,6 +8724,21 @@ function openNotifPanel() {
   loadNotifsFromGAS().then(() => _renderNotifPanelList());
 }
 
+// Clic sur une notification (pop-up OU panneau, y compris les anciennes) → ouvre
+// directement le dossier concerné. openAttribForDossier retombe sur une vue lecture
+// seule pour les rôles sans accès Attribution, donc c'est un point d'entrée universel.
+function openNotifTarget(id) {
+  const n = notifications.find(x => String(x.id) === String(id));
+  if (!n) return;
+  try { closeNotifPanel(); } catch(e) {}
+  if (n.dossierId && n.dossierId !== 'LIBRE') {
+    try { openAttribForDossier(n.dossierId); } catch(e) {}
+  } else if (n.dossierId === 'LIBRE') {
+    const ep = (typeof _effectivePages === 'function') ? _effectivePages(currentUser) : [];
+    if (ep.includes('production')) showPage('production', null, null);
+  }
+}
+
 function _renderNotifPanelList() {
   const list = document.getElementById('notifPanelList');
   const label = document.getElementById('notifCountLabel');
@@ -8759,12 +8774,17 @@ function _renderNotifPanelList() {
     const etapeConf = ETAPES_CONFIG.find(e => e.code === n.etapeCode);
     const icon  = n.dossierId === 'LIBRE' ? '' : (typeConf ? typeConf.icon : (etapeConf ? etapeConf.icon : ''));
     const color = n.dossierId === 'LIBRE' ? '#7c3aed' : (typeConf ? typeConf.color : (etapeConf ? etapeConf.color : '#16a34a'));
-    return `<div class="notif-item ${isUnread ? 'notif-item--unread' : ''}">
+    // Cliquable dès qu'un dossier (ou une tâche libre) est rattaché → ouvre le dossier même pour les notifs anciennes
+    const hasTarget = !!n.dossierId;
+    const ctaLabel  = n.dossierId === 'LIBRE' ? 'Voir la tâche →' : 'Voir le dossier →';
+    const clickAttr = hasTarget ? ` onclick="openNotifTarget('${n.id}')" style="cursor:pointer" title="${ctaLabel}"` : '';
+    return `<div class="notif-item ${isUnread ? 'notif-item--unread' : ''}"${clickAttr}>
       <div style="display:flex;gap:10px;align-items:flex-start">
         <div style="width:30px;height:30px;border-radius:50%;background:${color}20;border:1.5px solid ${color};display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:${color};flex-shrink:0;margin-top:1px">${icon}</div>
         <div style="flex:1;min-width:0">
           <p class="notif-item-msg">${n.message}</p>
           <p class="notif-item-meta">${dateStr} à ${timeStr}</p>
+          ${hasTarget ? `<p class="notif-item-cta" style="font-size:11px;font-weight:600;color:var(--accent);margin-top:3px">${ctaLabel}</p>` : ''}
         </div>
         ${isUnread ? '<div style="width:7px;height:7px;border-radius:50%;background:var(--accent2);flex-shrink:0;margin-top:6px"></div>' : ''}
       </div>
