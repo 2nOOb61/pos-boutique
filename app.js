@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '148 · 2026-08-19';
+const APP_VERSION = '149 · 2026-08-19';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -17689,8 +17689,11 @@ function renderArretSoldeResults(q) {
   // que leurs propres soldes.
   const CAN_CLOSE_OTHERS = ['admin', 'caissier', 'commerciale', 'comptable'];
   const canOthers = CAN_CLOSE_OTHERS.includes(currentUser?.role);
+  // Toute commande NON annulée avec un reste dû : inclut aussi les commandes
+  // déjà LIVRÉES (status 'completed') dont le solde n'a pas été encaissé
+  // (paiement à la livraison), qui n'apparaissaient pas avec l'ancien filtre 'pending'.
   let list = commandes.filter(c =>
-    c.status === 'pending' && _cmdReste(c) > 0 &&
+    c.status !== 'cancelled' && _cmdReste(c) > 0 &&
     (canOthers || String(c.caissier || '') === String(uname))
   );
   if (query) {
@@ -17722,13 +17725,18 @@ function renderArretSoldeResults(q) {
     const isMine = String(c.caissier || '') === String(uname);
     const ownerTag = (!isMine && owner)
       ? `<span class="ac-cli-owner" title="Commande de ${escapeHtml(owner)}">${escapeHtml(owner)}</span>` : '';
+    // Commande déjà livrée (completed) avec solde impayé : badge + on masque « Finaliser »
+    // (qui re-déduirait le stock) → seul « Encaisser » est proposé pour solder le reste.
+    const delivered = c.status === 'completed';
+    const delivTag = delivered
+      ? `<span class="ac-cli-deliv" title="Commande livrée, solde à encaisser">Livrée</span>` : '';
     return `<div class="ac-cli-row${i >= VIS ? ' ac-extra ac-hidden' : ''}">
       <div class="ac-ava">${initial(c.clientName)}</div>
-      <div class="ac-cli-n"><b>${escapeHtml(c.clientName || 'Client')}${ownerTag}</b><span>${escapeHtml(_cmdRef(c))}${c.clientContact ? ' · ' + escapeHtml(c.clientContact) : ''}</span></div>
+      <div class="ac-cli-n"><b>${escapeHtml(c.clientName || 'Client')}${ownerTag}${delivTag}</b><span>${escapeHtml(_cmdRef(c))}${c.clientContact ? ' · ' + escapeHtml(c.clientContact) : ''}</span></div>
       <div class="ac-cli-rap">${fmt(reste)}</div>
       <div class="ac-cli-act">
         <button class="ac-btn-enc" onclick="arretEncaisser('${c.id}')">Encaisser</button>
-        <button class="ac-lnk-fin" onclick="arretFinaliser('${c.id}')">Finaliser</button>
+        ${delivered ? '' : `<button class="ac-lnk-fin" onclick="arretFinaliser('${c.id}')">Finaliser</button>`}
       </div>
     </div>`;
   }).join('');
