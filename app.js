@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '146 · 2026-08-19';
+const APP_VERSION = '147 · 2026-08-19';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -17431,6 +17431,40 @@ function _dashKpi(label, value, sub, bgColor, textColor) {
 
 const BILLETAGE_DENOMS = [20000, 10000, 5000, 2000, 1000, 500, 200, 100];
 
+// Périmètre de l'arrêt de caisse (paiements pris en compte) :
+//  'today'     = uniquement aujourd'hui
+//  'lastArret' = depuis la dernière clôture (DÉFAUT — inclut les paiements des jours
+//                précédents non encore clôturés : chèques, mobile money, espèces)
+//  'all'       = tous les paiements perçus, toutes dates
+let _arretScope = 'lastArret';
+const _ARRET_SCOPE_LABEL = {
+  today:     "Aujourd'hui",
+  lastArret: 'Depuis le dernier arrêt',
+  all:       'Tous les paiements perçus'
+};
+
+// Texte d'aide sous le sélecteur : rappelle concrètement ce qui est pris en compte.
+function _updateArretScopeHint(d) {
+  const el = document.getElementById('arretScopeHint');
+  if (!el || !d) return;
+  let txt = '';
+  if (d.scope === 'today')          txt = "Encaissements d'aujourd'hui uniquement";
+  else if (d.scope === 'all')       txt = 'Tous les paiements enregistrés, toutes dates';
+  else if (d.periodStart)           txt = 'Depuis le dernier arrêt du ' +
+                                          new Date(d.periodStart).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+  else                              txt = 'Aucun arrêt antérieur → tous les paiements pris en compte';
+  el.textContent = txt;
+}
+
+// Change le périmètre puis rafraîchit la fiche SANS effacer le comptage en cours.
+function setArretScope(scope) {
+  if (!_ARRET_SCOPE_LABEL[scope]) return;
+  _arretScope = scope;
+  document.querySelectorAll('#arretScopeSeg [data-scope]').forEach(b =>
+    b.classList.toggle('active', b.dataset.scope === scope));
+  _refreshArretIfOpen();
+}
+
 function updateBilletage() {
   let total  = 0;
   let anyQty = false;
@@ -17459,6 +17493,9 @@ function updateBilletage() {
 
 function openArretCaisse() {
   if (!currentUser) return;
+  _arretScope = 'lastArret';   // défaut : depuis la dernière clôture
+  document.querySelectorAll('#arretScopeSeg [data-scope]').forEach(b =>
+    b.classList.toggle('active', b.dataset.scope === _arretScope));
   renderArretCaisseModal();
   openModal('arretCaisseModal');
   // Récupère les encaissements du serveur (multi-appareils) puis rafraîchit la fiche
@@ -17475,17 +17512,33 @@ function _getArretData() {
   const today    = new Date().toDateString();
   const mine = e => (e.caissier === username || e.caissierLabel === label || e.caissier === label);
 
-  // Encaissements du jour (journal)
+  // Périmètre de l'arrêt : 'today' (jour), 'lastArret' (depuis la dernière clôture,
+  // inclut donc les paiements des jours précédents non encore clôturés) ou 'all' (tout).
+  const scope = _arretScope || 'lastArret';
+  let cutoffTs = 0;
+  if (scope === 'lastArret') {
+    cutoffTs = arretsCaisse
+      .filter(a => a.caissier === username || a.caissierLabel === label || a.caissier === label)
+      .reduce((mx, a) => { const t = new Date(a.date).getTime(); return (isFinite(t) && t > mx) ? t : mx; }, 0);
+  }
+  const inScope = dt => {
+    if (!dt) return false;
+    if (scope === 'today') return dt.toDateString() === today;
+    if (scope === 'all')   return true;
+    return dt.getTime() > cutoffTs; // lastArret (tout si aucune clôture antérieure)
+  };
+
+  // Encaissements du périmètre (journal)
   const evts = encaissements.filter(e => {
     const d = parseSaleDate(e.date);
-    return d && d.toDateString() === today && mine(e);
+    return d && inScope(d) && mine(e);
   });
 
-  // Repli : ventes du jour SANS encaissement lié (ex. faites avant l'ajout du journal)
+  // Repli : ventes du périmètre SANS encaissement lié (ex. faites avant l'ajout du journal)
   const covered = new Set(evts.filter(e => e.source === 'vente').map(e => String(e.refId)));
   const todaySales = sales.filter(s => {
     const d = parseSaleDate(s.date);
-    return d && d.toDateString() === today && (s.caissier === username || s.caissier === label);
+    return d && inScope(d) && (s.caissier === username || s.caissier === label);
   });
   todaySales.forEach(s => {
     if (covered.has(String(s.id))) return;
@@ -17538,7 +17591,8 @@ function _getArretData() {
     }));
 
   return { todaySales, evts, especes, mobile, cheque, virement,
-           total: especes + mobile + cheque + virement, lignes };
+           total: especes + mobile + cheque + virement, lignes,
+           scope, periodStart: (scope === 'lastArret' && cutoffTs > 0) ? cutoffTs : null };
 }
 
 // Rend la fiche d'encaissement (liste détaillée) dans le modal d'arrêt de caisse
@@ -17695,6 +17749,7 @@ function _refreshArretIfOpen() {
   _renderArretFiche(d.lignes || []);
   updateArretEcart();
   updateArretModesReel();
+  _updateArretScopeHint(d);
   const sEl = document.getElementById('arretSoldeSearch');
   renderArretSoldeResults(sEl ? sEl.value : '');
 }
@@ -17742,6 +17797,7 @@ function renderArretCaisseModal() {
   const realEl = document.getElementById('arretEspecesReelles');
   if (realEl) realEl.value = '';
   updateArretEcart();
+  _updateArretScopeHint(d);
 }
 
 // Vérification des encaissements non-espèces (Mobile Money & Chèques) :
@@ -17889,6 +17945,7 @@ function _printArretDraft() {
     mobileReel, mobileEcart: mobileReel !== null ? mobileReel - d.mobile : null,
     chequeReel, chequeEcart: chequeReel !== null ? chequeReel - d.cheque : null, chequeNb,
     chequeBanque, chequeNumero, chequeEmetteur,
+    scope: d.scope, periodStart: d.periodStart,
     notes, lignes: d.lignes || []
   });
 }
@@ -17940,6 +17997,8 @@ function validerArretCaisse() {
     mobileReel, mobileEcart,
     chequeReel, chequeEcart, chequeNb,
     chequeBanque, chequeNumero, chequeEmetteur,
+    scope:          d.scope,
+    periodStart:    d.periodStart,
     notes,
     lignes:         d.lignes || []   // fiche d'encaissement détaillée
   };
@@ -17986,7 +18045,14 @@ function printArretCaisse(arret) {
       </div>
     </div>
 
-    <p class="rpt-period">Clôture de la journée — ventes enregistrées au moment de l'arrêt</p>
+    <p class="rpt-period">${
+      arret.scope == null     ? "Clôture de la journée — ventes enregistrées au moment de l'arrêt" :
+      arret.scope === 'all'   ? 'Tous les paiements perçus — toutes dates' :
+      arret.scope === 'today' ? "Clôture de la journée — encaissements d'aujourd'hui" :
+      (arret.periodStart
+        ? 'Depuis le dernier arrêt du ' + new Date(arret.periodStart).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' })
+        : 'Tous les paiements perçus (aucun arrêt antérieur)')
+    }</p>
 
     <div class="kpi-row">
       <div class="kpi-box"><div class="kl">Espèces</div><div class="kv">${fmt(arret.totalEspeces)}</div></div>

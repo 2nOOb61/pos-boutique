@@ -26,7 +26,7 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20260819-chqdetails">
+<link rel="stylesheet" href="./style.css?v=20260819-arretscope">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
@@ -3202,6 +3202,17 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
       <div class="ac-kpi"><div class="kl">Encaissements</div><div class="kv" id="kpiArretNb">0</div></div>
     </section>
 
+    <!-- SÉLECTEUR DE PÉRIODE : quels paiements inclure dans l'arrêt -->
+    <div class="ac-scope-bar">
+      <span class="ac-scope-lbl">Paiements inclus</span>
+      <div class="ac-scope-seg" id="arretScopeSeg" role="group" aria-label="Période de l'arrêt">
+        <button type="button" class="ac-scope-btn" data-scope="today" onclick="setArretScope('today')">Aujourd'hui</button>
+        <button type="button" class="ac-scope-btn active" data-scope="lastArret" onclick="setArretScope('lastArret')">Depuis le dernier arrêt</button>
+        <button type="button" class="ac-scope-btn" data-scope="all" onclick="setArretScope('all')">Tout</button>
+      </div>
+      <span class="ac-scope-hint" id="arretScopeHint"></span>
+    </div>
+
     <!-- ZONE PRINCIPALE : grille 3 colonnes (chaque colonne défile en interne) -->
     <div class="ac-grid">
 
@@ -3430,7 +3441,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260819-chqdetails"></script>
+<script src="./app.js?v=20260819-arretscope"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
