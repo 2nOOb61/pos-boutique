@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '151 · 2026-08-20';
+const APP_VERSION = '152 · 2026-08-20';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -102,6 +102,10 @@ var _tlPhotoQueue = (function(){ try { return JSON.parse(localStorage.getItem('p
 // timeout GAS) laissait les PJ visibles UNIQUEMENT sur l'appareil qui les a insérées
 // (base64 local), invisibles pour tous les autres postes qui lisent le Sheet.
 var _cmdAttQueue = (function(){ try { return JSON.parse(localStorage.getItem('pos-cmd-att-queue')||'[]'); } catch(e){ return []; } })();
+// Anti double-upload concurrent : ids des commandes dont les photos base64 sont en
+// cours de montée sur Drive (le polling 30s et l'événement `online` peuvent se
+// chevaucher → sans ce garde, mêmes photos uploadées 2× = doublons Drive).
+var _cmdPhotoUploading = new Set();
 var _notifPopupArmed   = false; // pop-ups activés après le chargement initial (évite le backlog au login ; insensible aux horloges)
 var _notifAudioCtx     = null; // contexte Web Audio pour le son de notification
 // Pop-ups à l'écran : file navigable (les plus récentes en tête) + page courante.
@@ -3739,6 +3743,10 @@ function initPWA() {
     document.getElementById('offlineBadge').classList.remove('show');
     showToast(' Connexion rétablie — synchronisation...');
     syncPendingOfflineSales();
+    // Reprise des pièces jointes de commande insérées hors ligne : montée Drive +
+    // persistance Sheet → enfin visibles par tous les postes.
+    try { _flushCmdPhotoQueue(); } catch(e) {}
+    try { _flushCmdAttQueue();   } catch(e) {}
   });
   if (!navigator.onLine) document.getElementById('offlineBadge').classList.add('show');
 }
@@ -7321,55 +7329,85 @@ async function syncCommandeToSheets(cmd) {
 
 // Upload des photos d'une commande sur Drive → pièces jointes partagées (atelier).
 // Réutilise l'action générique 'uploadFile' (comme réservations/commentaires).
+//
+// IDEMPOTENTE et sûre en reprise : seules les photos réellement montées sur Drive
+// sont retirées de `cmd.photos` (base64 local) et ajoutées à `cmd.attachments`
+// (metadata Drive) ; celles qui échouent RESTENT dans `cmd.photos` → réessayées au
+// prochain passage (_flushCmdPhotoQueue) SANS créer de doublon Drive.
 async function _uploadCommandeAttachments(commandeId, photos) {
-  if (!APPS_SCRIPT_URL || !Array.isArray(photos) || !photos.length) return;
-  const uploaded = [];
-  for (let i = 0; i < photos.length; i++) {
-    const item     = photos[i];
-    const isObj    = item && typeof item === 'object';
-    const dataUrl  = isObj ? (item.data || '') : (typeof item === 'string' ? item : '');
-    if (!dataUrl) continue;
-    const type     = (isObj && item.type) ? item.type : 'image/jpeg';
-    const origName = (isObj && item.name) ? item.name : '';
-    const ext      = origName.includes('.') ? origName.split('.').pop() : ((type.split('/')[1]) || 'jpg');
-    const name     = `commande-${commandeId}-${i + 1}.${ext}`;
-    try {
-      const r = await apiCall({ action:'uploadFile', fileName:name, mimeType:type, base64Data:dataUrl });
-      uploaded.push(r && r.ok
-        ? { name:r.fileName||name, type, fileId:r.fileId, viewUrl:r.viewUrl, dlUrl:r.dlUrl }
-        : { name, type, data:dataUrl }); // fallback base64 local si l'upload échoue
-    } catch(e) {
-      uploaded.push({ name, type, data:dataUrl });
-    }
-  }
-  if (!uploaded.length) return;
+  if (!APPS_SCRIPT_URL || !navigator.onLine) return;
+  if (_cmdPhotoUploading.has(String(commandeId))) return; // upload déjà en cours pour cette commande
   const cmd = commandes.find(c => String(c.id) === String(commandeId));
   if (!cmd) return;
-  cmd.attachments = [...(cmd.attachments || []), ...uploaded];
-  // Tout est sur Drive → libérer les copies base64 locales (source de vérité = Drive)
-  if (uploaded.every(a => a.fileId)) {
-    cmd.photos = [];
-    try { localStorage.removeItem(`pos-cmd-photos-${cmd.id}`); } catch(e) {}
-  }
-  saveData();
-  // Rafraîchir les vues éventuellement ouvertes
-  try { renderCommandes(); } catch(e) {}
-  if (selectedDossier && String(selectedDossier.sourceId) === String(cmd.id)) {
-    try { selectDossier(selectedDossier.id); } catch(e) {}
-  }
-  // Persister les metadata Drive dans le Sheet → visibles par tous les postes.
-  // ⚠️ CRITIQUE : si cet appel échoue et n'est pas rejoué, la PJ reste visible
-  // uniquement sur CE poste (base64 local) → « personne ne voit sauf l'inséreur ».
-  // On met donc en file de reprise persistante (rejouée par le polling 30s).
-  const driveAtts = cmd.attachments.filter(a => a && a.fileId);
-  if (driveAtts.length) {
+  const src = Array.isArray(photos) && photos.length ? photos : (cmd.photos || []);
+  if (!Array.isArray(src) || !src.length) return;
+
+  _cmdPhotoUploading.add(String(commandeId));
+  try {
+    const uploadedMeta = [];   // metadata Drive des photos montées cette fois
+    const stillPending = [];   // base64 des photos non montées → reprise ultérieure
+    for (let i = 0; i < src.length; i++) {
+      const item     = src[i];
+      const isObj    = item && typeof item === 'object';
+      const dataUrl  = isObj ? (item.data || '') : (typeof item === 'string' ? item : '');
+      if (!dataUrl) continue; // entrée vide → rien à monter
+      const type     = (isObj && item.type) ? item.type : 'image/jpeg';
+      const origName = (isObj && item.name) ? item.name : '';
+      const ext      = origName.includes('.') ? origName.split('.').pop() : ((type.split('/')[1]) || 'jpg');
+      const name     = `commande-${commandeId}-${Date.now()}-${i + 1}.${ext}`;
+      let ok = false;
+      try {
+        const r = await apiCall({ action:'uploadFile', fileName:name, mimeType:type, base64Data:dataUrl });
+        if (r && r.ok && r.fileId) {
+          uploadedMeta.push({ name:r.fileName||name, type, fileId:r.fileId, viewUrl:r.viewUrl, dlUrl:r.dlUrl });
+          ok = true;
+        }
+      } catch(e) { ok = false; }
+      if (!ok) stillPending.push(item); // échec réseau → on garde le base64 pour reprise
+    }
+    if (!uploadedMeta.length) return; // rien n'a pu monter → on retentera au prochain cycle
+
+    // Fusion Drive (dédup par fileId) + ne garder en local QUE les photos non montées.
+    cmd.attachments = _mergeAttById(cmd.attachments, uploadedMeta);
+    cmd.photos      = stillPending;
     try {
-      const rUp = await apiCall({ action:'updateCommande', id:cmd.id, attachments:driveAtts });
-      if (!rUp || !rUp.ok) _enqueueCmdAttJob(cmd.id, driveAtts);
-    } catch(e) { _enqueueCmdAttJob(cmd.id, driveAtts); }
+      if (stillPending.length) localStorage.setItem(`pos-cmd-photos-${cmd.id}`, JSON.stringify(stillPending));
+      else                     localStorage.removeItem(`pos-cmd-photos-${cmd.id}`);
+    } catch(e) {}
+    saveData();
+    // Rafraîchir les vues éventuellement ouvertes
+    try { renderCommandes(); } catch(e) {}
+    if (selectedDossier && String(selectedDossier.sourceId) === String(cmd.id)) {
+      try { selectDossier(selectedDossier.id); } catch(e) {}
+    }
+    // Persister les metadata Drive dans le Sheet → visibles par tous les postes.
+    // ⚠️ CRITIQUE : si cet appel échoue et n'est pas rejoué, la PJ reste visible
+    // uniquement sur CE poste → file de reprise persistante (rejouée par le polling 30s).
+    const driveAtts = (cmd.attachments || []).filter(a => a && a.fileId);
+    if (driveAtts.length) {
+      try {
+        const rUp = await apiCall({ action:'updateCommande', id:cmd.id, attachments:driveAtts });
+        if (!rUp || !rUp.ok) _enqueueCmdAttJob(cmd.id, driveAtts);
+      } catch(e) { _enqueueCmdAttJob(cmd.id, driveAtts); }
+    }
+    showToast(`${uploadedMeta.length} pièce(s) jointe(s) partagée(s) avec l'atelier`);
+  } finally {
+    _cmdPhotoUploading.delete(String(commandeId));
   }
-  const okCount = uploaded.filter(a => a.fileId).length;
-  if (okCount) showToast(`${okCount} pièce(s) jointe(s) partagée(s) avec l'atelier`);
+}
+
+// ── File de reprise : montée Drive des photos de commande insérées hors ligne ──
+// Une PJ ajoutée sans connexion (ou dont l'upload réseau a échoué) reste en base64
+// local (`cmd.photos`) et n'est visible que sur le poste inséreur. Cette reprise,
+// rejouée au retour de connexion + par le polling 30s, monte enfin ces photos sur
+// Drive et persiste leurs metadata dans le Sheet → PJ partagées avec tous les postes.
+async function _flushCmdPhotoQueue() {
+  if (!APPS_SCRIPT_URL || !navigator.onLine) return;
+  const pending = commandes.filter(c => Array.isArray(c.photos) &&
+    c.photos.some(p => (typeof p === 'string' && p) || (p && p.data)));
+  for (const c of pending) {
+    await _uploadCommandeAttachments(c.id, [...c.photos]);
+  }
 }
 
 async function syncCmdUpdateToSheets(cmd) {
@@ -8487,8 +8525,9 @@ function _startNotifPolling() {
     if (document.hidden) return; // ne pas polluer quand l'onglet est en arrière-plan
     _flushNotifRetryQueue();
     _flushTlPhotoQueue();
-    _flushCmdAttQueue(); // reprise persistance PJ commande → visibles par tous les postes
-    _flushBatQueue();    // reprise sync BAT
+    _flushCmdPhotoQueue(); // reprise montée Drive des PJ commande insérées hors ligne
+    _flushCmdAttQueue();   // reprise persistance PJ commande → visibles par tous les postes
+    _flushBatQueue();      // reprise sync BAT
     // Suivi BAT : rafraîchir en direct si l'Attribution ou le tableau de bord est ouvert
     if (APPS_SCRIPT_URL && document.getElementById('page-attribution')?.classList.contains('active')) {
       loadBatsFromScript().then(() => { if (selectedDossier) _refreshBatUi(selectedDossier.id); }).catch(()=>{});
