@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '149 · 2026-08-19';
+const APP_VERSION = '150 · 2026-08-20';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -18098,37 +18098,58 @@ function printArretCaisse(arret) {
       <div class="kpi-box"><div class="kl">Transactions</div><div class="kv">${arret.nbTransactions}</div></div>
     </div>
 
-    ${(arret.lignes && arret.lignes.length) ? `
-    <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#78716c;margin:16px 0 6px">Fiche d'encaissement</p>
+    ${(arret.lignes && arret.lignes.length) ? (() => {
+      // Fiche calquée sur la « FICHE D'ENCAISSEMENT BOUTIQUE » papier :
+      // N° FC · Client · Encaissement · Obs (mode) · Signature, sous-totaux par
+      // mode (« Total espèces … »), TOTAL, puis ligne de signature du caissier.
+      const modes = [
+        ['Espèces',      arret.totalEspeces],
+        ['Mobile Money', arret.totalMobile],
+        ['Chèque',       arret.totalCheque],
+        ['Virement',     arret.totalVirement],
+      ].filter(m => (Number(m[1]) || 0) > 0);
+      const totalEnc = arret.lignes.reduce((a, b) => a + (b.encaisse || 0), 0);
+      const totalRap = arret.lignes.reduce((a, b) => a + (b.reste || 0), 0);
+      return `
+    <p style="text-align:center;font-size:15px;font-weight:700;letter-spacing:.04em;color:#1a4a3a;margin:20px 0 2px">FICHE D'ENCAISSEMENT BOUTIQUE</p>
+    <p style="text-align:center;font-size:11px;color:#78716c;margin-bottom:10px">${dateStr}${arret.caissierLabel ? ` — Caissier : <strong>${_pcokEsc(arret.caissierLabel)}</strong>` : ''}</p>
     <table>
       <thead>
         <tr>
-          <th style="width:56px">N° FC</th>
+          <th style="width:62px">N° FC</th>
           <th>Client</th>
-          <th>Caissier</th>
-          <th>Articles</th>
-          <th style="text-align:right">Encaissement</th>
-          <th style="text-align:center;width:120px">Obs</th>
+          <th style="text-align:right;width:118px">Encaissement</th>
+          <th style="width:150px">Obs</th>
+          <th style="text-align:center;width:110px">Signature</th>
         </tr>
       </thead>
       <tbody>
         ${arret.lignes.map(l => `<tr>
           <td>${_pcokEsc(l.num)}</td>
-          <td>${_pcokEsc(l.client)}${l.methode ? `<span style="color:#a8a29e;font-size:10px"> · ${_pcokEsc(l.methode)}</span>` : ''}</td>
-          <td>${_pcokEsc(l.caissier || '—')}</td>
-          <td style="font-size:11px">${(l.articles && l.articles.length)
-            ? l.articles.map(a => `${_pcokEsc(a.name)} <strong>×${a.qty}</strong> <span style="color:#a8a29e">@ ${fmt(a.price)}</span>`).join('<br>')
-            : '<span style="color:#a8a29e">—</span>'}</td>
+          <td>${_pcokEsc(l.client)}${(l.caissier && l.caissier !== arret.caissierLabel) ? `<span style="color:#a8a29e;font-size:10px"> · ${_pcokEsc(l.caissier)}</span>` : ''}</td>
           <td style="text-align:right;font-weight:600">${fmt(l.encaisse)}</td>
-          <td style="text-align:center">${l.acompte ? `<strong>A</strong> · RAP ${fmt(l.reste)}` : 'Soldé'}</td>
-        </tr>`).join('')}
-        <tr style="font-weight:700;background:#f8f7f4">
-          <td colspan="4">TOTAL${arret.lignes.reduce((a,b)=>a+(b.reste||0),0) > 0 ? ` · Reste à payer ${fmt(arret.lignes.reduce((a,b)=>a+(b.reste||0),0))}` : ''}</td>
-          <td style="text-align:right">${fmt(arret.lignes.reduce((a,b)=>a+(b.encaisse||0),0))}</td>
+          <td>${_pcokEsc(l.methode || '')}${l.acompte ? `<span style="color:#dc2626;font-size:10px"> · Acompte · RAP ${fmt(l.reste)}</span>` : ''}</td>
           <td></td>
+        </tr>`).join('')}
+        ${modes.length > 1 ? modes.map(m => `<tr style="background:#faf9f7">
+          <td colspan="2" style="text-align:right;font-style:italic;color:#57534e">Total ${m[0].toLowerCase()}</td>
+          <td style="text-align:right;font-weight:600">${fmt(m[1])}</td>
+          <td colspan="2"></td>
+        </tr>`).join('') : ''}
+        <tr style="font-weight:700;background:#f0efe9">
+          <td colspan="2">TOTAL${totalRap > 0 ? ` · Reste à payer ${fmt(totalRap)}` : ''}</td>
+          <td style="text-align:right;font-size:13px;color:#1a4a3a">${fmt(totalEnc)}</td>
+          <td colspan="2"></td>
         </tr>
       </tbody>
-    </table>` : ''}
+    </table>
+    <div style="display:flex;justify-content:flex-end;margin:4px 0 18px">
+      <div style="text-align:center;min-width:210px">
+        <div style="border-bottom:1px solid #1c1917;height:46px"></div>
+        <div style="font-size:10px;color:#78716c;margin-top:4px;text-transform:uppercase;letter-spacing:.05em">Signature du caissier</div>
+      </div>
+    </div>`;
+    })() : ''}
 
     <table>
       <thead>
