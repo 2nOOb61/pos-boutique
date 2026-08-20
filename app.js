@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '152 · 2026-08-20';
+const APP_VERSION = '153 · 2026-08-20';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -17726,7 +17726,7 @@ function renderArretSoldeResults(q) {
   // Qui peut solder la commande d'un COLLÈGUE (arrêt consolidé) : le paiement
   // tombe dans SA caisse via _recordEncaissement. Les autres rôles ne voient
   // que leurs propres soldes.
-  const CAN_CLOSE_OTHERS = ['admin', 'caissier', 'commerciale', 'comptable'];
+  const CAN_CLOSE_OTHERS = ['admin', 'caissier', 'commerciale', 'comptable', 'gestionnaire'];
   const canOthers = CAN_CLOSE_OTHERS.includes(currentUser?.role);
   // Toute commande NON annulée avec un reste dû : inclut aussi les commandes
   // déjà LIVRÉES (status 'completed') dont le solde n'a pas été encaissé
