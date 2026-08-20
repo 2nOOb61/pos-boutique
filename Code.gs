@@ -1320,6 +1320,8 @@ function handleGetCommandes(data) {
         attachments: _parseAttachments_(r[24]),
         remarque: String(r[25]||''),
         poles: _parsePoles_(r[26]),   // col 27 = Poles (JSON array de clés)
+        finaliseParUser:  String(r[27]||''),  // col 28 = qui a finalisé (username)
+        finaliseParLabel: String(r[28]||''),  // col 29 = qui a finalisé (libellé)
         photos: []
       };
       order.push(id);
@@ -1528,6 +1530,9 @@ function handleAddCommande(data) {
   const items   = Array.isArray(c.items) ? c.items : [];
   // Sérialiser les articles en une seule cellule : "nom×qty@prix|..."
   const articlesStr = items.map(i => `${i.name||'?'}×${i.qty||1}@${i.price||0}`).join('|');
+  // Garantir assez de colonnes (29 : … 27=Poles, 28=Finalisé_Par_User, 29=Finalisé_Par_Label)
+  const _need = 29 - sh.getMaxColumns();
+  if (_need > 0) sh.insertColumnsAfter(sh.getMaxColumns(), _need);
   sh.appendRow([
     id, dateStr, c.caissier||'',
     c.clientName||'', c.clientContact||'',
@@ -1543,7 +1548,9 @@ function handleAddCommande(data) {
     c.dateBAT||'',
     JSON.stringify(Array.isArray(c.attachments) ? c.attachments : []),
     c.remarque||'',   // col 26 = Remarque (finance)
-    JSON.stringify(Array.isArray(c.poles) ? c.poles : [])   // col 27 = Poles (pôles atelier)
+    JSON.stringify(Array.isArray(c.poles) ? c.poles : []),   // col 27 = Poles (pôles atelier)
+    c.finaliseParUser||'',    // col 28 = qui a finalisé (username)
+    c.finaliseParLabel||''    // col 29 = qui a finalisé (libellé)
   ]);
   // Forcer nom + contact en TEXTE (un contact "+261 34…" serait sinon évalué en formule → #ERROR!)
   const _r = sh.getLastRow();
@@ -1614,6 +1621,16 @@ function handleUpdateCommande(data) {
       const need = 27 - sh.getMaxColumns();
       if (need > 0) sh.insertColumnsAfter(sh.getMaxColumns(), need);
       sh.getRange(i+1, 27).setValue(JSON.stringify(Array.isArray(data.poles) ? data.poles : []));
+    }
+    if (data.finaliseParUser !== undefined) {                                                  // col 28 = qui a finalisé (username)
+      const need = 28 - sh.getMaxColumns();
+      if (need > 0) sh.insertColumnsAfter(sh.getMaxColumns(), need);
+      sh.getRange(i+1, 28).setValue(String(data.finaliseParUser || ''));
+    }
+    if (data.finaliseParLabel !== undefined) {                                                 // col 29 = qui a finalisé (libellé)
+      const need = 29 - sh.getMaxColumns();
+      if (need > 0) sh.insertColumnsAfter(sh.getMaxColumns(), need);
+      sh.getRange(i+1, 29).setValue(String(data.finaliseParLabel || ''));
     }
     updated = true;
   }
