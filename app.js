@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '153 · 2026-08-20';
+const APP_VERSION = '154 · 2026-08-20';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -6847,6 +6847,10 @@ function _doCmdFinalize(c, method, given, change, provider, ref, bankInfo) {
   c.status           = 'completed';
   c.dateFinalisation = new Date().toISOString();
   c.saleId           = sale.id;
+  // Qui a finalisé (≠ caissier d'origine de la commande) : source de vérité pour
+  // la carte « Finalisations par agent » de la page Finances.
+  c.finaliseParUser  = currentUser?.username || '';
+  c.finaliseParLabel = currentUser?.label || currentUser?.username || '';
   saveData();
   renderProducts();
   renderStockTable();
@@ -7412,7 +7416,7 @@ async function _flushCmdPhotoQueue() {
 
 async function syncCmdUpdateToSheets(cmd) {
   if (!APPS_SCRIPT_URL) return;
-  await apiCall({ action: 'updateCommande', id: cmd.id, status: cmd.status, dateFinalisation: cmd.dateFinalisation || '', saleId: cmd.saleId || '', accompte: cmd.accompte, restant: cmd.restant, remarque: cmd.remarque || '' });
+  await apiCall({ action: 'updateCommande', id: cmd.id, status: cmd.status, dateFinalisation: cmd.dateFinalisation || '', saleId: cmd.saleId || '', accompte: cmd.accompte, restant: cmd.restant, remarque: cmd.remarque || '', finaliseParUser: cmd.finaliseParUser || '', finaliseParLabel: cmd.finaliseParLabel || '' });
 }
 
 // Journalise une action côté client (édition / annulation directe d'une commande
@@ -14266,6 +14270,68 @@ function _finRow(e, colspan) {
   </tr>${detail}`;
 }
 
+// Qui a finalisé une commande : estampille locale prioritaire, sinon l'événement
+// d'encaissement du SOLDE (journal, synchronisé cross-postes → le patron le voit
+// depuis un autre appareil), sinon inconnu.
+function _finFinalizerOf(c) {
+  if (c.finaliseParLabel) return c.finaliseParLabel;
+  const ev = (encaissements || []).find(e =>
+    e && e.source === 'commande' && e.type === 'solde' && String(e.refId) === String(c.id));
+  if (ev && (ev.caissierLabel || ev.caissier)) return ev.caissierLabel || ev.caissier;
+  return '—';
+}
+
+// Carte Finances : répartition des commandes FINALISÉES (livrées) par agent qui
+// les a finalisées, sur la période sélectionnée (filtre date de la page Finances).
+function _finFinalizersCard() {
+  const { from, to } = _finPeriodRange();
+  const inRange = c => {
+    const d = parseSaleDate(c.dateFinalisation || c.date);
+    if (!d) return false;
+    if (from && d < from) return false;
+    if (to && d > to) return false;
+    return true;
+  };
+  const finCmds = (commandes || []).filter(c => c.status === 'completed' && inRange(c));
+  if (!finCmds.length) return '';
+
+  const byAgent = {};
+  finCmds.forEach(c => {
+    const a = _finFinalizerOf(c);
+    if (!byAgent[a]) byAgent[a] = { n: 0, montant: 0 };
+    byAgent[a].n++;
+    byAgent[a].montant += Number(c.total) || 0;
+  });
+  const agents = Object.keys(byAgent).sort((x, y) => byAgent[y].montant - byAgent[x].montant);
+  const totalN = finCmds.length;
+  const totalM = finCmds.reduce((s, c) => s + (Number(c.total) || 0), 0);
+  const initial = s => ((String(s || '?').trim()[0]) || '?').toUpperCase();
+
+  const rows = agents.map(a => {
+    const g = byAgent[a];
+    const pct = totalN ? Math.round(g.n / totalN * 100) : 0;
+    return `<tr>
+      <td><span style="display:inline-flex;align-items:center;gap:8px">
+        <span style="width:26px;height:26px;border-radius:50%;background:#1a4a3a14;color:#1a4a3a;display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;flex-shrink:0">${initial(a)}</span>
+        <b>${escapeHtml(a)}</b></span></td>
+      <td class="pcf-num">${g.n} <span style="color:var(--muted);font-weight:600">(${pct}%)</span></td>
+      <td class="pcf-num">${fmt(g.montant)}</td>
+    </tr>`;
+  }).join('');
+
+  return `<div class="pcf-card">
+    <div class="pcf-card-head">
+      <div class="ic" style="background:#7c3aed14;color:#7c3aed"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
+      <div style="flex:1;min-width:0"><div class="pcf-card-title">Finalisations par agent</div><div class="pcf-card-sub">${totalN} commande(s) finalisée(s) · ${fmt(totalM)}</div></div>
+      <span class="pcf-card-badge" style="background:#7c3aed14;color:#7c3aed">${agents.length} agent(s)</span>
+    </div>
+    <table class="pcf-table">
+      <thead><tr><th>Agent</th><th class="pcf-num">Commandes finalisées</th><th class="pcf-num">Montant total</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
 function renderFinances() {
   const root = document.getElementById('financesContent');
   if (!root) return;
@@ -14317,6 +14383,9 @@ function renderFinances() {
       <div class="pcf-kpi" style="--kc:#dc2626"><div class="pcf-kpi-label">Restant à percevoir</div><div class="pcf-kpi-val" style="color:#dc2626">${fmt(tRes)}</div><div class="pcf-kpi-sub">${list.filter(e => e.restant > 0).length} à solder</div></div>
       <div class="pcf-kpi" style="--kc:#2563eb"><div class="pcf-kpi-label">Panier moyen</div><div class="pcf-kpi-val">${fmt(panier)}</div><div class="pcf-kpi-sub">par opération</div></div>
     </div>`;
+
+  // ── Carte : qui a finalisé les commandes (sur la période) ──
+  html += _finFinalizersCard();
 
   if (!list.length) {
     html += `<div class="pcf-empty">Aucune opération sur cette période.</div>`;
