@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '157 · 2026-08-21';
+const APP_VERSION = '158 · 2026-08-21';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -13228,6 +13228,7 @@ function _resolveOperatorLabel(who) {
 let _delivState = { filter: 'ACTIVE', mode: 'all', groupBy: 'client', sort: 'echeance', dir: 'asc', density: 'compact', q: '', date: '' };
 const _DELIV_PAGE = 80;
 let _delivLimit = _DELIV_PAGE;
+let _delivRecapOpen = false;   // panneau « Récapitulatif des adresses de livraison » (replié par défaut)
 
 const _DELIV_MONEY_ROLES = ['admin','caissier','commerciale','comptable','gestionnaire'];
 
@@ -13779,8 +13780,10 @@ function renderLivraisons() {
   root.innerHTML = `<div class="pcok">
       ${_delivToolbar(cnt)}
       ${_delivAlertCards(all)}
+      <div id="delivAddrRecap"></div>
       <div id="delivCockpitBody"></div>
     </div>`;
+  _delivRenderAddrRecap();
   _delivRenderBody();
 }
 
@@ -13798,6 +13801,151 @@ function _delivRenderBody() {
   const more = filtered.length > _delivLimit
     ? `<div class="pcok-more"><button onclick="delivShowMore()">Afficher plus (${filtered.length - _delivLimit} restants)</button></div>` : '';
   body.innerHTML = count + _delivTable(page, showMoney) + more;
+}
+
+// ── Récapitulatif des adresses de livraison ────────────────────────────────
+// Focalisé sur les livraisons À DOMICILE (mode « livraison » uniquement — les
+// retraits boutique n'ont pas d'adresse). Respecte le filtre bucket + la date +
+// la recherche de la barre d'outils, mais IGNORE le sélecteur de mode (une
+// récap d'adresses n'a de sens que sur les livraisons). Sert de feuille de
+// route pour le livreur, à l'écran et à l'impression.
+function _delivAddrRecapRows() {
+  let out = _delivBuildRows().filter(r => r.mode === 'livraison');
+  out = out.filter(r => _delivBucketMatch(r, _delivState.filter));
+  if (_delivState.date) out = out.filter(r => r.ymd === _delivState.date);
+  const q = (_delivState.q || '').trim().toLowerCase();
+  if (q) out = out.filter(r => (r.client + ' ' + (r.commercial || '') + ' ' + (r.items || []).map(i => i.name).join(' ') + ' ' + (r.address || '') + ' ' + (r.contact || '') + ' ' + (r.ref || '')).toLowerCase().includes(q));
+  return _delivSortRows(out);
+}
+
+function toggleDelivRecap() {
+  _delivRecapOpen = !_delivRecapOpen;
+  _delivRenderAddrRecap();
+  // Rafraîchit l'état actif du bouton de la barre d'outils.
+  const tb = document.querySelector('.pcok-toolbar [onclick="toggleDelivRecap()"]');
+  if (tb) tb.classList.toggle('pcok-chip--active', _delivRecapOpen);
+}
+
+function _delivRenderAddrRecap() {
+  const host = document.getElementById('delivAddrRecap');
+  if (!host) return;
+  const rows = _delivAddrRecapRows();
+  const missing = rows.filter(r => !(r.address || '').trim()).length;
+  const head = `<div class="deliv-recap-head" onclick="toggleDelivRecap()">
+      <div class="deliv-recap-title">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+        Récapitulatif des adresses de livraison
+        <span class="deliv-recap-n">${rows.length}</span>
+        ${missing ? `<span class="deliv-recap-warn" title="Livraisons sans adresse renseignée">${missing} sans adresse</span>` : ''}
+      </div>
+      <svg class="deliv-recap-caret${_delivRecapOpen ? ' open' : ''}" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>`;
+  if (!_delivRecapOpen) { host.innerHTML = `<div class="deliv-recap">${head}</div>`; return; }
+  host.innerHTML = `<div class="deliv-recap deliv-recap--open">
+      ${head}
+      <div class="deliv-recap-body">
+        <div class="deliv-recap-actions">
+          <button class="pcok-iconbtn" onclick="event.stopPropagation();printDelivAddresses()">Imprimer le récap</button>
+        </div>
+        ${_delivAddrRecapTable(rows)}
+      </div>
+    </div>`;
+}
+
+function _delivAddrRecapTable(rows) {
+  if (!rows.length) return `<div class="pcok-empty" style="padding:22px 12px"><p>Aucune livraison à domicile dans ce filtre</p></div>`;
+  const body = rows.map(r => {
+    const ret = _delivRetInfo(r);
+    const ech = r.ymd ? new Date(r.ymd + 'T00:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) : '—';
+    const addr = (r.address || '').trim()
+      ? _pcokEsc(r.address)
+      : `<span class="deliv-recap-noaddr">⚠ Adresse manquante</span>`;
+    return `<tr class="pcok-row" onclick="openDelivDrawer('${r.kind}','${r.id}')">
+        <td class="pcok-td-client"><div class="pcok-client">${_pcokEsc(r.client)}</div><div class="pcok-ref">${_pcokEsc(r.ref)} · ${r.kind === 'reservation' ? 'Réservation' : 'Commande'}</div></td>
+        <td class="pcok-muted">${_pcokEsc(r.contact || '—')}</td>
+        <td class="deliv-recap-addr">${addr}</td>
+        <td class="pcok-muted">${_pcokEsc(r.commercial || '—')}</td>
+        <td class="pcok-td-ech"><div style="font-weight:600">${ech}</div><div class="pcok-ret" style="color:${ret.col};background:${ret.col}1a;margin-top:2px">${ret.txt}</div></td>
+      </tr>`;
+  }).join('');
+  return `<div class="pcok-tablewrap"><table class="pcok-table deliv-recap-table"><thead><tr>
+      <th class="pcok-th">Réf / Client</th>
+      <th class="pcok-th">Contact</th>
+      <th class="pcok-th">Adresse de livraison</th>
+      <th class="pcok-th">Commercial</th>
+      <th class="pcok-th">Échéance</th>
+    </tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+// Impression A4 (portrait) du récapitulatif des adresses, groupé par date
+// d'échéance, avec colonnes vierges (Livreur / Heure / Reçu par / ✓) pour le
+// suivi terrain. Suit exactement le filtre actif de la page.
+function printDelivAddresses() {
+  const rows = _delivAddrRecapRows();
+  if (!rows.length) { showToast('Aucune adresse de livraison à imprimer', 'error'); return; }
+  const shop = (typeof shopConfig !== 'undefined' && shopConfig && shopConfig.name) || 'FOREVER MG';
+  const filterLbl = { ACTIVE: 'En cours', RETARD: 'En retard', AUJ: "Aujourd'hui", SEMAINE: 'Cette semaine', SANS_DATE: 'Sans date', TERMINE: 'Livrées', TOUS: 'Toutes' }[_delivState.filter] || '';
+  const late = rows.filter(r => r.status === 'pending' && r.days != null && r.days < 0).length;
+
+  const groups = {}; const order = [];
+  rows.forEach(r => { const k = r.ymd || '~'; if (!groups[k]) { groups[k] = { ymd: r.ymd, rows: [] }; order.push(k); } groups[k].rows.push(r); });
+  order.sort((a, b) => { const ga = groups[a].ymd, gb = groups[b].ymd; if (!ga) return 1; if (!gb) return -1; return ga < gb ? -1 : ga > gb ? 1 : 0; });
+
+  let seq = 0;
+  const body = order.map(k => {
+    const g = groups[k];
+    const meta = _delivDateLabel(g.ymd);
+    const rws = g.rows.map(r => {
+      seq++;
+      const ret = _delivRetInfo(r);
+      const lateCls = (r.status === 'pending' && r.days != null && r.days < 0) ? ' class="late b"' : (r.status === 'pending' && (r.days === 0 || r.days === 1)) ? ' class="soon b"' : '';
+      const addr = (r.address || '').trim() || '⚠ Adresse manquante';
+      return `<tr>
+          <td class="c b">${seq}</td>
+          <td>${_pcokEsc(r.client)}<div class="ref">${_pcokEsc(r.ref)} · ${r.kind === 'reservation' ? 'Réservation' : 'Commande'}</div></td>
+          <td>${_pcokEsc(r.contact || '')}</td>
+          <td class="addr">${_pcokEsc(addr)}</td>
+          <td>${_pcokEsc(r.commercial || '')}</td>
+          <td${lateCls}>${ret.txt}</td>
+          <td></td><td></td><td></td><td class="c"></td>
+        </tr>`;
+    }).join('');
+    return `<tr class="grp"><td colspan="10">${meta.label}${meta.tag ? ` — ${meta.tag}` : ''} · ${g.rows.length} livraison(s)</td></tr>${rws}`;
+  }).join('');
+
+  const w = window.open('', '_blank', 'width=1000,height=1200');
+  if (!w) { alert("Impression bloquée : autorisez les fenêtres pop-up pour ce site, puis réessayez."); return; }
+  setTimeout(() => {
+    w.document.write(`<html><head><meta charset="utf-8"><title>Récapitulatif des adresses de livraison</title><style>
+      @page{size:A4 portrait;margin:9mm}
+      *{box-sizing:border-box}
+      body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;font-size:10px}
+      h1{font-size:15px;margin:0}
+      .sub{color:#555;font-size:10px;margin:2px 0 8px}
+      table{width:100%;border-collapse:collapse;table-layout:fixed}
+      th,td{border:1px solid #555;padding:3px 4px;vertical-align:top;word-wrap:break-word}
+      th{background:#e9e9e9;font-size:8.5px;text-transform:uppercase;text-align:center}
+      td{height:34px}
+      .addr{font-weight:bold}
+      .c{text-align:center}.b{font-weight:bold}
+      .ref{font-size:8px;color:#777;margin-top:1px}
+      .grp td{background:#1a4a3a;color:#fff;font-weight:bold;font-size:10.5px;height:auto;text-transform:none}
+      .late{color:#c00}.soon{color:#c2410c}
+      @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+    </style></head><body onload="window.print()">
+      <h1>${_pcokEsc(shop)} — RÉCAPITULATIF DES ADRESSES DE LIVRAISON</h1>
+      <div class="sub">${filterLbl} · ${rows.length} livraison(s) à domicile${late ? ` · ${late} en retard` : ''} · édité le ${new Date().toLocaleDateString('fr-FR')} ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</div>
+      <table>
+        <colgroup><col style="width:4%"><col style="width:19%"><col style="width:12%"><col style="width:24%"><col style="width:11%"><col style="width:7%"><col style="width:9%"><col style="width:6%"><col style="width:9%"><col style="width:4%"></colgroup>
+        <thead><tr>
+          <th>N°</th><th>Client / Réf</th><th>Contact</th><th>Adresse de livraison</th><th>Commercial</th><th>Échéance</th>
+          <th>Livreur</th><th>Heure</th><th>Reçu par</th><th>✓</th>
+        </tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </body></html>`);
+    w.document.close();
+  }, 200);
 }
 
 function _delivToolbar(cnt) {
@@ -13833,6 +13981,7 @@ function _delivToolbar(cnt) {
       <select class="select-input" onchange="setDelivSort(this.value)" title="Trier">${sortOpts}</select>
       <button class="pcok-iconbtn" title="Sens du tri" onclick="toggleDelivSortDir()">${dirIcon}</button>
       <button class="pcok-iconbtn pcok-density" title="Vue compacte / détaillée" onclick="toggleDelivDensity()">${_delivState.density === 'compact' ? 'Détaillé' : 'Compact'}</button>
+      <button class="pcok-iconbtn${_delivRecapOpen ? ' pcok-chip--active' : ''}" title="Récapitulatif des adresses de livraison" onclick="toggleDelivRecap()">Récap adresses</button>
       <button class="pcok-iconbtn" title="Imprimer le planning de livraison" onclick="printLivraisons()">Imprimer</button>
     </div>
   </div>`;

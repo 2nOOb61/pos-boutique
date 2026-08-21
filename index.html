@@ -26,7 +26,7 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20260821-nobrief">
+<link rel="stylesheet" href="./style.css?v=20260821-recapadr">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
@@ -740,6 +740,20 @@
 .pcok--attr { padding-bottom:4px; }
 .pcok-empty { display:flex; flex-direction:column; align-items:center; gap:10px; padding:56px 0; color:var(--color-text-secondary); }
 .pcok-empty p { font-size:13px; font-weight:500; margin:0; }
+/* Récapitulatif des adresses de livraison (panneau repliable) */
+.deliv-recap { border:1px solid var(--color-border,#e5e3df); border-radius:12px; background:var(--color-surface,#fff); margin-bottom:12px; overflow:hidden; }
+.deliv-recap-head { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:11px 14px; cursor:pointer; user-select:none; }
+.deliv-recap-head:hover { background:rgba(26,74,58,.03); }
+.deliv-recap-title { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:700; color:var(--color-text,#1c1917); }
+.deliv-recap-title svg { color:#1a4a3a; flex:none; }
+.deliv-recap-n { font-size:11px; font-weight:800; color:#1a4a3a; background:#dcfce7; padding:1px 8px; border-radius:20px; }
+.deliv-recap-warn { font-size:10px; font-weight:800; color:#c2410c; background:#fff0e6; border:1px solid #fed7aa; padding:1px 8px; border-radius:20px; }
+.deliv-recap-caret { color:var(--color-text-secondary); transition:transform .18s ease; flex:none; }
+.deliv-recap-caret.open { transform:rotate(180deg); }
+.deliv-recap-body { padding:0 12px 12px; }
+.deliv-recap-actions { display:flex; justify-content:flex-end; margin-bottom:8px; }
+.deliv-recap-table td.deliv-recap-addr { white-space:normal; font-weight:600; color:var(--color-text,#1c1917); max-width:none; }
+.deliv-recap-noaddr { color:#dc2626; font-weight:700; }
 /* Blocages — cartes de synthèse + colonnes cause/action */
 .bloc-cards { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:14px; }
 .bloc-card { background:var(--color-surface,#fff); border:1px solid var(--color-border,#e5e3df); border-radius:12px; padding:12px 14px; }
@@ -3413,7 +3427,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260821-nobrief"></script>
+<script src="./app.js?v=20260821-recapadr"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
