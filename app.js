@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '156 · 2026-08-21';
+const APP_VERSION = '157 · 2026-08-21';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -6513,59 +6513,6 @@ function _cmdTogglePole(id, key){
   }
 }
 
-// ── Briefing « autres commandes du même client » ───────────────────────────
-// Regroupe les commandes par client : contact téléphone (chiffres) si dispo,
-// sinon nom normalisé. Dès qu'un client a PLUS D'UNE commande, la fiche affiche
-// automatiquement un récap des AUTRES commandes (réf, échéance, statut, reste
-// dû) pour coordonner l'atelier et éviter les livraisons/paiements oubliés.
-function _cmdClientKey(c){
-  const tel = String((c && c.clientContact) || '').replace(/\D/g,'');
-  if (tel.length >= 6) return 'tel:' + tel;
-  const nom = String((c && c.clientName) || '').trim().toLowerCase().replace(/\s+/g,' ');
-  return nom ? 'nom:' + nom : '';
-}
-function _cmdSiblings(c){
-  const key = _cmdClientKey(c);
-  if (!key) return [];
-  return (Array.isArray(commandes) ? commandes : [])
-    .filter(x => String(x.id) !== String(c.id) && _cmdClientKey(x) === key);
-}
-function _cmdBriefingHtml(c){
-  const sibs = _cmdSiblings(c);
-  if (!sibs.length) return '';
-  const stMap = { pending:['#d97706','En cours'], completed:['#16a34a','Livrée'], cancelled:['#78716c','Annulée'] };
-  const rank = s => s==='pending'?0 : s==='completed'?1 : 2; // en cours d'abord
-  const rows = sibs.slice().sort((a,b)=>{
-    const dr = rank(a.status)-rank(b.status); if(dr) return dr;
-    return (parseSaleDate(b.date)||0) - (parseSaleDate(a.date)||0);
-  }).map(x => {
-    const [col,lbl] = stMap[x.status] || ['#78716c','—'];
-    const reste = _cmdReste(x);
-    const liv = _dispDate(x.dateLivraison);
-    return `<div class="cmd-brief-row" onclick="openCmdDrawer('${x.id}')">
-      <div class="cmd-brief-main">
-        <span class="cmd-brief-ref">#${_pcokEsc(_factureNum(x))}</span>
-        <span class="cmd-brief-badge" style="color:${col}">● ${lbl}</span>
-      </div>
-      <div class="cmd-brief-sub">
-        ${liv?`<span>Livr. ${_pcokEsc(liv)}</span>`:''}
-        <span>${(x.items||[]).length} art.</span>
-        <span class="cmd-brief-reste" style="color:${reste>0?'#dc2626':'#16a34a'}">${reste>0?'Reste '+fmt(reste):'Soldé'}</span>
-      </div>
-    </div>`;
-  }).join('');
-  const nbEnCours  = sibs.filter(x=>x.status==='pending').length;
-  const totalReste = sibs.reduce((s,x)=>s+_cmdReste(x),0);
-  return `<div class="cmd-brief">
-    <div class="cmd-brief-head">
-      <span class="cmd-brief-title">⚠️ Client à commandes multiples</span>
-      <span class="cmd-brief-count">${sibs.length} autre${sibs.length>1?'s':''}${nbEnCours?` · ${nbEnCours} en cours`:''}</span>
-    </div>
-    <div class="cmd-brief-list">${rows}</div>
-    ${totalReste>0?`<div class="cmd-brief-foot">Reste dû cumulé (autres commandes) : <b style="color:#dc2626">${fmt(totalReste)}</b></div>`:''}
-  </div>`;
-}
-
 function _cmdDrawerContent(c) {
   const r = _buildCommandeRows().find(x => String(x.id) === String(c.id)) || {};
   const _pmod = _pendingModFor(c.id); // demande en attente → bandeau + boutons valider/refuser (admin)
@@ -6619,7 +6566,6 @@ function _cmdDrawerContent(c) {
       <span style="font-size:11px;color:var(--color-text-muted);margin-left:auto">${dCmd}</span>
     </div>
     ${livTxt?`<div class="pcok-drawer-ech" style="color:${dCol};margin-bottom:12px">Livraison : ${livTxt}${dtxt?' · '+dtxt:''}</div>`:''}
-    ${_cmdBriefingHtml(c)}
     ${_pmod ? _buildModBanner(c, _pmod) : ''}
     <div class="pcok-pay">
       <div class="pcok-pay-c"><div class="pcok-pay-l">Total</div><div class="pcok-pay-v">${fmt(c.total)}</div></div>

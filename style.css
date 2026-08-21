@@ -1377,21 +1377,6 @@ tr:hover td {
 .cmd-pole-chip.on { background:color-mix(in srgb, var(--pc) 12%, var(--surface)); font-weight:700; }
 .cmd-pole-dot { width:9px; height:9px; border-radius:50%; flex:none; }
 
-/* Briefing « autres commandes du même client » (tiroir détail commande) */
-.cmd-brief { border:1px solid rgba(217,119,6,.35); background:rgba(217,119,6,.07); border-radius:11px; padding:11px 13px; margin-bottom:12px; }
-.cmd-brief-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:9px; }
-.cmd-brief-title { font-size:12.5px; font-weight:700; color:#b45309; }
-.cmd-brief-count { font-size:11px; color:var(--muted); white-space:nowrap; }
-.cmd-brief-list { display:flex; flex-direction:column; gap:6px; }
-.cmd-brief-row { cursor:pointer; border:1px solid var(--border); background:var(--surface); border-radius:8px; padding:7px 10px; transition:background .12s, border-color .12s; }
-.cmd-brief-row:hover { background:rgba(217,119,6,.09); border-color:rgba(217,119,6,.4); }
-.cmd-brief-main { display:flex; align-items:center; justify-content:space-between; gap:8px; }
-.cmd-brief-ref { font-size:12.5px; font-weight:600; color:var(--text); }
-.cmd-brief-badge { font-size:11px; font-weight:600; white-space:nowrap; }
-.cmd-brief-sub { display:flex; flex-wrap:wrap; gap:3px 10px; margin-top:3px; font-size:11px; color:var(--muted); }
-.cmd-brief-reste { font-weight:600; }
-.cmd-brief-foot { margin-top:9px; font-size:11.5px; color:var(--text); }
-
 /* Personnalisation PAR article (visible atelier) — encart distinct sous l'article */
 .cmd-item-perso {
   margin:2px 0 2px 8px; padding:4px 9px;
