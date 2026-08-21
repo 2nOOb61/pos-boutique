@@ -26,7 +26,7 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20260821-recapadr">
+<link rel="stylesheet" href="./style.css?v=20260821-tournee">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
@@ -754,6 +754,26 @@
 .deliv-recap-actions { display:flex; justify-content:flex-end; margin-bottom:8px; }
 .deliv-recap-table td.deliv-recap-addr { white-space:normal; font-weight:600; color:var(--color-text,#1c1917); max-width:none; }
 .deliv-recap-noaddr { color:#dc2626; font-weight:700; }
+/* Itinéraire (tournée Google Maps) + zones */
+.deliv-route-bar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px; }
+.deliv-route-actions { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.deliv-route-tools { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.deliv-route-lbl { font-size:12px; color:var(--color-text-secondary,#78716c); }
+.deliv-route-btn { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; font-weight:700; color:#fff; background:#1a73e8; border:1px solid #1a73e8; border-radius:8px; padding:7px 13px; cursor:pointer; }
+.deliv-route-btn:hover { background:#1666d0; }
+.deliv-zone-chips { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+.deliv-zone-chip { display:inline-flex; align-items:center; gap:6px; font-size:11.5px; font-weight:600; color:var(--color-text,#1c1917); background:var(--color-surface,#fff); border:1px solid var(--color-border,#e5e3df); border-radius:20px; padding:3px 10px; cursor:pointer; }
+.deliv-zone-chip span { font-size:10px; font-weight:800; color:#1a4a3a; background:#dcfce7; padding:0 6px; border-radius:20px; }
+.deliv-zone-chip--active { background:#1a4a3a; color:#fff; border-color:#1a4a3a; }
+.deliv-zone-chip--active span { background:rgba(255,255,255,.22); color:#fff; }
+.deliv-zone-sel { font-size:11.5px; max-width:140px; padding:3px 4px; border:1px solid var(--color-border,#e5e3df); border-radius:6px; background:var(--color-surface,#fff); color:var(--color-text,#1c1917); }
+.deliv-seq-td { white-space:nowrap; }
+.deliv-seq { display:inline-block; min-width:20px; text-align:center; font-weight:800; color:#1a4a3a; }
+.deliv-seq-btns { display:inline-flex; flex-direction:column; gap:1px; margin-left:4px; vertical-align:middle; }
+.deliv-seq-btns button { font-size:9px; line-height:1; padding:2px 4px; border:1px solid var(--color-border,#e5e3df); background:var(--color-surface,#fff); border-radius:4px; cursor:pointer; color:var(--color-text-secondary,#78716c); }
+.deliv-seq-btns button:hover:not([disabled]) { background:#f0efec; color:#1a4a3a; }
+.deliv-seq-btns button[disabled] { opacity:.3; cursor:default; }
+.deliv-zone-td { white-space:nowrap; }
 /* Blocages — cartes de synthèse + colonnes cause/action */
 .bloc-cards { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:14px; }
 .bloc-card { background:var(--color-surface,#fff); border:1px solid var(--color-border,#e5e3df); border-radius:12px; padding:12px 14px; }
@@ -3427,7 +3447,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260821-recapadr"></script>
+<script src="./app.js?v=20260821-tournee"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

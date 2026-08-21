@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '158 · 2026-08-21';
+const APP_VERSION = '159 · 2026-08-21';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -13229,6 +13229,149 @@ let _delivState = { filter: 'ACTIVE', mode: 'all', groupBy: 'client', sort: 'ech
 const _DELIV_PAGE = 80;
 let _delivLimit = _DELIV_PAGE;
 let _delivRecapOpen = false;   // panneau « Récapitulatif des adresses de livraison » (replié par défaut)
+let _delivZoneFilter = '';     // filtre par zone dans le récap ('' = toutes)
+
+// Zones / quartiers d'Antananarivo pour regrouper les livraisons et planifier la
+// tournée. `aliases` = mots-clés (minuscule sans accent) cherchés dans le texte
+// de l'adresse pour deviner la zone automatiquement. Ordre = ordre de tournée par
+// défaut (grossièrement centre → périphérie). Éditable ici au besoin.
+const TANA_ZONES = [
+  { key:'analakely',        label:'Analakely',            aliases:['analakely'] },
+  { key:'antaninarenina',   label:'Antaninarenina',       aliases:['antaninarenina'] },
+  { key:'isoraka',          label:'Isoraka',              aliases:['isoraka'] },
+  { key:'tsaralalana',      label:'Tsaralalàna',          aliases:['tsaralalana'] },
+  { key:'behoririka',       label:'Behoririka',           aliases:['behoririka'] },
+  { key:'antanimena',       label:'Antanimena',           aliases:['antanimena'] },
+  { key:'ampefiloha',       label:'Ampefiloha',           aliases:['ampefiloha'] },
+  { key:'anosy',            label:'Anosy',                aliases:['anosy'] },
+  { key:'mahamasina',       label:'Mahamasina',           aliases:['mahamasina'] },
+  { key:'isotry',           label:'Isotry',               aliases:['isotry'] },
+  { key:'andravoahangy',    label:'Andravoahangy',        aliases:['andravoahangy'] },
+  { key:'ankadifotsy',      label:'Ankadifotsy',          aliases:['ankadifotsy'] },
+  { key:'ankadivato',       label:'Ankadivato',           aliases:['ankadivato'] },
+  { key:'faravohitra',      label:'Faravohitra',          aliases:['faravohitra'] },
+  { key:'ambohijatovo',     label:'Ambohijatovo',         aliases:['ambohijatovo'] },
+  { key:'ambatonakanga',    label:'Ambatonakanga',        aliases:['ambatonakanga'] },
+  { key:'ambanidia',        label:'Ambanidia',            aliases:['ambanidia'] },
+  { key:'ampandrana',       label:'Ampandrana',           aliases:['ampandrana'] },
+  { key:'ankorondrano',     label:'Ankorondrano',         aliases:['ankorondrano'] },
+  { key:'andraharo',        label:'Andraharo',            aliases:['andraharo'] },
+  { key:'ambodivona',       label:'Ambodivona',           aliases:['ambodivona'] },
+  { key:'ankazomanga',      label:'Ankazomanga',          aliases:['ankazomanga'] },
+  { key:'andranomena',      label:'Andranomena',          aliases:['andranomena'] },
+  { key:'ivandry',          label:'Ivandry',              aliases:['ivandry'] },
+  { key:'alarobia',         label:'Alarobia',             aliases:['alarobia'] },
+  { key:'ambatobe',         label:'Ambatobe',             aliases:['ambatobe'] },
+  { key:'nanisana',         label:'Nanisana',             aliases:['nanisana'] },
+  { key:'amboditsiry',      label:'Amboditsiry',          aliases:['amboditsiry'] },
+  { key:'ambohipo',         label:'Ambohipo',             aliases:['ambohipo'] },
+  { key:'ankatso',          label:'Ankatso',              aliases:['ankatso'] },
+  { key:'ambohimanarina',   label:'Ambohimanarina',       aliases:['ambohimanarina'] },
+  { key:'ambatomaro',       label:'Ambatomaro',           aliases:['ambatomaro'] },
+  { key:'sabotsy',          label:'Sabotsy Namehana',     aliases:['sabotsy namehana','sabotsy'] },
+  { key:'ambohimangakely',  label:'Ambohimangakely',      aliases:['ambohimangakely'] },
+  { key:'67ha',             label:'67 Ha',                aliases:['67 ha','67ha'] },
+  { key:'andavamamba',      label:'Andavamamba',          aliases:['andavamamba'] },
+  { key:'anosibe',          label:'Anosibe',              aliases:['anosibe'] },
+  { key:'ampitatafika',     label:'Ampitatafika',         aliases:['ampitatafika'] },
+  { key:'itaosy',           label:'Itaosy',               aliases:['itaosy'] },
+  { key:'anosizato',        label:'Anosizato',            aliases:['anosizato'] },
+  { key:'tanjombato',       label:'Tanjombato',           aliases:['tanjombato'] },
+  { key:'ankadimbahoaka',   label:'Ankadimbahoaka',       aliases:['ankadimbahoaka'] },
+  { key:'andoharanofotsy',  label:'Andoharanofotsy',      aliases:['andoharanofotsy'] },
+  { key:'ambohibao',        label:'Ambohibao',            aliases:['ambohibao'] },
+  { key:'talatamaty',       label:'Talatamaty',           aliases:['talatamaty'] },
+  { key:'ivato',            label:'Ivato',                aliases:['ivato'] },
+];
+
+function _delivNorm(s){ return String(s == null ? '' : s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+
+// Corrections manuelles de zone (localStorage, par appareil) — clé = "kind:id".
+function _delivZoneOverrides(){ try { return JSON.parse(localStorage.getItem('pos-deliv-zone') || '{}') || {}; } catch(e){ return {}; } }
+function _delivSetZoneOverride(kind, id, zoneKey){
+  const m = _delivZoneOverrides(); const k = kind + ':' + id;
+  if (!zoneKey) delete m[k]; else m[k] = zoneKey;
+  try { localStorage.setItem('pos-deliv-zone', JSON.stringify(m)); } catch(e){}
+}
+// Zone effective d'une livraison : correction manuelle → auto-détection par
+// l'adresse → 'autre' (non classé).
+function _delivZoneOf(r){
+  const ov = _delivZoneOverrides()[r.kind + ':' + r.id];
+  if (ov) return ov;
+  const a = _delivNorm(r.address);
+  if (a) for (const z of TANA_ZONES) { if (z.aliases.some(al => a.includes(al))) return z.key; }
+  return 'autre';
+}
+function _delivZoneLabel(key){ const z = TANA_ZONES.find(z => z.key === key); return z ? z.label : 'Non classé'; }
+function _delivZoneIndex(key){ const i = TANA_ZONES.findIndex(z => z.key === key); return i < 0 ? 9999 : i; }
+
+// Ordre manuel de la tournée (localStorage) — liste de clés "kind:id".
+function _delivTourOrder(){ try { return JSON.parse(localStorage.getItem('pos-deliv-tour-order') || '[]') || []; } catch(e){ return []; } }
+function _delivSaveTourOrder(keys){ try { localStorage.setItem('pos-deliv-tour-order', JSON.stringify(keys)); } catch(e){} }
+
+// Arrêts de la tournée = lignes du récap (filtrées par zone si besoin), ordonnées
+// par défaut zone→échéance, puis réordonnées selon l'ordre manuel enregistré.
+function _delivTourStops(){
+  let rows = _delivAddrRecapRows();
+  if (_delivZoneFilter) rows = rows.filter(r => _delivZoneOf(r) === _delivZoneFilter);
+  rows.sort((a, b) => {
+    const za = _delivZoneIndex(_delivZoneOf(a)), zb = _delivZoneIndex(_delivZoneOf(b));
+    if (za !== zb) return za - zb;
+    return (a.days == null ? 1e9 : a.days) - (b.days == null ? 1e9 : b.days);
+  });
+  const saved = _delivTourOrder();
+  if (!saved.length) return rows;
+  const rank = {}; saved.forEach((k, i) => { rank[k] = i; });
+  return rows.sort((a, b) => {
+    const A = rank[a.kind + ':' + a.id], B = rank[b.kind + ':' + b.id];
+    return (A == null ? 1e9 : A) - (B == null ? 1e9 : B);   // tri stable : inconnus gardent l'ordre par défaut
+  });
+}
+
+function _delivTourMove(kind, id, dir){
+  const keys = _delivTourStops().map(s => s.kind + ':' + s.id);
+  const k = kind + ':' + id;
+  const idx = keys.indexOf(k), j = dir < 0 ? idx - 1 : idx + 1;
+  if (idx < 0 || j < 0 || j >= keys.length) return;
+  keys.splice(j, 0, keys.splice(idx, 1)[0]);
+  _delivSaveTourOrder(keys);
+  _delivRenderAddrRecap();
+}
+function _delivTourReset(){ _delivSaveTourOrder([]); _delivRenderAddrRecap(); }
+function _delivSetRowZone(kind, id, v){ _delivSetZoneOverride(kind, id, v === '__auto' ? '' : v); _delivRenderAddrRecap(); }
+function _delivSetZoneFilter(z){ _delivZoneFilter = (_delivZoneFilter === z ? '' : z); _delivRenderAddrRecap(); }
+
+// Adresse encodée pour Google Maps (ajoute « Antananarivo, Madagascar » si absent,
+// pour aider le géocodage des adresses par repère).
+function _delivMapsAddr(r){
+  let a = (r.address || '').trim();
+  if (!a) a = (r.client || '') + ' ' + _delivZoneLabel(_delivZoneOf(r));
+  const n = _delivNorm(a);
+  if (!/antananarivo|tananarive|madagascar|\btana\b/.test(n)) a += ', Antananarivo, Madagascar';
+  return encodeURIComponent(a);
+}
+// Découpe la tournée en itinéraires Google Maps (URL universelle : origine boutique
+// + ≤9 arrêts par lien ; au-delà, plusieurs tronçons).
+function _delivRouteChunks(){
+  const stops = _delivTourStops();
+  const origin = ((typeof shopConfig !== 'undefined' && shopConfig && shopConfig.address) || '').trim();
+  const originEnc = origin ? encodeURIComponent(origin) : '';
+  const MAX = 9, urls = [];
+  for (let i = 0; i < stops.length; i += MAX) {
+    const batch = stops.slice(i, i + MAX);
+    const pts = batch.map(_delivMapsAddr);
+    const dest = pts[pts.length - 1];
+    const wps = pts.slice(0, -1);
+    let u = 'https://www.google.com/maps/dir/?api=1';
+    if (originEnc) u += '&origin=' + originEnc;
+    u += '&destination=' + dest;
+    if (wps.length) u += '&waypoints=' + wps.join('%7C');
+    u += '&travelmode=driving';
+    urls.push({ url: u, from: i + 1, to: i + batch.length });
+  }
+  return urls;
+}
+function openDelivRoute(url){ if (url) window.open(url, '_blank'); }
 
 const _DELIV_MONEY_ROLES = ['admin','caissier','commerciale','comptable','gestionnaire'];
 
@@ -13841,104 +13984,153 @@ function _delivRenderAddrRecap() {
       <svg class="deliv-recap-caret${_delivRecapOpen ? ' open' : ''}" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
     </div>`;
   if (!_delivRecapOpen) { host.innerHTML = `<div class="deliv-recap">${head}</div>`; return; }
+  const stops = _delivTourStops();
   host.innerHTML = `<div class="deliv-recap deliv-recap--open">
       ${head}
       <div class="deliv-recap-body">
-        <div class="deliv-recap-actions">
-          <button class="pcok-iconbtn" onclick="event.stopPropagation();printDelivAddresses()">Imprimer le récap</button>
-        </div>
-        ${_delivAddrRecapTable(rows)}
+        ${_delivRouteBar(stops)}
+        ${_delivZoneChips(rows)}
+        ${_delivAddrRecapTable(stops)}
       </div>
     </div>`;
 }
 
-function _delivAddrRecapTable(rows) {
-  if (!rows.length) return `<div class="pcok-empty" style="padding:22px 12px"><p>Aucune livraison à domicile dans ce filtre</p></div>`;
-  const body = rows.map(r => {
+// Barre itinéraire : ouverture de la tournée dans Google Maps (un ou plusieurs
+// tronçons de ≤9 arrêts) + impression + réinitialisation de l'ordre manuel.
+function _delivRouteBar(stops) {
+  const chunks = _delivRouteChunks();
+  const hasOrder = _delivTourOrder().length > 0;
+  let routeBtns;
+  if (!stops.length) {
+    routeBtns = `<button class="pcok-iconbtn" disabled>Itinéraire Google Maps</button>`;
+  } else if (chunks.length === 1) {
+    routeBtns = `<button class="deliv-route-btn" onclick="event.stopPropagation();openDelivRoute('${chunks[0].url}')">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
+        Itinéraire Google Maps</button>`;
+  } else {
+    routeBtns = `<span class="deliv-route-lbl">Itinéraire (${chunks.length} tronçons) :</span>` +
+      chunks.map((c, i) => `<button class="deliv-route-btn" onclick="event.stopPropagation();openDelivRoute('${c.url}')">Tronçon ${i + 1} · arrêts ${c.from}–${c.to}</button>`).join('');
+  }
+  return `<div class="deliv-route-bar">
+      <div class="deliv-route-actions">${routeBtns}</div>
+      <div class="deliv-route-tools">
+        ${hasOrder ? `<button class="pcok-iconbtn" title="Rétablir l'ordre automatique (zone puis échéance)" onclick="event.stopPropagation();_delivTourReset()">↺ Ordre auto</button>` : ''}
+        <button class="pcok-iconbtn" onclick="event.stopPropagation();printDelivAddresses()">Imprimer le récap</button>
+      </div>
+    </div>`;
+}
+
+// Puces de zones (répartition + filtre). Compte sur l'ensemble du récap.
+function _delivZoneChips(rows) {
+  const counts = {};
+  rows.forEach(r => { const z = _delivZoneOf(r); counts[z] = (counts[z] || 0) + 1; });
+  const keys = Object.keys(counts).sort((a, b) => _delivZoneIndex(a) - _delivZoneIndex(b));
+  if (keys.length <= 1 && !_delivZoneFilter) return '';
+  const all = `<button class="deliv-zone-chip${_delivZoneFilter === '' ? ' deliv-zone-chip--active' : ''}" onclick="event.stopPropagation();_delivSetZoneFilter('')">Toutes<span>${rows.length}</span></button>`;
+  const chips = keys.map(z => `<button class="deliv-zone-chip${_delivZoneFilter === z ? ' deliv-zone-chip--active' : ''}" onclick="event.stopPropagation();_delivSetZoneFilter('${z}')">${_pcokEsc(_delivZoneLabel(z))}<span>${counts[z]}</span></button>`).join('');
+  return `<div class="deliv-zone-chips">${all}${chips}</div>`;
+}
+
+function _delivZoneSelect(r) {
+  const cur = _delivZoneOf(r);
+  const opts = TANA_ZONES.map(z => `<option value="${z.key}"${z.key === cur ? ' selected' : ''}>${_pcokEsc(z.label)}</option>`).join('');
+  const other = `<option value="autre"${cur === 'autre' ? ' selected' : ''}>Non classé</option>`;
+  const auto = `<option value="__auto">↺ Auto-détection</option>`;
+  return `<select class="deliv-zone-sel" onclick="event.stopPropagation()" onchange="_delivSetRowZone('${r.kind}','${r.id}',this.value)">${opts}${other}${auto}</select>`;
+}
+
+function _delivAddrRecapTable(stops) {
+  if (!stops.length) return `<div class="pcok-empty" style="padding:22px 12px"><p>Aucune livraison à domicile dans ce filtre</p></div>`;
+  const n = stops.length;
+  const body = stops.map((r, i) => {
     const ret = _delivRetInfo(r);
     const ech = r.ymd ? new Date(r.ymd + 'T00:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) : '—';
     const addr = (r.address || '').trim()
       ? _pcokEsc(r.address)
       : `<span class="deliv-recap-noaddr">⚠ Adresse manquante</span>`;
+    const upDis = i === 0 ? ' disabled' : '', dnDis = i === n - 1 ? ' disabled' : '';
+    const seqCell = `<div class="deliv-seq">${i + 1}</div>
+        <div class="deliv-seq-btns">
+          <button title="Monter"${upDis} onclick="event.stopPropagation();_delivTourMove('${r.kind}','${r.id}',-1)">▲</button>
+          <button title="Descendre"${dnDis} onclick="event.stopPropagation();_delivTourMove('${r.kind}','${r.id}',1)">▼</button>
+        </div>`;
     return `<tr class="pcok-row" onclick="openDelivDrawer('${r.kind}','${r.id}')">
+        <td class="deliv-seq-td">${seqCell}</td>
         <td class="pcok-td-client"><div class="pcok-client">${_pcokEsc(r.client)}</div><div class="pcok-ref">${_pcokEsc(r.ref)} · ${r.kind === 'reservation' ? 'Réservation' : 'Commande'}</div></td>
-        <td class="pcok-muted">${_pcokEsc(r.contact || '—')}</td>
+        <td class="deliv-zone-td">${_delivZoneSelect(r)}</td>
         <td class="deliv-recap-addr">${addr}</td>
-        <td class="pcok-muted">${_pcokEsc(r.commercial || '—')}</td>
+        <td class="pcok-muted">${_pcokEsc(r.contact || '—')}</td>
         <td class="pcok-td-ech"><div style="font-weight:600">${ech}</div><div class="pcok-ret" style="color:${ret.col};background:${ret.col}1a;margin-top:2px">${ret.txt}</div></td>
       </tr>`;
   }).join('');
   return `<div class="pcok-tablewrap"><table class="pcok-table deliv-recap-table"><thead><tr>
+      <th class="pcok-th" title="Ordre de la tournée">Ordre</th>
       <th class="pcok-th">Réf / Client</th>
-      <th class="pcok-th">Contact</th>
+      <th class="pcok-th">Zone</th>
       <th class="pcok-th">Adresse de livraison</th>
-      <th class="pcok-th">Commercial</th>
+      <th class="pcok-th">Contact</th>
       <th class="pcok-th">Échéance</th>
     </tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
-// Impression A4 (portrait) du récapitulatif des adresses, groupé par date
-// d'échéance, avec colonnes vierges (Livreur / Heure / Reçu par / ✓) pour le
-// suivi terrain. Suit exactement le filtre actif de la page.
+// Impression A4 (portrait) de la feuille de tournée : arrêts dans l'ordre de la
+// tournée (zone puis échéance, ou ordre manuel), colonne Zone, colonnes vierges
+// (Livreur / Heure / Reçu par / ✓) pour le suivi terrain. Suit le filtre actif +
+// le filtre de zone éventuel.
 function printDelivAddresses() {
-  const rows = _delivAddrRecapRows();
-  if (!rows.length) { showToast('Aucune adresse de livraison à imprimer', 'error'); return; }
+  const stops = _delivTourStops();
+  if (!stops.length) { showToast('Aucune adresse de livraison à imprimer', 'error'); return; }
   const shop = (typeof shopConfig !== 'undefined' && shopConfig && shopConfig.name) || 'FOREVER MG';
+  const origin = ((typeof shopConfig !== 'undefined' && shopConfig && shopConfig.address) || '').trim();
   const filterLbl = { ACTIVE: 'En cours', RETARD: 'En retard', AUJ: "Aujourd'hui", SEMAINE: 'Cette semaine', SANS_DATE: 'Sans date', TERMINE: 'Livrées', TOUS: 'Toutes' }[_delivState.filter] || '';
-  const late = rows.filter(r => r.status === 'pending' && r.days != null && r.days < 0).length;
-
-  const groups = {}; const order = [];
-  rows.forEach(r => { const k = r.ymd || '~'; if (!groups[k]) { groups[k] = { ymd: r.ymd, rows: [] }; order.push(k); } groups[k].rows.push(r); });
-  order.sort((a, b) => { const ga = groups[a].ymd, gb = groups[b].ymd; if (!ga) return 1; if (!gb) return -1; return ga < gb ? -1 : ga > gb ? 1 : 0; });
+  const zoneLbl = _delivZoneFilter ? ' · zone ' + _delivZoneLabel(_delivZoneFilter) : '';
+  const late = stops.filter(r => r.status === 'pending' && r.days != null && r.days < 0).length;
 
   let seq = 0;
-  const body = order.map(k => {
-    const g = groups[k];
-    const meta = _delivDateLabel(g.ymd);
-    const rws = g.rows.map(r => {
-      seq++;
-      const ret = _delivRetInfo(r);
-      const lateCls = (r.status === 'pending' && r.days != null && r.days < 0) ? ' class="late b"' : (r.status === 'pending' && (r.days === 0 || r.days === 1)) ? ' class="soon b"' : '';
-      const addr = (r.address || '').trim() || '⚠ Adresse manquante';
-      return `<tr>
-          <td class="c b">${seq}</td>
-          <td>${_pcokEsc(r.client)}<div class="ref">${_pcokEsc(r.ref)} · ${r.kind === 'reservation' ? 'Réservation' : 'Commande'}</div></td>
-          <td>${_pcokEsc(r.contact || '')}</td>
-          <td class="addr">${_pcokEsc(addr)}</td>
-          <td>${_pcokEsc(r.commercial || '')}</td>
-          <td${lateCls}>${ret.txt}</td>
-          <td></td><td></td><td></td><td class="c"></td>
-        </tr>`;
-    }).join('');
-    return `<tr class="grp"><td colspan="10">${meta.label}${meta.tag ? ` — ${meta.tag}` : ''} · ${g.rows.length} livraison(s)</td></tr>${rws}`;
+  const body = stops.map(r => {
+    seq++;
+    const ret = _delivRetInfo(r);
+    const ech = r.ymd ? new Date(r.ymd + 'T00:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) : '—';
+    const lateCls = (r.status === 'pending' && r.days != null && r.days < 0) ? ' class="late b"' : (r.status === 'pending' && (r.days === 0 || r.days === 1)) ? ' class="soon b"' : '';
+    const addr = (r.address || '').trim() || '⚠ Adresse manquante';
+    return `<tr>
+        <td class="c b">${seq}</td>
+        <td class="b">${_pcokEsc(_delivZoneLabel(_delivZoneOf(r)))}</td>
+        <td>${_pcokEsc(r.client)}<div class="ref">${_pcokEsc(r.ref)} · ${r.kind === 'reservation' ? 'Réservation' : 'Commande'}</div></td>
+        <td class="addr">${_pcokEsc(addr)}</td>
+        <td>${_pcokEsc(r.contact || '')}</td>
+        <td class="c">${ech}<div${lateCls} style="font-size:8px">${ret.txt}</div></td>
+        <td></td><td></td><td></td><td class="c"></td>
+      </tr>`;
   }).join('');
 
   const w = window.open('', '_blank', 'width=1000,height=1200');
   if (!w) { alert("Impression bloquée : autorisez les fenêtres pop-up pour ce site, puis réessayez."); return; }
   setTimeout(() => {
-    w.document.write(`<html><head><meta charset="utf-8"><title>Récapitulatif des adresses de livraison</title><style>
+    w.document.write(`<html><head><meta charset="utf-8"><title>Feuille de tournée — livraisons</title><style>
       @page{size:A4 portrait;margin:9mm}
       *{box-sizing:border-box}
       body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;font-size:10px}
       h1{font-size:15px;margin:0}
-      .sub{color:#555;font-size:10px;margin:2px 0 8px}
+      .sub{color:#555;font-size:10px;margin:2px 0 4px}
+      .orig{font-size:10px;margin:0 0 8px}
       table{width:100%;border-collapse:collapse;table-layout:fixed}
       th,td{border:1px solid #555;padding:3px 4px;vertical-align:top;word-wrap:break-word}
       th{background:#e9e9e9;font-size:8.5px;text-transform:uppercase;text-align:center}
-      td{height:34px}
+      td{height:36px}
       .addr{font-weight:bold}
       .c{text-align:center}.b{font-weight:bold}
       .ref{font-size:8px;color:#777;margin-top:1px}
-      .grp td{background:#1a4a3a;color:#fff;font-weight:bold;font-size:10.5px;height:auto;text-transform:none}
       .late{color:#c00}.soon{color:#c2410c}
       @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
     </style></head><body onload="window.print()">
-      <h1>${_pcokEsc(shop)} — RÉCAPITULATIF DES ADRESSES DE LIVRAISON</h1>
-      <div class="sub">${filterLbl} · ${rows.length} livraison(s) à domicile${late ? ` · ${late} en retard` : ''} · édité le ${new Date().toLocaleDateString('fr-FR')} ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</div>
+      <h1>${_pcokEsc(shop)} — FEUILLE DE TOURNÉE (livraisons)</h1>
+      <div class="sub">${filterLbl}${zoneLbl} · ${stops.length} arrêt(s)${late ? ` · ${late} en retard` : ''} · édité le ${new Date().toLocaleDateString('fr-FR')} ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</div>
+      ${origin ? `<div class="orig"><b>Départ :</b> ${_pcokEsc(origin)}</div>` : ''}
       <table>
-        <colgroup><col style="width:4%"><col style="width:19%"><col style="width:12%"><col style="width:24%"><col style="width:11%"><col style="width:7%"><col style="width:9%"><col style="width:6%"><col style="width:9%"><col style="width:4%"></colgroup>
+        <colgroup><col style="width:4%"><col style="width:12%"><col style="width:19%"><col style="width:23%"><col style="width:11%"><col style="width:8%"><col style="width:8%"><col style="width:6%"><col style="width:9%"><col style="width:4%"></colgroup>
         <thead><tr>
-          <th>N°</th><th>Client / Réf</th><th>Contact</th><th>Adresse de livraison</th><th>Commercial</th><th>Échéance</th>
+          <th>N°</th><th>Zone</th><th>Client / Réf</th><th>Adresse de livraison</th><th>Contact</th><th>Échéance</th>
           <th>Livreur</th><th>Heure</th><th>Reçu par</th><th>✓</th>
         </tr></thead>
         <tbody>${body}</tbody>
