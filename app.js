@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '155 · 2026-08-21';
+const APP_VERSION = '156 · 2026-08-21';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -5776,9 +5776,18 @@ function renderCmdItemsTable() {
           <td style="padding:7px 4px;text-align:center">
             <button onclick="removeCmdItem(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:17px;padding:2px 4px;line-height:1" title="Supprimer">×</button>
           </td>
+        </tr>
+        <tr class="cmd-perso-row">
+          <td colspan="5" style="padding:0 6px 10px">
+            <input value="${(item.perso||'').replace(/"/g,'&quot;')}" oninput="cmdModalItems[${i}].perso=this.value"
+              placeholder="✎ Personnalisation de CET article (texte à graver, couleur, taille, prénom…)"
+              title="Consigne de personnalisation propre à cet article — visible par l'atelier"
+              style="width:100%;padding:6px 10px;border:1px dashed var(--accent2);border-radius:7px;background:var(--surface);color:var(--text);font-size:12.5px" />
+          </td>
         </tr>`).join('')}
       </tbody>
-    </table>`;
+    </table>
+    <div style="font-size:11px;color:var(--muted);margin-top:6px">✎ Renseignez la personnalisation <b>article par article</b> — chaque consigne s'affichera sous son article pour l'atelier.</div>`;
 }
 
 function removeCmdItem(index) {
@@ -5989,7 +5998,7 @@ function saveCommande() {
     dateLivraison:     dateLiv,
     dateLivraisonProd: dateLivProd,
     dateBAT:           dateBAT,
-    items:            cmdModalItems.map(i => ({ name: i.name.trim(), qty: i.qty, price: i.price, custom: !!i.custom })),
+    items:            cmdModalItems.map(i => ({ name: i.name.trim(), qty: i.qty, price: i.price, custom: !!i.custom, perso: (i.perso||'').trim() })),
     poles:            [...cmdModalPoles],
     notes,
     photos:           [...cmdModalPhotos],
@@ -6566,7 +6575,11 @@ function _cmdDrawerContent(c) {
   const livTxt = r.ymd ? new Date(r.ymd+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'2-digit',month:'long'}) : '';
   const dtxt = r.days==null ? '' : r.days<0 ? `${Math.abs(r.days)}j de retard` : r.days===0 ? "Aujourd'hui" : r.days===1 ? 'Demain' : `${r.days}j`;
   const dCol = r.days!=null && r.days<0 ? '#dc2626' : (r.days===0||r.days===1) ? '#e8834a' : '#16a34a';
-  const itemsHtml = (c.items||[]).map(i => `<div class="pcok-drawer-item"><span>${_pcokEsc(i.name)} × ${i.qty}</span><b>${fmt((Number(i.price)||0)*(Number(i.qty)||1))}</b></div>`).join('') || '<div class="pcok-muted" style="font-size:12px">Aucun article</div>';
+  const itemsHtml = (c.items||[]).map(i => {
+    const perso = String(i.perso||'').trim();
+    return `<div class="pcok-drawer-item"><span>${_pcokEsc(i.name)} × ${i.qty}</span><b>${fmt((Number(i.price)||0)*(Number(i.qty)||1))}</b></div>`
+      + (perso ? `<div class="cmd-item-perso">✎ ${_pcokEsc(perso)}</div>` : '');
+  }).join('') || '<div class="pcok-muted" style="font-size:12px">Aucun article</div>';
   const datesHtml = [
     _dispDate(c.dateLivraison) ? `<div class="pcok-drawer-item"><span>Livraison client</span><b>${_dispDate(c.dateLivraison)}</b></div>` : '',
     _dispDate(c.dateBAT) ? `<div class="pcok-drawer-item"><span style="color:#2563eb">BAT</span><b>${_dispDate(c.dateBAT)}</b></div>` : '',
@@ -7088,7 +7101,7 @@ function _openCmdEditForm(id, mode) {
     return `<label class="modif-field"><span>${f.label}</span><input id="mf_${f.key}" type="${inputType}" value="${val}" ${f.type === 'number' ? 'min="0"' : ''}></label>`;
   }).join('');
   // Édition des articles (corriger la saisie : libellé / qté / prix unitaire)
-  _modifItems = (c.items || []).map(i => ({ name: i.name || '', qty: Math.round(Number(i.qty) || 0), price: Math.round(Number(i.price) || 0) }));
+  _modifItems = (c.items || []).map(i => ({ name: i.name || '', qty: Math.round(Number(i.qty) || 0), price: Math.round(Number(i.price) || 0), perso: String(i.perso || '') }));
   const itemsSection =
     `<div class="modif-field">
        <span>Articles — corriger qté / prix / libellé</span>
@@ -7124,7 +7137,8 @@ function _renderModifItems() {
         <input class="mf-item-qty" type="number" min="0" value="${it.qty}" title="Quantité" oninput="_modifItemChange(${idx},'qty',this.value)">
         <input class="mf-item-price" type="number" min="0" value="${it.price}" title="Prix unitaire (Ar)" oninput="_modifItemChange(${idx},'price',this.value)">
         <button type="button" class="mf-item-del" onclick="_modifRemoveItem(${idx})" title="Supprimer l'article">×</button>
-      </div>`).join('')
+      </div>
+      <input class="mf-item-perso" type="text" value="${String(it.perso||'').replace(/"/g,'&quot;')}" placeholder="✎ Personnalisation de cet article" title="Consigne de personnalisation propre à cet article" oninput="_modifItemChange(${idx},'perso',this.value)">`).join('')
     : '<div style="font-size:12px;color:var(--muted);padding:4px 0">Aucun article</div>';
   _modifUpdateItemsSum();
 }
@@ -7135,7 +7149,7 @@ function _modifUpdateItemsSum() {
 }
 function _modifItemChange(idx, key, val) {
   if (!_modifItems[idx]) return;
-  _modifItems[idx][key] = key === 'name' ? val : Math.max(0, Math.round(parseFloat(val) || 0));
+  _modifItems[idx][key] = (key === 'name' || key === 'perso') ? val : Math.max(0, Math.round(parseFloat(val) || 0));
   _modifUpdateItemsSum(); // pas de re-render → garde le focus dans le champ
 }
 function _modifAddItem() { _modifItems.push({ name: '', qty: 1, price: 0 }); _renderModifItems(); }
@@ -7160,7 +7174,7 @@ function submitCommandeModif() {
     if (String(nv) !== String(ov)) changes[f.key] = { old: ov, new: nv, label: f.label };
   });
   // Diff des articles (libellé / qté / prix)
-  const _normItems = arr => (arr || []).map(i => ({ name: String(i.name).trim(), qty: Math.round(Number(i.qty) || 0), price: Math.round(Number(i.price) || 0) })).filter(i => i.name);
+  const _normItems = arr => (arr || []).map(i => ({ name: String(i.name).trim(), qty: Math.round(Number(i.qty) || 0), price: Math.round(Number(i.price) || 0), perso: String(i.perso || '').trim() })).filter(i => i.name);
   const newItems = _normItems(_modifItems);
   const oldItems = _normItems(c.items);
   if (JSON.stringify(newItems) !== JSON.stringify(oldItems)) {
@@ -11544,11 +11558,17 @@ function renderAttrPanel(tachesD, commentsD = []) {
     if (src) {
       const items = (src.items || []);
       const itemsHtml = items.length
-        ? items.map(i => `
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--color-border)">
-            <span style="font-size:13px;color:var(--color-text-primary);font-weight:500">${i.name}</span>
-            <span style="font-size:12px;color:var(--color-text-secondary)">× ${i.qty || 1}</span>
-          </div>`).join('')
+        ? items.map(i => {
+          const perso = String(i.perso||'').trim();
+          return `
+          <div style="padding:5px 0;border-bottom:1px solid var(--color-border)">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:13px;color:var(--color-text-primary);font-weight:500">${_pcokEsc(i.name)}</span>
+              <span style="font-size:12px;color:var(--color-text-secondary)">× ${i.qty || 1}</span>
+            </div>
+            ${perso ? `<div class="cmd-item-perso" style="margin-top:3px">✎ ${_pcokEsc(perso)}</div>` : ''}
+          </div>`;
+        }).join('')
         : `<div style="font-size:13px;color:var(--color-text-muted);font-style:italic">Aucun article</div>`;
 
       const contactLine = src.clientContact
@@ -11953,12 +11973,16 @@ function printDossier(dossierId) {
   // ── Articles
   const items = src?.items || [];
   const itemsHtml = items.length
-    ? items.map(i => `
+    ? items.map(i => {
+        const perso = String(i.perso||'').trim();
+        return `
         <tr>
-          <td style="padding:7px 10px;border-bottom:1px solid #e5e3df;font-size:12pt;color:#1c1917;font-weight:500">${i.name || '?'}</td>
-          <td style="padding:7px 10px;border-bottom:1px solid #e5e3df;text-align:center;font-size:12pt;font-weight:700;color:#1a4a3a">${i.qty || 1}</td>
-          ${i.custom ? `<td style="padding:7px 10px;border-bottom:1px solid #e5e3df;font-size:10pt;color:#78716c;font-style:italic">Personnalisé</td>` : '<td></td>'}
-        </tr>`).join('')
+          <td style="padding:7px 10px;${perso?'':'border-bottom:1px solid #e5e3df;'}font-size:12pt;color:#1c1917;font-weight:500">${_pcokEsc(i.name || '?')}</td>
+          <td style="padding:7px 10px;${perso?'':'border-bottom:1px solid #e5e3df;'}text-align:center;font-size:12pt;font-weight:700;color:#1a4a3a">${i.qty || 1}</td>
+          ${i.custom ? `<td style="padding:7px 10px;${perso?'':'border-bottom:1px solid #e5e3df;'}font-size:10pt;color:#78716c;font-style:italic">Personnalisé</td>` : '<td style="'+(perso?'':'border-bottom:1px solid #e5e3df;')+'"></td>'}
+        </tr>`
+        + (perso ? `<tr><td colspan="3" style="padding:2px 10px 8px 22px;border-bottom:1px solid #e5e3df;font-size:11pt;color:#b45309;font-weight:600">✎ Personnalisation : ${_pcokEsc(perso)}</td></tr>` : '');
+      }).join('')
     : `<tr><td colspan="3" style="padding:10px;color:#a8a29e;font-style:italic;font-size:11pt">Aucun article</td></tr>`;
 
   // ── Pipeline de production

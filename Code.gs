@@ -1329,9 +1329,15 @@ function handleGetCommandes(data) {
     // Reconstruire items depuis la colonne Articles (format "nom×qty@prix")
     const articlesStr = String(r[5]||'');
     if (articlesStr && map[id].items.length === 0) {
-      map[id].items = articlesStr.split('|').map(s => {
+      // Personnalisation par article (col 30, JSON aligné par index) — repli [] si absente/legacy
+      let persoArr = [];
+      try { persoArr = r[29] ? JSON.parse(String(r[29])) : []; } catch(e) { persoArr = []; }
+      if (!Array.isArray(persoArr)) persoArr = [];
+      map[id].items = articlesStr.split('|').map((s, idx) => {
         const m = s.match(/^(.+)×(\d+)@(\d+)$/);
-        return m ? { name:m[1], qty:Number(m[2]), price:Number(m[3]) } : { name:s, qty:1, price:0 };
+        const it = m ? { name:m[1], qty:Number(m[2]), price:Number(m[3]) } : { name:s, qty:1, price:0 };
+        if (persoArr[idx]) it.perso = String(persoArr[idx]);
+        return it;
       }).filter(i => i.name);
     }
   }
@@ -1530,8 +1536,11 @@ function handleAddCommande(data) {
   const items   = Array.isArray(c.items) ? c.items : [];
   // Sérialiser les articles en une seule cellule : "nom×qty@prix|..."
   const articlesStr = items.map(i => `${i.name||'?'}×${i.qty||1}@${i.price||0}`).join('|');
-  // Garantir assez de colonnes (29 : … 27=Poles, 28=Finalisé_Par_User, 29=Finalisé_Par_Label)
-  const _need = 29 - sh.getMaxColumns();
+  // Personnalisation PAR article, alignée par index (col 30, JSON) — texte libre,
+  // stocké à part de la colonne Articles délimitée (× @ |) pour rester robuste.
+  const persoStr = JSON.stringify(items.map(i => String(i.perso || '')));
+  // Garantir assez de colonnes (30 : … 28=Finalisé_Par_User, 29=Finalisé_Par_Label, 30=PersoItems)
+  const _need = 30 - sh.getMaxColumns();
   if (_need > 0) sh.insertColumnsAfter(sh.getMaxColumns(), _need);
   sh.appendRow([
     id, dateStr, c.caissier||'',
@@ -1550,7 +1559,8 @@ function handleAddCommande(data) {
     c.remarque||'',   // col 26 = Remarque (finance)
     JSON.stringify(Array.isArray(c.poles) ? c.poles : []),   // col 27 = Poles (pôles atelier)
     c.finaliseParUser||'',    // col 28 = qui a finalisé (username)
-    c.finaliseParLabel||''    // col 29 = qui a finalisé (libellé)
+    c.finaliseParLabel||'',   // col 29 = qui a finalisé (libellé)
+    persoStr                  // col 30 = PersoItems (JSON, personnalisation par article)
   ]);
   // Forcer nom + contact en TEXTE (un contact "+261 34…" serait sinon évalué en formule → #ERROR!)
   const _r = sh.getLastRow();
@@ -1595,9 +1605,14 @@ function handleUpdateCommande(data) {
     if (data.total !== undefined)            sh.getRange(i+1, 13).setValue(Number(data.total)||0);          // col M = Total
     if (data.restant !== undefined)          sh.getRange(i+1, 15).setValue(Number(data.restant)||0);        // col O = Restant
     if (data.items !== undefined) {                                                          // col F = Articles ("nom×qty@prix|…")
-      const _arts = (Array.isArray(data.items) ? data.items : [])
+      const _its  = Array.isArray(data.items) ? data.items : [];
+      const _arts = _its
         .map(it => `${it.name||'?'}×${Math.round(Number(it.qty)||1)}@${Math.round(Number(it.price)||0)}`).join('|');
       sh.getRange(i+1, 6).setValue(_arts);
+      // Personnalisation par article (col 30, JSON aligné par index) maintenue en phase
+      const _needP = 30 - sh.getMaxColumns();
+      if (_needP > 0) sh.insertColumnsAfter(sh.getMaxColumns(), _needP);
+      sh.getRange(i+1, 30).setValue(JSON.stringify(_its.map(it => String(it.perso || ''))));
     }
     if (data.clientName !== undefined)       _setTextCell_(sh, i+1, 4, data.clientName);    // col D = Client_Nom (texte)
     if (data.clientContact !== undefined)    _setTextCell_(sh, i+1, 5, data.clientContact); // col E = Client_Contact (texte : évite #ERROR! sur "+261…")
