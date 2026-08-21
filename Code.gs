@@ -15,7 +15,7 @@ const SHEET_COMMANDES    = 'Commandes';
 const SHEET_ENCAISSEMENTS = 'Encaissements'; // journal centralisé des entrées d'argent (patron)
 const SHEET_ARRETS        = 'ArretsCaisse';   // clôtures de caisse centralisées (multi-appareils + vue patron)
 const SHEET_BATS          = 'BATs';           // suivi des BAT (épreuves) : versions, envoi client, retours, validation
-const BAT_HEADERS_        = ['ID','DossierId','NumeroDossier','Version','Statut','Retours','FileName','FileUrl','FileDlUrl','FileType','CreatedBy','CreatedAt','SentBy','SentAt','DecidedBy','DecidedAt'];
+const BAT_HEADERS_        = ['ID','DossierId','NumeroDossier','Version','Statut','Retours','FileName','FileUrl','FileDlUrl','FileType','CreatedBy','CreatedAt','SentBy','SentAt','DecidedBy','DecidedAt','Files'];
 
 // Nouvelles feuilles
 const SHEET_DOSSIERS   = 'Dossiers';
@@ -715,13 +715,22 @@ function handleAddBat(data) {
   if (!b || !b.id) return { ok:false, error:'BAT invalide' };
   const ss = getSS();
   const sh = ss.getSheetByName(SHEET_BATS) || ensureSheet(ss, SHEET_BATS, BAT_HEADERS_);
+
+  // Colonne Files (17) ajoutée après coup (multi-images) : les feuilles créées
+  // avant n'ont que 16 colonnes → poser l'en-tête manquant plutôt que d'insérer
+  // une colonne (réutilise le schéma de Total_Virement des arrêts de caisse).
+  if (sh.getLastColumn() < 17) sh.getRange(1, 17).setValue('Files');
+
+  let filesJson = '';
+  try { filesJson = JSON.stringify(Array.isArray(b.files) ? b.files : []); } catch (_) { filesJson = '[]'; }
   const row = [
     String(b.id), String(b.dossierId || ''), String(b.numeroDossier || ''),
     Number(b.version) || 1, String(b.status || ''), String(b.retours || ''),
     String(b.fileName || ''), String(b.fileUrl || ''), String(b.fileDlUrl || ''), String(b.fileType || ''),
     String(b.createdBy || ''), String(b.createdAt || ''),
     String(b.sentBy || ''), String(b.sentAt || ''),
-    String(b.decidedBy || ''), String(b.decidedAt || '')
+    String(b.decidedBy || ''), String(b.decidedAt || ''),
+    filesJson
   ];
   const last = sh.getLastRow();
   if (last > 1) {
@@ -742,15 +751,23 @@ function handleGetBats(data) {
   if (!sh) return { ok:true, bats:[] };
   const last = sh.getLastRow();
   if (last <= 1) return { ok:true, bats:[] };
-  const rows = sh.getRange(2, 1, last - 1, BAT_HEADERS_.length).getValues();
-  let list = rows.map(r => ({
-    id: String(r[0]), dossierId: String(r[1]), numeroDossier: String(r[2]),
-    version: Number(r[3]) || 1, status: String(r[4]), retours: String(r[5]),
-    fileName: String(r[6]), fileUrl: String(r[7]), fileDlUrl: String(r[8]), fileType: String(r[9]),
-    createdBy: String(r[10]), createdAt: String(r[11]),
-    sentBy: String(r[12]), sentAt: String(r[13]),
-    decidedBy: String(r[14]), decidedAt: String(r[15])
-  })).filter(x => x.id);
+  const width = Math.min(BAT_HEADERS_.length, sh.getLastColumn());   // feuilles anciennes = 16 col.
+  const rows = sh.getRange(2, 1, last - 1, width).getValues();
+  let list = rows.map(r => {
+    const fileName = String(r[6]), fileUrl = String(r[7]), fileDlUrl = String(r[8]), fileType = String(r[9]);
+    let files = [];
+    const rawFiles = r[16];   // col 17 = Files (JSON), absente sur les feuilles antérieures
+    if (rawFiles) { try { const p = JSON.parse(rawFiles); if (Array.isArray(p)) files = p; } catch (_) {} }
+    if (!files.length && (fileUrl || fileName)) files = [{ name:fileName, viewUrl:fileUrl, dlUrl:fileDlUrl, type:fileType }];
+    return {
+      id: String(r[0]), dossierId: String(r[1]), numeroDossier: String(r[2]),
+      version: Number(r[3]) || 1, status: String(r[4]), retours: String(r[5]),
+      fileName, fileUrl, fileDlUrl, fileType, files,
+      createdBy: String(r[10]), createdAt: String(r[11]),
+      sentBy: String(r[12]), sentAt: String(r[13]),
+      decidedBy: String(r[14]), decidedAt: String(r[15])
+    };
+  }).filter(x => x.id);
   if (data && data.dossierId) list = list.filter(x => String(x.dossierId) === String(data.dossierId));
   return { ok:true, bats:list };
 }

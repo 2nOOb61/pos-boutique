@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '159 · 2026-08-21';
+const APP_VERSION = '160 · 2026-08-21';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -11126,40 +11126,64 @@ function _batWhen(iso){ if(!iso) return ''; const d=new Date(iso); return isNaN(
 function _batDaysSince(iso){ if(!iso) return null; const d=new Date(iso); if(isNaN(d.getTime())) return null; return Math.floor((Date.now()-d.getTime())/86400000); }
 function _batReadFile(f){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(f); }); }
 
+// Fichiers d'un BAT (multi-images) : source de vérité = tableau b.files ;
+// repli sur les anciens champs mono-fichier (fileName/fileUrl…) pour les BAT créés
+// avant le multi-fichiers ou renvoyés par un serveur plus ancien.
+function _batFiles(b){
+  if (!b) return [];
+  if (Array.isArray(b.files) && b.files.length) {
+    return b.files.filter(Boolean).map(f => ({
+      name: f.name || 'Fichier', viewUrl: f.viewUrl || f.url || '', dlUrl: f.dlUrl || '', type: f.type || ''
+    }));
+  }
+  if (b.fileUrl || b.fileName) {
+    return [{ name: b.fileName || 'Voir le BAT', viewUrl: b.fileUrl || '', dlUrl: b.fileDlUrl || '', type: b.fileType || '' }];
+  }
+  return [];
+}
+
 // ── Actions ────────────────────────────────────────────────
 function batCreate(dossierId){
   if (!_canPaoBat()) { showToast('Réservé à la PAO / responsable', 'error'); return; }
   const inp = document.createElement('input');
-  inp.type = 'file'; inp.accept = 'image/*,.pdf';
+  inp.type = 'file'; inp.accept = 'image/*,.pdf'; inp.multiple = true;
   inp.onchange = async () => {
-    const f = inp.files && inp.files[0];
-    if (!f) return;
-    if (f.size > 12 * 1024 * 1024) { showToast('Fichier trop lourd (max 12 Mo)', 'error'); return; }
-    showToast('Envoi du BAT…');
-    let fileMeta = null;
-    try {
-      const dataUrl = await _batReadFile(f);
-      if (APPS_SCRIPT_URL) {
-        const ext = (f.name.split('.').pop() || 'jpg');
-        const r = await apiCall({ action:'uploadFile', fileName:`BAT-${dossierId}-${Date.now()}.${ext}`, mimeType:f.type || 'application/octet-stream', base64Data:dataUrl });
-        if (r && r.ok) fileMeta = { name:f.name, viewUrl:r.viewUrl || '', dlUrl:r.dlUrl || '', type:f.type || '' };
-        else showToast('Upload du fichier échoué — BAT créé sans fichier', 'warning');
-      }
-    } catch(e){ showToast('Upload impossible — BAT créé sans fichier', 'warning'); }
-    _batCreateRound(dossierId, fileMeta);
+    const picked = inp.files ? Array.from(inp.files) : [];
+    if (!picked.length) return;
+    const tooBig = picked.find(f => f.size > 12 * 1024 * 1024);
+    if (tooBig) { showToast(`« ${tooBig.name} » trop lourd (max 12 Mo)`, 'error'); return; }
+    const files = [];
+    for (let i = 0; i < picked.length; i++) {
+      const f = picked[i];
+      showToast(picked.length > 1 ? `Envoi du BAT… (${i + 1}/${picked.length})` : 'Envoi du BAT…');
+      try {
+        const dataUrl = await _batReadFile(f);
+        if (APPS_SCRIPT_URL) {
+          const ext = (f.name.split('.').pop() || 'jpg');
+          const r = await apiCall({ action:'uploadFile', fileName:`BAT-${dossierId}-${Date.now()}-${i + 1}.${ext}`, mimeType:f.type || 'application/octet-stream', base64Data:dataUrl });
+          if (r && r.ok) files.push({ name:f.name, viewUrl:r.viewUrl || '', dlUrl:r.dlUrl || '', type:f.type || '' });
+          else showToast(`Upload de « ${f.name} » échoué`, 'warning');
+        }
+      } catch(e){ showToast(`Upload de « ${f.name} » impossible`, 'warning'); }
+    }
+    _batCreateRound(dossierId, files);
   };
   inp.click();
 }
 
-function _batCreateRound(dossierId, fileMeta){
+function _batCreateRound(dossierId, files){
+  const list = Array.isArray(files) ? files.filter(Boolean) : (files ? [files] : []);
+  const first = list[0] || null;
   const d = dossiers.find(x => x.id === dossierId) || selectedDossier;
   const prev = _dossierBats(dossierId);
   const version = prev.length ? Math.max(...prev.map(b => Number(b.version) || 0)) + 1 : 1;
   const bat = {
     id: _genUid('BAT'), dossierId, numeroDossier: (d && d.numeroDossier) || '',
     version, status: 'a_envoyer',
-    fileName: fileMeta ? fileMeta.name : '', fileUrl: fileMeta ? fileMeta.viewUrl : '',
-    fileDlUrl: fileMeta ? fileMeta.dlUrl : '', fileType: fileMeta ? fileMeta.type : '',
+    files: list,
+    // champs mono-fichier conservés (rétro-compat serveur/anciens clients) = 1ᵉʳ fichier
+    fileName: first ? first.name : '', fileUrl: first ? first.viewUrl : '',
+    fileDlUrl: first ? first.dlUrl : '', fileType: first ? first.type : '',
     retours: '', createdBy: _myOpLabel(), createdAt: new Date().toISOString(),
     sentBy: '', sentAt: '', decidedBy: '', decidedAt: ''
   };
@@ -11258,8 +11282,9 @@ function _batSectionInner(d){
   const roundsHtml = rounds.length ? rounds.map(b => {
     const sColor = b.status==='valide' ? '#16a34a' : b.status==='retour' ? '#dc2626' : b.status==='envoye_client' ? '#2563eb' : '#d97706';
     const sBg    = b.status==='valide' ? '#dcfce7' : b.status==='retour' ? '#fee2e2' : b.status==='envoye_client' ? '#dbeafe' : '#fef3c7';
-    const fileLink = b.fileUrl
-      ? `<a href="${b.fileUrl}" target="_blank" class="bat-file">📎 ${escapeHtml(b.fileName || 'Voir le BAT')}</a>`
+    const files = _batFiles(b);
+    const fileLink = files.length
+      ? files.map(f => `<a href="${f.viewUrl}" target="_blank" class="bat-file">📎 ${escapeHtml(f.name || 'Voir le BAT')}</a>`).join('')
       : '<span class="bat-nofile">Pas de fichier joint</span>';
     const timeline = [
       b.createdAt ? `Créé ${_batWhen(b.createdAt)}${b.createdBy?' · '+escapeHtml(b.createdBy):''}` : '',
