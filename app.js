@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '160 · 2026-08-21';
+const APP_VERSION = '161 · 2026-08-25';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -15866,13 +15866,24 @@ function _cockpitToggleOps(){ _cockpitOpsOpen = !_cockpitOpsOpen; renderProdCock
 function _cockpitSetSearch(v){ _cockpitSearch = v; _cockpitLimit = _COCKPIT_PAGE; _cockpitRenderBody(); }
 function _cockpitShowMore(){ _cockpitLimit += _COCKPIT_PAGE; _cockpitRenderBody(); }
 
+// La gestionnaire de stock EST l'acheteuse : elle peut démarrer/terminer
+// n'importe quelle tâche d'achat (étape ACHAT), au même titre qu'admin/chef —
+// même si la tâche a été assignée à un autre acheteur. Pour les autres étapes,
+// elle reste soumise à la règle « seul l'opérateur assigné ».
+function _canActOnTache(t) {
+  const role = currentUser?.role;
+  if (['admin','chef_atelier'].includes(role)) return true;
+  if (role === 'gestionnaire' && t && t.etapeCode === 'ACHAT') return true;
+  return _sameOp(t?.operateur, currentUser?.label);
+}
+
 async function pointerStart(tacheId) {
   const isLibre = tacheId.startsWith('TL_');
-  const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
   const t = isLibre ? tachesLibres.find(x => x.id === tacheId) : taches.find(x => x.id === tacheId);
   if (!t) return;
-  // Guard 1 : seul l'opérateur assigné (ou admin/chef) peut démarrer la tâche
-  if (!isAdminOrChef && !_sameOp(t.operateur, currentUser?.label)) {
+  // Guard 1 : seul l'opérateur assigné (ou admin/chef, ou la gestionnaire sur un
+  // achat) peut démarrer la tâche
+  if (!_canActOnTache(t)) {
     showToast('Vous ne pouvez pas démarrer une tâche qui ne vous est pas assignée.', 'error');
     return;
   }
@@ -15926,10 +15937,10 @@ async function confirmPointage() {
   if (!pendingPointage) return;
   const { tacheId, etapeCode } = pendingPointage;
   const isLibre = tacheId.startsWith('TL_');
-  const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
-  // Vérifier que l'utilisateur courant est l'opérateur assigné ou admin/chef
+  // Vérifier que l'utilisateur courant est l'opérateur assigné, admin/chef, ou la
+  // gestionnaire sur un achat
   const tCheck = isLibre ? tachesLibres.find(x => x.id === tacheId) : taches.find(x => x.id === tacheId);
-  if (tCheck && !isAdminOrChef && tCheck.operateur !== currentUser?.label) {
+  if (tCheck && !_canActOnTache(tCheck)) {
     showToast('Vous ne pouvez pas terminer une tâche qui ne vous est pas assignée.', 'error');
     closeModal('pointageModal');
     return;
@@ -16081,8 +16092,7 @@ function renderAchats() {
   const container = document.getElementById('achatsContainer');
   if (!container) return;
 
-  const myLabel       = currentUser?.label || currentUser?.username || '';
-  const isAdminOrChef = ['admin','chef_atelier'].includes(currentUser?.role);
+  const myLabel = currentUser?.label || currentUser?.username || '';
 
   const achatTaches = (Array.isArray(taches) ? taches : []).filter(t => t.etapeCode === 'ACHAT');
   const queue = achatTaches.filter(t => t.statut !== 'TERMINE').map(_achatEnrich);
@@ -16138,7 +16148,9 @@ function renderAchats() {
   const _rowTask = r => {
     const late    = _isLate(r.echeance);
     const enCours = r.t.statut === 'EN_COURS';
-    const canAct  = isAdminOrChef || _sameOp(r.operateur, myLabel);
+    // Toutes les lignes de ce cockpit sont des tâches ACHAT → la gestionnaire
+    // (acheteuse) peut agir dessus, comme admin/chef, via _canActOnTache.
+    const canAct  = _canActOnTache(r.t);
     const dem     = _demandeForDossier(r.t.dossierId);
     const _s      = dem ? _daStatut(dem.statut) : null;
     const statusBadge = _s
@@ -18040,7 +18052,29 @@ function _getArretData() {
   });
   todaySales.forEach(s => {
     if (covered.has(String(s.id))) return;
-    if (s.fromCommande) return;   // finalisation de commande : déjà couverte par ses encaissements (acompte + solde)
+    // Finalisation d'une commande : normalement couverte par son encaissement de
+    // SOLDE. Mais ce solde peut manquer au journal du périmètre (reste calculé à 0
+    // à cause d'une synchro concurrente ou d'un acompte saisi sur un autre poste)
+    // → la commande livrée disparaîtrait alors de la fiche ET des totaux. On la
+    // rattrape ici avec le solde réellement réglé à la finalisation.
+    if (s.fromCommande != null && s.fromCommande !== '') {
+      const hasSolde = evts.some(e =>
+        e.source === 'commande' && String(e.refId) === String(s.fromCommande) &&
+        (e.type === 'solde' || e.type === 'paiement'));
+      if (hasSolde) return;   // solde déjà présent au journal du périmètre
+      const solde = Math.max(0, (Number(s.total) || 0) - (Number(s.accompte) || 0));
+      if (solde <= 0) return; // rien encaissé à la finalisation (commande déjà prépayée)
+      const c = commandes.find(x => String(x.id) === String(s.fromCommande));
+      evts.push({
+        id: 'F' + s.id, date: s.date, source: 'commande',
+        refId: s.fromCommande, refLabel: c ? _cmdRef(c) : ('CMD-' + s.fromCommande),
+        client: (s.clientName || '').trim() || 'Client comptant',
+        caissier: s.caissier, montant: solde, method: s.method || 'cash',
+        provider: s.provider || '', ref: s.ref || '',
+        type: 'solde', resteApres: 0
+      });
+      return;
+    }
     const total = Number(s.total) || 0;
     // Ventes finalisées depuis une réservation : `due` fait foi (solde déjà réglé).
     // Ventes rapides : on redéduit du couple (total, acompte) — les ventes
