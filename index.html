@@ -2151,7 +2151,9 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
       </div>
       <div class="form-group">
         <label>Commande / réservation</label>
-        <select id="mchStartSource" onchange="onMachineSourceChange()"></select>
+        <input id="mchStartSearch" placeholder="🔎 Rechercher par nom de client ou référence…" oninput="_filterMachineSource()" autocomplete="off" style="margin-bottom:8px" />
+        <select id="mchStartSource" size="6" onchange="onMachineSourceChange()"></select>
+        <div id="mchStartSourceCount" style="font-size:11px;color:var(--muted);margin-top:4px"></div>
       </div>
       <div class="form-group">
         <label>Travail (libellé)</label>
@@ -3517,7 +3519,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260827-machines"></script>
+<script src="./app.js?v=20260827-machsearch"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

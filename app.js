@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '162 · 2026-08-27';
+const APP_VERSION = '163 · 2026-08-27';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -5527,6 +5527,7 @@ let _machineTickTimer = null;   // 1s : rafraîchit l'affichage des chronos en c
 let _machinePollTimer = null;   // 15s : recharge les sessions depuis le serveur
 let _machineStartKey  = null;   // clé de la machine ciblée par la modale de démarrage
 let _machineStartClient = '';   // client déduit de la source choisie dans la modale
+let _machineSourceItems = [];   // liste complète (commandes+réservations) pour la recherche dans la modale
 const _MACHINE_OP_ROLES = ['operateur_prod','machiniste','pao','finition','chef_atelier'];
 function _canControlMachines(){
   return ['admin','chef_atelier','gestionnaire','machiniste','operateur_prod','pao','finition'].includes(currentUser?.role);
@@ -5677,21 +5678,23 @@ function openMachineStart(key){
   const titleEl = document.getElementById('mchStartTitle');
   if (titleEl) titleEl.textContent = 'Démarrer — ' + (m ? m.label : key);
 
-  // Source : commandes + réservations non annulées (on part des commandes/réservations)
+  // Source : commandes + réservations non annulées (on part des commandes/réservations).
+  // On construit une liste unique cherchable par nom de client OU référence.
   const cmds = (typeof commandes !== 'undefined' ? commandes : [])
     .filter(c => c.status !== 'cancelled')
     .sort((a,b)=> new Date(b.date||0) - new Date(a.date||0));
   const ress = (typeof reservations !== 'undefined' ? reservations : [])
     .filter(r => r.status !== 'cancelled')
     .sort((a,b)=> new Date(b.date||0) - new Date(a.date||0));
-  const cmdOpts = cmds.map(c => `<option value="cmd:${c.id}">${escapeHtml(_cmdRef(c))} — ${escapeHtml(c.clientName||'Client')}</option>`).join('');
-  const resOpts = ress.map(r => `<option value="res:${r.id}">${escapeHtml(_resRef(r))} — ${escapeHtml(r.clientName||'Client')}</option>`).join('');
-  const sel = document.getElementById('mchStartSource');
-  if (sel) sel.innerHTML = `
-    <option value="">— Choisir une commande / réservation —</option>
-    ${cmdOpts?`<optgroup label="Commandes">${cmdOpts}</optgroup>`:''}
-    ${resOpts?`<optgroup label="Réservations">${resOpts}</optgroup>`:''}
-    <option value="libre">— Travail libre (saisie manuelle) —</option>`;
+  _machineSourceItems = [
+    ...cmds.map(c => { const ref=_cmdRef(c), cl=c.clientName||'Client';
+      return { value:'cmd:'+c.id, group:'Commandes', ref, client:cl, search:_machineNorm(ref+' '+cl) }; }),
+    ...ress.map(r => { const ref=_resRef(r), cl=r.clientName||'Client';
+      return { value:'res:'+r.id, group:'Réservations', ref, client:cl, search:_machineNorm(ref+' '+cl) }; })
+  ];
+  const searchEl = document.getElementById('mchStartSearch');
+  if (searchEl) searchEl.value = '';
+  _renderMachineSourceOptions('');
 
   // Datalist des opérateurs machine
   const dl = document.getElementById('mchOpList');
@@ -5704,6 +5707,43 @@ function openMachineStart(key){
   document.getElementById('mchStartNote').value = '';
   _machineStartClient = '';
   openModal('machineStartModal');
+}
+
+// Normalisation pour la recherche : minuscules + suppression des accents.
+function _machineNorm(s){
+  return String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
+}
+// (Re)construit les <option> du sélecteur en fonction de la recherche (nom client ou réf).
+function _renderMachineSourceOptions(q){
+  const sel = document.getElementById('mchStartSource');
+  if (!sel) return;
+  const nq = _machineNorm(q);
+  const matched = nq ? _machineSourceItems.filter(it => it.search.includes(nq)) : _machineSourceItems;
+  const byGroup = { 'Commandes':[], 'Réservations':[] };
+  matched.forEach(it => { (byGroup[it.group] = byGroup[it.group] || []).push(it); });
+  const optHtml = grp => (byGroup[grp]||[]).map(it =>
+    `<option value="${it.value}">${escapeHtml(it.ref)} — ${escapeHtml(it.client)}</option>`).join('');
+  sel.innerHTML = `
+    <option value="">${nq?'— Résultats —':'— Choisir une commande / réservation —'}</option>
+    ${byGroup['Commandes'].length?`<optgroup label="Commandes">${optHtml('Commandes')}</optgroup>`:''}
+    ${byGroup['Réservations'].length?`<optgroup label="Réservations">${optHtml('Réservations')}</optgroup>`:''}
+    <option value="libre">— Travail libre (saisie manuelle) —</option>`;
+  const countEl = document.getElementById('mchStartSourceCount');
+  if (countEl){
+    const n = matched.length;
+    countEl.textContent = nq
+      ? `${n} résultat${n>1?'s':''} pour « ${q.trim()} »`
+      : `${_machineSourceItems.length} commande(s)/réservation(s)`;
+  }
+}
+// Filtrage en direct depuis le champ de recherche.
+function _filterMachineSource(){
+  const q = document.getElementById('mchStartSearch')?.value || '';
+  _renderMachineSourceOptions(q);
+  // Auto-sélection si un seul résultat → préremplit le libellé/client
+  const sel = document.getElementById('mchStartSource');
+  const real = sel ? [...sel.options].filter(o => o.value && o.value !== 'libre') : [];
+  if (real.length === 1){ sel.value = real[0].value; onMachineSourceChange(); }
 }
 
 function onMachineSourceChange(){
