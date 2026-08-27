@@ -21,6 +21,11 @@ const BAT_HEADERS_        = ['ID','DossierId','NumeroDossier','Version','Statut'
 const SHEET_DOSSIERS   = 'Dossiers';
 const SHEET_TACHES     = 'Taches';
 const SHEET_JOURNAL    = 'JournalAcces'; // audit log : qui fait quoi et quand
+const SHEET_MACHINES   = 'MachinesSessions'; // suivi machines : une ligne = une session de travail
+// En-têtes de la feuille MachinesSessions. StartTs/EndTs = epoch ms absolu (chrono live,
+// immunisé contre l'écart de fuseau, comme les tâches). Statut : EN_COURS | TERMINE.
+const MACHINE_HEADERS  = ['ID','Machine','RefType','RefID','RefLabel','Client','Operateur',
+  'Statut','DateDebut','DateFin','StartTs','EndTs','DemarrePar','Note'];
 
 // En-têtes de la feuille Dossiers, partagés par tous les points de création
 // (vente, manuel, autre) pour éviter tout décalage de colonnes si l'un diverge.
@@ -144,6 +149,10 @@ function doPost(e) {
     else if (action === 'saveDemandeAchat')  result = handleSaveDemandeAchat(data);
     else if (action === 'getDemandesAchat')  result = handleGetDemandesAchat(data);
     else if (action === 'deleteDemandeAchat') result = handleDeleteDemandeAchat(data);
+    else if (action === 'startMachineSession') result = handleStartMachineSession(data);
+    else if (action === 'endMachineSession')   result = handleEndMachineSession(data);
+    else if (action === 'getMachineSessions')  result = handleGetMachineSessions(data);
+    else if (action === 'deleteMachineSession') result = handleDeleteMachineSession(data);
     else result = { ok:false, error:'Action inconnue: ' + action };
 
     return jsonResp(result);
@@ -197,6 +206,9 @@ function doGet(e) {
       else if (action === 'saveDemandeAchat')  result = handleSaveDemandeAchat(data);
       else if (action === 'deleteDemandeAchat') result = handleDeleteDemandeAchat(data);
       else if (action === 'getControlPatron')   result = handleGetControlPatron(data);
+      else if (action === 'startMachineSession') result = handleStartMachineSession(data);
+      else if (action === 'endMachineSession')   result = handleEndMachineSession(data);
+      else if (action === 'deleteMachineSession') result = handleDeleteMachineSession(data);
       else result = { ok:false, error:'Action payload inconnue: ' + action };
       return jsonResp(result);
     } catch(err) {
@@ -237,6 +249,7 @@ function doGet(e) {
     if (action === 'getDriveFolderUrl') return jsonResp(handleGetDriveFolderUrl());
     if (action === 'getSharedFiles')    return jsonResp(handleGetSharedFiles());
     if (action === 'getDemandesAchat')  return jsonResp(handleGetDemandesAchat(e.parameter));
+    if (action === 'getMachineSessions') return jsonResp(handleGetMachineSessions(e.parameter));
     return jsonResp({ ok:false, error:'Action GET inconnue: ' + action });
   } catch(err) {
     return jsonResp({ ok:false, error:'GET error: ' + err.message });
@@ -318,6 +331,8 @@ function initSheets() {
   // Nouvelles feuilles production
   ensureSheet(ss, SHEET_DOSSIERS, DOSSIER_HEADERS);
   ensureSheet(ss, SHEET_TACHES,     ['ID','DossierID','NumeroDossier','Etape','EtapeLabel','Operateur','Statut','DateAssignation','DateDebut','DateFin','Commentaire','AssignePar','Priorite','Echeance','Photos','Equipe']);
+  // Suivi machines (sessions de travail)
+  ensureSheet(ss, SHEET_MACHINES, MACHINE_HEADERS);
 
   return { ok:true, message:'Feuilles initialisées ' };
 }
@@ -2103,6 +2118,118 @@ function handlePointerAction(data) {
     return { ok:true };
   }
   return { ok:false, error:'Tâche introuvable' };
+}
+
+// ============================================================
+// SUIVI MACHINES — sessions de travail (module indépendant piloté
+// par le responsable de production ; les opérateurs machines n'ont
+// pas d'ordinateur). Une session = un travail sur une machine, avec
+// début/fin. Une seule session EN_COURS par machine à la fois.
+// ============================================================
+
+// Lit une valeur epoch ms robuste : si la cellule contient déjà un nombre (ms)
+// on le garde, sinon on reparse la Date. Immunise le chrono contre le fuseau.
+function _msFromCell_(cell) {
+  if (cell === '' || cell === null || cell === undefined) return null;
+  const n = Number(cell);
+  if (isFinite(n) && n > 1e11) return n;         // déjà un epoch ms
+  const d = new Date(cell);
+  return isNaN(d.getTime()) ? null : d.getTime();
+}
+
+function handleStartMachineSession(data) {
+  if (!data.machine)  return { ok:false, error:'machine requise' };
+  const ss   = getSS();
+  const sh   = ensureSheet(ss, SHEET_MACHINES, MACHINE_HEADERS);
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(8000);
+    const rows = sh.getDataRange().getValues();
+    // Garde-fou : une seule session EN_COURS par machine.
+    for (let i = 1; i < rows.length; i++) {
+      if (String(rows[i][1]) === String(data.machine) && rows[i][7] === 'EN_COURS') {
+        return { ok:false, error:'Machine déjà en cours d\'utilisation', busy:true };
+      }
+    }
+    const lastId = rows.length > 1
+      ? Math.max.apply(null, rows.slice(1).map(function(r){ return Number(String(r[0]).replace('M','')) || 0; }))
+      : 0;
+    const id  = 'M' + String(lastId + 1).padStart(5, '0');
+    const now = new Date();
+    sh.appendRow([id, String(data.machine), String(data.refType||''), String(data.refId||''),
+      String(data.refLabel||''), String(data.client||''), String(data.operateur||''),
+      'EN_COURS', now, '', now.getTime(), '', String(data.demarrePar||''), String(data.note||'')]);
+    _logAction_('MACHINE_START', data.demarrePar||'admin',
+      'Machine:' + data.machine + ' ref:' + (data.refLabel||data.refId||''));
+    return { ok:true, id:id, startTs:now.getTime() };
+  } finally {
+    try { lock.releaseLock(); } catch(e) {}
+  }
+}
+
+function handleEndMachineSession(data) {
+  if (!data.id) return { ok:false, error:'id requis' };
+  const ss   = getSS();
+  const sh   = ss.getSheetByName(SHEET_MACHINES);
+  if (!sh) return { ok:false, error:'Feuille MachinesSessions introuvable' };
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(8000);
+    const rows = sh.getDataRange().getValues();
+    for (let i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) !== String(data.id)) continue;
+      if (rows[i][7] === 'TERMINE') return { ok:true, already:true };
+      const now = new Date();
+      const rowData = rows[i].slice();
+      rowData[7]  = 'TERMINE';
+      rowData[9]  = now;
+      rowData[11] = now.getTime();
+      if (data.note) rowData[13] = String(data.note);
+      sh.getRange(i + 1, 1, 1, rowData.length).setValues([rowData]);
+      _logAction_('MACHINE_END', data.demarrePar||String(rows[i][12]||'admin'),
+        'Machine:' + rows[i][1] + ' session:' + data.id);
+      return { ok:true, endTs:now.getTime() };
+    }
+    return { ok:false, error:'Session introuvable' };
+  } finally {
+    try { lock.releaseLock(); } catch(e) {}
+  }
+}
+
+function handleGetMachineSessions(data) {
+  const sh = getSS().getSheetByName(SHEET_MACHINES);
+  if (!sh) return { ok:true, sessions:[] };
+  const lastRow = sh.getLastRow();
+  if (lastRow <= 1) return { ok:true, sessions:[] };
+  const nCols = Math.max(MACHINE_HEADERS.length, sh.getLastColumn());
+  const LIMIT = Number((data && data.limit)) || 800;
+  const start = Math.max(2, lastRow - LIMIT + 1);
+  const rows  = sh.getRange(start, 1, lastRow - start + 1, nCols).getValues();
+  const tz  = Session.getScriptTimeZone();
+  const fmt = function(dt){ return dt ? Utilities.formatDate(new Date(dt), tz, 'dd/MM/yyyy HH:mm') : ''; };
+  const list = [];
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i]; if (!r[0]) continue;
+    list.push({
+      id:r[0], machine:r[1], refType:r[2], refId:r[3], refLabel:r[4], client:r[5],
+      operateur:r[6], statut:r[7], dateDebut:fmt(r[8]), dateFin:fmt(r[9]),
+      startTs:_msFromCell_(r[10]) || _msFromCell_(r[8]),
+      endTs:_msFromCell_(r[11]) || (r[9] ? _msFromCell_(r[9]) : null),
+      demarrePar:r[12], note:r[13]
+    });
+  }
+  return { ok:true, sessions:list };
+}
+
+function handleDeleteMachineSession(data) {
+  if (!data.id) return { ok:false, error:'id requis' };
+  const sh = getSS().getSheetByName(SHEET_MACHINES);
+  if (!sh) return { ok:false, error:'Feuille MachinesSessions introuvable' };
+  const rows = sh.getDataRange().getValues();
+  for (let i = rows.length - 1; i >= 1; i--) {
+    if (String(rows[i][0]) === String(data.id)) { sh.deleteRow(i + 1); return { ok:true }; }
+  }
+  return { ok:false, error:'Session introuvable' };
 }
 
 // Calcule statut + progression d'un dossier À PARTIR DES TÂCHES RÉELLES.

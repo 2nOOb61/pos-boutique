@@ -26,7 +26,7 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20260821-tournee">
+<link rel="stylesheet" href="./style.css?v=20260827-machines">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
@@ -921,6 +921,9 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
     <button class="bnav-btn" id="bnav-production" data-roles="admin,chef_atelier,operateur_prod,machiniste,pao,finition,livreur,caissier,commerciale,utilisateur,gestionnaire,comptable" onclick="showPage('production',null,this)">
       <span class="bnav-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg></span>Production
     </button>
+    <button class="bnav-btn" id="bnav-machines" data-roles="admin,chef_atelier,operateur_prod,machiniste,pao,finition,gestionnaire,commerciale" onclick="showPage('machines',null,this)">
+      <span class="bnav-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>Machines
+    </button>
     <button class="bnav-btn" id="bnav-messagerie" data-roles="admin,chef_atelier,operateur_prod,machiniste,pao,finition,livreur,caissier,commerciale,utilisateur,gestionnaire,comptable" onclick="showPage('messagerie',null,this)">
       <span class="bnav-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>Messagerie
     </button>
@@ -1024,6 +1027,10 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
           <button class="nav-btn sidebar-btn" data-roles="admin,chef_atelier,operateur_prod,machiniste,pao,finition,livreur,caissier,commerciale,utilisateur,gestionnaire,comptable" onclick="showPage('production',this)" aria-label="Production">
             <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg></span>
             <span class="sidebar-label">Production</span>
+          </button>
+          <button class="nav-btn sidebar-btn" data-roles="admin,chef_atelier,operateur_prod,machiniste,pao,finition,gestionnaire,commerciale" onclick="showPage('machines',this)" aria-label="Machines">
+            <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+            <span class="sidebar-label">Machines</span>
           </button>
           <button class="nav-btn sidebar-btn" data-roles="admin,commerciale,chef_atelier,pao,gestionnaire" onclick="showPage('suivi-bat',this)" aria-label="Suivi BAT">
             <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg></span>
@@ -1830,6 +1837,18 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
       <div id="polesConfigContainer"></div>
     </div>
 
+    <!-- Section Machines -->
+    <div class="config-section" data-roles="admin,chef_atelier">
+      <div style="margin-bottom:14px">
+        <div class="config-section-title" style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          Machines de production
+        </div>
+        <p style="font-size:12px;color:#78716c;margin:0">Liste des machines de l'atelier. Elles apparaissent dans le module « Machines » pour le suivi de production en temps réel (démarrage / fin des travaux par machine).</p>
+      </div>
+      <div id="machinesConfigContainer"></div>
+    </div>
+
     <!-- Section Articles -->
     <!-- Objectifs commerciaux -->
     <div class="config-section" data-roles="admin">
@@ -2101,6 +2120,57 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
     </div><!-- /prod-filters-sticky -->
 
     <div id="tachesContainer"></div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════
+       MACHINES — Suivi de production en temps réel
+       ═══════════════════════════════════════════ -->
+  <div class="page" id="page-machines" data-roles="admin,chef_atelier,operateur_prod,machiniste,pao,finition,gestionnaire,commerciale">
+    <div class="page-topbar">
+      <div>
+        <h1 class="page-title">Machines</h1>
+        <p class="page-subtitle">Suivi de production en temps réel — démarrage / fin des travaux par machine</p>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
+        <button class="btn-secondary" onclick="loadMachineSessionsFromScript().then(renderMachinesPage)" title="Actualiser">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          Actualiser
+        </button>
+      </div>
+    </div>
+    <div id="machinesStats" class="mch-stats"></div>
+    <div id="machinesGrid" class="mch-grid"></div>
+  </div>
+
+  <!-- MODAL — Démarrer un travail sur une machine -->
+  <div class="modal-overlay" id="machineStartModal">
+    <div class="modal" style="max-width:460px">
+      <div class="modal-title">
+        <span id="mchStartTitle">Démarrer un travail</span>
+        <button class="modal-close" onclick="closeModal('machineStartModal')">×</button>
+      </div>
+      <div class="form-group">
+        <label>Commande / réservation</label>
+        <select id="mchStartSource" onchange="onMachineSourceChange()"></select>
+      </div>
+      <div class="form-group">
+        <label>Travail (libellé)</label>
+        <input id="mchStartLabel" placeholder="Réf. ou description du travail" />
+      </div>
+      <div class="form-group">
+        <label>Opérateur machine</label>
+        <input id="mchStartOp" list="mchOpList" placeholder="Nom de l'opérateur" />
+        <datalist id="mchOpList"></datalist>
+      </div>
+      <div class="form-group">
+        <label>Note (optionnel)</label>
+        <input id="mchStartNote" placeholder="Ex. urgent, 200 pièces…" />
+      </div>
+      <div class="modal-footer" style="gap:8px">
+        <button class="btn-secondary" onclick="closeModal('machineStartModal')">Annuler</button>
+        <button class="btn-primary" id="mchStartConfirmBtn" onclick="confirmMachineStart()">▶ Démarrer</button>
+      </div>
+    </div>
   </div>
 
   <!-- ═══════════════════════════════════════════
@@ -3447,7 +3517,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260825-arretsolde"></script>
+<script src="./app.js?v=20260827-machines"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

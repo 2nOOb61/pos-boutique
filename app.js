@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '161 · 2026-08-25';
+const APP_VERSION = '162 · 2026-08-27';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -85,6 +85,41 @@ function _normPoles(v){
     return s.split(',').map(x => x.trim()).filter(Boolean);
   }
   return [];
+}
+
+// ============================================================
+// MACHINES ATELIER — liste configurable (Paramètres) stockée dans
+// shopConfig.machines, synchronisée sur tous les postes via saveShopConfig.
+// Modèle identique aux pôles. Sert au module de suivi machines : le
+// responsable de production démarre/termine une session par machine.
+// ============================================================
+const DEFAULT_MACHINES = [
+  { key:'dtf',        label:'DTF',              color:'#2563eb' },
+  { key:'sublimation',label:'Sublimation',      color:'#7c3aed' },
+  { key:'brodeuse',   label:'Brodeuse',         color:'#0d9488' },
+  { key:'decoupe',    label:'Découpe / Plotter',color:'#d97706' }
+];
+let ATELIER_MACHINES = DEFAULT_MACHINES.map(m => ({ ...m }));
+function _machineLabel(key){ const m = ATELIER_MACHINES.find(x => x.key === key); return m ? m.label : key; }
+function _machineColor(key){ const m = ATELIER_MACHINES.find(x => x.key === key); return m ? m.color : '#64748b'; }
+function _machineSlug(label){
+  return String(label || '').toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'machine';
+}
+function _applyMachinesFromConfig(){
+  const raw = (typeof shopConfig !== 'undefined' && shopConfig && Array.isArray(shopConfig.machines)) ? shopConfig.machines : null;
+  if (raw && raw.length){
+    ATELIER_MACHINES = raw
+      .filter(m => m && (m.key || m.label))
+      .map((m, i) => ({
+        key:   String(m.key || _machineSlug(m.label)),
+        label: String(m.label || m.key),
+        color: String(m.color || _POLE_PALETTE[i % _POLE_PALETTE.length])
+      }));
+  } else {
+    ATELIER_MACHINES = DEFAULT_MACHINES.map(m => ({ ...m }));
+  }
 }
 
 // ============================================================
@@ -214,6 +249,7 @@ const PAGE_ACCESS = {
   attribution:    ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','commerciale','gestionnaire'],
   blocages:       ['admin','chef_atelier','commerciale','gestionnaire'],
   production:     ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
+  machines:       ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','gestionnaire','commerciale'],
   calendrier:     ['admin','commerciale','chef_atelier','gestionnaire'],
   'suivi-bat':    ['admin','commerciale','chef_atelier','pao','gestionnaire'],
   messagerie:     ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
@@ -564,6 +600,8 @@ function closeMobileNav() {
 function showPage(id, btn, bnavBtn) {
   // Fermer le drawer mobile à chaque navigation
   if (window.innerWidth <= 768) closeMobileNav();
+  // Arrêter les timers du module Machines si on quitte cette page
+  if (id !== 'machines') _stopMachinesTimers();
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
   document.querySelectorAll('.bnav-btn').forEach(b=>b.classList.remove('active'));
@@ -579,7 +617,7 @@ function showPage(id, btn, bnavBtn) {
   });
   if (id==='stats')           { renderStats(); Promise.all([loadSalesFromScript(true, true), loadReservationsFromScript(), loadCommandesFromScript()]).then(renderStats).catch(()=>renderStats()); _loadProdStats(); }
   if (id==='mon-dashboard')  { renderMonDashboard(); }
-  if (id==='config')         { renderConfigPage(); renderRythmeConfig(); renderObjectifsConfig(); renderPolesConfig(); }
+  if (id==='config')         { renderConfigPage(); renderRythmeConfig(); renderObjectifsConfig(); renderPolesConfig(); renderMachinesConfig(); }
   if (id==='users')        renderUsersPage();
   if (id==='reservations') { _ensureDossierLinks(); renderReservations(); _lastResRefresh = 0; _autoRefreshReservations(); _loadTachesQuietly().then(renderReservations); }
   if (id==='attribution')  {
@@ -594,6 +632,7 @@ function showPage(id, btn, bnavBtn) {
   }
   if (id==='blocages')     { renderBlocages(); if (APPS_SCRIPT_URL) Promise.all([loadDossiers(), _loadTachesQuietly()]).then(renderBlocages).catch(()=>renderBlocages()); }
   if (id==='production')   { _setupProdViewToggle(); loadTaches(); _autoRefreshProduction(); initModulesProduction(); }
+  if (id==='machines')     { _enterMachinesPage(); }
   if (id==='calendrier')   { _ensureDossierLinks(); renderCalendrier(); if (APPS_SCRIPT_URL) Promise.all([loadCommandesFromScript(), loadReservationsFromScript()]).then(() => { _ensureDossierLinks(); renderCalendrier(); }).catch(()=>{}); }
   if (id==='suivi-bat')    { renderSuiviBat(); if (APPS_SCRIPT_URL) Promise.all([loadBatsFromScript(), loadDossiers(), loadCommandesFromScript()]).then(() => renderSuiviBat()).catch(()=>{}); }
   if (id==='messagerie')   { loadMessagerie(); _autoRefreshMessagerie(); }
@@ -5199,6 +5238,7 @@ function loadConfig() {
     if (k) categories = JSON.parse(k);
   } catch(e) {}
   _applyPolesFromConfig();
+  _applyMachinesFromConfig();
 }
 
 async function loadConfigFromGAS() {
@@ -5210,6 +5250,7 @@ async function loadConfigFromGAS() {
       shopConfig = { ...shopConfig, ...r.config };
       _persistConfig();
       _applyPolesFromConfig();   // pôles synchronisés depuis un autre poste
+      _applyMachinesFromConfig(); // machines synchronisées depuis un autre poste
       // Sauvegarder l'URL du dossier Drive si présente
       if (r.config.driveFolderUrl) {
         localStorage.setItem('pos-drive-folder-url', r.config.driveFolderUrl);
@@ -5217,7 +5258,9 @@ async function loadConfigFromGAS() {
       // Rafraîchir les UIs qui dépendent de la liste des pôles
       if (document.getElementById('cfgShopName')) renderConfigPage();
       if (document.getElementById('polesConfigContainer')) renderPolesConfig();
+      if (document.getElementById('machinesConfigContainer')) renderMachinesConfig();
       if (document.getElementById('cmdPolesList')) renderCmdPoles();
+      if (document.getElementById('page-machines') && document.getElementById('page-machines').classList.contains('active')) renderMachinesPage();
       if (document.getElementById('page-calendrier') && document.getElementById('page-calendrier').classList.contains('active')) renderCalendrier();
     }
   } catch(e) { /* silencieux — GAS peut ne pas supporter cette action */ }
@@ -5406,6 +5449,338 @@ function savePolesConfig(){
   const st = document.getElementById('polesCfgStatus');
   if (st){ st.textContent = ' Enregistré — synchronisé'; st.style.color = '#16a34a'; setTimeout(() => { if (st) st.textContent = ''; }, 3500); }
   showToast('Pôles enregistrés — synchronisés sur tous les postes', 'success');
+}
+
+// ============================================================
+// MACHINES — éditeur dans les Paramètres (mêmes mécanique/canal que les pôles).
+// ============================================================
+let _machinesEdit = [];   // copie éditable affichée dans les paramètres
+
+function renderMachinesConfig(){
+  const c = document.getElementById('machinesConfigContainer');
+  if (!c) return;
+  _machinesEdit = ATELIER_MACHINES.map(m => ({ key: m.key, label: m.label, color: m.color }));
+  _renderMachinesEditor();
+}
+
+function _renderMachinesEditor(){
+  const c = document.getElementById('machinesConfigContainer');
+  if (!c) return;
+  const rows = _machinesEdit.map((m, i) => `
+    <div class="pole-cfg-row">
+      <input type="color" class="pole-cfg-color" value="${m.color || '#64748b'}" onchange="_machineEditChange(${i},'color',this.value)" title="Couleur de la machine" />
+      <input type="text" class="pole-cfg-label" value="${String(m.label || '').replace(/"/g,'&quot;')}" placeholder="Nom de la machine (ex. DTF, Brodeuse…)" oninput="_machineEditChange(${i},'label',this.value)" />
+      <button type="button" class="pole-cfg-del" onclick="_machineEditRemove(${i})" title="Supprimer cette machine" aria-label="Supprimer">×</button>
+    </div>`).join('');
+  c.innerHTML = `
+    <div class="pole-cfg-list">${rows || '<div style="font-size:12px;color:var(--muted);padding:6px 0">Aucune machine — ajoutez-en une.</div>'}</div>
+    <div class="pole-cfg-actions">
+      <button type="button" class="btn-add-product" onclick="_machineEditAdd()">+ Ajouter une machine</button>
+      <button type="button" class="pole-cfg-save" onclick="saveMachinesConfig()">Enregistrer les machines</button>
+      <span id="machinesCfgStatus" class="pole-cfg-status"></span>
+    </div>
+    <p style="font-size:11px;color:#a8a29e;margin-top:10px">Synchronisé sur tous les postes. Ces machines apparaissent dans le module « Machines » (suivi de production en temps réel). Supprimer une machine n'efface pas l'historique de ses sessions.</p>`;
+}
+
+function _machineEditChange(i, key, val){ if (_machinesEdit[i]) _machinesEdit[i][key] = val; }
+function _machineEditAdd(){
+  _machinesEdit.push({ key: '', label: '', color: _POLE_PALETTE[_machinesEdit.length % _POLE_PALETTE.length] });
+  _renderMachinesEditor();
+}
+function _machineEditRemove(i){ _machinesEdit.splice(i, 1); _renderMachinesEditor(); }
+
+function saveMachinesConfig(){
+  const seen = {};
+  const out = [];
+  for (const m of _machinesEdit){
+    const label = String(m.label || '').trim();
+    if (!label) continue;
+    let key = String(m.key || '').trim() || _machineSlug(label);
+    let base = key, n = 2;
+    while (seen[key]) { key = base + '-' + n; n++; }
+    seen[key] = true;
+    out.push({ key, label, color: String(m.color || '#64748b') });
+  }
+  if (!out.length){ showToast('Ajoutez au moins une machine', 'error'); return; }
+  shopConfig.machines = out;
+  _persistConfig();
+  _applyMachinesFromConfig();
+  syncConfigToGAS();
+  if (document.getElementById('page-machines')?.classList.contains('active')) renderMachinesPage();
+  _renderMachinesEditor();
+  const st = document.getElementById('machinesCfgStatus');
+  if (st){ st.textContent = ' Enregistré — synchronisé'; st.style.color = '#16a34a'; setTimeout(() => { if (st) st.textContent = ''; }, 3500); }
+  showToast('Machines enregistrées — synchronisées sur tous les postes', 'success');
+}
+
+// ============================================================
+// MODULE MACHINES — suivi de production en temps réel.
+// Piloté par le responsable de production depuis un écran central
+// (les opérateurs machines n'ont pas d'ordinateur). Une session =
+// un travail sur une machine, démarré depuis une commande/réservation,
+// avec début/fin. Une machine « travaille » si elle a une session
+// EN_COURS, sinon elle est « libre / en pause ». Backend :
+// startMachineSession / endMachineSession / getMachineSessions.
+// ============================================================
+let machineSessions = (function(){ try { return JSON.parse(localStorage.getItem('pos-machine-sessions')||'[]'); } catch(e){ return []; } })();
+let _machineTickTimer = null;   // 1s : rafraîchit l'affichage des chronos en cours
+let _machinePollTimer = null;   // 15s : recharge les sessions depuis le serveur
+let _machineStartKey  = null;   // clé de la machine ciblée par la modale de démarrage
+let _machineStartClient = '';   // client déduit de la source choisie dans la modale
+const _MACHINE_OP_ROLES = ['operateur_prod','machiniste','pao','finition','chef_atelier'];
+function _canControlMachines(){
+  return ['admin','chef_atelier','gestionnaire','machiniste','operateur_prod','pao','finition'].includes(currentUser?.role);
+}
+
+function _saveMachineSessions(){ try { localStorage.setItem('pos-machine-sessions', JSON.stringify(machineSessions)); } catch(e){} }
+
+async function loadMachineSessionsFromScript(){
+  if (!APPS_SCRIPT_URL) return machineSessions;
+  try {
+    const r = await apiCall({ action:'getMachineSessions' });
+    if (r && r.ok && Array.isArray(r.sessions)) {
+      machineSessions = r.sessions;   // serveur = source de vérité
+      _saveMachineSessions();
+    }
+  } catch(e){}
+  return machineSessions;
+}
+
+function _enterMachinesPage(){
+  renderMachinesPage();               // rendu immédiat depuis le cache local
+  if (APPS_SCRIPT_URL) {
+    Promise.all([loadMachineSessionsFromScript(), loadCommandesFromScript(), loadReservationsFromScript()])
+      .then(() => { _ensureDossierLinks(); renderMachinesPage(); }).catch(()=>{});
+  }
+  _stopMachinesTimers();
+  _machineTickTimer = setInterval(_tickMachineTimers, 1000);
+  _machinePollTimer = setInterval(() => {
+    loadMachineSessionsFromScript().then(renderMachinesPage).catch(()=>{});
+  }, 15000);
+}
+function _stopMachinesTimers(){
+  if (_machineTickTimer){ clearInterval(_machineTickTimer); _machineTickTimer = null; }
+  if (_machinePollTimer){ clearInterval(_machinePollTimer); _machinePollTimer = null; }
+}
+
+function _machineActiveSession(key){
+  return machineSessions.find(s => String(s.machine) === String(key) && s.statut === 'EN_COURS') || null;
+}
+function _machineElapsedMs(s){
+  const start = Number(s.startTs) || 0;
+  const end   = s.statut === 'TERMINE' ? (Number(s.endTs) || start) : Date.now();
+  return Math.max(0, end - start);
+}
+function _fmtDur(ms){
+  const t = Math.floor(ms/1000);
+  const h = Math.floor(t/3600), m = Math.floor((t%3600)/60), sec = t%60;
+  if (h>0) return h+'h '+String(m).padStart(2,'0')+'m';
+  if (m>0) return m+'m '+String(sec).padStart(2,'0')+'s';
+  return sec+'s';
+}
+function _tickMachineTimers(){
+  document.querySelectorAll('.mch-timer[data-start]').forEach(el => {
+    const st = Number(el.getAttribute('data-start')) || 0;
+    if (st) el.textContent = _fmtDur(Date.now() - st);
+  });
+}
+function _resRef(r){
+  const d = (typeof dossiers !== 'undefined' ? dossiers : []).find(x => String(x.id) === String(r.dossierId));
+  return (d && d.numeroDossier) || ('RES-' + String(r.id).slice(-4).toUpperCase());
+}
+
+function renderMachinesPage(){
+  const grid = document.getElementById('machinesGrid');
+  if (!grid) return;
+  const machines = ATELIER_MACHINES;
+  const startOfDay = new Date(); startOfDay.setHours(0,0,0,0);
+  const sod = startOfDay.getTime();
+
+  const active = machines.filter(m => _machineActiveSession(m.key)).length;
+  const free   = machines.length - active;
+  const todayMs = machineSessions
+    .filter(s => (Number(s.startTs)||0) >= sod)
+    .reduce((a,s) => a + _machineElapsedMs(s), 0);
+
+  const stats = document.getElementById('machinesStats');
+  if (stats) stats.innerHTML = `
+    <div class="mch-kpi"><span class="mch-kpi-val" style="color:#16a34a">${active}</span><span class="mch-kpi-lbl">En cours</span></div>
+    <div class="mch-kpi"><span class="mch-kpi-val" style="color:#78716c">${free}</span><span class="mch-kpi-lbl">Libres / pause</span></div>
+    <div class="mch-kpi"><span class="mch-kpi-val">${machines.length}</span><span class="mch-kpi-lbl">Machines</span></div>
+    <div class="mch-kpi"><span class="mch-kpi-val">${_fmtDur(todayMs)}</span><span class="mch-kpi-lbl">Temps du jour</span></div>`;
+
+  if (!machines.length){
+    grid.innerHTML = `<div class="mch-empty">Aucune machine configurée.<br><a href="#" onclick="showPage('config');return false" style="color:var(--primary)">Ajoutez-en dans les Paramètres →</a></div>`;
+    return;
+  }
+  const canCtl = _canControlMachines();
+  grid.innerHTML = machines.map(m => {
+    const s = _machineActiveSession(m.key);
+    const busy = !!s;
+    const doneToday = machineSessions.filter(x => String(x.machine)===String(m.key) && x.statut==='TERMINE' && (Number(x.startTs)||0)>=sod);
+    const doneMs = doneToday.reduce((a,x) => a + _machineElapsedMs(x), 0);
+    const body = busy ? `
+      <div class="mch-job">
+        <div class="mch-job-ref">${escapeHtml(s.refLabel||'Travail')}</div>
+        <div class="mch-job-meta">${s.client?'👤 '+escapeHtml(s.client):''}${s.operateur?' &nbsp;·&nbsp; 🔧 '+escapeHtml(s.operateur):''}</div>
+        ${s.note?`<div class="mch-job-note">📝 ${escapeHtml(s.note)}</div>`:''}
+        <div class="mch-timer" data-start="${Number(s.startTs)||0}">${_fmtDur(_machineElapsedMs(s))}</div>
+        <div class="mch-since">Démarré ${escapeHtml(s.dateDebut||'')}</div>
+      </div>
+      ${canCtl?`<button class="mch-btn mch-btn-stop" onclick="endMachineSession('${s.id}')">⏹ Terminer le travail</button>`:''}`
+    : `
+      <div class="mch-job mch-job-empty">Machine libre — aucun travail en cours</div>
+      ${canCtl?`<button class="mch-btn mch-btn-start" onclick="openMachineStart('${m.key}')">▶ Démarrer un travail</button>`:''}`;
+    return `
+    <div class="mch-card ${busy?'busy':'idle'}" style="--mch:${m.color}">
+      <div class="mch-head">
+        <span class="mch-dot"></span>
+        <span class="mch-name">${escapeHtml(m.label)}</span>
+        <span class="mch-status">${busy?'🟢 En cours':'⚪ Libre'}</span>
+      </div>
+      ${body}
+      <div class="mch-foot">
+        <span>${doneToday.length} terminé(s) aujourd'hui · ${_fmtDur(doneMs)}</span>
+        ${doneToday.length?`<a href="#" onclick="toggleMachineHistory('${m.key}');return false">Historique</a>`:''}
+      </div>
+      <div class="mch-hist" id="mchHist-${m.key}" style="display:none"></div>
+    </div>`;
+  }).join('');
+}
+
+function toggleMachineHistory(key){
+  const box = document.getElementById('mchHist-'+key);
+  if (!box) return;
+  if (box.style.display !== 'none'){ box.style.display = 'none'; return; }
+  const startOfDay = new Date(); startOfDay.setHours(0,0,0,0);
+  const sod = startOfDay.getTime();
+  const list = machineSessions
+    .filter(x => String(x.machine)===String(key) && (Number(x.startTs)||0)>=sod)
+    .sort((a,b)=> (Number(b.startTs)||0) - (Number(a.startTs)||0));
+  const admin = currentUser?.role === 'admin';
+  box.innerHTML = list.length ? list.map(x => `
+    <div class="mch-hist-row">
+      <span class="mch-hist-ref">${escapeHtml(x.refLabel||'Travail')}</span>
+      <span class="mch-hist-dur">${x.statut==='EN_COURS'?'⏳ en cours':_fmtDur(_machineElapsedMs(x))}</span>
+      <span class="mch-hist-meta">${escapeHtml(x.dateDebut||'')}${x.dateFin?' → '+escapeHtml(x.dateFin):''}${x.operateur?' · '+escapeHtml(x.operateur):''}</span>
+      ${admin?`<button class="mch-hist-del" title="Supprimer" onclick="deleteMachineSession('${x.id}')">×</button>`:''}
+    </div>`).join('') : '<div style="font-size:12px;color:var(--muted);padding:6px">Aucune session aujourd\'hui.</div>';
+  box.style.display = '';
+}
+
+// ── Démarrage d'un travail sur une machine ──────────────────
+function openMachineStart(key){
+  if (!_canControlMachines()){ showToast('Action non autorisée pour votre rôle', 'error'); return; }
+  if (_machineActiveSession(key)){ showToast('Cette machine a déjà un travail en cours', 'error'); return; }
+  _machineStartKey = key;
+  const m = ATELIER_MACHINES.find(x => x.key === key);
+  const titleEl = document.getElementById('mchStartTitle');
+  if (titleEl) titleEl.textContent = 'Démarrer — ' + (m ? m.label : key);
+
+  // Source : commandes + réservations non annulées (on part des commandes/réservations)
+  const cmds = (typeof commandes !== 'undefined' ? commandes : [])
+    .filter(c => c.status !== 'cancelled')
+    .sort((a,b)=> new Date(b.date||0) - new Date(a.date||0));
+  const ress = (typeof reservations !== 'undefined' ? reservations : [])
+    .filter(r => r.status !== 'cancelled')
+    .sort((a,b)=> new Date(b.date||0) - new Date(a.date||0));
+  const cmdOpts = cmds.map(c => `<option value="cmd:${c.id}">${escapeHtml(_cmdRef(c))} — ${escapeHtml(c.clientName||'Client')}</option>`).join('');
+  const resOpts = ress.map(r => `<option value="res:${r.id}">${escapeHtml(_resRef(r))} — ${escapeHtml(r.clientName||'Client')}</option>`).join('');
+  const sel = document.getElementById('mchStartSource');
+  if (sel) sel.innerHTML = `
+    <option value="">— Choisir une commande / réservation —</option>
+    ${cmdOpts?`<optgroup label="Commandes">${cmdOpts}</optgroup>`:''}
+    ${resOpts?`<optgroup label="Réservations">${resOpts}</optgroup>`:''}
+    <option value="libre">— Travail libre (saisie manuelle) —</option>`;
+
+  // Datalist des opérateurs machine
+  const dl = document.getElementById('mchOpList');
+  if (dl) dl.innerHTML = (localUsers||[])
+    .filter(u => u.actif && _MACHINE_OP_ROLES.includes(u.role))
+    .map(u => `<option value="${escapeHtml(u.label||u.username)}"></option>`).join('');
+
+  document.getElementById('mchStartLabel').value = '';
+  document.getElementById('mchStartOp').value = '';
+  document.getElementById('mchStartNote').value = '';
+  _machineStartClient = '';
+  openModal('machineStartModal');
+}
+
+function onMachineSourceChange(){
+  const v = document.getElementById('mchStartSource').value;
+  const labelInput = document.getElementById('mchStartLabel');
+  _machineStartClient = '';
+  if (!v || v === 'libre'){ if (v==='libre') labelInput.focus(); return; }
+  const [type, id] = v.split(':');
+  if (type === 'cmd'){
+    const c = (commandes||[]).find(x => String(x.id) === String(id));
+    if (c){ labelInput.value = _cmdRef(c); _machineStartClient = c.clientName || ''; }
+  } else if (type === 'res'){
+    const r = (reservations||[]).find(x => String(x.id) === String(id));
+    if (r){ labelInput.value = _resRef(r); _machineStartClient = r.clientName || ''; }
+  }
+}
+
+async function confirmMachineStart(){
+  const key = _machineStartKey;
+  if (!key) return;
+  if (_machineActiveSession(key)){ showToast('Machine déjà occupée', 'error'); closeModal('machineStartModal'); return; }
+  const v     = document.getElementById('mchStartSource').value;
+  const label = document.getElementById('mchStartLabel').value.trim();
+  const op    = document.getElementById('mchStartOp').value.trim();
+  const note  = document.getElementById('mchStartNote').value.trim();
+  let refType = 'libre', refId = '', refLabel = label, client = _machineStartClient;
+  if (v && v !== 'libre'){
+    const [type, id] = v.split(':');
+    refType = type === 'cmd' ? 'commande' : 'reservation';
+    refId   = id;
+  }
+  if (!refLabel){ showToast('Indiquez le travail (choisir une commande ou saisir un libellé)', 'error'); return; }
+
+  const payload = { action:'startMachineSession', machine:key, refType, refId, refLabel,
+    client, operateur:op, note, demarrePar: currentUser?.label || currentUser?.username || '' };
+  let r = { ok:true };
+  if (APPS_SCRIPT_URL){
+    const btn = document.getElementById('mchStartConfirmBtn');
+    if (btn){ btn.disabled = true; btn.textContent = 'Démarrage...'; }
+    r = await apiCall(payload);
+    if (btn){ btn.disabled = false; btn.textContent = '▶ Démarrer'; }
+  }
+  if (r && r.busy){ showToast('Machine déjà en cours sur un autre poste', 'error'); await loadMachineSessionsFromScript(); renderMachinesPage(); closeModal('machineStartModal'); return; }
+  if (!r || !r.ok){ showToast('Échec du démarrage', 'error'); return; }
+  const now = Date.now();
+  machineSessions.push({ id: r.id || ('MLOC'+now), machine:key, refType, refId, refLabel,
+    client, operateur:op, statut:'EN_COURS', dateDebut:new Date().toLocaleString('fr-FR'),
+    dateFin:'', startTs: r.startTs || now, endTs:null, demarrePar: payload.demarrePar, note });
+  _saveMachineSessions();
+  closeModal('machineStartModal');
+  renderMachinesPage();
+  showToast('Travail démarré sur ' + _machineLabel(key), 'success');
+}
+
+async function endMachineSession(id){
+  if (!_canControlMachines()){ showToast('Action non autorisée pour votre rôle', 'error'); return; }
+  const s = machineSessions.find(x => String(x.id) === String(id));
+  if (!s){ showToast('Session introuvable', 'error'); return; }
+  if (!confirm('Terminer le travail « ' + (s.refLabel||'') + ' » sur ' + _machineLabel(s.machine) + ' ?\nDurée : ' + _fmtDur(_machineElapsedMs(s)))) return;
+  let r = { ok:true };
+  if (APPS_SCRIPT_URL){ r = await apiCall({ action:'endMachineSession', id, demarrePar: currentUser?.label || '' }); }
+  if (!r || !r.ok){ showToast('Échec de la clôture', 'error'); return; }
+  const now = Date.now();
+  s.statut = 'TERMINE'; s.endTs = r.endTs || now; s.dateFin = new Date().toLocaleString('fr-FR');
+  _saveMachineSessions();
+  renderMachinesPage();
+  showToast('Travail terminé — ' + _fmtDur(_machineElapsedMs(s)), 'success');
+}
+
+async function deleteMachineSession(id){
+  if (currentUser?.role !== 'admin'){ showToast('Réservé à l\'administrateur', 'error'); return; }
+  if (!confirm('Supprimer définitivement cette session ?')) return;
+  if (APPS_SCRIPT_URL){ try { await apiCall({ action:'deleteMachineSession', id }); } catch(e){} }
+  machineSessions = machineSessions.filter(x => String(x.id) !== String(id));
+  _saveMachineSessions();
+  renderMachinesPage();
+  showToast('Session supprimée', 'success');
 }
 
 function renderConfigPage() {
