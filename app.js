@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '163 · 2026-08-27';
+const APP_VERSION = '164 · 2026-08-27';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -5535,10 +5535,12 @@ function _canControlMachines(){
 
 function _saveMachineSessions(){ try { localStorage.setItem('pos-machine-sessions', JSON.stringify(machineSessions)); } catch(e){} }
 
-async function loadMachineSessionsFromScript(){
+async function loadMachineSessionsFromScript(limit){
   if (!APPS_SCRIPT_URL) return machineSessions;
   try {
-    const r = await apiCall({ action:'getMachineSessions' });
+    const payload = { action:'getMachineSessions' };
+    if (limit) payload.limit = limit;
+    const r = await apiCall(payload);
     if (r && r.ok && Array.isArray(r.sessions)) {
       machineSessions = r.sessions;   // serveur = source de vérité
       _saveMachineSessions();
@@ -5642,7 +5644,10 @@ function renderMachinesPage(){
       ${body}
       <div class="mch-foot">
         <span>${doneToday.length} terminé(s) aujourd'hui · ${_fmtDur(doneMs)}</span>
-        ${doneToday.length?`<a href="#" onclick="toggleMachineHistory('${m.key}');return false">Historique</a>`:''}
+        <span class="mch-foot-links">
+          <a href="#" onclick="openMachineDash('${m.key}');return false">📊 Tableau de bord</a>
+          ${doneToday.length?`<a href="#" onclick="toggleMachineHistory('${m.key}');return false">Historique</a>`:''}
+        </span>
       </div>
       <div class="mch-hist" id="mchHist-${m.key}" style="display:none"></div>
     </div>`;
@@ -5820,7 +5825,136 @@ async function deleteMachineSession(id){
   machineSessions = machineSessions.filter(x => String(x.id) !== String(id));
   _saveMachineSessions();
   renderMachinesPage();
+  if (document.getElementById('machineDashModal')?.classList.contains('open')) renderMachineDash();
   showToast('Session supprimée', 'success');
+}
+
+// ============================================================
+// TABLEAU DE BORD PAR MACHINE — tous les travaux passés par la
+// machine, filtrables par jour / mois / année (source machineSessions).
+// ============================================================
+let _machineDashKey  = null;
+let _machineDashGran = 'month';   // 'day' | 'month' | 'year' | 'all'
+let _machineDashRef  = '';        // valeur du sélecteur selon la granularité
+
+function openMachineDash(key){
+  _machineDashKey = key;
+  const now = new Date();
+  _machineDashGran = 'month';
+  _machineDashRef  = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+  const m = ATELIER_MACHINES.find(x => x.key === key);
+  const t = document.getElementById('mchDashTitle');
+  if (t) t.textContent = 'Tableau de bord — ' + (m ? m.label : key);
+  openModal('machineDashModal');
+  renderMachineDash();
+  // Charger davantage d'historique (au-delà du board temps réel) en arrière-plan
+  if (APPS_SCRIPT_URL){
+    loadMachineSessionsFromScript(5000).then(() => {
+      if (document.getElementById('machineDashModal')?.classList.contains('open')) renderMachineDash();
+    }).catch(()=>{});
+  }
+}
+
+function _machineDashSetGran(g){
+  _machineDashGran = g;
+  const now = new Date();
+  if (g === 'day')        _machineDashRef = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');
+  else if (g === 'month') _machineDashRef = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+  else if (g === 'year')  _machineDashRef = String(now.getFullYear());
+  else                    _machineDashRef = '';
+  renderMachineDash();
+}
+function _machineDashSetRef(v){ _machineDashRef = v; renderMachineDash(); }
+
+function _machineDashYmd(s){
+  const ts = Number(s.startTs) || 0; if (!ts) return '';
+  const d = new Date(ts);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function _machineDashPeriodSessions(){
+  const key = _machineDashKey, g = _machineDashGran, ref = _machineDashRef;
+  let list = machineSessions.filter(s => String(s.machine) === String(key));
+  if (g !== 'all' && ref){
+    list = list.filter(s => {
+      const ymd = _machineDashYmd(s); if (!ymd) return false;
+      if (g === 'day')   return ymd === ref;
+      if (g === 'month') return ymd.slice(0,7) === ref;
+      if (g === 'year')  return ymd.slice(0,4) === ref;
+      return true;
+    });
+  }
+  return list.sort((a,b) => (Number(b.startTs)||0) - (Number(a.startTs)||0));
+}
+
+function renderMachineDash(){
+  const ctrl = document.getElementById('mchDashControls');
+  const kpis = document.getElementById('mchDashKpis');
+  const body = document.getElementById('mchDashBody');
+  if (!ctrl || !kpis || !body) return;
+  const g = _machineDashGran;
+  const tab = (val,lbl) => `<button class="mch-dash-tab ${g===val?'active':''}" onclick="_machineDashSetGran('${val}')">${lbl}</button>`;
+  let picker = '';
+  if (g === 'day')        picker = `<input type="date" value="${_machineDashRef}" onchange="_machineDashSetRef(this.value)">`;
+  else if (g === 'month') picker = `<input type="month" value="${_machineDashRef}" onchange="_machineDashSetRef(this.value)">`;
+  else if (g === 'year'){
+    const years = [...new Set(machineSessions
+      .filter(s => String(s.machine)===String(_machineDashKey))
+      .map(s => new Date(Number(s.startTs)||0).getFullYear())
+      .filter(y => y > 2000))].sort((a,b)=>b-a);
+    if (!years.length) years.push(new Date().getFullYear());
+    if (!years.map(String).includes(String(_machineDashRef))) _machineDashRef = String(years[0]);
+    picker = `<select onchange="_machineDashSetRef(this.value)">${years.map(y=>`<option value="${y}" ${String(y)===String(_machineDashRef)?'selected':''}>${y}</option>`).join('')}</select>`;
+  }
+  ctrl.innerHTML = `<div class="mch-dash-controls">
+    <div class="mch-dash-tabs">${tab('day','Jour')}${tab('month','Mois')}${tab('year','Année')}${tab('all','Tout')}</div>
+    <div class="mch-dash-picker">${picker}</div>
+  </div>`;
+
+  const list    = _machineDashPeriodSessions();
+  const totalMs = list.reduce((a,s)=> a + _machineElapsedMs(s), 0);
+  const done    = list.filter(s => s.statut === 'TERMINE').length;
+  const enCours = list.filter(s => s.statut === 'EN_COURS').length;
+  const avg     = list.length ? totalMs/list.length : 0;
+  kpis.innerHTML = `
+    <div class="mch-kpi"><span class="mch-kpi-val">${list.length}</span><span class="mch-kpi-lbl">Travaux</span></div>
+    <div class="mch-kpi"><span class="mch-kpi-val">${_fmtDur(totalMs)}</span><span class="mch-kpi-lbl">Temps total</span></div>
+    <div class="mch-kpi"><span class="mch-kpi-val">${_fmtDur(avg)}</span><span class="mch-kpi-lbl">Temps moyen</span></div>
+    <div class="mch-kpi"><span class="mch-kpi-val">${done}${enCours?` <span style="font-size:13px;color:#16a34a">+${enCours}⏳</span>`:''}</span><span class="mch-kpi-lbl">Terminés</span></div>`;
+
+  body.innerHTML = list.length ? `
+    <div class="mch-dash-tablewrap"><table class="mch-dash-table">
+      <thead><tr><th>Début</th><th>Réf / Client</th><th>Opérateur</th><th>Durée</th><th>Statut</th></tr></thead>
+      <tbody>${list.map(s => `<tr>
+        <td>${escapeHtml(s.dateDebut||'')}</td>
+        <td><strong>${escapeHtml(s.refLabel||'—')}</strong>${s.client?`<br><span class="mch-dash-cli">${escapeHtml(s.client)}</span>`:''}</td>
+        <td>${escapeHtml(s.operateur||'—')}</td>
+        <td class="mch-dash-dur">${s.statut==='EN_COURS'?'⏳ '+_fmtDur(_machineElapsedMs(s)):_fmtDur(_machineElapsedMs(s))}</td>
+        <td>${s.statut==='EN_COURS'?'<span style="color:#16a34a;font-weight:700">En cours</span>':'Terminé'}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`
+    : `<div class="mch-dash-empty">Aucun travail sur cette machine pour cette période.</div>`;
+}
+
+function printMachineDash(){
+  const m = ATELIER_MACHINES.find(x => x.key === _machineDashKey);
+  const list = _machineDashPeriodSessions();
+  const totalMs = list.reduce((a,s)=> a + _machineElapsedMs(s), 0);
+  const periodLbl = _machineDashGran==='all' ? "Tout l'historique"
+    : (_machineDashGran==='day' ? 'Jour '+_machineDashRef
+    :  _machineDashGran==='month' ? 'Mois '+_machineDashRef : 'Année '+_machineDashRef);
+  const rows = list.map(s => `<tr><td>${escapeHtml(s.dateDebut||'')}</td><td>${escapeHtml(s.refLabel||'')}</td><td>${escapeHtml(s.client||'')}</td><td>${escapeHtml(s.operateur||'')}</td><td>${s.statut==='EN_COURS'?'en cours':_fmtDur(_machineElapsedMs(s))}</td></tr>`).join('');
+  const w = window.open('', '_blank');
+  if (!w){ showToast('Autorisez les pop-ups pour imprimer', 'error'); return; }
+  w.document.write(`<html><head><title>Machine ${escapeHtml(m?m.label:'')}</title>
+    <style>body{font-family:Arial,sans-serif;padding:20px;color:#111}h1{font-size:18px;margin:0}h2{font-size:13px;color:#555;font-weight:normal;margin:4px 0 16px}
+    table{width:100%;border-collapse:collapse;font-size:12px}th,td{border:1px solid #ccc;padding:6px 8px;text-align:left}th{background:#f0f0f0}</style>
+    </head><body>
+    <h1>Tableau de bord — ${escapeHtml(m?m.label:'')}</h1>
+    <h2>${periodLbl} · ${list.length} travaux · temps total ${_fmtDur(totalMs)}</h2>
+    <table><thead><tr><th>Début</th><th>Référence</th><th>Client</th><th>Opérateur</th><th>Durée</th></tr></thead>
+    <tbody>${rows||'<tr><td colspan="5">Aucun travail</td></tr>'}</tbody></table>
+    </body></html>`);
+  w.document.close(); w.focus(); w.print();
 }
 
 function renderConfigPage() {

@@ -26,7 +26,7 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20260827-machines">
+<link rel="stylesheet" href="./style.css?v=20260827-machdash">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
@@ -2175,6 +2175,23 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
     </div>
   </div>
 
+  <!-- MODAL — Tableau de bord par machine -->
+  <div class="modal-overlay" id="machineDashModal">
+    <div class="modal" style="max-width:760px">
+      <div class="modal-title">
+        <span id="mchDashTitle">Tableau de bord machine</span>
+        <button class="modal-close" onclick="closeModal('machineDashModal')">×</button>
+      </div>
+      <div id="mchDashControls"></div>
+      <div id="mchDashKpis" class="mch-stats"></div>
+      <div id="mchDashBody"></div>
+      <div class="modal-footer" style="gap:8px">
+        <button class="btn-secondary" onclick="closeModal('machineDashModal')">Fermer</button>
+        <button class="btn-primary" onclick="printMachineDash()">🖨 Imprimer</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ═══════════════════════════════════════════
        MESSAGERIE — Fil commun + pièces jointes
        ═══════════════════════════════════════════ -->
@@ -3519,7 +3536,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260827-machsearch"></script>
+<script src="./app.js?v=20260827-machdash"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
