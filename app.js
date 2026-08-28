@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '167 · 2026-08-28';
+const APP_VERSION = '169 · 2026-08-28';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -602,6 +602,8 @@ function showPage(id, btn, bnavBtn) {
   if (window.innerWidth <= 768) closeMobileNav();
   // Arrêter les timers du module Machines si on quitte cette page
   if (id !== 'machines') _stopMachinesTimers();
+  // Arrêter l'horloge live du cockpit Suivi BAT si on quitte cette page
+  if (id !== 'suivi-bat' && typeof _stopBatClock === 'function') _stopBatClock();
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
   document.querySelectorAll('.bnav-btn').forEach(b=>b.classList.remove('active'));
@@ -12031,6 +12033,58 @@ function _updateBatNavBadge(){
   if (n > 0) { badge.textContent = n; badge.style.display = ''; } else badge.style.display = 'none';
 }
 
+// ── Cockpit : horloge live + flux d'activité ───────────────
+let _batClockTimer = null;
+function _stopBatClock(){ if (_batClockTimer){ clearInterval(_batClockTimer); _batClockTimer = null; } }
+function _startBatClock(){
+  _stopBatClock();
+  const upd = () => {
+    const el = document.getElementById('batClock'); if (!el) return;
+    const d = new Date();
+    el.textContent = [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2,'0')).join(':');
+  };
+  upd(); _batClockTimer = setInterval(upd, 1000);
+}
+
+// Temps relatif court pour le flux d'activité.
+function _batAgo(iso){
+  const t = new Date(iso).getTime(); if (isNaN(t)) return '';
+  const s = Math.floor((Date.now() - t) / 1000);
+  if (s < 45)   return "à l'instant";
+  const m = Math.floor(s / 60);   if (m < 60) return `il y a ${m} min`;
+  const h = Math.floor(m / 60);   if (h < 24) return `il y a ${h} h`;
+  const d = Math.floor(h / 24);   return d === 1 ? 'hier' : `il y a ${d} j`;
+}
+
+// Métadonnées d'un type d'action BAT (couleur, icône, verbe).
+function _batEventMeta(kind){
+  switch(kind){
+    case 'create': return { color:'#7c3aed', icon:'🟣', verb:'a préparé' , tail:'' };
+    case 'sent':   return { color:'#2563eb', icon:'🔵', verb:'a envoyé'  , tail:' au client' };
+    case 'valide': return { color:'#16a34a', icon:'🟢', verb:'a fait valider', tail:' par le client' };
+    case 'retour': return { color:'#dc2626', icon:'🔴', verb:'a saisi des retours sur', tail:'' };
+  }
+  return { color:'#57534e', icon:'⚪', verb:'a agi sur', tail:'' };
+}
+
+// Aplatit tous les BAT en événements datés (1 BAT → jusqu'à 3 actions),
+// les plus récents en tête. Source du flux « Dernières actions ».
+function _batActivityEvents(limit){
+  const evs = [];
+  (Array.isArray(bats) ? bats : []).forEach(b => {
+    const ref = b.numeroDossier || '';
+    const base = { ref, dossierId: b.dossierId, version: b.version };
+    if (b.createdAt) evs.push({ ...base, ts:b.createdAt, who:b.createdBy || '—', kind:'create' });
+    if (b.sentAt)    evs.push({ ...base, ts:b.sentAt,    who:b.sentBy    || '—', kind:'sent'   });
+    if (b.decidedAt) evs.push({ ...base, ts:b.decidedAt, who:b.decidedBy || '—', kind:(b.status === 'valide' ? 'valide' : 'retour'), retours:b.retours || '' });
+  });
+  evs.sort((a,b) => new Date(b.ts) - new Date(a.ts));
+  return (limit && limit > 0) ? evs.slice(0, limit) : evs;
+}
+
+// Détection « nouvelle action » : on retient le dernier horodatage déjà vu.
+let _batSeenTs = (function(){ const v = Number(localStorage.getItem('pos-bat-seen') || 0); return isNaN(v) ? 0 : v; })();
+
 async function renderSuiviBat(force){
   if (force && APPS_SCRIPT_URL) { try { await loadBatsFromScript(); } catch(e){} }
   const cont = document.getElementById('suiviBatContent');
@@ -12038,14 +12092,83 @@ async function renderSuiviBat(force){
   const all = _batBoardRows();
   const counts = { all:all.length, pao:0, commercial:0, client:0, valide:0 };
   all.forEach(r => { counts[r.bucket] = (counts[r.bucket] || 0) + 1; });
-  const chips = [
-    ['all','Tous','#57534e'],
-    ['pao','🟣 PAO','#7c3aed'],
-    ['commercial','🟠 À envoyer','#d97706'],
-    ['client','🔵 Attente client','#2563eb'],
-    ['valide','🟢 Validés','#16a34a'],
-  ].map(([k,lbl,c]) => `<button class="batb-chip${_batBoardFilter===k?' on':''}" style="${_batBoardFilter===k?`border-color:${c};color:${c}`:''}" onclick="setBatBoardFilter('${k}')">${lbl} <span class="batb-chip-n">${counts[k]||0}</span></button>`).join('');
 
+  // Retards : échéance de livraison dépassée, BAT non encore validé.
+  const todayIso = (typeof _calTodayIso === 'function') ? _calTodayIso() : new Date().toISOString().slice(0,10);
+  const nbLate = all.filter(r => { const dl = _batDossierDeadline(r.d); return dl && dl < todayIso && r.bucket !== 'valide'; }).length;
+
+  const now = new Date();
+  const clock = [now.getHours(), now.getMinutes(), now.getSeconds()].map(n => String(n).padStart(2,'0')).join(':');
+
+  // ── Barre de commande (cockpit sombre) : KPI + horloge + filtres ──
+  const kpis = [
+    { k:'pao',        lbl:'PAO',            n:counts.pao,        c:'#7c3aed' },
+    { k:'commercial', lbl:'À envoyer',      n:counts.commercial, c:'#d97706' },
+    { k:'client',     lbl:'Attente client', n:counts.client,     c:'#2563eb' },
+    { k:'valide',     lbl:'Validés',        n:counts.valide,     c:'#16a34a' },
+    { k:'late',       lbl:'En retard',      n:nbLate,            c:'#dc2626' },
+  ].map(x => `<div class="batk-kpi" style="--k:${x.c}"><span class="batk-kpi-val">${x.n}</span><span class="batk-kpi-lbl">${x.lbl}</span></div>`).join('');
+
+  const filters = [
+    { k:'all',        lbl:'Tous',           n:counts.all },
+    { k:'pao',        lbl:'🟣 PAO',          n:counts.pao },
+    { k:'commercial', lbl:'🟠 À envoyer',    n:counts.commercial },
+    { k:'client',     lbl:'🔵 Attente client', n:counts.client },
+    { k:'valide',     lbl:'🟢 Validés',      n:counts.valide },
+  ].map(f => `<button class="batk-filter${_batBoardFilter===f.k?' batk-filter--active':''}" onclick="setBatBoardFilter('${f.k}')">${f.lbl}<span class="batk-filter-n">${f.n}</span></button>`).join('');
+
+  const cockpit = `
+    <div class="batk-cockpit">
+      <div class="batk-kpis">${kpis}</div>
+      <div class="batk-cockpit-right">
+        <div class="batk-clock" id="batClock">${clock}</div>
+        <div class="batk-filters">${filters}</div>
+      </div>
+    </div>`;
+
+  // ── Flux « Dernières actions » — regroupé PAR OPÉRATEUR ──
+  const events = _batActivityEvents(24);
+  const maxTs = events.reduce((mx, e) => { const t = new Date(e.ts).getTime(); return t > mx ? t : mx; }, 0);
+  // Regroupe par opérateur ; l'ordre des groupes suit l'activité la plus récente
+  // (events déjà triés du plus récent au plus ancien), les actions restent triées
+  // du plus récent au plus ancien dans chaque groupe.
+  const groups = []; const gmap = {};
+  events.forEach(e => {
+    const key = e.who || '—';
+    if (!gmap[key]) { gmap[key] = { who:key, list:[], latest:e.ts }; groups.push(gmap[key]); }
+    gmap[key].list.push(e);
+  });
+  const evRow = e => {
+    const m = _batEventMeta(e.kind);
+    const isNew = _batSeenTs > 0 && new Date(e.ts).getTime() > _batSeenTs;
+    return `<div class="batk-ev${isNew?' batk-ev--new':''}">
+        <span class="batk-ev-dot" style="background:${m.color}"></span>
+        <div class="batk-ev-body">
+          <div class="batk-ev-line">${m.verb} le <b>BAT v${e.version}</b>${m.tail} <span class="batk-ev-ref">${escapeHtml(e.ref||'dossier')}</span></div>
+          ${e.kind==='retour' && e.retours ? `<div class="batk-ev-note">« ${escapeHtml(e.retours)} »</div>` : ''}
+          <div class="batk-ev-time">${_batAgo(e.ts)}</div>
+        </div>
+        ${isNew ? `<span class="batk-ev-new">Nouveau</span>` : ''}
+        <button class="batk-ev-open" title="Ouvrir le dossier" onclick="openAttribForDossier('${e.dossierId}')">→</button>
+      </div>`;
+  };
+  const feedInner = groups.length ? groups.map(g => {
+    const anyNew = g.list.some(e => _batSeenTs > 0 && new Date(e.ts).getTime() > _batSeenTs);
+    return `<div class="batk-grp">
+        <div class="batk-grp-h">
+          <span class="batk-grp-who">🔧 ${escapeHtml(g.who)}${anyNew?'<span class="batk-grp-dot"></span>':''}</span>
+          <span class="batk-grp-meta">${g.list.length} action${g.list.length>1?'s':''} · ${_batAgo(g.latest)}</span>
+        </div>
+        ${g.list.map(evRow).join('')}
+      </div>`;
+  }).join('') : `<div class="batk-ev-empty">Aucune action pour l'instant.</div>`;
+  const feed = `
+    <div class="batk-feed">
+      <div class="batk-feed-h"><span>Dernières actions · par opérateur</span><span class="batk-feed-live">● en direct</span></div>
+      <div class="batk-evs">${feedInner}</div>
+    </div>`;
+
+  // ── Liste des dossiers (filtrée) ──
   const rows = _batBoardFilter === 'all' ? all : all.filter(r => r.bucket === _batBoardFilter);
   const list = rows.length ? rows.map(r => {
     const st = r.st;
@@ -12055,11 +12178,16 @@ async function renderSuiviBat(force){
       if (r.bucket === 'client') since = 'en attente ' + (r.days <= 0 ? "aujourd'hui" : r.days === 1 ? '1 jour' : r.days + ' jours');
       else since = r.days <= 0 ? "aujourd'hui" : r.days === 1 ? 'il y a 1 j' : 'il y a ' + r.days + ' j';
     }
+    // Dernier opérateur intervenu sur ce dossier (à qui l'on doit la dernière action).
+    const b = st.bat; let lastWho = '', lastTs = '';
+    if (b){ if (b.decidedAt){ lastWho = b.decidedBy; lastTs = b.decidedAt; } else if (b.sentAt){ lastWho = b.sentBy; lastTs = b.sentAt; } else if (b.createdAt){ lastWho = b.createdBy; lastTs = b.createdAt; } }
+    const lastChip = lastWho ? `<span class="batb-last">🔧 ${escapeHtml(lastWho)} · ${_batAgo(lastTs)}</span>` : '';
     return `<div class="batb-row${urgent?' batb-row--urgent':''}">
       <div class="batb-main">
         <div class="batb-ref">${escapeHtml(r.d.numeroDossier||'')}</div>
         <div class="batb-client">${escapeHtml(r.client)}</div>
         <div class="batb-sub">Commercial : ${escapeHtml(r.commercial)} · BAT v${r.version} · ${r.nbVersions} version${r.nbVersions>1?'s':''}</div>
+        ${lastChip}
       </div>
       <div class="batb-state">
         <span class="batb-badge" style="background:${st.bg};color:${st.color};border-color:${st.color}55">${st.label}</span>
@@ -12069,7 +12197,12 @@ async function renderSuiviBat(force){
     </div>`;
   }).join('') : `<div class="batb-empty">Aucun dossier dans cet état.</div>`;
 
-  cont.innerHTML = `<div class="batb-chips">${chips}</div><div class="batb-list">${list}</div>`;
+  cont.innerHTML = cockpit + feed + `<div class="batb-list">${list}</div>`;
+
+  // Mémorise le dernier horodatage vu (les prochaines actions plus récentes flasheront « Nouveau »).
+  if (maxTs > _batSeenTs){ _batSeenTs = maxTs; try { localStorage.setItem('pos-bat-seen', String(maxTs)); } catch(e){} }
+
+  _startBatClock();
   _updateBatNavBadge();
   _applyBatView();
 }
