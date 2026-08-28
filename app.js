@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '166 · 2026-08-28';
+const APP_VERSION = '167 · 2026-08-28';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -4497,7 +4497,7 @@ async function apiCall(payload) {
   if (!APPS_SCRIPT_URL) return null;
 
   // ── LECTURES & LOGIN : requête GET avec params individuels ─
-  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getEncaissements', 'getBats', 'getArretsCaisse', 'getJournal', 'getDossiers', 'getTaches', 'getDashboard', 'getControlPatron', 'getComments', 'getNotifs', 'getModifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles'];
+  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getEncaissements', 'getBats', 'getArretsCaisse', 'getJournal', 'getDossiers', 'getTaches', 'getDashboard', 'getControlPatron', 'getComments', 'getNotifs', 'getModifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles', 'getMachineSessions'];
   if (getActions.includes(payload.action)) {
     const buildUrl = () => {
       let url = APPS_SCRIPT_URL + '?action=' + payload.action;
