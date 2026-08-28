@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '164 · 2026-08-27';
+const APP_VERSION = '166 · 2026-08-28';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -5528,6 +5528,9 @@ let _machinePollTimer = null;   // 15s : recharge les sessions depuis le serveur
 let _machineStartKey  = null;   // clé de la machine ciblée par la modale de démarrage
 let _machineStartClient = '';   // client déduit de la source choisie dans la modale
 let _machineSourceItems = [];   // liste complète (commandes+réservations) pour la recherche dans la modale
+let _mchFilter = 'all';         // filtre cockpit : all | busy | paused | idle
+const MCH_SHIFT_MS = 8 * 3600 * 1000;   // référence charge du jour (poste de 8h)
+function setMchFilter(f){ _mchFilter = f; renderMachinesPage(); }
 const _MACHINE_OP_ROLES = ['operateur_prod','machiniste','pao','finition','chef_atelier'];
 function _canControlMachines(){
   return ['admin','chef_atelier','gestionnaire','machiniste','operateur_prod','pao','finition'].includes(currentUser?.role);
@@ -5569,10 +5572,22 @@ function _stopMachinesTimers(){
 function _machineActiveSession(key){
   return machineSessions.find(s => String(s.machine) === String(key) && s.statut === 'EN_COURS') || null;
 }
+function _machinePausedSessions(key){
+  return machineSessions.filter(s => String(s.machine) === String(key) && s.statut === 'EN_PAUSE');
+}
+// Temps ACTIF d'une session (hors pauses) : cumul figé + segment courant si EN_COURS.
+// Rétro-compatible avec les anciennes sessions sans accumMs (durée = endTs − startTs).
 function _machineElapsedMs(s){
-  const start = Number(s.startTs) || 0;
-  const end   = s.statut === 'TERMINE' ? (Number(s.endTs) || start) : Date.now();
-  return Math.max(0, end - start);
+  const hasAccum = s.accumMs !== undefined && s.accumMs !== null && s.accumMs !== '';
+  if (s.statut === 'TERMINE'){
+    if (hasAccum) return Math.max(0, Number(s.accumMs) || 0);
+    const st = Number(s.startTs)||0, en = Number(s.endTs)||st; return Math.max(0, en - st);
+  }
+  const accum = hasAccum ? (Number(s.accumMs)||0) : 0;
+  if (s.statut === 'EN_PAUSE') return Math.max(0, accum);
+  // EN_COURS : cumul + segment courant depuis startTs (= début du segment)
+  const seg = Number(s.startTs) || 0;
+  return Math.max(0, accum + (Date.now() - seg));
 }
 function _fmtDur(ms){
   const t = Math.floor(ms/1000);
@@ -5582,14 +5597,26 @@ function _fmtDur(ms){
   return sec+'s';
 }
 function _tickMachineTimers(){
-  document.querySelectorAll('.mch-timer[data-start]').forEach(el => {
-    const st = Number(el.getAttribute('data-start')) || 0;
-    if (st) el.textContent = _fmtDur(Date.now() - st);
+  document.querySelectorAll('.mch-timer[data-seg]').forEach(el => {
+    const seg   = Number(el.getAttribute('data-seg')) || 0;
+    const accum = Number(el.getAttribute('data-accum')) || 0;
+    if (seg) el.textContent = _fmtDur(accum + (Date.now() - seg));
   });
+  const clk = document.getElementById('mchClock');
+  if (clk){
+    const d = new Date();
+    clk.textContent = [d.getHours(), d.getMinutes(), d.getSeconds()]
+      .map(n => String(n).padStart(2,'0')).join(':');
+  }
 }
 function _resRef(r){
   const d = (typeof dossiers !== 'undefined' ? dossiers : []).find(x => String(x.id) === String(r.dossierId));
   return (d && d.numeroDossier) || ('RES-' + String(r.id).slice(-4).toUpperCase());
+}
+function _machineStatutTxt(s){ return s.statut==='EN_COURS'?'En cours':(s.statut==='EN_PAUSE'?'En pause':'Terminé'); }
+function _machineDurTxt(s){
+  const d = _fmtDur(_machineElapsedMs(s));
+  return s.statut==='EN_COURS' ? '⏳ '+d : (s.statut==='EN_PAUSE' ? '⏸ '+d : d);
 }
 
 function renderMachinesPage(){
@@ -5600,48 +5627,110 @@ function renderMachinesPage(){
   const sod = startOfDay.getTime();
 
   const active = machines.filter(m => _machineActiveSession(m.key)).length;
-  const free   = machines.length - active;
+  const paused = machines.filter(m => !_machineActiveSession(m.key) && _machinePausedSessions(m.key).length).length;
+  const free   = machines.length - active - paused;
   const todayMs = machineSessions
     .filter(s => (Number(s.startTs)||0) >= sod)
     .reduce((a,s) => a + _machineElapsedMs(s), 0);
 
+  const now = new Date();
+  const clock = [now.getHours(), now.getMinutes(), now.getSeconds()].map(n => String(n).padStart(2,'0')).join(':');
+  const filters = [
+    { k:'all',    lbl:'Toutes', n:machines.length },
+    { k:'busy',   lbl:'En cours', n:active },
+    { k:'paused', lbl:'En pause', n:paused },
+    { k:'idle',   lbl:'Libres', n:free },
+  ];
   const stats = document.getElementById('machinesStats');
   if (stats) stats.innerHTML = `
-    <div class="mch-kpi"><span class="mch-kpi-val" style="color:#16a34a">${active}</span><span class="mch-kpi-lbl">En cours</span></div>
-    <div class="mch-kpi"><span class="mch-kpi-val" style="color:#78716c">${free}</span><span class="mch-kpi-lbl">Libres / pause</span></div>
-    <div class="mch-kpi"><span class="mch-kpi-val">${machines.length}</span><span class="mch-kpi-lbl">Machines</span></div>
-    <div class="mch-kpi"><span class="mch-kpi-val">${_fmtDur(todayMs)}</span><span class="mch-kpi-lbl">Temps du jour</span></div>`;
+    <div class="mch-cockpit-bar">
+      <div class="mch-kpis">
+        <div class="mch-kpi mch-kpi--run"><span class="mch-kpi-val">${active}</span><span class="mch-kpi-lbl">En cours</span></div>
+        <div class="mch-kpi mch-kpi--pause"><span class="mch-kpi-val">${paused}</span><span class="mch-kpi-lbl">En pause</span></div>
+        <div class="mch-kpi mch-kpi--idle"><span class="mch-kpi-val">${free}</span><span class="mch-kpi-lbl">Libres</span></div>
+        <div class="mch-kpi mch-kpi--time"><span class="mch-kpi-val">${_fmtDur(todayMs)}</span><span class="mch-kpi-lbl">Temps du jour</span></div>
+      </div>
+      <div class="mch-cockpit-right">
+        <div class="mch-clock" id="mchClock">${clock}</div>
+        <div class="mch-filters">
+          ${filters.map(f => `<button class="mch-filter ${_mchFilter===f.k?'mch-filter--active':''}" onclick="setMchFilter('${f.k}')">${f.lbl}<span class="mch-filter-n">${f.n}</span></button>`).join('')}
+        </div>
+      </div>
+    </div>`;
 
   if (!machines.length){
     grid.innerHTML = `<div class="mch-empty">Aucune machine configurée.<br><a href="#" onclick="showPage('config');return false" style="color:var(--primary)">Ajoutez-en dans les Paramètres →</a></div>`;
     return;
   }
   const canCtl = _canControlMachines();
-  grid.innerHTML = machines.map(m => {
-    const s = _machineActiveSession(m.key);
-    const busy = !!s;
+  const visible = machines.filter(m => {
+    if (_mchFilter === 'all') return true;
+    const st = _machineActiveSession(m.key) ? 'busy' : (_machinePausedSessions(m.key).length ? 'paused' : 'idle');
+    return st === _mchFilter;
+  });
+  if (!visible.length){
+    const lbl = { busy:'en cours', paused:'en pause', idle:'libre' }[_mchFilter] || '';
+    grid.innerHTML = `<div class="mch-empty">Aucune machine ${lbl}.</div>`;
+    return;
+  }
+  grid.innerHTML = visible.map(m => {
+    const s        = _machineActiveSession(m.key);
+    const pausedL  = _machinePausedSessions(m.key);
+    const busy     = !!s;
+    const state    = busy ? 'busy' : (pausedL.length ? 'paused' : 'idle');
     const doneToday = machineSessions.filter(x => String(x.machine)===String(m.key) && x.statut==='TERMINE' && (Number(x.startTs)||0)>=sod);
     const doneMs = doneToday.reduce((a,x) => a + _machineElapsedMs(x), 0);
+    // Charge du jour : temps total suivi (actif + pause + terminé) sur cette machine, en % d'un poste de 8h
+    const dayMs  = machineSessions.filter(x => String(x.machine)===String(m.key) && (Number(x.startTs)||0)>=sod)
+                                  .reduce((a,x) => a + _machineElapsedMs(x), 0);
+    const loadPct = Math.min(100, Math.round(dayMs / MCH_SHIFT_MS * 100));
+    // Liste des travaux en pause (repris ou terminés depuis la carte)
+    const pausedBlock = pausedL.length ? `
+      <div class="mch-paused-list">
+        ${pausedL.map(p => `
+          <div class="mch-paused-item">
+            <div class="mch-paused-info">
+              <span class="mch-paused-ref">⏸ ${escapeHtml(p.refLabel||'Travail')}</span>
+              ${p.client?`<span class="mch-paused-cli">${escapeHtml(p.client)}</span>`:''}
+              <span class="mch-paused-time">${_fmtDur(_machineElapsedMs(p))} de travail</span>
+            </div>
+            ${canCtl?`<div class="mch-paused-actions">
+              <button class="mch-mini-btn mch-mini-resume" ${busy?`disabled title="Terminez ou mettez en pause le travail en cours d'abord"`:''} onclick="resumeMachineSession('${p.id}')">▶ Reprendre</button>
+              <button class="mch-mini-btn mch-mini-stop" onclick="endMachineSession('${p.id}')">⏹</button>
+            </div>`:''}
+          </div>`).join('')}
+      </div>` : '';
     const body = busy ? `
       <div class="mch-job">
         <div class="mch-job-ref">${escapeHtml(s.refLabel||'Travail')}</div>
         <div class="mch-job-meta">${s.client?'👤 '+escapeHtml(s.client):''}${s.operateur?' &nbsp;·&nbsp; 🔧 '+escapeHtml(s.operateur):''}</div>
         ${s.note?`<div class="mch-job-note">📝 ${escapeHtml(s.note)}</div>`:''}
-        <div class="mch-timer" data-start="${Number(s.startTs)||0}">${_fmtDur(_machineElapsedMs(s))}</div>
+        <div class="mch-timer" data-seg="${Number(s.startTs)||0}" data-accum="${Number(s.accumMs)||0}">${_fmtDur(_machineElapsedMs(s))}</div>
         <div class="mch-since">Démarré ${escapeHtml(s.dateDebut||'')}</div>
       </div>
-      ${canCtl?`<button class="mch-btn mch-btn-stop" onclick="endMachineSession('${s.id}')">⏹ Terminer le travail</button>`:''}`
+      ${canCtl?`<div class="mch-btn-row">
+        <button class="mch-btn mch-btn-pause" onclick="pauseMachineSession('${s.id}')">⏸ Pause</button>
+        <button class="mch-btn mch-btn-stop" onclick="endMachineSession('${s.id}')">⏹ Terminer</button>
+      </div>`:''}`
     : `
-      <div class="mch-job mch-job-empty">Machine libre — aucun travail en cours</div>
+      <div class="mch-job mch-job-empty">${pausedL.length?'Machine libre — travail(x) en pause ci-dessous':'Machine libre — aucun travail en cours'}</div>
       ${canCtl?`<button class="mch-btn mch-btn-start" onclick="openMachineStart('${m.key}')">▶ Démarrer un travail</button>`:''}`;
+    const statusPill = busy ? 'En cours' : (pausedL.length ? 'En pause' : 'Libre');
     return `
-    <div class="mch-card ${busy?'busy':'idle'}" style="--mch:${m.color}">
+    <div class="mch-card ${state}" style="--mch:${m.color}">
       <div class="mch-head">
         <span class="mch-dot"></span>
         <span class="mch-name">${escapeHtml(m.label)}</span>
-        <span class="mch-status">${busy?'🟢 En cours':'⚪ Libre'}</span>
+        <span class="mch-status">${statusPill}</span>
       </div>
-      ${body}
+      <div class="mch-readout">
+        ${body}
+        ${pausedBlock}
+      </div>
+      <div class="mch-gauge" title="Charge du jour (base 8h)">
+        <div class="mch-gauge-track"><div class="mch-gauge-fill" style="width:${loadPct}%"></div></div>
+        <span class="mch-gauge-lbl">${loadPct}%</span>
+      </div>
       <div class="mch-foot">
         <span>${doneToday.length} terminé(s) aujourd'hui · ${_fmtDur(doneMs)}</span>
         <span class="mch-foot-links">
@@ -5667,7 +5756,7 @@ function toggleMachineHistory(key){
   box.innerHTML = list.length ? list.map(x => `
     <div class="mch-hist-row">
       <span class="mch-hist-ref">${escapeHtml(x.refLabel||'Travail')}</span>
-      <span class="mch-hist-dur">${x.statut==='EN_COURS'?'⏳ en cours':_fmtDur(_machineElapsedMs(x))}</span>
+      <span class="mch-hist-dur">${_machineDurTxt(x)}</span>
       <span class="mch-hist-meta">${escapeHtml(x.dateDebut||'')}${x.dateFin?' → '+escapeHtml(x.dateFin):''}${x.operateur?' · '+escapeHtml(x.operateur):''}</span>
       ${admin?`<button class="mch-hist-del" title="Supprimer" onclick="deleteMachineSession('${x.id}')">×</button>`:''}
     </div>`).join('') : '<div style="font-size:12px;color:var(--muted);padding:6px">Aucune session aujourd\'hui.</div>';
@@ -5796,7 +5885,7 @@ async function confirmMachineStart(){
   const now = Date.now();
   machineSessions.push({ id: r.id || ('MLOC'+now), machine:key, refType, refId, refLabel,
     client, operateur:op, statut:'EN_COURS', dateDebut:new Date().toLocaleString('fr-FR'),
-    dateFin:'', startTs: r.startTs || now, endTs:null, demarrePar: payload.demarrePar, note });
+    dateFin:'', startTs: r.startTs || now, endTs:null, demarrePar: payload.demarrePar, note, accumMs:0 });
   _saveMachineSessions();
   closeModal('machineStartModal');
   renderMachinesPage();
@@ -5807,15 +5896,53 @@ async function endMachineSession(id){
   if (!_canControlMachines()){ showToast('Action non autorisée pour votre rôle', 'error'); return; }
   const s = machineSessions.find(x => String(x.id) === String(id));
   if (!s){ showToast('Session introuvable', 'error'); return; }
-  if (!confirm('Terminer le travail « ' + (s.refLabel||'') + ' » sur ' + _machineLabel(s.machine) + ' ?\nDurée : ' + _fmtDur(_machineElapsedMs(s)))) return;
+  // Temps actif final (fige le segment courant si EN_COURS)
+  const finalMs = _machineElapsedMs(s);
+  if (!confirm('Terminer le travail « ' + (s.refLabel||'') + ' » sur ' + _machineLabel(s.machine) + ' ?\nTemps de travail : ' + _fmtDur(finalMs))) return;
   let r = { ok:true };
   if (APPS_SCRIPT_URL){ r = await apiCall({ action:'endMachineSession', id, demarrePar: currentUser?.label || '' }); }
   if (!r || !r.ok){ showToast('Échec de la clôture', 'error'); return; }
   const now = Date.now();
   s.statut = 'TERMINE'; s.endTs = r.endTs || now; s.dateFin = new Date().toLocaleString('fr-FR');
+  s.accumMs = (r && typeof r.accumMs === 'number') ? r.accumMs : finalMs;
   _saveMachineSessions();
   renderMachinesPage();
+  if (document.getElementById('machineDashModal')?.classList.contains('open')) renderMachineDash();
   showToast('Travail terminé — ' + _fmtDur(_machineElapsedMs(s)), 'success');
+}
+
+// Met en pause le travail en cours : la machine se libère pour un travail prioritaire.
+async function pauseMachineSession(id){
+  if (!_canControlMachines()){ showToast('Action non autorisée pour votre rôle', 'error'); return; }
+  const s = machineSessions.find(x => String(x.id) === String(id));
+  if (!s || s.statut !== 'EN_COURS'){ showToast('Aucun travail en cours à mettre en pause', 'error'); return; }
+  // Fige le cumul localement (accum + segment courant)
+  const accum = (Number(s.accumMs)||0) + Math.max(0, Date.now() - (Number(s.startTs)||0));
+  let r = { ok:true };
+  if (APPS_SCRIPT_URL){ r = await apiCall({ action:'pauseMachineSession', id, demarrePar: currentUser?.label || '' }); }
+  if (!r || !r.ok){ showToast('Échec de la mise en pause', 'error'); return; }
+  s.statut = 'EN_PAUSE';
+  s.accumMs = (r && typeof r.accumMs === 'number') ? r.accumMs : accum;
+  _saveMachineSessions();
+  renderMachinesPage();
+  showToast('Travail mis en pause — ' + _machineLabel(s.machine) + ' libérée', 'success');
+}
+
+// Reprend un travail en pause (refusé si la machine a déjà un travail en cours).
+async function resumeMachineSession(id){
+  if (!_canControlMachines()){ showToast('Action non autorisée pour votre rôle', 'error'); return; }
+  const s = machineSessions.find(x => String(x.id) === String(id));
+  if (!s || s.statut !== 'EN_PAUSE'){ showToast('Ce travail n\'est pas en pause', 'error'); return; }
+  if (_machineActiveSession(s.machine)){ showToast('Machine occupée — terminez ou mettez en pause le travail en cours', 'error'); return; }
+  let r = { ok:true };
+  if (APPS_SCRIPT_URL){ r = await apiCall({ action:'resumeMachineSession', id, demarrePar: currentUser?.label || '' }); }
+  if (r && r.busy){ showToast('Machine occupée sur un autre poste', 'error'); await loadMachineSessionsFromScript(); renderMachinesPage(); return; }
+  if (!r || !r.ok){ showToast('Échec de la reprise', 'error'); return; }
+  s.statut = 'EN_COURS';
+  s.startTs = r.startTs || Date.now();   // nouveau début de segment
+  _saveMachineSessions();
+  renderMachinesPage();
+  showToast('Travail repris sur ' + _machineLabel(s.machine), 'success');
 }
 
 async function deleteMachineSession(id){
@@ -5928,8 +6055,8 @@ function renderMachineDash(){
         <td>${escapeHtml(s.dateDebut||'')}</td>
         <td><strong>${escapeHtml(s.refLabel||'—')}</strong>${s.client?`<br><span class="mch-dash-cli">${escapeHtml(s.client)}</span>`:''}</td>
         <td>${escapeHtml(s.operateur||'—')}</td>
-        <td class="mch-dash-dur">${s.statut==='EN_COURS'?'⏳ '+_fmtDur(_machineElapsedMs(s)):_fmtDur(_machineElapsedMs(s))}</td>
-        <td>${s.statut==='EN_COURS'?'<span style="color:#16a34a;font-weight:700">En cours</span>':'Terminé'}</td>
+        <td class="mch-dash-dur">${_machineDurTxt(s)}</td>
+        <td>${s.statut==='EN_COURS'?'<span style="color:#16a34a;font-weight:700">En cours</span>':(s.statut==='EN_PAUSE'?'<span style="color:#d97706;font-weight:700">En pause</span>':'Terminé')}</td>
       </tr>`).join('')}</tbody>
     </table></div>`
     : `<div class="mch-dash-empty">Aucun travail sur cette machine pour cette période.</div>`;
@@ -5942,7 +6069,7 @@ function printMachineDash(){
   const periodLbl = _machineDashGran==='all' ? "Tout l'historique"
     : (_machineDashGran==='day' ? 'Jour '+_machineDashRef
     :  _machineDashGran==='month' ? 'Mois '+_machineDashRef : 'Année '+_machineDashRef);
-  const rows = list.map(s => `<tr><td>${escapeHtml(s.dateDebut||'')}</td><td>${escapeHtml(s.refLabel||'')}</td><td>${escapeHtml(s.client||'')}</td><td>${escapeHtml(s.operateur||'')}</td><td>${s.statut==='EN_COURS'?'en cours':_fmtDur(_machineElapsedMs(s))}</td></tr>`).join('');
+  const rows = list.map(s => `<tr><td>${escapeHtml(s.dateDebut||'')}</td><td>${escapeHtml(s.refLabel||'')}</td><td>${escapeHtml(s.client||'')}</td><td>${escapeHtml(s.operateur||'')}</td><td>${s.statut==='EN_COURS'?'en cours':(s.statut==='EN_PAUSE'?'en pause · '+_fmtDur(_machineElapsedMs(s)):_fmtDur(_machineElapsedMs(s)))}</td></tr>`).join('');
   const w = window.open('', '_blank');
   if (!w){ showToast('Autorisez les pop-ups pour imprimer', 'error'); return; }
   w.document.write(`<html><head><title>Machine ${escapeHtml(m?m.label:'')}</title>
@@ -8511,7 +8638,17 @@ function _syncDossierDates() {
     // partout et « qui se suit ». Normalise aussi les anciens dossiers. Affichage seul.
     const ref = _seqRefOf(d.sourceType, d.sourceId, _seq);
     if (!ref || ref.endsWith('—')) return;           // source absente des maps → ne pas écraser
-    if (d.numeroDossier !== ref) d.numeroDossier = ref;
+    // 🛑 N'ÉCRASER un numéro DÉJÀ posé QUE si `ref` vient d'un vrai `seq` SERVEUR
+    // (identique sur tous les postes). Sinon `ref` est un « rang local » recalculé à
+    // partir des SEULES commandes chargées ici → dépendant du poste : c'est ce qui
+    // faisait qu'une même commande CMD-521 s'imprimait CMD-525 sur le poste opérateur
+    // (le recalcul écrasait, à l'impression, l'instantané serveur pourtant correct).
+    // Quand la réf n'est pas fiable, on GARDE l'instantané serveur déjà présent sur le
+    // dossier / la tâche ; on ne pose le repli local que si aucun numéro n'existe encore.
+    const authSet = d.sourceType === 'reservation' ? _seq.resAuth : _seq.cmdAuth;
+    const reliable = authSet && authSet.has(String(d.sourceId));
+    const pick = cur => (reliable || !cur) ? ref : cur;
+    d.numeroDossier = pick(d.numeroDossier);
     // Propager la référence canonique aux tâches liées. Leur `numeroDossier` est un
     // instantané figé à l'assignation : il divergeait de l'Attribution (qui lit le
     // dossier live) dès que la numérotation séquentielle se décalait — p.ex. une commande
@@ -8519,7 +8656,7 @@ function _syncDossierDates() {
     // suivants. Résultat : Attribution, Production et fiche imprimée affichaient 3 réf.
     // différentes pour un même dossier. Ici on réaligne (mémoire seule, pas de resync GAS).
     if (Array.isArray(taches)) {
-      taches.forEach(t => { if (t.dossierId === d.id && t.numeroDossier !== ref) t.numeroDossier = ref; });
+      taches.forEach(t => { if (t.dossierId === d.id) t.numeroDossier = pick(t.numeroDossier); });
     }
   });
 }
@@ -15038,17 +15175,20 @@ function toggleFinItem(id) { if (_finItemOpen.has(id)) _finItemOpen.delete(id); 
 // enregistrements y compris annulés → ne se décale pas quand on annule/filtre). Partagée
 // par Finances / Attribution / Production / Livraisons → références cohérentes partout.
 function _buildSeqMaps() {
-  const mk = arr => {
+  const auth = { cmd: new Set(), res: new Set() };
+  const mk = (arr, authSet) => {
     const m = new Map();
     const list = (Array.isArray(arr) ? arr : []).slice();
     // 1) SOURCE DE VÉRITÉ = le `seq` persisté par le serveur (position dans l'ordre
     //    de création de la feuille, calculé sur la liste COMPLÈTE). Identique sur
     //    tous les postes → règle le bug « réf. différente sur un autre opérateur »,
     //    y compris quand le client charge les commandes par tranches (pagination).
+    //    Les ids porteurs d'un vrai `seq` serveur sont marqués « authoritative » :
+    //    eux seuls peuvent écraser un numéro déjà posé (cf. _syncDossierDates).
     let maxSeq = 0;
     list.forEach(o => {
       const s = Number(o && o.seq);
-      if (s > 0) { m.set(String(o.id), s); if (s > maxSeq) maxSeq = s; }
+      if (s > 0) { m.set(String(o.id), s); authSet.add(String(o.id)); if (s > maxSeq) maxSeq = s; }
     });
     // 2) REPLI (rang local) UNIQUEMENT pour les enregistrements sans `seq` — créés
     //    hors-ligne et pas encore synchronisés, ou ancien backend sans seq. Numéros
@@ -15064,7 +15204,13 @@ function _buildSeqMaps() {
       .forEach(o => { m.set(String(o.id), ++maxSeq); });
     return m;
   };
-  return { cmd: mk(commandes), res: mk(reservations) };
+  return {
+    cmd: mk(commandes, auth.cmd),
+    res: mk(reservations, auth.res),
+    // Ids dont le numéro vient d'un vrai `seq` SERVEUR (fiable/identique partout).
+    cmdAuth: auth.cmd,
+    resAuth: auth.res
+  };
 }
 function _seqRefOf(kind, id, maps) {
   const m = (kind === 'reservation') ? maps.res : maps.cmd;

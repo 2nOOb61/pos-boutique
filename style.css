@@ -2660,36 +2660,94 @@ html, body { overflow-x: hidden; max-width: 100%; }
 /* ═══════════════════════════════════════════
    MODULE MACHINES — suivi de production temps réel
    ═══════════════════════════════════════════ */
-.mch-stats{display:flex;gap:12px;flex-wrap:wrap;margin:6px 0 18px}
-.mch-kpi{flex:1;min-width:120px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:2px}
-.mch-kpi-val{font-size:26px;font-weight:800;line-height:1;color:var(--text)}
-.mch-kpi-lbl{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600}
-.mch-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;padding-bottom:40px}
+/* ═══════════════════════════════════════════════════════════════
+   MODULE MACHINES — poste de pilotage (cockpit temps réel)
+   ═══════════════════════════════════════════════════════════════ */
+.mch-stats{display:block;margin:4px 0 16px}
+/* Barre de commande collante : jauges + horloge live + filtres */
+.mch-cockpit-bar{position:sticky;top:0;z-index:16;display:flex;align-items:stretch;gap:16px;flex-wrap:wrap;
+  background:linear-gradient(135deg,#111c26,#1b2c3a);border:1px solid #27384a;border-radius:16px;
+  padding:14px 16px;box-shadow:0 14px 34px -18px rgba(0,0,0,.55)}
+.mch-kpis{display:flex;gap:10px;flex:1;flex-wrap:wrap;min-width:0}
+.mch-kpi{flex:1;min-width:106px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.08);
+  border-radius:12px;padding:10px 14px;display:flex;flex-direction:column;gap:3px;position:relative;overflow:hidden}
+.mch-kpi::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--k,#64748b)}
+.mch-kpi--run{--k:#22c55e}.mch-kpi--pause{--k:#f59e0b}.mch-kpi--idle{--k:#64748b}.mch-kpi--time{--k:#38bdf8}
+.mch-kpi-val{font-size:26px;font-weight:800;line-height:1;color:#f1f5f9;font-variant-numeric:tabular-nums}
+.mch-kpi-lbl{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#93a4b5;font-weight:700}
+.mch-cockpit-right{display:flex;flex-direction:column;align-items:flex-end;justify-content:space-between;gap:10px}
+.mch-clock{font-family:'DM Mono',ui-monospace,monospace;font-size:22px;font-weight:700;color:#e2e8f0;
+  letter-spacing:1px;font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:9px}
+.mch-clock::before{content:'';width:8px;height:8px;border-radius:50%;background:#22c55e;
+  box-shadow:0 0 0 4px rgba(34,197,94,.18);animation:mchLive 1.6s ease-in-out infinite}
+@keyframes mchLive{0%,100%{box-shadow:0 0 0 3px rgba(34,197,94,.22)}50%{box-shadow:0 0 0 6px rgba(34,197,94,.05)}}
+.mch-filters{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.mch-filter{border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05);color:#cbd5e1;
+  border-radius:999px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;transition:.14s;
+  display:inline-flex;align-items:center;gap:6px;font-family:inherit}
+.mch-filter:hover{border-color:rgba(255,255,255,.32);color:#fff}
+.mch-filter--active{background:#22c55e;border-color:#22c55e;color:#04210f}
+.mch-filter-n{font-size:10px;font-weight:800;background:rgba(0,0,0,.2);border-radius:999px;padding:1px 6px;min-width:15px;text-align:center}
+.mch-filter--active .mch-filter-n{background:rgba(0,0,0,.14)}
+/* Grille des tuiles-instruments */
+.mch-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px;padding-bottom:40px}
 .mch-empty{grid-column:1/-1;text-align:center;color:var(--muted);padding:50px 20px;font-size:14px}
-.mch-card{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--mch,#64748b);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:10px;transition:.2s}
-.mch-card.busy{box-shadow:0 0 0 1px rgba(22,163,74,.25);border-left-color:#16a34a}
-.mch-card.busy .mch-dot{background:#16a34a;box-shadow:0 0 0 4px rgba(22,163,74,.18);animation:mchPulse 1.6s ease-in-out infinite}
-.mch-card.idle{opacity:.96}
-.mch-head{display:flex;align-items:center;gap:9px}
-.mch-dot{width:10px;height:10px;border-radius:50%;background:#cbd0cc;flex-shrink:0}
-@keyframes mchPulse{0%,100%{box-shadow:0 0 0 3px rgba(22,163,74,.18)}50%{box-shadow:0 0 0 6px rgba(22,163,74,.06)}}
-.mch-name{font-size:16px;font-weight:800;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.mch-status{font-size:11px;font-weight:700;white-space:nowrap}
-.mch-job{background:var(--surface2);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:4px}
-.mch-job-empty{color:var(--muted);font-size:13px;text-align:center;padding:16px 12px}
-.mch-job-ref{font-size:15px;font-weight:800;color:var(--text)}
-.mch-job-meta{font-size:12.5px;color:var(--muted)}
-.mch-job-note{font-size:12px;color:var(--text);background:var(--surface3);border-radius:8px;padding:4px 8px;margin-top:2px}
-.mch-timer{font-size:28px;font-weight:800;color:#16a34a;font-variant-numeric:tabular-nums;margin-top:4px;letter-spacing:-.5px}
-.mch-since{font-size:11px;color:var(--muted)}
+.mch-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;overflow:hidden;
+  display:flex;flex-direction:column;transition:.2s;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+.mch-card.busy{box-shadow:0 0 0 1px rgba(34,197,94,.35),0 10px 26px -14px rgba(34,197,94,.45)}
+.mch-card.paused{box-shadow:0 0 0 1px rgba(245,158,11,.32)}
+.mch-card.idle{opacity:.97}
+/* Bandeau instrument (sombre) */
+.mch-head{display:flex;align-items:center;gap:10px;padding:11px 14px;
+  background:linear-gradient(135deg,#14202b,#1d2e3d);border-bottom:2px solid var(--mch,#64748b)}
+.mch-dot{width:11px;height:11px;border-radius:50%;background:#64748b;flex-shrink:0;box-shadow:0 0 0 3px rgba(100,116,139,.2)}
+.mch-card.busy .mch-dot{background:#22c55e;box-shadow:0 0 0 3px rgba(34,197,94,.25);animation:mchPulse 1.6s ease-in-out infinite}
+.mch-card.paused .mch-dot{background:#f59e0b;box-shadow:0 0 0 3px rgba(245,158,11,.22)}
+@keyframes mchPulse{0%,100%{box-shadow:0 0 0 3px rgba(34,197,94,.28)}50%{box-shadow:0 0 0 7px rgba(34,197,94,.04)}}
+.mch-name{font-size:15px;font-weight:800;color:#f1f5f9;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:.2px}
+.mch-status{font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;
+  padding:3px 9px;border-radius:999px;background:rgba(255,255,255,.08);color:#cbd5e1}
+.mch-card.busy .mch-status{background:rgba(34,197,94,.18);color:#86efac}
+.mch-card.paused .mch-status{background:rgba(245,158,11,.18);color:#fcd34d}
+/* Corps / lecture instrument */
+.mch-readout{padding:14px;display:flex;flex-direction:column;gap:10px}
+.mch-btn-row{display:flex;gap:8px}
+.mch-btn-row .mch-btn{flex:1}
+.mch-btn-pause{background:#f59e0b;color:#3a2606}
+.mch-btn-pause:hover{filter:brightness(1.06)}
+.mch-paused-list{display:flex;flex-direction:column;gap:6px}
+.mch-paused-item{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#fff8ec;border:1px dashed #f0b657;border-radius:10px;padding:8px 10px}
+.mch-paused-info{display:flex;flex-direction:column;gap:1px;min-width:0}
+.mch-paused-ref{font-size:13px;font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mch-paused-cli{font-size:11.5px;color:var(--muted)}
+.mch-paused-time{font-size:11px;color:#b45309;font-weight:600}
+.mch-paused-actions{display:flex;gap:5px;flex-shrink:0}
+.mch-mini-btn{border:none;border-radius:8px;padding:7px 10px;font-size:12px;font-weight:700;cursor:pointer;transition:.15s}
+.mch-mini-resume{background:var(--color-success,#16a34a);color:#fff}
+.mch-mini-resume:hover{filter:brightness(1.12)}
+.mch-mini-resume:disabled{opacity:.45;cursor:not-allowed}
+.mch-mini-stop{background:transparent;border:1px solid var(--border);color:var(--red)}
+.mch-job{background:#0f1a24;border:1px solid #24333f;border-radius:12px;padding:13px 14px;display:flex;flex-direction:column;gap:4px}
+.mch-job-empty{background:var(--surface2);border:1px dashed var(--border);color:var(--muted);font-size:13px;text-align:center;padding:20px 12px;border-radius:12px}
+.mch-job-ref{font-size:15px;font-weight:800;color:#f1f5f9}
+.mch-job-meta{font-size:12.5px;color:#94a3b8}
+.mch-job-note{font-size:12px;color:#dbe4ee;background:rgba(255,255,255,.05);border-radius:8px;padding:4px 8px;margin-top:2px}
+.mch-timer{font-size:36px;font-weight:800;color:#4ade80;font-variant-numeric:tabular-nums;margin-top:6px;
+  letter-spacing:-.5px;line-height:1;text-shadow:0 0 18px rgba(74,222,128,.35);font-family:'DM Mono',ui-monospace,monospace}
+.mch-since{font-size:11px;color:#94a3b8;margin-top:2px}
 .mch-btn{border:none;border-radius:12px;padding:12px;font-size:14px;font-weight:700;cursor:pointer;transition:.15s;width:100%}
-.mch-btn-start{background:var(--green);color:#fff}
-.mch-btn-start:hover{filter:brightness(1.12)}
+.mch-btn-start{background:var(--color-success,#16a34a);color:#fff}
+.mch-btn-start:hover{filter:brightness(1.1)}
 .mch-btn-stop{background:#dc2626;color:#fff}
-.mch-btn-stop:hover{filter:brightness(1.1)}
-.mch-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11.5px;color:var(--muted);border-top:1px solid var(--border);padding-top:8px}
-.mch-foot a{color:var(--green);font-weight:700;text-decoration:none}
-.mch-hist{display:flex;flex-direction:column;gap:6px;margin-top:2px}
+.mch-btn-stop:hover{filter:brightness(1.08)}
+/* Jauge de charge du jour (utilisation) */
+.mch-gauge{display:flex;align-items:center;gap:9px;padding:0 14px 12px}
+.mch-gauge-track{flex:1;height:6px;background:var(--surface3);border-radius:999px;overflow:hidden}
+.mch-gauge-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--mch,#64748b),#4ade80);transition:width .5s}
+.mch-gauge-lbl{font-size:10px;font-weight:800;color:var(--muted);font-variant-numeric:tabular-nums;letter-spacing:.03em;white-space:nowrap}
+.mch-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11.5px;color:var(--muted);border-top:1px solid var(--border);padding:9px 14px}
+.mch-foot a{color:var(--color-primary,#1a4a3a);font-weight:700;text-decoration:none}
+.mch-hist{display:flex;flex-direction:column;gap:6px;padding:0 14px 12px}
 .mch-hist-row{display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:8px;font-size:12px;background:var(--surface2);border-radius:8px;padding:6px 8px}
 .mch-hist-ref{font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mch-hist-dur{font-weight:700;color:#16a34a;font-variant-numeric:tabular-nums}
