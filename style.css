@@ -1537,7 +1537,13 @@ tr:hover td {
 .batk-ev-empty{padding:26px;text-align:center;font-size:13px;color:var(--muted);font-style:italic}
 /* Classement par PAO */
 .batk-pao{margin-bottom:16px}
-.batk-pao-h{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 2px 10px}
+.batk-pao-h{display:flex;align-items:center;gap:8px;width:100%;margin:0 0 10px;padding:2px;
+  background:transparent;border:none;cursor:pointer;font-family:inherit;text-align:left;
+  font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.batk-pao-chev{flex-shrink:0;transition:transform .2s}
+.batk-pao-count{margin-left:auto;font-size:10.5px;font-weight:800;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:2px 9px;text-transform:none;letter-spacing:0}
+.batk-pao--collapsed .batk-pao-chev{transform:rotate(-90deg)}
+.batk-pao--collapsed .batk-pao-grid{display:none}
 .batk-pao-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
 .batk-pao-card{border:1px solid var(--border);border-radius:14px;background:var(--surface);overflow:hidden;display:flex;flex-direction:column}
 .batk-pao-card-h{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 13px;background:var(--surface2);border-bottom:1px solid var(--border)}

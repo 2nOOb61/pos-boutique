@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '170 · 2026-08-28';
+const APP_VERSION = '171 · 2026-08-28';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -12103,6 +12103,19 @@ function _batPaoGroups(){
   return order;
 }
 
+// État replié/déplié de la section « Classement par PAO » (persisté).
+let _batPaoCollapsed = localStorage.getItem('pos-bat-pao-collapsed') === '1';
+function toggleBatPao(){
+  _batPaoCollapsed = !_batPaoCollapsed;
+  try { localStorage.setItem('pos-bat-pao-collapsed', _batPaoCollapsed ? '1' : '0'); } catch(e){}
+  const sec = document.getElementById('batPaoSection');
+  if (sec){
+    sec.classList.toggle('batk-pao--collapsed', _batPaoCollapsed);
+    const b = sec.querySelector('.batk-pao-h');
+    if (b) b.setAttribute('aria-expanded', _batPaoCollapsed ? 'false' : 'true');
+  }
+}
+
 async function renderSuiviBat(force){
   if (force && APPS_SCRIPT_URL) { try { await loadBatsFromScript(); } catch(e){} }
   const cont = document.getElementById('suiviBatContent');
@@ -12215,8 +12228,12 @@ async function renderSuiviBat(force){
       </div>`;
   }).join('');
   const paoSection = paoGroups.length ? `
-    <div class="batk-pao">
-      <div class="batk-pao-h">Classement par PAO</div>
+    <div class="batk-pao${_batPaoCollapsed?' batk-pao--collapsed':''}" id="batPaoSection">
+      <button class="batk-pao-h" onclick="toggleBatPao()" aria-expanded="${_batPaoCollapsed?'false':'true'}">
+        <svg class="batk-pao-chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        <span>Classement par PAO</span>
+        <span class="batk-pao-count">${paoGroups.length} PAO</span>
+      </button>
       <div class="batk-pao-grid">${paoInner}</div>
     </div>` : '';
 
