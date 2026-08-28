@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '169 · 2026-08-28';
+const APP_VERSION = '170 · 2026-08-28';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -12085,6 +12085,24 @@ function _batActivityEvents(limit){
 // Détection « nouvelle action » : on retient le dernier horodatage déjà vu.
 let _batSeenTs = (function(){ const v = Number(localStorage.getItem('pos-bat-seen') || 0); return isNaN(v) ? 0 : v; })();
 
+// Regroupe les dossiers BAT par PAO (= créateur du dernier BAT du dossier).
+// Sert au « Classement par PAO » : charge et états par graphiste.
+function _batPaoGroups(){
+  const rows = _batBoardRows();
+  const map = {}; const order = [];
+  rows.forEach(r => {
+    const b = r.st.bat;
+    const pao = (b && b.createdBy) ? b.createdBy : '—';
+    if (!map[pao]){ map[pao] = { pao, rows:[], counts:{ pao:0, commercial:0, client:0, valide:0 } }; order.push(map[pao]); }
+    map[pao].rows.push(r);
+    map[pao].counts[r.bucket] = (map[pao].counts[r.bucket] || 0) + 1;
+  });
+  // Tri : d'abord ceux qui ont le plus de BAT encore actifs (non validés), puis le total.
+  order.forEach(g => { g.active = g.rows.filter(r => r.bucket !== 'valide').length; });
+  order.sort((a,b) => (b.active - a.active) || (b.rows.length - a.rows.length));
+  return order;
+}
+
 async function renderSuiviBat(force){
   if (force && APPS_SCRIPT_URL) { try { await loadBatsFromScript(); } catch(e){} }
   const cont = document.getElementById('suiviBatContent');
@@ -12168,6 +12186,40 @@ async function renderSuiviBat(force){
       <div class="batk-evs">${feedInner}</div>
     </div>`;
 
+  // ── Classement par PAO (charge & états par graphiste) ──
+  const paoGroups = _batPaoGroups();
+  const paoInner = paoGroups.map(g => {
+    const mini = [
+      ['🟣', g.counts.pao,        '#7c3aed', 'à préparer'],
+      ['🟠', g.counts.commercial, '#d97706', 'à envoyer'],
+      ['🔵', g.counts.client,     '#2563eb', 'attente'],
+      ['🟢', g.counts.valide,     '#16a34a', 'validés'],
+    ].filter(x => x[1] > 0).map(x => `<span class="batk-pao-stat" style="color:${x[2]}">${x[0]} ${x[1]} ${x[3]}</span>`).join('');
+    const items = g.rows.slice(0, 6).map(r => {
+      const st = r.st;
+      return `<button class="batk-pao-item" onclick="openAttribForDossier('${r.d.id}')" title="${escapeHtml(st.label)}">
+          <span class="batk-pao-dot" style="background:${st.color}"></span>
+          <span class="batk-pao-ref">${escapeHtml(r.d.numeroDossier||'—')}</span>
+          <span class="batk-pao-cli">${escapeHtml(r.client)}</span>
+          <span class="batk-pao-badge" style="color:${st.color};background:${st.bg}">${st.label}</span>
+        </button>`;
+    }).join('');
+    const more = g.rows.length > 6 ? `<div class="batk-pao-more">+ ${g.rows.length - 6} autre${g.rows.length-6>1?'s':''}…</div>` : '';
+    return `<div class="batk-pao-card">
+        <div class="batk-pao-card-h">
+          <span class="batk-pao-name">🎨 ${escapeHtml(g.pao)}</span>
+          <span class="batk-pao-tot">${g.rows.length} BAT</span>
+        </div>
+        ${mini ? `<div class="batk-pao-stats">${mini}</div>` : ''}
+        <div class="batk-pao-items">${items}${more}</div>
+      </div>`;
+  }).join('');
+  const paoSection = paoGroups.length ? `
+    <div class="batk-pao">
+      <div class="batk-pao-h">Classement par PAO</div>
+      <div class="batk-pao-grid">${paoInner}</div>
+    </div>` : '';
+
   // ── Liste des dossiers (filtrée) ──
   const rows = _batBoardFilter === 'all' ? all : all.filter(r => r.bucket === _batBoardFilter);
   const list = rows.length ? rows.map(r => {
@@ -12197,7 +12249,7 @@ async function renderSuiviBat(force){
     </div>`;
   }).join('') : `<div class="batb-empty">Aucun dossier dans cet état.</div>`;
 
-  cont.innerHTML = cockpit + feed + `<div class="batb-list">${list}</div>`;
+  cont.innerHTML = cockpit + feed + paoSection + `<div class="batb-list">${list}</div>`;
 
   // Mémorise le dernier horodatage vu (les prochaines actions plus récentes flasheront « Nouveau »).
   if (maxTs > _batSeenTs){ _batSeenTs = maxTs; try { localStorage.setItem('pos-bat-seen', String(maxTs)); } catch(e){} }
