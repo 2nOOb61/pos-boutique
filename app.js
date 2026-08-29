@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '171 · 2026-08-28';
+const APP_VERSION = '172 · 2026-08-29';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -604,6 +604,8 @@ function showPage(id, btn, bnavBtn) {
   if (id !== 'machines') _stopMachinesTimers();
   // Arrêter l'horloge live du cockpit Suivi BAT si on quitte cette page
   if (id !== 'suivi-bat' && typeof _stopBatClock === 'function') _stopBatClock();
+  // Arrêter l'horloge live du cockpit Production si on quitte cette page
+  if (id !== 'production' && typeof _stopProdClock === 'function') _stopProdClock();
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
   document.querySelectorAll('.bnav-btn').forEach(b=>b.classList.remove('active'));
@@ -8542,6 +8544,79 @@ function _getTacheRetardInfo(t) {
   return { isRetard: minutesEcoulees > delai, minutesEcoulees: Math.round(minutesEcoulees), delai, depassement };
 }
 
+// « En retard » au sens opérateur (cockpit + filtre) : une tâche non terminée est en
+// retard si (1) elle dépasse le rythme de production (tâche en cours trop longue) OU
+// (2) l'échéance de livraison de son dossier est passée. Source de vérité UNIQUE pour
+// le KPI « En retard » et le filtre EN_RETARD → le compteur et la liste concordent.
+function _tacheRetardFlag(t) {
+  if (!t || t.statut === 'TERMINE') return false;
+  if (_getTacheRetardInfo(t).isRetard) return true;
+  if (t.dossierId && t.dossierId !== 'LIBRE' && Array.isArray(dossiers)) {
+    const d = dossiers.find(x => x.id === t.dossierId);
+    if (d && d.dateLivraisonProd) {
+      const days = _daysUntil(d.dateLivraisonProd);
+      if (days != null && days < 0) return true;
+    }
+  }
+  return false;
+}
+
+// Horloge live du cockpit production (dédiée, ≠ #batClock pour éviter tout conflit d'id).
+let _prodClockTimer = null;
+function _stopProdClock() { if (_prodClockTimer) { clearInterval(_prodClockTimer); _prodClockTimer = null; } }
+function _startProdClock() {
+  _stopProdClock();
+  const upd = () => {
+    const el = document.getElementById('prodCockpitClock'); if (!el) return;
+    const d = new Date();
+    el.textContent = [d.getHours(), d.getMinutes(), d.getSeconds()].map(n => String(n).padStart(2, '0')).join(':');
+  };
+  upd(); _prodClockTimer = setInterval(upd, 1000);
+}
+
+// Cockpit opérateur — barre de commande sombre : KPI À faire / En cours / Faits /
+// En retard (cliquables = filtres) + horloge live. `scope` = tâches visibles par
+// l'utilisateur (les siennes pour un opérateur ; toutes en vue globale).
+function _buildProdOperatorCockpit(scope) {
+  scope = Array.isArray(scope) ? scope : [];
+  const now = new Date();
+  const clock = [now.getHours(), now.getMinutes(), now.getSeconds()].map(n => String(n).padStart(2, '0')).join(':');
+  const aFaire  = scope.filter(t => t.statut === 'A_FAIRE').length;
+  const enCours = scope.filter(t => t.statut === 'EN_COURS').length;
+  const termine = scope.filter(t => t.statut === 'TERMINE').length;
+  const retard  = scope.filter(t => _tacheRetardFlag(t)).length;
+
+  const kpis = [
+    { f:'A_FAIRE',   lbl:'À faire',   n:aFaire,  c:'#2563eb' },
+    { f:'EN_COURS',  lbl:'En cours',  n:enCours, c:'#d97706' },
+    { f:'TERMINE',   lbl:'Faits',     n:termine, c:'#16a34a' },
+    { f:'EN_RETARD', lbl:'En retard', n:retard,  c:'#dc2626' },
+  ].map(x => `<button class="prodk-kpi ${prodFilter===x.f?'prodk-kpi--active':''}" style="--k:${x.c}" onclick="setProdFilter('${x.f}')" title="Filtrer : ${x.lbl}">
+      <span class="prodk-kpi-val">${x.n}</span>
+      <span class="prodk-kpi-lbl"><span class="prodk-kpi-dot"></span>${x.lbl}</span>
+    </button>`).join('');
+
+  const whoLbl = currentUser ? (currentUser.label || currentUser.username || '') : '';
+  const alert = retard
+    ? `<div class="prodk-alert" onclick="setProdFilter('EN_RETARD')" style="cursor:pointer" title="Voir les tâches en retard">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        ${retard} tâche(s) en retard — à traiter en priorité
+      </div>`
+    : `<div class="prodk-alert prodk-alert--ok">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        Aucun retard — production à jour
+      </div>`;
+
+  return `<div class="prodk-cockpit">
+    <div class="prodk-kpis">${kpis}</div>
+    <div class="prodk-right">
+      <div class="prodk-clock" id="prodCockpitClock">${clock}</div>
+      ${whoLbl ? `<div class="prodk-who">${whoLbl}</div>` : ''}
+    </div>
+    ${alert}
+  </div>`;
+}
+
 function renderRythmeConfig() {
   const container = document.getElementById('rythmeConfigContainer');
   if (!container) return;
@@ -13467,8 +13542,15 @@ async function refreshTaches(btn) {
 
 function setProdFilter(f, btn) {
   prodFilter = f;
-  document.querySelectorAll('.prod-filter-btn').forEach(b => b.classList.remove('prod-filter-btn--active'));
-  btn.classList.add('prod-filter-btn--active');
+  const all = document.querySelectorAll('.prod-filter-btn');
+  all.forEach(b => b.classList.remove('prod-filter-btn--active'));
+  if (btn) {
+    btn.classList.add('prod-filter-btn--active');
+  } else {
+    // Appel depuis le cockpit (sans bouton) → synchroniser la barre sticky par index.
+    const idx = { TOUS:0, A_FAIRE:1, EN_COURS:2, TERMINE:3, EN_RETARD:4 }[f];
+    if (idx != null && all[idx]) all[idx].classList.add('prod-filter-btn--active');
+  }
   renderTaches();
 }
 
@@ -16206,6 +16288,7 @@ function renderTaches() {
   const container = document.getElementById('tachesContainer');
   if (!container) return;
   _syncDossierDates();
+  _stopProdClock(); // (re)démarré seulement dans la vue opérateur ci-dessous
 
   if (_prodView === 'charge') {
     _renderChargeView();
@@ -16246,7 +16329,7 @@ function renderTaches() {
   // du groupement par dossier pour ne pas créer un faux "dossier LIBRE" en doublon.
   let dossierList = _merged.filter(t => t.dossierId !== 'LIBRE');
   if (!canViewAllProd) dossierList = dossierList.filter(t => _sameOp(t.operateur, myLabel));
-  if (prodFilter === 'EN_RETARD') dossierList = dossierList.filter(t => _getTacheRetardInfo(t).isRetard);
+  if (prodFilter === 'EN_RETARD') dossierList = dossierList.filter(t => _tacheRetardFlag(t));
   else if (prodFilter !== 'TOUS') dossierList = dossierList.filter(t => t.statut === prodFilter);
   if (prodDateFilter.mois || prodDateFilter.annee)
     dossierList = dossierList.filter(t => _matchDateFilter(t.dateAssignation, prodDateFilter));
@@ -16260,7 +16343,7 @@ function renderTaches() {
 
   // Mettre à jour les compteurs dans les boutons filtre (sur données non filtrées par date)
   const allVisible = _merged.filter(t => canViewAllProd || _sameOp(t.operateur, myLabel));
-  const retardCount = _merged.filter(t => (canViewAllProd || _sameOp(t.operateur, myLabel)) && _getTacheRetardInfo(t).isRetard).length;
+  const retardCount = allVisible.filter(t => _tacheRetardFlag(t)).length;
   const _cnt = s => s === 'EN_RETARD' ? retardCount : allVisible.filter(t => s==='TOUS'||t.statut===s).length;
   ['TOUS','A_FAIRE','EN_COURS','TERMINE','EN_RETARD'].forEach(s => {
     const sfx = {'TOUS':'Tous','A_FAIRE':'AFaire','EN_COURS':'EnCours','TERMINE':'Termine','EN_RETARD':'Retard'}[s];
@@ -16268,14 +16351,19 @@ function renderTaches() {
     if (el) { el.textContent = _cnt(s); el.style.display = _cnt(s)?'':'none'; }
   });
 
+  // Cockpit opérateur (À faire / En cours / Faits / En retard + horloge live)
+  const cockpit = _buildProdOperatorCockpit(allVisible);
+  const _startCk = () => { if (document.getElementById('page-production')?.classList.contains('active')) _startProdClock(); };
+
   if (!dossierList.length && !libreList.length) {
-    container.innerHTML = deadlines + dash + `<div style="display:flex;flex-direction:column;align-items:center;padding:64px 0;text-align:center">
+    container.innerHTML = cockpit + deadlines + dash + `<div style="display:flex;flex-direction:column;align-items:center;padding:64px 0;text-align:center">
       <div style="width:44px;height:44px;background:var(--color-bg);border-radius:12px;display:flex;align-items:center;justify-content:center;margin-bottom:12px">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.4"><polyline points="20 6 9 17 4 12"/></svg>
       </div>
       <p style="font-size:13px;font-weight:500;color:var(--color-text-secondary)">Aucune tâche${prodFilter!=='TOUS'?' dans ce filtre':''}</p>
     </div>`;
     _ensureChronoTick();
+    _startCk();
     return;
   }
 
@@ -16333,9 +16421,10 @@ function renderTaches() {
     </div>`;
   }).join('');
 
-  container.innerHTML = deadlines + dash + libreHtml + groupsHtml;
+  container.innerHTML = cockpit + deadlines + dash + libreHtml + groupsHtml;
   _syncProdExpandBtn();
   _ensureChronoTick();
+  _startCk();
 }
 
 // ── Cartes-dossiers repliables (vue compacte production) ────────────────────

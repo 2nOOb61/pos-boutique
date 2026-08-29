@@ -1565,6 +1565,35 @@ tr:hover td {
   .batk-kpi{min-width:calc(33.33% - 7px)}
 }
 
+/* ── Cockpit opérateur — page Production (À faire / En cours / Faits / En retard) ── */
+.prodk-cockpit{position:sticky;top:0;z-index:16;display:flex;align-items:stretch;gap:16px;flex-wrap:wrap;
+  background:linear-gradient(135deg,#111c26,#1b2c3a);border:1px solid #27384a;border-radius:16px;
+  padding:14px 16px;margin-bottom:16px;box-shadow:0 14px 34px -18px rgba(0,0,0,.55)}
+.prodk-kpis{display:flex;gap:10px;flex:1;flex-wrap:wrap;min-width:0}
+.prodk-kpi{flex:1;min-width:118px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.08);
+  border-radius:12px;padding:11px 14px;display:flex;flex-direction:column;gap:4px;position:relative;overflow:hidden;
+  cursor:pointer;font-family:inherit;text-align:left;transition:.14s}
+.prodk-kpi::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--k,#64748b)}
+.prodk-kpi:hover{background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.22)}
+.prodk-kpi--active{background:rgba(255,255,255,.13);border-color:var(--k,#64748b);box-shadow:inset 0 0 0 1px var(--k,#64748b)}
+.prodk-kpi-val{font-size:27px;font-weight:800;line-height:1;color:#f1f5f9;font-variant-numeric:tabular-nums}
+.prodk-kpi-lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:#93a4b5;font-weight:700;display:flex;align-items:center;gap:6px}
+.prodk-kpi-dot{width:8px;height:8px;border-radius:50%;background:var(--k,#64748b);flex-shrink:0}
+.prodk-right{display:flex;flex-direction:column;align-items:flex-end;justify-content:center;gap:6px}
+.prodk-clock{font-family:'DM Mono',ui-monospace,monospace;font-size:22px;font-weight:700;color:#e2e8f0;
+  letter-spacing:1px;font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:9px}
+.prodk-clock::before{content:'';width:8px;height:8px;border-radius:50%;background:#22c55e;
+  box-shadow:0 0 0 4px rgba(34,197,94,.18);animation:mchLive 1.6s ease-in-out infinite}
+.prodk-who{font-size:11px;color:#93a4b5;font-weight:700;text-align:right}
+.prodk-alert{flex-basis:100%;display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;
+  color:#fca5a5;background:rgba(220,38,38,.12);border:1px solid rgba(220,38,38,.3);border-radius:10px;padding:8px 12px}
+.prodk-alert--ok{color:#86efac;background:rgba(22,163,74,.1);border-color:rgba(22,163,74,.28)}
+@media (max-width:600px){
+  .prodk-right{align-items:stretch;width:100%;flex-direction:row;justify-content:space-between}
+  .prodk-kpi{min-width:calc(50% - 5px)}
+  .prodk-kpi-val{font-size:24px}
+}
+
 .cmd-photos-zone {
   border: 2px dashed var(--border);
   border-radius: 12px;
