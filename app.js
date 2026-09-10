@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '172 · 2026-08-29';
+const APP_VERSION = '173 · 2026-09-10';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -11873,15 +11873,46 @@ function _dossierBats(dossierId){
 }
 function _latestBat(dossierId){ const l = _dossierBats(dossierId); return l.length ? l[l.length-1] : null; }
 
-// État « à qui la balle » dérivé du dernier BAT.
+// Type d'épreuve d'un round : 'simulation' (numérique, en 1er) ou 'bat' (physique).
+// Les rounds créés avant l'ajout du champ n'ont pas de `kind` → traités comme 'bat'
+// (rétro-compat : les anciens dossiers ne repassent pas par la simulation).
+function _batKind(b){ return (b && b.kind === 'simulation') ? 'simulation' : 'bat'; }
+
+// Phase courante d'un dossier : d'abord la SIMULATION (épreuve numérique), PUIS le
+// BAT. On bascule sur le BAT dès qu'une simulation est validée (ou pour les dossiers
+// legacy qui ont déjà des rounds BAT sans aucune simulation).
+function _batPhaseInfo(dossierId){
+  const all  = _dossierBats(dossierId);                 // tri croissant par version
+  const sims = all.filter(b => _batKind(b) === 'simulation');
+  const bts  = all.filter(b => _batKind(b) === 'bat');
+  const simValidated = sims.some(b => b.status === 'valide');
+  const phase  = (bts.length === 0 && !simValidated) ? 'simulation' : 'bat';
+  const active = phase === 'simulation' ? sims : bts;
+  const latest = active.length ? active[active.length - 1] : null;
+  return { phase, sims, bats:bts, simValidated, latest, noun: phase === 'simulation' ? 'Simulation' : 'BAT' };
+}
+
+// État « à qui la balle » dérivé du round actif de la PHASE courante (simulation
+// puis BAT). `phase`/`noun` permettent d'étiqueter l'affichage (Simulation vs BAT).
 function _batBallState(dossierId){
-  const b = _latestBat(dossierId);
-  if (!b)                         return { code:'pao',        ...BAT_STATES.pao,        since:null,        bat:null };
-  if (b.status === 'a_envoyer')    return { code:'commercial', ...BAT_STATES.commercial, since:b.createdAt,  bat:b };
-  if (b.status === 'envoye_client')return { code:'client',     ...BAT_STATES.client,     since:b.sentAt,     bat:b };
-  if (b.status === 'retour')       return { code:'refaire',    ...BAT_STATES.refaire,    since:b.decidedAt,  bat:b };
-  if (b.status === 'valide')       return { code:'valide',     ...BAT_STATES.valide,     since:b.decidedAt,  bat:b };
-  return { code:'pao', ...BAT_STATES.pao, since:null, bat:b };
+  const info = _batPhaseInfo(dossierId);
+  const b = info.latest, noun = info.noun, phase = info.phase;
+  let code, since;
+  if (!b)                              { code = 'pao';        since = null; }
+  else if (b.status === 'a_envoyer')    { code = 'commercial'; since = b.createdAt; }
+  else if (b.status === 'envoye_client'){ code = 'client';     since = b.sentAt; }
+  else if (b.status === 'retour')       { code = 'refaire';    since = b.decidedAt; }
+  else if (b.status === 'valide')       { code = 'valide';     since = b.decidedAt; }
+  else                                  { code = 'pao';        since = null; }
+  const base = BAT_STATES[code] || BAT_STATES.pao;
+  const labels = {
+    pao:        `PAO — ${noun} à préparer`,
+    refaire:    `PAO — retours à traiter (${noun})`,
+    commercial: `Commercial — ${noun} à envoyer au client`,
+    client:     `Client — ${noun} en attente de réponse`,
+    valide:     phase === 'simulation' ? 'Simulation validée — BAT à préparer' : 'BAT validé',
+  };
+  return { code, color:base.color, bg:base.bg, label:labels[code] || base.label, since, bat:b, phase, noun };
 }
 function _canPaoBat(){ return ['pao','admin','chef_atelier'].includes(currentUser?.role); }
 function _canCommercialBat(){ return ['commerciale','admin'].includes(currentUser?.role); }
@@ -11906,8 +11937,11 @@ function _batFiles(b){
 }
 
 // ── Actions ────────────────────────────────────────────────
-function batCreate(dossierId){
+function batCreate(dossierId, kind){
   if (!_canPaoBat()) { showToast('Réservé à la PAO / responsable', 'error'); return; }
+  const k    = kind === 'simulation' ? 'simulation' : 'bat';
+  const nounF = k === 'simulation' ? 'la simulation' : 'le BAT';
+  const tag  = k === 'simulation' ? 'SIMU' : 'BAT';
   const inp = document.createElement('input');
   inp.type = 'file'; inp.accept = 'image/*,.pdf'; inp.multiple = true;
   inp.onchange = async () => {
@@ -11918,31 +11952,34 @@ function batCreate(dossierId){
     const files = [];
     for (let i = 0; i < picked.length; i++) {
       const f = picked[i];
-      showToast(picked.length > 1 ? `Envoi du BAT… (${i + 1}/${picked.length})` : 'Envoi du BAT…');
+      showToast(picked.length > 1 ? `Envoi de ${nounF}… (${i + 1}/${picked.length})` : `Envoi de ${nounF}…`);
       try {
         const dataUrl = await _batReadFile(f);
         if (APPS_SCRIPT_URL) {
           const ext = (f.name.split('.').pop() || 'jpg');
-          const r = await apiCall({ action:'uploadFile', fileName:`BAT-${dossierId}-${Date.now()}-${i + 1}.${ext}`, mimeType:f.type || 'application/octet-stream', base64Data:dataUrl });
+          const r = await apiCall({ action:'uploadFile', fileName:`${tag}-${dossierId}-${Date.now()}-${i + 1}.${ext}`, mimeType:f.type || 'application/octet-stream', base64Data:dataUrl });
           if (r && r.ok) files.push({ name:f.name, viewUrl:r.viewUrl || '', dlUrl:r.dlUrl || '', type:f.type || '' });
           else showToast(`Upload de « ${f.name} » échoué`, 'warning');
         }
       } catch(e){ showToast(`Upload de « ${f.name} » impossible`, 'warning'); }
     }
-    _batCreateRound(dossierId, files);
+    _batCreateRound(dossierId, files, k);
   };
   inp.click();
 }
 
-function _batCreateRound(dossierId, files){
+function _batCreateRound(dossierId, files, kind){
+  const k    = kind === 'simulation' ? 'simulation' : 'bat';
+  const noun = k === 'simulation' ? 'Simulation' : 'BAT';
   const list = Array.isArray(files) ? files.filter(Boolean) : (files ? [files] : []);
   const first = list[0] || null;
   const d = dossiers.find(x => x.id === dossierId) || selectedDossier;
-  const prev = _dossierBats(dossierId);
-  const version = prev.length ? Math.max(...prev.map(b => Number(b.version) || 0)) + 1 : 1;
+  // Version indépendante par type d'épreuve : Simulation v1, v2… ET BAT v1, v2…
+  const prevSame = _dossierBats(dossierId).filter(b => _batKind(b) === k);
+  const version = prevSame.length ? Math.max(...prevSame.map(b => Number(b.version) || 0)) + 1 : 1;
   const bat = {
     id: _genUid('BAT'), dossierId, numeroDossier: (d && d.numeroDossier) || '',
-    version, status: 'a_envoyer',
+    version, kind:k, status: 'a_envoyer',
     files: list,
     // champs mono-fichier conservés (rétro-compat serveur/anciens clients) = 1ᵉʳ fichier
     fileName: first ? first.name : '', fileUrl: first ? first.viewUrl : '',
@@ -11953,41 +11990,47 @@ function _batCreateRound(dossierId, files){
   bats.push(bat);
   saveData();
   syncBatToScript(bat);
-  _addNotification({ dossierId, numeroDossier: bat.numeroDossier, etapeCode:'BAT', etapeLabel:'BAT à envoyer', operateur:_myOpLabel(),
-    message:`BAT v${version} prêt — à envoyer au client (${bat.numeroDossier || 'dossier'}) — par ${_myOpLabel()}` });
-  showToast(`BAT v${version} créé — le commercial est notifié`);
+  _addNotification({ dossierId, numeroDossier: bat.numeroDossier, etapeCode:'BAT', etapeLabel:`${noun} à envoyer`, operateur:_myOpLabel(),
+    message:`${noun} v${version} prête — à envoyer au client (${bat.numeroDossier || 'dossier'}) — par ${_myOpLabel()}` });
+  showToast(`${noun} v${version} créée — le commercial est notifié`);
   _refreshBatUi(dossierId);
 }
 
 function batMarkSent(batId){
   if (!_canCommercialBat()) { showToast('Réservé au commercial', 'error'); return; }
   const b = bats.find(x => x.id === batId); if (!b) return;
+  const noun = _batKind(b) === 'simulation' ? 'Simulation' : 'BAT';
   b.status = 'envoye_client'; b.sentBy = _myOpLabel(); b.sentAt = new Date().toISOString();
   saveData(); syncBatToScript(b);
-  showToast('BAT marqué « envoyé au client »');
+  showToast(`${noun} — marquée « envoyée au client »`);
   _refreshBatUi(b.dossierId);
 }
 
 function batValidate(batId){
   if (!_canCommercialBat()) { showToast('Réservé au commercial', 'error'); return; }
   const b = bats.find(x => x.id === batId); if (!b) return;
+  const isSim = _batKind(b) === 'simulation';
+  const noun = isSim ? 'Simulation' : 'BAT';
   b.status = 'valide'; b.decidedBy = _myOpLabel(); b.decidedAt = new Date().toISOString();
   saveData(); syncBatToScript(b);
-  _addNotification({ dossierId:b.dossierId, numeroDossier:b.numeroDossier, etapeCode:'BAT', etapeLabel:'BAT validé', operateur:_myOpLabel(),
-    message:`BAT v${b.version} VALIDÉ par le client (${b.numeroDossier || 'dossier'}) — la production peut démarrer` });
-  showToast('BAT validé — production peut démarrer');
+  _addNotification({ dossierId:b.dossierId, numeroDossier:b.numeroDossier, etapeCode:'BAT', etapeLabel:`${noun} validé`, operateur:_myOpLabel(),
+    message: isSim
+      ? `Simulation v${b.version} VALIDÉE par le client (${b.numeroDossier || 'dossier'}) — la PAO peut préparer le BAT`
+      : `BAT v${b.version} VALIDÉ par le client (${b.numeroDossier || 'dossier'}) — la production peut démarrer` });
+  showToast(isSim ? 'Simulation validée — le BAT peut être préparé' : 'BAT validé — production peut démarrer');
   _refreshBatUi(b.dossierId);
 }
 
 function batReturn(batId){
   if (!_canCommercialBat()) { showToast('Réservé au commercial', 'error'); return; }
   const b = bats.find(x => x.id === batId); if (!b) return;
+  const noun = _batKind(b) === 'simulation' ? 'Simulation' : 'BAT';
   const txt = prompt("Retours du client — ce qu'il faut modifier :", b.retours || '');
   if (txt === null) return;
   b.status = 'retour'; b.retours = String(txt).trim(); b.decidedBy = _myOpLabel(); b.decidedAt = new Date().toISOString();
   saveData(); syncBatToScript(b);
-  _addNotification({ dossierId:b.dossierId, numeroDossier:b.numeroDossier, etapeCode:'BAT', etapeLabel:'Retours BAT', operateur:_myOpLabel(),
-    message:`Retours client sur BAT v${b.version} (${b.numeroDossier || 'dossier'}) : ${b.retours || '—'} → PAO à refaire` });
+  _addNotification({ dossierId:b.dossierId, numeroDossier:b.numeroDossier, etapeCode:'BAT', etapeLabel:`Retours ${noun}`, operateur:_myOpLabel(),
+    message:`Retours client sur ${noun} v${b.version} (${b.numeroDossier || 'dossier'}) : ${b.retours || '—'} → PAO à refaire` });
   showToast('Retours enregistrés — la PAO est notifiée');
   _refreshBatUi(b.dossierId);
 }
@@ -12004,10 +12047,23 @@ function _batSectionHtml(d){
 }
 
 function _batSectionInner(d){
+  const info = _batPhaseInfo(d.id);
   const st = _batBallState(d.id);
   const rounds = _dossierBats(d.id).slice().reverse();  // plus récent en tête
   const isPao = _canPaoBat(), isCom = _canCommercialBat();
   const latest = st.bat;
+  const phase = info.phase;
+
+  // Stepper ① Simulation → ② BAT (la simulation numérique précède toujours le BAT)
+  const simDone = info.simValidated;
+  const batDone = info.bats.some(b => b.status === 'valide');
+  const step = (n, lbl, active, done) =>
+    `<span class="bat-step${active?' bat-step--active':''}${done?' bat-step--done':''}"><span class="bat-step-num">${done?'✓':n}</span>${lbl}</span>`;
+  const stepper = `<div class="bat-stepper">
+      ${step(1,'Simulation', phase==='simulation', simDone)}
+      <span class="bat-step-arrow">→</span>
+      ${step(2,'BAT', phase==='bat', batDone)}
+    </div>`;
 
   // Compteur d'attente (en attente client)
   let waitTxt = '';
@@ -12023,10 +12079,15 @@ function _batSectionInner(d){
       ${waitTxt ? `<span class="bat-ball-since">${waitTxt}</span>` : ''}
     </div>`;
 
-  // Boutons d'action selon l'état + le rôle
+  // Libellé du bouton de création selon la phase.
+  const createLbl = phase === 'simulation'
+    ? (st.code === 'refaire' ? 'Refaire la simulation (v'+((latest?latest.version:0)+1)+')' : 'Créer la simulation')
+    : (info.bats.length === 0 ? 'Créer le BAT' : (st.code === 'refaire' ? 'Refaire le BAT (v'+((latest?latest.version:0)+1)+')' : 'Nouveau BAT'));
+
+  // Boutons d'action selon l'état + le rôle + la phase
   let actions = '';
   if (st.code === 'pao' || st.code === 'refaire'){
-    if (isPao) actions += `<button class="bat-btn bat-btn--pao" onclick="batCreate('${d.id}')">${st.code==='refaire'?'Refaire le BAT (v'+((latest?latest.version:0)+1)+')':'Créer le 1ᵉʳ BAT'}</button>`;
+    if (isPao) actions += `<button class="bat-btn bat-btn--pao" onclick="batCreate('${d.id}','${phase}')">${createLbl}</button>`;
     else actions += `<span class="bat-hint">En attente de la PAO…</span>`;
   } else if (st.code === 'commercial'){
     if (isCom) actions += `<button class="bat-btn bat-btn--send" onclick="batMarkSent('${latest.id}')">Marquer « envoyé au client »</button>`;
@@ -12038,16 +12099,19 @@ function _batSectionInner(d){
     } else actions += `<span class="bat-hint">En attente de la réponse du client…</span>`;
   } else if (st.code === 'valide'){
     actions += `<span class="bat-hint" style="color:#16a34a">BAT validé — production lancée.</span>`;
-    if (isPao) actions += `<button class="bat-btn" onclick="batCreate('${d.id}')">Nouveau BAT</button>`;
+    if (isPao) actions += `<button class="bat-btn" onclick="batCreate('${d.id}','bat')">Nouveau BAT</button>`;
   }
 
-  // Liste des versions
+  // Liste des versions (simulation + BAT, plus récent en tête)
   const roundsHtml = rounds.length ? rounds.map(b => {
+    const isSim = _batKind(b) === 'simulation';
+    const noun  = isSim ? 'Simulation' : 'BAT';
     const sColor = b.status==='valide' ? '#16a34a' : b.status==='retour' ? '#dc2626' : b.status==='envoye_client' ? '#2563eb' : '#d97706';
     const sBg    = b.status==='valide' ? '#dcfce7' : b.status==='retour' ? '#fee2e2' : b.status==='envoye_client' ? '#dbeafe' : '#fef3c7';
+    const kindTag = `<span class="bat-kind bat-kind--${isSim?'sim':'bat'}">${isSim?'🎨 Simulation':'🧾 BAT'}</span>`;
     const files = _batFiles(b);
     const fileLink = files.length
-      ? files.map(f => `<a href="${f.viewUrl}" target="_blank" class="bat-file">📎 ${escapeHtml(f.name || 'Voir le BAT')}</a>`).join('')
+      ? files.map(f => `<a href="${f.viewUrl}" target="_blank" class="bat-file">📎 ${escapeHtml(f.name || 'Voir le fichier')}</a>`).join('')
       : '<span class="bat-nofile">Pas de fichier joint</span>';
     const timeline = [
       b.createdAt ? `Créé ${_batWhen(b.createdAt)}${b.createdBy?' · '+escapeHtml(b.createdBy):''}` : '',
@@ -12056,20 +12120,22 @@ function _batSectionInner(d){
     ].filter(Boolean).join(' — ');
     return `<div class="bat-round">
         <div class="bat-round-top">
-          <span class="bat-ver">BAT v${b.version}</span>
+          ${kindTag}
+          <span class="bat-ver">${noun} v${b.version}</span>
           <span class="bat-stat" style="color:${sColor};background:${sBg}">${BAT_STATUS_LABEL[b.status]||b.status}</span>
           ${fileLink}
         </div>
         ${b.retours ? `<div class="bat-retours"><b>Retours client :</b> ${escapeHtml(b.retours)}</div>` : ''}
         ${timeline ? `<div class="bat-time">${timeline}</div>` : ''}
       </div>`;
-  }).join('') : '<div class="bat-empty">Aucun BAT pour l\'instant.</div>';
+  }).join('') : '<div class="bat-empty">Aucune épreuve pour l\'instant.</div>';
 
   return `
     <div class="bat-head">
-      <span class="bat-title">Suivi BAT (épreuves)</span>
+      <span class="bat-title">Épreuves — Simulation puis BAT</span>
       ${ball}
     </div>
+    ${stepper}
     <div class="bat-actions">${actions}</div>
     <div class="bat-rounds">${roundsHtml}</div>`;
 }
@@ -12148,7 +12214,7 @@ function _batActivityEvents(limit){
   const evs = [];
   (Array.isArray(bats) ? bats : []).forEach(b => {
     const ref = b.numeroDossier || '';
-    const base = { ref, dossierId: b.dossierId, version: b.version };
+    const base = { ref, dossierId: b.dossierId, version: b.version, proof: _batKind(b) };
     if (b.createdAt) evs.push({ ...base, ts:b.createdAt, who:b.createdBy || '—', kind:'create' });
     if (b.sentAt)    evs.push({ ...base, ts:b.sentAt,    who:b.sentBy    || '—', kind:'sent'   });
     if (b.decidedAt) evs.push({ ...base, ts:b.decidedAt, who:b.decidedBy || '—', kind:(b.status === 'valide' ? 'valide' : 'retour'), retours:b.retours || '' });
@@ -12250,7 +12316,7 @@ async function renderSuiviBat(force){
     return `<div class="batk-ev${isNew?' batk-ev--new':''}">
         <span class="batk-ev-dot" style="background:${m.color}"></span>
         <div class="batk-ev-body">
-          <div class="batk-ev-line">${m.verb} le <b>BAT v${e.version}</b>${m.tail} <span class="batk-ev-ref">${escapeHtml(e.ref||'dossier')}</span></div>
+          <div class="batk-ev-line">${m.verb} ${e.proof==='simulation'?'la':'le'} <b>${e.proof==='simulation'?'Simulation':'BAT'} v${e.version}</b>${m.tail} <span class="batk-ev-ref">${escapeHtml(e.ref||'dossier')}</span></div>
           ${e.kind==='retour' && e.retours ? `<div class="batk-ev-note">« ${escapeHtml(e.retours)} »</div>` : ''}
           <div class="batk-ev-time">${_batAgo(e.ts)}</div>
         </div>
@@ -12326,11 +12392,13 @@ async function renderSuiviBat(force){
     const b = st.bat; let lastWho = '', lastTs = '';
     if (b){ if (b.decidedAt){ lastWho = b.decidedBy; lastTs = b.decidedAt; } else if (b.sentAt){ lastWho = b.sentBy; lastTs = b.sentAt; } else if (b.createdAt){ lastWho = b.createdBy; lastTs = b.createdAt; } }
     const lastChip = lastWho ? `<span class="batb-last">🔧 ${escapeHtml(lastWho)} · ${_batAgo(lastTs)}</span>` : '';
+    const phaseChip = `<span class="batb-phase batb-phase--${st.phase}">${st.phase==='simulation'?'🎨 Simulation':'🧾 BAT'}</span>`;
+    const verTxt = r.version ? `${st.noun} v${r.version}` : `${st.noun} à préparer`;
     return `<div class="batb-row${urgent?' batb-row--urgent':''}">
       <div class="batb-main">
-        <div class="batb-ref">${escapeHtml(r.d.numeroDossier||'')}</div>
+        <div class="batb-ref">${escapeHtml(r.d.numeroDossier||'')} ${phaseChip}</div>
         <div class="batb-client">${escapeHtml(r.client)}</div>
-        <div class="batb-sub">Commercial : ${escapeHtml(r.commercial)} · BAT v${r.version} · ${r.nbVersions} version${r.nbVersions>1?'s':''}</div>
+        <div class="batb-sub">Commercial : ${escapeHtml(r.commercial)} · ${verTxt} · ${r.nbVersions} épreuve${r.nbVersions>1?'s':''}</div>
         ${lastChip}
       </div>
       <div class="batb-state">
@@ -13960,12 +14028,6 @@ function _renderChargeView() {
         return d?.priorite === 'Urgente' && t.statut !== 'TERMINE';
       }).map(t => t.dossierId)
     )].length;
-    const maxCharge = Math.max(...opKeys.map(op => opMap[op].filter(t => t.statut !== 'TERMINE').length), 1);
-    const surcharges = opKeys.filter(op => {
-      const actif = opMap[op].filter(t => t.statut !== 'TERMINE').length;
-      return actif / maxCharge >= 0.85;
-    }).length;
-
     kpiHtml = `<div class="charge-kpi-bar">
       <div class="charge-kpi-card">
         <div class="charge-kpi-card__val">${totalOps}</div>
@@ -13983,10 +14045,6 @@ function _renderChargeView() {
         <div class="charge-kpi-card__val">${urgentDossiers}</div>
         <div class="charge-kpi-card__label">Dossiers urgents actifs</div>
       </div>` : ''}
-      ${surcharges ? `<div class="charge-kpi-card charge-kpi-card--alert">
-        <div class="charge-kpi-card__val">${surcharges}</div>
-        <div class="charge-kpi-card__label">Opérateur(s) surchargé(s)</div>
-      </div>` : ''}
     </div>`;
   }
 
@@ -14002,14 +14060,13 @@ function _renderChargeView() {
     const termine    = opTaches.filter(t => t.statut === 'TERMINE');
     const actif      = aFaire.length + enCours.length;
     const pct        = Math.round(actif / maxActif * 100);
-    const overloaded = pct >= 85;
 
     // Trouver le rôle depuis localUsers
     const userObj  = (localUsers || []).find(u => (u.label || u.username) === op);
     const roleLabel = userObj ? (ROLE_LABELS_LOCAL[userObj.role] || userObj.role) : '';
 
     const avatar = op.charAt(0).toUpperCase();
-    const barColor = overloaded ? 'var(--color-danger)' : actif > 0 ? 'var(--color-primary)' : '#d6d3d1';
+    const barColor = actif > 0 ? 'var(--color-primary)' : '#d6d3d1';
 
     // Construire les lignes de tâches (en cours d'abord, puis à faire, puis terminées)
     const renderTaskRows = (list, statut) => list.map(t => {
@@ -14062,7 +14119,7 @@ function _renderChargeView() {
     const emptyHtml = !actif && !termine.length
       ? `<div class="charge-card__empty">Aucune tâche assignée</div>` : '';
 
-    return `<div class="charge-card ${overloaded?'charge-card--overloaded':''} ${actif===0?'charge-card--idle':''}">
+    return `<div class="charge-card ${actif===0?'charge-card--idle':''}">
       <div class="charge-card__header">
         <div class="charge-card__top">
           <div class="charge-card__avatar">${avatar}</div>
@@ -14070,7 +14127,6 @@ function _renderChargeView() {
             <div class="charge-card__name">${op}</div>
             ${roleLabel?`<div class="charge-card__role">${roleLabel}</div>`:''}
           </div>
-          ${overloaded?`<span style="margin-left:auto;font-size:9px;font-weight:700;background:var(--color-danger-bg);color:var(--color-danger);padding:2px 7px;border-radius:8px;white-space:nowrap">Surchargé</span>`:''}
         </div>
         <div class="charge-card__bar-row">
           <span class="charge-card__bar-lbl">Charge</span>

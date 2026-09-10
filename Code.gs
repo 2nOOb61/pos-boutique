@@ -15,7 +15,7 @@ const SHEET_COMMANDES    = 'Commandes';
 const SHEET_ENCAISSEMENTS = 'Encaissements'; // journal centralisé des entrées d'argent (patron)
 const SHEET_ARRETS        = 'ArretsCaisse';   // clôtures de caisse centralisées (multi-appareils + vue patron)
 const SHEET_BATS          = 'BATs';           // suivi des BAT (épreuves) : versions, envoi client, retours, validation
-const BAT_HEADERS_        = ['ID','DossierId','NumeroDossier','Version','Statut','Retours','FileName','FileUrl','FileDlUrl','FileType','CreatedBy','CreatedAt','SentBy','SentAt','DecidedBy','DecidedAt','Files'];
+const BAT_HEADERS_        = ['ID','DossierId','NumeroDossier','Version','Statut','Retours','FileName','FileUrl','FileDlUrl','FileType','CreatedBy','CreatedAt','SentBy','SentAt','DecidedBy','DecidedAt','Files','Kind'];
 
 // Nouvelles feuilles
 const SHEET_DOSSIERS   = 'Dossiers';
@@ -24,8 +24,11 @@ const SHEET_JOURNAL    = 'JournalAcces'; // audit log : qui fait quoi et quand
 const SHEET_MACHINES   = 'MachinesSessions'; // suivi machines : une ligne = une session de travail
 // En-têtes de la feuille MachinesSessions. StartTs/EndTs = epoch ms absolu (chrono live,
 // immunisé contre l'écart de fuseau, comme les tâches). Statut : EN_COURS | TERMINE.
+// StartTs (col 11) = début du SEGMENT actif courant (mis à jour à chaque reprise).
+// AccumMs (col 15) = temps actif cumulé des segments déjà terminés (hors pauses).
+// DateDebut (col 9) garde l'heure du TOUT PREMIER démarrage (affichage). Statut : EN_COURS | EN_PAUSE | TERMINE.
 const MACHINE_HEADERS  = ['ID','Machine','RefType','RefID','RefLabel','Client','Operateur',
-  'Statut','DateDebut','DateFin','StartTs','EndTs','DemarrePar','Note'];
+  'Statut','DateDebut','DateFin','StartTs','EndTs','DemarrePar','Note','AccumMs'];
 
 // En-têtes de la feuille Dossiers, partagés par tous les points de création
 // (vente, manuel, autre) pour éviter tout décalage de colonnes si l'un diverge.
@@ -151,6 +154,8 @@ function doPost(e) {
     else if (action === 'deleteDemandeAchat') result = handleDeleteDemandeAchat(data);
     else if (action === 'startMachineSession') result = handleStartMachineSession(data);
     else if (action === 'endMachineSession')   result = handleEndMachineSession(data);
+    else if (action === 'pauseMachineSession') result = handlePauseMachineSession(data);
+    else if (action === 'resumeMachineSession') result = handleResumeMachineSession(data);
     else if (action === 'getMachineSessions')  result = handleGetMachineSessions(data);
     else if (action === 'deleteMachineSession') result = handleDeleteMachineSession(data);
     else result = { ok:false, error:'Action inconnue: ' + action };
@@ -208,6 +213,8 @@ function doGet(e) {
       else if (action === 'getControlPatron')   result = handleGetControlPatron(data);
       else if (action === 'startMachineSession') result = handleStartMachineSession(data);
       else if (action === 'endMachineSession')   result = handleEndMachineSession(data);
+      else if (action === 'pauseMachineSession') result = handlePauseMachineSession(data);
+      else if (action === 'resumeMachineSession') result = handleResumeMachineSession(data);
       else if (action === 'deleteMachineSession') result = handleDeleteMachineSession(data);
       else result = { ok:false, error:'Action payload inconnue: ' + action };
       return jsonResp(result);
@@ -735,6 +742,9 @@ function handleAddBat(data) {
   // avant n'ont que 16 colonnes → poser l'en-tête manquant plutôt que d'insérer
   // une colonne (réutilise le schéma de Total_Virement des arrêts de caisse).
   if (sh.getLastColumn() < 17) sh.getRange(1, 17).setValue('Files');
+  // Colonne Kind (18) ajoutée après coup (Simulation / BAT) : même schéma de patch
+  // d'en-tête que Files, pour ne pas décaler les lignes existantes.
+  if (sh.getLastColumn() < 18) sh.getRange(1, 18).setValue('Kind');
 
   let filesJson = '';
   try { filesJson = JSON.stringify(Array.isArray(b.files) ? b.files : []); } catch (_) { filesJson = '[]'; }
@@ -745,7 +755,8 @@ function handleAddBat(data) {
     String(b.createdBy || ''), String(b.createdAt || ''),
     String(b.sentBy || ''), String(b.sentAt || ''),
     String(b.decidedBy || ''), String(b.decidedAt || ''),
-    filesJson
+    filesJson,
+    (b.kind === 'simulation' ? 'simulation' : 'bat')
   ];
   const last = sh.getLastRow();
   if (last > 1) {
@@ -774,10 +785,12 @@ function handleGetBats(data) {
     const rawFiles = r[16];   // col 17 = Files (JSON), absente sur les feuilles antérieures
     if (rawFiles) { try { const p = JSON.parse(rawFiles); if (Array.isArray(p)) files = p; } catch (_) {} }
     if (!files.length && (fileUrl || fileName)) files = [{ name:fileName, viewUrl:fileUrl, dlUrl:fileDlUrl, type:fileType }];
+    // col 18 = Kind (Simulation / BAT), absente des feuilles antérieures → 'bat' par défaut
+    const kind = (String(r[17] || '').toLowerCase() === 'simulation') ? 'simulation' : 'bat';
     return {
       id: String(r[0]), dossierId: String(r[1]), numeroDossier: String(r[2]),
       version: Number(r[3]) || 1, status: String(r[4]), retours: String(r[5]),
-      fileName, fileUrl, fileDlUrl, fileType, files,
+      fileName, fileUrl, fileDlUrl, fileType, files, kind,
       createdBy: String(r[10]), createdAt: String(r[11]),
       sentBy: String(r[12]), sentAt: String(r[13]),
       decidedBy: String(r[14]), decidedAt: String(r[15])
@@ -2156,9 +2169,10 @@ function handleStartMachineSession(data) {
       : 0;
     const id  = 'M' + String(lastId + 1).padStart(5, '0');
     const now = new Date();
+    _ensureMachineAccumCol_(sh);
     sh.appendRow([id, String(data.machine), String(data.refType||''), String(data.refId||''),
       String(data.refLabel||''), String(data.client||''), String(data.operateur||''),
-      'EN_COURS', now, '', now.getTime(), '', String(data.demarrePar||''), String(data.note||'')]);
+      'EN_COURS', now, '', now.getTime(), '', String(data.demarrePar||''), String(data.note||''), 0]);
     _logAction_('MACHINE_START', data.demarrePar||'admin',
       'Machine:' + data.machine + ' ref:' + (data.refLabel||data.refId||''));
     return { ok:true, id:id, startTs:now.getTime() };
@@ -2166,6 +2180,12 @@ function handleStartMachineSession(data) {
     try { lock.releaseLock(); } catch(e) {}
   }
 }
+
+// Ajoute la colonne AccumMs (15) si la feuille est antérieure (14 col.).
+function _ensureMachineAccumCol_(sh) {
+  if (sh.getLastColumn() < 15) sh.getRange(1, 15).setValue('AccumMs');
+}
+function _numCell_(v) { const n = Number(v); return isFinite(n) ? n : 0; }
 
 function handleEndMachineSession(data) {
   if (!data.id) return { ok:false, error:'id requis' };
@@ -2175,22 +2195,99 @@ function handleEndMachineSession(data) {
   const lock = LockService.getScriptLock();
   try {
     lock.waitLock(8000);
+    _ensureMachineAccumCol_(sh);
     const rows = sh.getDataRange().getValues();
     for (let i = 1; i < rows.length; i++) {
       if (String(rows[i][0]) !== String(data.id)) continue;
       if (rows[i][7] === 'TERMINE') return { ok:true, already:true };
-      const now = new Date();
+      const now   = new Date();
+      const nowMs = now.getTime();
+      // Temps actif final : cumul + (si en cours, le segment courant depuis StartTs).
+      let accum = _numCell_(rows[i][14]);
+      if (rows[i][7] === 'EN_COURS') accum += Math.max(0, nowMs - _numCell_(rows[i][10]));
       const rowData = rows[i].slice();
+      while (rowData.length < 15) rowData.push('');
       rowData[7]  = 'TERMINE';
       rowData[9]  = now;
-      rowData[11] = now.getTime();
+      rowData[11] = nowMs;
+      rowData[14] = accum;
       if (data.note) rowData[13] = String(data.note);
       sh.getRange(i + 1, 1, 1, rowData.length).setValues([rowData]);
       _logAction_('MACHINE_END', data.demarrePar||String(rows[i][12]||'admin'),
         'Machine:' + rows[i][1] + ' session:' + data.id);
-      return { ok:true, endTs:now.getTime() };
+      return { ok:true, endTs:nowMs, accumMs:accum };
     }
     return { ok:false, error:'Session introuvable' };
+  } finally {
+    try { lock.releaseLock(); } catch(e) {}
+  }
+}
+
+// Met une session EN_COURS en pause : fige le temps actif cumulé (la machine se libère).
+function handlePauseMachineSession(data) {
+  if (!data.id) return { ok:false, error:'id requis' };
+  const ss   = getSS();
+  const sh   = ss.getSheetByName(SHEET_MACHINES);
+  if (!sh) return { ok:false, error:'Feuille MachinesSessions introuvable' };
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(8000);
+    _ensureMachineAccumCol_(sh);
+    const rows = sh.getDataRange().getValues();
+    for (let i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) !== String(data.id)) continue;
+      if (rows[i][7] !== 'EN_COURS') return { ok:false, error:'La session n\'est pas en cours' };
+      const nowMs = Date.now();
+      const accum = _numCell_(rows[i][14]) + Math.max(0, nowMs - _numCell_(rows[i][10]));
+      const rowData = rows[i].slice();
+      while (rowData.length < 15) rowData.push('');
+      rowData[7]  = 'EN_PAUSE';
+      rowData[14] = accum;
+      if (data.note) rowData[13] = String(data.note);
+      sh.getRange(i + 1, 1, 1, rowData.length).setValues([rowData]);
+      _logAction_('MACHINE_PAUSE', data.demarrePar||String(rows[i][12]||'admin'),
+        'Machine:' + rows[i][1] + ' session:' + data.id);
+      return { ok:true, accumMs:accum };
+    }
+    return { ok:false, error:'Session introuvable' };
+  } finally {
+    try { lock.releaseLock(); } catch(e) {}
+  }
+}
+
+// Reprend une session EN_PAUSE : nouveau segment actif. Refuse si la machine
+// a déjà un travail EN_COURS (une seule session active à la fois).
+function handleResumeMachineSession(data) {
+  if (!data.id) return { ok:false, error:'id requis' };
+  const ss   = getSS();
+  const sh   = ss.getSheetByName(SHEET_MACHINES);
+  if (!sh) return { ok:false, error:'Feuille MachinesSessions introuvable' };
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(8000);
+    _ensureMachineAccumCol_(sh);
+    const rows = sh.getDataRange().getValues();
+    let target = -1, machine = '';
+    for (let i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) === String(data.id)) { target = i; machine = rows[i][1]; break; }
+    }
+    if (target < 0) return { ok:false, error:'Session introuvable' };
+    if (rows[target][7] !== 'EN_PAUSE') return { ok:false, error:'La session n\'est pas en pause' };
+    // Garde-fou : pas d'autre session EN_COURS sur cette machine
+    for (let i = 1; i < rows.length; i++) {
+      if (i !== target && String(rows[i][1]) === String(machine) && rows[i][7] === 'EN_COURS') {
+        return { ok:false, error:'Machine occupée par un autre travail', busy:true };
+      }
+    }
+    const nowMs = Date.now();
+    const rowData = rows[target].slice();
+    while (rowData.length < 15) rowData.push('');
+    rowData[7]  = 'EN_COURS';
+    rowData[10] = nowMs;   // nouveau début de segment actif
+    sh.getRange(target + 1, 1, 1, rowData.length).setValues([rowData]);
+    _logAction_('MACHINE_RESUME', data.demarrePar||String(rows[target][12]||'admin'),
+      'Machine:' + machine + ' session:' + data.id);
+    return { ok:true, startTs:nowMs };
   } finally {
     try { lock.releaseLock(); } catch(e) {}
   }
@@ -2215,7 +2312,8 @@ function handleGetMachineSessions(data) {
       operateur:r[6], statut:r[7], dateDebut:fmt(r[8]), dateFin:fmt(r[9]),
       startTs:_msFromCell_(r[10]) || _msFromCell_(r[8]),
       endTs:_msFromCell_(r[11]) || (r[9] ? _msFromCell_(r[9]) : null),
-      demarrePar:r[12], note:r[13]
+      demarrePar:r[12], note:r[13],
+      accumMs:(r.length > 14 && r[14] !== '' && r[14] !== null && r[14] !== undefined) ? (Number(r[14])||0) : null
     });
   }
   return { ok:true, sessions:list };

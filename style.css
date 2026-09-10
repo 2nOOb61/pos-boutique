@@ -1425,6 +1425,24 @@ tr:hover td {
 .bat-time { margin-top:5px; font-size:10.5px; color:var(--color-text-muted); }
 .bat-empty { font-size:12px; color:var(--color-text-muted); font-style:italic; padding:4px 0; }
 
+/* Stepper ① Simulation → ② BAT (précédence de la simulation numérique) */
+.bat-stepper { display:flex; align-items:center; gap:8px; margin:2px 0 12px; flex-wrap:wrap; }
+.bat-step { display:inline-flex; align-items:center; gap:6px; padding:4px 11px 4px 5px; border-radius:999px; border:1.5px solid var(--color-border); background:var(--color-bg); color:var(--color-text-muted); font-size:12px; font-weight:700; }
+.bat-step-num { width:18px; height:18px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:10px; font-weight:800; background:var(--color-border); color:var(--color-text-secondary); }
+.bat-step--active { border-color:#2563eb; background:#eaf1fb; color:#1d4ed8; }
+.bat-step--active .bat-step-num { background:#2563eb; color:#fff; }
+.bat-step--done { border-color:#16a34a; background:#dcfce7; color:#15803d; }
+.bat-step--done .bat-step-num { background:#16a34a; color:#fff; }
+.bat-step-arrow { color:var(--color-text-muted); font-weight:800; }
+/* Étiquette du type d'épreuve (Simulation / BAT) dans la liste des rounds */
+.bat-kind { font-size:10px; font-weight:800; padding:2px 8px; border-radius:20px; letter-spacing:.02em; }
+.bat-kind--sim { color:#6d28d9; background:#f3ecfe; }
+.bat-kind--bat { color:#1d4ed8; background:#eaf1fb; }
+/* Pastille de phase sur les lignes du tableau Suivi BAT */
+.batb-phase { display:inline-block; font-size:10px; font-weight:800; padding:1px 7px; border-radius:20px; vertical-align:middle; margin-left:4px; }
+.batb-phase--simulation { color:#6d28d9; background:#f3ecfe; }
+.batb-phase--bat { color:#1d4ed8; background:#eaf1fb; }
+
 /* Tableau de bord Suivi BAT */
 /* Bascule Liste / Calendrier (Suivi BAT) */
 .batv-toggle { display:inline-flex; gap:2px; padding:3px; margin-bottom:16px; background:var(--surface2); border:1px solid var(--border); border-radius:10px; }
