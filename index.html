@@ -26,7 +26,7 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20260910-prodphasetri">
+<link rel="stylesheet" href="./style.css?v=20260910-superadmin">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
@@ -965,8 +965,8 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
       <button id="btnDriveFolder" onclick="openDriveFolder()" title="Dossier partagé des pièces jointes" style="display:inline-flex;align-items:center;gap:5px;padding:7px 12px;background:transparent;border:1px solid rgba(232,131,74,0.5);border-radius:10px;color:var(--accent2);font-size:13px;cursor:pointer;transition:.2s;">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>Drive
       </button>
-      <button class="btn-logout btn-sync-desktop" onclick="openScriptSettings()" title="Configurer Apps Script" aria-label="Configurer Google Sheets" style="border-color:rgba(26,74,58,0.3);color:var(--accent)">Google Sheets</button>
-      <button class="btn-logout btn-sync-desktop" onclick="openAirtableSettings()" title="Configurer Airtable" id="btnAirtable" style="border-color:rgba(232,131,74,0.4);color:var(--accent2)">Airtable</button>
+      <button class="btn-logout btn-sync-desktop su-only" onclick="openScriptSettings()" title="Configurer Apps Script" aria-label="Configurer Google Sheets" style="border-color:rgba(26,74,58,0.3);color:var(--accent)">Google Sheets</button>
+      <button class="btn-logout btn-sync-desktop su-only" onclick="openAirtableSettings()" title="Configurer Airtable" id="btnAirtable" style="border-color:rgba(232,131,74,0.4);color:var(--accent2)">Airtable</button>
       <span id="pendingBadge" title="Ventes en attente de sync" role="button" tabindex="0" aria-live="polite" style="display:none;background:var(--red);color:#fff;border-radius:20px;padding:3px 10px;font-size:12px;font-weight:700;cursor:pointer" onclick="syncPendingOfflineSales()" onkeydown="if(event.key==='Enter')syncPendingOfflineSales()"><span id="pendingCount">0</span> en attente</span>
       <!-- Cloche notifications -->
       <div class="notif-bell-wrap">
@@ -1628,7 +1628,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
     <div class="config-section">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px">
         <div class="config-section-title" style="margin-bottom:0">Informations de la boutique</div>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <div class="su-only" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <span id="cfgSyncStatus" style="font-size:11px;color:#78716c;font-style:italic"></span>
           <button onclick="exportConfig()" title="Exporter la config en JSON pour la partager sur d'autres postes"
             style="display:flex;align-items:center;gap:5px;padding:6px 12px;background:#e8f4f0;color:#1a4a3a;border:1px solid rgba(26,74,58,.2);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">
@@ -1647,7 +1647,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
         <div class="form-group"><label>Adresse / Ville</label><input id="cfgAddress" placeholder="Antananarivo, Madagascar" oninput="saveConfig()" /></div>
         <div class="form-group"><label>Téléphone</label><input id="cfgPhone" placeholder="+261 XX XX XXX XX" oninput="saveConfig()" /></div>
         <div class="form-group"><label>Message de bas de ticket</label><input id="cfgFooter" placeholder="Merci de votre visite !" oninput="saveConfig()" /></div>
-        <div class="form-group">
+        <div class="form-group su-only">
           <label style="display:flex;align-items:center;gap:6px;">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
             URL Dossier Drive partagé
@@ -1784,7 +1784,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
     </div>
 
     <!-- Section Mise à jour -->
-    <div class="config-section">
+    <div class="config-section su-only">
       <div class="config-section-title">Cache &amp; Mise à jour</div>
       <p style="font-size:13px;color:var(--muted);margin-bottom:4px">
         Le cache est vidé <strong>automatiquement</strong> à chaque nouveau déploiement.
@@ -1797,7 +1797,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
     </div>
 
     <!-- Section Airtable -->
-    <div class="config-section" id="airtableConfigSection">
+    <div class="config-section su-only" id="airtableConfigSection">
       <div class="config-section-title">Connexion Airtable — Commandes</div>
       <div class="config-grid">
         <div class="form-group">
@@ -1816,7 +1816,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
     </div>
 
     <!-- Section Rythme de production -->
-    <div class="config-section" data-roles="admin,chef_atelier">
+    <div class="config-section su-only" data-roles="admin,chef_atelier">
       <div style="margin-bottom:14px">
         <div class="config-section-title" style="margin-bottom:4px">Rythme de production</div>
         <p style="font-size:12px;color:#78716c;margin:0">Délais cibles par étape — au-delà du seuil, la tâche est marquée <strong style="color:#dc2626">EN RETARD</strong>. Ajustez selon vos études de temps.</p>
@@ -1851,7 +1851,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
     <!-- Section Articles -->
     <!-- Objectifs commerciaux -->
-    <div class="config-section" data-roles="admin">
+    <div class="config-section su-only" data-roles="admin">
       <div class="config-section-title" style="display:flex;align-items:center;gap:10px">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
         Objectifs commerciaux mensuels
@@ -2729,7 +2729,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
     </div>
     <div class="form-group">
       <label>Rôle</label>
-      <select id="uRole">
+      <select id="uRole" onchange="_syncSuperRow()">
         <option value="admin">Administrateur — accès complet</option>
         <option value="caissier">Caissier — caisse + réservations + commandes</option>
         <option value="commerciale">Commerciale — caisse + réservations + commandes</option>
@@ -2750,6 +2750,15 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
         <span class="toggle-slider"></span>
       </label>
       <span style="font-size:14px">Compte actif</span>
+    </div>
+    <div class="form-group" id="uSuperRow" style="display:none;align-items:center;gap:12px;background:#f0fdf4;border:1px solid rgba(26,74,58,.2);border-radius:8px;padding:10px 12px">
+      <label class="toggle">
+        <input type="checkbox" id="uSuper" />
+        <span class="toggle-slider"></span>
+      </label>
+      <span style="font-size:14px">★ Super administrateur
+        <span style="display:block;font-size:11px;color:var(--muted)">Accès complet aux réglages sensibles, à la gestion des utilisateurs et au journal</span>
+      </span>
     </div>
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeModal('userModal')">Annuler</button>
@@ -3536,7 +3545,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260910-prodphasetri"></script>
+<script src="./app.js?v=20260910-superadmin"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '176 · 2026-09-10';
+const APP_VERSION = '177 · 2026-09-10';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -184,7 +184,7 @@ var rythmeProduction = (function() {
 // ============================================================
 // Utilisateurs locaux (persistés dans localStorage)
 let localUsers = [
-  { username:'admin',        pass:'1234', role:'admin',        label:'Administrateur',    actif:true },
+  { username:'admin',        pass:'1234', role:'admin',        label:'Administrateur',    actif:true, superAdmin:true },
   { username:'caissier',     pass:'0000', role:'caissier',     label:'Caissier',          actif:true },
   { username:'utilisateur',  pass:'1111', role:'utilisateur',  label:'Utilisateur',       actif:true },
   { username:'gestionnaire', pass:'2222', role:'gestionnaire', label:'Gestionnaire Stock', actif:true },
@@ -254,6 +254,8 @@ const PAGE_ACCESS = {
   'suivi-bat':    ['admin','commerciale','chef_atelier','pao','gestionnaire'],
   messagerie:     ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
 };
+// Pages réservées au SUPER ADMIN uniquement (les autres admins ne les voient pas).
+const SUPERADMIN_ONLY_PAGES = ['users', 'journal'];
 let editingUserId = null; // index dans localUsers
 
 let currentUser = null;
@@ -553,6 +555,8 @@ async function doLogin() {
           renderStats();
           updatePendingBadge();
           updateResBadge();
+          // Réappliquer les permissions : le statut super admin a pu arriver du serveur
+          if (currentUser) applyRolePermissions(currentUser.role);
         }).catch(() => {});
       // Précharger le fil de messagerie pour le badge non-lus
       loadCommentsForDossier(MSG_GLOBAL_ID).then(() => _updateMsgBadge()).catch(() => {});
@@ -600,6 +604,13 @@ function closeMobileNav() {
 function showPage(id, btn, bnavBtn) {
   // Fermer le drawer mobile à chaque navigation
   if (window.innerWidth <= 768) closeMobileNav();
+  // Pages réservées au super admin : rediriger tout autre compte
+  if (SUPERADMIN_ONLY_PAGES.includes(id) && !isSuperAdmin()) {
+    showToast('Accès réservé au super administrateur', 'error');
+    const fallback = _effectivePages(currentUser).find(p => p !== id) || 'caisse';
+    if (fallback !== id) return showPage(fallback);
+    return;
+  }
   // Arrêter les timers du module Machines si on quitte cette page
   if (id !== 'machines') _stopMachinesTimers();
   // Arrêter l'horloge live du cockpit Suivi BAT si on quitte cette page
@@ -3999,9 +4010,38 @@ function loadUsers() {
 // Si l'utilisateur a un champ customPages défini, on l'utilise ;
 // sinon on retombe sur PAGE_ACCESS[role].
 function _effectivePages(u) {
-  if (u && Array.isArray(u.customPages) && u.customPages.length > 0) return u.customPages;
-  return u ? Object.keys(PAGE_ACCESS).filter(p => PAGE_ACCESS[p].includes(u.role)) : [];
+  let pages;
+  if (u && Array.isArray(u.customPages) && u.customPages.length > 0) pages = u.customPages.slice();
+  else pages = u ? Object.keys(PAGE_ACCESS).filter(p => PAGE_ACCESS[p].includes(u.role)) : [];
+  // Les pages réservées au super admin sont retirées pour tout autre utilisateur
+  if (!_isSuperAdmin(u)) pages = pages.filter(p => !SUPERADMIN_ONLY_PAGES.includes(p));
+  return pages;
 }
+
+// ── SUPER ADMIN ─────────────────────────────────────────────
+// Le super admin (toi) garde l'accès complet aux Réglages / Utilisateurs / Journal.
+// Les autres comptes admin ont un accès restreint. Le statut est un champ
+// `superAdmin:true` sur l'utilisateur (attribuable dans la gestion des comptes).
+function _userSuperFlag(username) {
+  const u = localUsers.find(x => x.username && x.username.toLowerCase() === String(username || '').toLowerCase());
+  return !!(u && u.superAdmin === true);
+}
+function _anySuperAdmin() {
+  return localUsers.some(x => x.role === 'admin' && x.superAdmin === true);
+}
+// Anti-verrouillage : si AUCUN super admin n'est défini (données héritées, Sheet
+// sans la colonne), le compte 'admin' (sinon le 1er admin actif) l'est d'office,
+// pour ne jamais perdre l'accès aux Réglages sensibles.
+function _isSuperAdmin(user) {
+  const u = user || currentUser;
+  if (!u || u.role !== 'admin') return false;
+  if (_userSuperFlag(u.username)) return true;
+  if (_anySuperAdmin()) return false;
+  const seed = localUsers.find(x => x.username === 'admin' && x.role === 'admin')
+            || localUsers.find(x => x.role === 'admin' && x.actif !== false);
+  return !!(seed && u.username && seed.username.toLowerCase() === String(u.username).toLowerCase());
+}
+function isSuperAdmin() { return _isSuperAdmin(currentUser); }
 
 function applyRolePermissions(role) {
   const ep = currentUser ? _effectivePages(currentUser) : null;
@@ -4022,6 +4062,9 @@ function applyRolePermissions(role) {
   });
   const sheetsBtn = document.querySelector('[onclick="openScriptSettings()"]');
   if (sheetsBtn) sheetsBtn.style.display = isAdmin ? '' : 'none';
+  // Zones des Réglages réservées au super admin (clés/technique, objectifs, rythme…)
+  const su = isSuperAdmin();
+  document.querySelectorAll('.su-only').forEach(el => { el.style.display = su ? '' : 'none'; });
   // Masque les groupes/catégories de la sidebar dont aucun bouton n'est visible
   document.querySelectorAll('.sidebar-group').forEach(group => {
     const anyVisible = Array.from(group.querySelectorAll('.sidebar-btn'))
@@ -4092,6 +4135,9 @@ function renderUsersPage() {
       </div>
       <div class="user-card-meta">
         <span class="badge badge-${u.role}">${roleLabel}</span>
+        ${_isSuperAdmin(u)
+          ? '<span class="badge" style="background:#1a4a3a;color:#fff" title="Super administrateur — accès complet aux réglages, utilisateurs et journal">★ Super admin</span>'
+          : ''}
         ${u.actif !== false
           ? '<span class="badge badge-ok">Actif</span>'
           : '<span class="badge badge-inactive">Inactif</span>'}
@@ -4129,6 +4175,7 @@ function openUserModal(idx=null) {
     document.getElementById('uPass').value = '';
     document.getElementById('uRole').value = 'caissier';
     document.getElementById('uActif').checked = true;
+    const sc = document.getElementById('uSuper'); if (sc) sc.checked = false;
   } else {
     const u = localUsers[idx];
     document.getElementById('uUsername').value = u.username;
@@ -4137,8 +4184,20 @@ function openUserModal(idx=null) {
     document.getElementById('uPass').value = '';
     document.getElementById('uRole').value = u.role;
     document.getElementById('uActif').checked = u.actif !== false;
+    const sc = document.getElementById('uSuper'); if (sc) sc.checked = _isSuperAdmin(u);
   }
+  _syncSuperRow();
   openModal('userModal');
+}
+
+// La case « Super admin » n'est visible que pour un super admin, et seulement
+// quand le rôle choisi est « Administrateur ».
+function _syncSuperRow() {
+  const row = document.getElementById('uSuperRow');
+  if (!row) return;
+  const roleSel = document.getElementById('uRole');
+  const show = isSuperAdmin() && roleSel && roleSel.value === 'admin';
+  row.style.display = show ? 'flex' : 'none';
 }
 
 function togglePassVis() {
@@ -4174,17 +4233,36 @@ async function saveUser() {
     }
   }
 
+  // Statut super admin : seul un super admin peut l'attribuer/retirer, et
+  // uniquement à un compte de rôle admin. On conserve l'ancienne valeur sinon.
+  const prevSuper = !isNew && localUsers[editingUserId].superAdmin === true;
+  let wantSuper = prevSuper;
+  if (isSuperAdmin()) {
+    const sc = document.getElementById('uSuper');
+    wantSuper = (role === 'admin') && !!(sc && sc.checked);
+  } else if (role !== 'admin') {
+    wantSuper = false;
+  }
+  // Empêcher de retirer le dernier super admin actif
+  if (!isNew && prevSuper && !wantSuper) {
+    const otherSupers = localUsers.filter((x,i) => i !== editingUserId && x.role === 'admin' && x.superAdmin === true && x.actif !== false);
+    if (otherSupers.length === 0) {
+      showToast('Impossible : c\'est le dernier super administrateur', 'error'); return;
+    }
+  }
+
   // Hasher le mot de passe pour le stockage local et l'envoi API
   const passHashed = pass ? await sha256(pass) : null;
 
   if (isNew) {
-    localUsers.push({ username, pass: passHashed, role, label, actif });
+    localUsers.push({ username, pass: passHashed, role, label, actif, superAdmin: wantSuper });
     showToast(` Utilisateur ${label} créé`);
   } else {
     const u = localUsers[editingUserId];
     u.label = label;
     u.role  = role;
     u.actif = actif;
+    u.superAdmin = wantSuper;
     if (passHashed) u.pass = passHashed;
     showToast(` ${label} mis à jour`);
   }
@@ -4197,7 +4275,7 @@ async function saveUser() {
   // non salé) qui écraserait le mot de passe serveur lors d'une édition sans
   // changement. Si pass est vide (édition sans changement) → champ omis → serveur garde l'ancien.
   const base = localUsers[isNew ? localUsers.length - 1 : editingUserId];
-  const syncUser = { username: base.username, role: base.role, label: base.label, actif: base.actif, password: pass || undefined };
+  const syncUser = { username: base.username, role: base.role, label: base.label, actif: base.actif, superAdmin: base.superAdmin === true, password: pass || undefined };
   if (syncUser.username) saveUserToScript(syncUser);
 }
 
@@ -4214,21 +4292,25 @@ function openPermissionsModal(idx) {
 
   document.getElementById('permPagesList').innerHTML = Object.keys(PAGE_LABELS).map(pageId => {
     const isAdminLocked = (pageId === 'config' || pageId === 'users') && u.role !== 'admin';
-    const isChecked     = effectiveP.includes(pageId);
-    const isDefault     = rolePages.includes(pageId);
-    return `<label class="perm-row${isAdminLocked ? ' perm-row-locked' : ''}">
+    // Pages réservées au super admin : verrouillées pour tout compte non super admin
+    const isSuperLocked = SUPERADMIN_ONLY_PAGES.includes(pageId) && !_isSuperAdmin(u);
+    const locked        = isAdminLocked || isSuperLocked;
+    const isChecked     = effectiveP.includes(pageId) && !isSuperLocked;
+    const isDefault     = rolePages.includes(pageId) && !isSuperLocked;
+    return `<label class="perm-row${locked ? ' perm-row-locked' : ''}">
       <div class="perm-row-left">
         <div>
           <div class="perm-label">${PAGE_LABELS[pageId]}</div>
           <div style="display:flex;gap:4px;margin-top:3px;flex-wrap:wrap">
             ${isDefault     ? '<span class="perm-badge perm-badge-default">rôle par défaut</span>' : ''}
             ${isAdminLocked ? '<span class="perm-badge perm-badge-locked">admin seulement</span>' : ''}
+            ${isSuperLocked ? '<span class="perm-badge perm-badge-locked">super admin seulement</span>' : ''}
           </div>
         </div>
       </div>
       <label class="toggle" style="flex-shrink:0" onclick="event.stopPropagation()">
         <input type="checkbox" class="perm-cb" data-page="${pageId}"
-               ${isChecked ? 'checked' : ''} ${isAdminLocked ? 'disabled' : ''} />
+               ${isChecked ? 'checked' : ''} ${locked ? 'disabled' : ''} />
         <span class="toggle-slider"></span>
       </label>
     </label>`;
@@ -4270,7 +4352,7 @@ async function savePermissions() {
   }
 
   if (APPS_SCRIPT_URL) {
-    saveUserToScript({ username: u.username, role: u.role, label: u.label, actif: u.actif, customPages: u.customPages });
+    saveUserToScript({ username: u.username, role: u.role, label: u.label, actif: u.actif, customPages: u.customPages, superAdmin: u.superAdmin === true });
   }
 }
 
@@ -4798,6 +4880,8 @@ async function loadUsersFromScript() {
         const patched = { ...su };
         if (!patched.label && patched.nom) patched.label = patched.nom; // compat ancien champ nom
         if (!patched.pass  && local?.pass)  patched.pass  = local.pass;
+        // Le Sheet peut ne pas (encore) stocker superAdmin → conserver le flag local
+        if (patched.superAdmin === undefined && local && local.superAdmin !== undefined) patched.superAdmin = local.superAdmin;
         const badLabel = !patched.label || patched.label === 'undefined';
         const goodLocal = local?.label && local.label !== 'undefined';
         if (badLabel) patched.label = goodLocal ? local.label : su.username;

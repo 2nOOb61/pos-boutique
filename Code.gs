@@ -1066,7 +1066,8 @@ function handleGetUsers() {
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i]; if (!r[0]) continue;
     let _cp = null; try { if (r[5]) _cp = JSON.parse(r[5]); } catch(e) {}
-    users.push({ username:r[0], role:r[2], label:r[3], actif:String(r[4]||'oui').toLowerCase()!=='non', hasPwd: !!String(r[1]||'').trim(), customPages: _cp });
+    const _su = String(r[6]||'').toLowerCase() === 'oui';
+    users.push({ username:r[0], role:r[2], label:r[3], actif:String(r[4]||'oui').toLowerCase()!=='non', hasPwd: !!String(r[1]||'').trim(), customPages: _cp, superAdmin: _su });
   }
   const result = { ok:true, users };
   try { cache.put(cacheKey, JSON.stringify(result), 300); } catch(e) {}
@@ -1087,16 +1088,19 @@ function handleSaveUser(data) {
   if (pwd && !/^[0-9a-f]{64}$/i.test(pwd)) {
     pwd = _hashPwd_(pwd);
   }
+  // Auto-réparation de l'en-tête : colonne 7 "SuperAdmin" (feuilles anciennes = 6 col.)
+  if (sh.getLastColumn() < 7) sh.getRange(1, 7).setValue('SuperAdmin');
+  const _suCell = u.superAdmin === true ? 'oui' : 'non';
   const rows = sh.getDataRange().getValues();
   for (let i = 1; i < rows.length; i++) {
     if (String(rows[i][0]).toLowerCase() === String(u.username).toLowerCase()) {
       const storedPwd = pwd || rows[i][1];
-      sh.getRange(i+1,1,1,6).setValues([[u.username, storedPwd, u.role, u.label||u.nom||u.username, u.actif!==false?'oui':'non', u.customPages ? JSON.stringify(u.customPages) : '']]);
+      sh.getRange(i+1,1,1,7).setValues([[u.username, storedPwd, u.role, u.label||u.nom||u.username, u.actif!==false?'oui':'non', u.customPages ? JSON.stringify(u.customPages) : '', _suCell]]);
       _logAction_('USER_UPDATE', data.editedBy||'admin', 'Modifié: ' + u.username + ' rôle:' + u.role);
       return { ok:true };
     }
   }
-  sh.appendRow([u.username, pwd, u.role||'caissier', u.label||u.nom||u.username, 'oui', u.customPages ? JSON.stringify(u.customPages) : '']);
+  sh.appendRow([u.username, pwd, u.role||'caissier', u.label||u.nom||u.username, 'oui', u.customPages ? JSON.stringify(u.customPages) : '', _suCell]);
   _logAction_('USER_CREATE', data.editedBy||'admin', 'Créé: ' + u.username + ' rôle:' + (u.role||'caissier'));
   return { ok:true };
 }
