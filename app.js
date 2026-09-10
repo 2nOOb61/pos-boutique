@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '177 · 2026-09-10';
+const APP_VERSION = '178 · 2026-09-10';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -6937,8 +6937,17 @@ function _renderCommandesLegacy() {
         const _adminEditAll = _isAdmin
           ? `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();editCommandeAdmin('${c.id}')">${_kebabIcon('edit')}<span>Modifier la commande (tout + articles)</span></button>`
           : '';
-        kebabItems = _adminEditAll + _editFull
-          + (c.status === 'pending' ? `<button class="kebab-item danger" role="menuitem" onclick="closeAllKebabs();cancelCommande('${c.id}')">${_kebabIcon('trash')}<span>Annuler la commande</span></button>` : '');
+        // Annulation : directe pour le super admin, sinon demande à valider par le super admin
+        const _cancelBtn = c.status === 'pending'
+          ? (isSuperAdmin()
+              ? `<button class="kebab-item danger" role="menuitem" onclick="closeAllKebabs();cancelCommande('${c.id}')">${_kebabIcon('trash')}<span>Annuler la commande</span></button>`
+              : `<button class="kebab-item danger" role="menuitem" onclick="closeAllKebabs();requestCommandeCancel('${c.id}')">${_kebabIcon('trash')}<span>Demander l'annulation</span></button>`)
+          : '';
+        // Annuler une annulation (super admin uniquement)
+        const _restoreBtn = (c.status === 'cancelled' && isSuperAdmin())
+          ? `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();restoreCommande('${c.id}')">${_kebabIcon('reset')}<span>Rétablir la commande</span></button>`
+          : '';
+        kebabItems = _adminEditAll + _editFull + _cancelBtn + _restoreBtn;
       }
       const kebab = kebabItems ? `<div class="kebab-wrap">
              <button class="kebab-btn" aria-label="Plus d'actions" aria-haspopup="true" onclick="toggleKebab('cmd${c.id}',event)">${_dSvg}</button>
@@ -7384,8 +7393,14 @@ function _cmdDrawerActions(c) {
       btns.push(`<button class="pcok-btn pcok-btn--primary" onclick="closeDrawers();editCommandeAdmin('${c.id}')">Modifier (tout)</button>`);
     btns.push(`<button class="pcok-btn" onclick="closeDrawers();editCommandeAddress('${c.id}')">Adresse</button>`);
     btns.push(`<button class="pcok-btn" onclick="closeDrawers();editCommandeFrais('${c.id}')">Frais livraison</button>`);
-    btns.push(`<button class="pcok-btn" style="color:#dc2626" onclick="closeDrawers();cancelCommande('${c.id}')">Annuler</button>`);
+    // Annulation : directe pour le super admin, sinon demande à valider
+    btns.push(isSuperAdmin()
+      ? `<button class="pcok-btn" style="color:#dc2626" onclick="closeDrawers();cancelCommande('${c.id}')">Annuler</button>`
+      : `<button class="pcok-btn" style="color:#dc2626" onclick="closeDrawers();requestCommandeCancel('${c.id}')">Demander annulation</button>`);
   }
+  // Annuler une annulation (super admin uniquement)
+  if (c.status === 'cancelled' && isSuperAdmin())
+    btns.push(`<button class="pcok-btn" style="color:#16a34a;border-color:rgba(22,163,74,.4)" onclick="closeDrawers();restoreCommande('${c.id}')">Rétablir</button>`);
   return `<div class="pcok-drawer-actions pcok-drawer-actions--wrap">${btns.join('')}</div>`;
 }
 
@@ -7731,9 +7746,44 @@ function _applyCommandeCancel(c) {
 function cancelCommande(id) {
   const c = commandes.find(x => String(x.id) === String(id));
   if (!c || c.status !== 'pending') return;
+  // Seul le super admin annule directement. Tout autre compte doit passer par
+  // une demande d'annulation validée par le super admin.
+  if (!isSuperAdmin()) { requestCommandeCancel(id); return; }
   if (!confirm(`Annuler la commande #${c.id} de ${c.clientName} ?`)) return;
   _applyCommandeCancel(c);
   showToast(`Commande #${c.id} annulée`, 'info');
+}
+
+// Annuler une annulation : rétablit une commande annulée (super admin uniquement).
+function restoreCommande(id) {
+  const c = commandes.find(x => String(x.id) === String(id));
+  if (!c || c.status !== 'cancelled') return;
+  if (!isSuperAdmin()) { showToast('Réservé au super administrateur', 'error'); return; }
+  if (!confirm(`Rétablir la commande #${c.id} de ${c.clientName} ?\nElle repassera « En cours ».`)) return;
+  // Re-déduire le stock qui avait été restitué lors de l'annulation
+  (Array.isArray(c.items) ? c.items : []).forEach(function(item) {
+    if (item.custom) return;
+    const p = products.find(function(pr) { return pr.name === item.name; });
+    if (p) p.stock = Math.max(0, (p.stock || 0) - (Number(item.qty) || 0));
+  });
+  c.status = 'pending';
+  saveData();
+  renderProducts();
+  renderStockTable();
+  renderCommandes();
+  updateCmdBadge();
+  syncCmdUpdateToSheets(c);
+  syncCmdUpdateToAirtable(c);
+  _addNotification({
+    dossierId:     c.dossierId || '',
+    numeroDossier: `CMD-${String(c.id).padStart(3,'0')}`,
+    etapeCode:     'RETABLIE',
+    etapeLabel:    'Annulation annulée',
+    operateur:     currentUser?.label || 'Super admin',
+    message:       `Commande #${c.id} rétablie (annulation annulée) — ${c.clientName}`
+  });
+  logActivity('COMMANDE_RESTORE', `CMD #${c.id} — ${c.clientName || 'client'}`);
+  showToast(`Commande #${c.id} rétablie — pensez à ré-attribuer la production si besoin`);
 }
 
 // ============================================================
@@ -7768,12 +7818,16 @@ function _buildModBanner(c, mod) {
     ).join('');
     detail = `<div class="mod-title"> Modification demandée</div>${mod.reason ? `<div class="mod-reason">« ${mod.reason} »</div>` : ''}<div class="mod-diffs">${lines}</div>`;
   }
-  const actions = isAdmin
+  // Une demande d'annulation ne peut être validée QUE par le super admin ;
+  // les autres demandes (modifications) restent validables par tout admin.
+  const canValidate = mod.type === 'cancel' ? isSuperAdmin() : isAdmin;
+  const pendingTxt  = mod.type === 'cancel' ? 'En attente de validation du super admin' : 'En attente de validation admin';
+  const actions = canValidate
     ? `<div class="mod-actions">
          <button class="mod-btn mod-btn-approve" onclick="approveCommandeModif('${mod.id}')">✓ Approuver</button>
          <button class="mod-btn mod-btn-reject" onclick="rejectCommandeModif('${mod.id}')">✕ Refuser</button>
        </div>`
-    : `<div class="mod-pending-tag"> En attente de validation admin</div>`;
+    : `<div class="mod-pending-tag"> ${pendingTxt}</div>`;
   return `<div class="cmd-mod-banner ${mod.type === 'cancel' ? 'cmd-mod-banner--cancel' : ''}">
     ${detail}
     <div class="mod-who">${who}</div>
@@ -8018,9 +8072,13 @@ function _applyCommandeChanges(c, changes) {
 
 // ── Validation admin ───────────────────────────────────────
 function approveCommandeModif(modId) {
-  if (currentUser?.role !== 'admin') { showToast('Réservé à l\'admin', 'error'); return; }
   const mod = commandeMods.find(m => m.id === modId);
   if (!mod || mod.statut !== 'pending') return;
+  // Une annulation ne peut être validée que par le super admin
+  const _needSuper = mod.type === 'cancel';
+  if (_needSuper ? !isSuperAdmin() : currentUser?.role !== 'admin') {
+    showToast(_needSuper ? 'Annulation réservée au super administrateur' : 'Réservé à l\'admin', 'error'); return;
+  }
   const c = commandes.find(x => String(x.id) === String(mod.commandeId));
   if (!c) { showToast('Commande introuvable', 'error'); return; }
 
@@ -8045,9 +8103,13 @@ function approveCommandeModif(modId) {
 }
 
 function rejectCommandeModif(modId) {
-  if (currentUser?.role !== 'admin') { showToast('Réservé à l\'admin', 'error'); return; }
   const mod = commandeMods.find(m => m.id === modId);
   if (!mod || mod.statut !== 'pending') return;
+  // Le refus d'une annulation est aussi une décision réservée au super admin
+  const _needSuper = mod.type === 'cancel';
+  if (_needSuper ? !isSuperAdmin() : currentUser?.role !== 'admin') {
+    showToast(_needSuper ? 'Annulation réservée au super administrateur' : 'Réservé à l\'admin', 'error'); return;
+  }
   const c = commandes.find(x => String(x.id) === String(mod.commandeId));
   const motif = prompt('Motif du refus (optionnel, visible par le commercial) :', '');
   if (motif === null) return;
