@@ -1575,6 +1575,15 @@ tr:hover td {
 .batk-pao-card-h{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 13px;background:var(--surface2);border-bottom:1px solid var(--border)}
 .batk-pao-name{font-size:13.5px;font-weight:800;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .batk-pao-tot{font-size:10.5px;font-weight:800;color:var(--muted);background:var(--surface);border:1px solid var(--border);border-radius:999px;padding:2px 9px;white-space:nowrap}
+/* En-tête de section : toggle + impression globale */
+.batk-pao-hrow{display:flex;align-items:center;gap:8px;margin:0 0 10px}
+.batk-pao-hrow .batk-pao-h{flex:1;margin:0}
+.batk-pao-printall{display:inline-flex;align-items:center;gap:6px;flex-shrink:0;padding:5px 11px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--color-primary,#1a4a3a);font-family:inherit;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;transition:.15s}
+.batk-pao-printall:hover{background:var(--color-primary,#1a4a3a);color:#fff;border-color:transparent}
+/* Impression par carte PAO */
+.batk-pao-hr{display:inline-flex;align-items:center;gap:6px;flex-shrink:0}
+.batk-pao-print{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;flex-shrink:0;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--muted);cursor:pointer;transition:.15s}
+.batk-pao-print:hover{background:var(--color-primary,#1a4a3a);color:#fff;border-color:transparent}
 .batk-pao-stats{display:flex;flex-wrap:wrap;gap:5px 12px;padding:9px 13px 4px}
 .batk-pao-stat{font-size:11px;font-weight:700}
 /* Répartition Simulation / BAT par graphiste (classement PAO) */

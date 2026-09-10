@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '178 · 2026-09-10';
+const APP_VERSION = '179 · 2026-09-10';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -12428,6 +12428,73 @@ function toggleBatPao(){
   }
 }
 
+// ── Impression des fiches d'épreuves par PAO ────────────────
+function _batPhaseFilterLabel(){
+  return _batPhaseFilter === 'simulation' ? 'Simulations'
+       : _batPhaseFilter === 'bat'        ? 'BAT'
+       : 'Toutes les épreuves';
+}
+
+// Fiche d'un seul graphiste (bouton 🖨 sur sa carte).
+function printBatPao(paoEnc){
+  const name = decodeURIComponent(paoEnc || '');
+  const g = _batPaoGroups().find(x => x.pao === name);
+  if (!g){ showToast('Aucune épreuve pour ce PAO', 'info'); return; }
+  _printBatPaoDoc([g], `Fiche épreuves — ${name}`);
+}
+
+// Toutes les fiches (une section par PAO) — pour distribuer à chaque graphiste.
+function printBatAllPaos(){
+  const groups = _batPaoGroups();
+  if (!groups.length){ showToast('Aucune épreuve à imprimer', 'info'); return; }
+  _printBatPaoDoc(groups, 'Fiches épreuves par PAO');
+}
+
+function _printBatPaoDoc(groups, title){
+  const sections = groups.map(g => {
+    const kpis = `<div class="kpi-row">
+      <div class="kpi-box"><div class="kl">Épreuves</div><div class="kv">${g.rows.length}</div></div>
+      <div class="kpi-box"><div class="kl">À préparer</div><div class="kv" style="color:#7c3aed">${g.counts.pao}</div></div>
+      <div class="kpi-box"><div class="kl">À envoyer</div><div class="kv" style="color:#d97706">${g.counts.commercial}</div></div>
+      <div class="kpi-box"><div class="kl">Attente client</div><div class="kv" style="color:#2563eb">${g.counts.client}</div></div>
+      <div class="kpi-box"><div class="kl">Validés</div><div class="kv" style="color:#16a34a">${g.counts.valide}</div></div>
+    </div>`;
+    const rows = g.rows.map(r => {
+      const st = r.st;
+      const phase = st.phase === 'simulation' ? '🎨 Simulation' : '🧾 BAT';
+      const ver = r.version ? `v${r.version}` : '—';
+      let since = '—';
+      if (r.days != null){
+        const dj = r.days <= 0 ? "auj." : r.days === 1 ? '1 j' : r.days + ' j';
+        since = r.bucket === 'client' ? 'attente ' + dj : dj;
+      }
+      const b = st.bat; let lastWho = '', lastTs = '';
+      if (b){ if (b.decidedAt){ lastWho = b.decidedBy; lastTs = b.decidedAt; } else if (b.sentAt){ lastWho = b.sentBy; lastTs = b.sentAt; } else if (b.createdAt){ lastWho = b.createdBy; lastTs = b.createdAt; } }
+      const last = lastWho ? `${escapeHtml(lastWho)}${lastTs ? ' · ' + _batAgo(lastTs) : ''}` : '—';
+      return `<tr>
+        <td><strong>${escapeHtml(r.d.numeroDossier || '—')}</strong></td>
+        <td>${escapeHtml(r.client || '—')}</td>
+        <td>${phase}</td>
+        <td>${ver}</td>
+        <td><span class="badge" style="color:${st.color};background:${st.bg}">${escapeHtml(st.label)}</span></td>
+        <td>${since}</td>
+        <td>${last}</td>
+      </tr>`;
+    }).join('');
+    return `<div class="section-title">🎨 ${escapeHtml(g.pao)} — ${g.rows.length} épreuve${g.rows.length > 1 ? 's' : ''}</div>
+      ${kpis}
+      <table>
+        <thead><tr><th>N° Dossier</th><th>Client</th><th>Type</th><th>Version</th><th>État</th><th>Depuis</th><th>Dernière action</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }).join('');
+  _printWindow(title + ' — FOREVER MG', `
+    <div class="rpt-title">${escapeHtml(title)}</div>
+    <div class="rpt-period">Filtre : ${_batPhaseFilterLabel()} · ${groups.length} PAO · ${groups.reduce((s,g)=>s+g.rows.length,0)} épreuve(s)</div>
+    ${sections}
+  `);
+}
+
 async function renderSuiviBat(force){
   if (force && APPS_SCRIPT_URL) { try { await loadBatsFromScript(); } catch(e){} }
   const cont = document.getElementById('suiviBatContent');
@@ -12549,7 +12616,12 @@ async function renderSuiviBat(force){
     return `<div class="batk-pao-card">
         <div class="batk-pao-card-h">
           <span class="batk-pao-name">🎨 ${escapeHtml(g.pao)}</span>
-          <span class="batk-pao-tot">${g.rows.length} épreuve${g.rows.length>1?'s':''}</span>
+          <span class="batk-pao-hr">
+            <span class="batk-pao-tot">${g.rows.length} épreuve${g.rows.length>1?'s':''}</span>
+            <button class="batk-pao-print" onclick="event.stopPropagation();printBatPao('${encodeURIComponent(g.pao)}')" title="Imprimer la fiche de ${escapeHtml(g.pao)}" aria-label="Imprimer la fiche">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+            </button>
+          </span>
         </div>
         ${phaseMini ? `<div class="batk-pao-phases">${phaseMini}</div>` : ''}
         ${mini ? `<div class="batk-pao-stats">${mini}</div>` : ''}
@@ -12558,11 +12630,17 @@ async function renderSuiviBat(force){
   }).join('');
   const paoSection = paoGroups.length ? `
     <div class="batk-pao${_batPaoCollapsed?' batk-pao--collapsed':''}" id="batPaoSection">
-      <button class="batk-pao-h" onclick="toggleBatPao()" aria-expanded="${_batPaoCollapsed?'false':'true'}">
-        <svg class="batk-pao-chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-        <span>Classement par PAO</span>
-        <span class="batk-pao-count">${paoGroups.length} PAO</span>
-      </button>
+      <div class="batk-pao-hrow">
+        <button class="batk-pao-h" onclick="toggleBatPao()" aria-expanded="${_batPaoCollapsed?'false':'true'}">
+          <svg class="batk-pao-chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+          <span>Classement par PAO</span>
+          <span class="batk-pao-count">${paoGroups.length} PAO</span>
+        </button>
+        <button class="batk-pao-printall" onclick="printBatAllPaos()" title="Imprimer une fiche par graphiste">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+          <span>Imprimer par PAO</span>
+        </button>
+      </div>
       <div class="batk-pao-grid">${paoInner}</div>
     </div>` : '';
 
