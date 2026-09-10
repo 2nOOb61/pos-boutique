@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '175 · 2026-09-10';
+const APP_VERSION = '176 · 2026-09-10';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -8463,6 +8463,7 @@ let pendingAttrib = null;
 let _dossierView = 'list'; // 'list' | 'card'
 let pendingPointage = null;
 let prodFilter = 'TOUS';
+let _prodPhaseFilter = 'all'; // all | simulation | bat — tri des dossiers prod par phase d'épreuve
 let opFilterVal = 'TOUS';
 let _prodView   = 'tasks'; // 'tasks' | 'charge'
 let _prodExpanded = new Set(); // dossierId des groupes dépliés (repliés par défaut = vue compacte)
@@ -8596,6 +8597,17 @@ function _buildProdOperatorCockpit(scope) {
       <span class="prodk-kpi-lbl"><span class="prodk-kpi-dot"></span>${x.lbl}</span>
     </button>`).join('');
 
+  // Tri par type d'épreuve (Simulation / BAT) des dossiers de ce périmètre.
+  const _dossierIds = [...new Set(scope.filter(t => t.dossierId && t.dossierId !== 'LIBRE').map(t => t.dossierId))];
+  const _phaseTally = { simulation:0, bat:0 };
+  _dossierIds.forEach(id => { const p = _dossierEpreuvePhase(id); if (p) _phaseTally[p]++; });
+  const _hasEpreuves = (_phaseTally.simulation + _phaseTally.bat) > 0;
+  const phaseSeg = _hasEpreuves ? [
+    { k:'all',        lbl:'Toutes',  n:_dossierIds.length },
+    { k:'simulation', lbl:'🎨 Simu',  n:_phaseTally.simulation },
+    { k:'bat',        lbl:'🧾 BAT',   n:_phaseTally.bat },
+  ].map(f => `<button class="prodk-phasebtn ${_prodPhaseFilter===f.k?'prodk-phasebtn--active':''}" onclick="setProdPhaseFilter('${f.k}')">${f.lbl}<span class="prodk-phasebtn-n">${f.n}</span></button>`).join('') : '';
+
   const whoLbl = currentUser ? (currentUser.label || currentUser.username || '') : '';
   const alert = retard
     ? `<div class="prodk-alert" onclick="setProdFilter('EN_RETARD')" style="cursor:pointer" title="Voir les tâches en retard">
@@ -8612,6 +8624,7 @@ function _buildProdOperatorCockpit(scope) {
     <div class="prodk-right">
       <div class="prodk-clock" id="prodCockpitClock">${clock}</div>
       ${whoLbl ? `<div class="prodk-who">${whoLbl}</div>` : ''}
+      ${phaseSeg ? `<div class="prodk-phaseseg">${phaseSeg}</div>` : ''}
     </div>
     ${alert}
   </div>`;
@@ -11914,6 +11927,14 @@ function _batBallState(dossierId){
   };
   return { code, color:base.color, bg:base.bg, label:labels[code] || base.label, since, bat:b, phase, noun };
 }
+// Phase d'épreuve d'un dossier pour la Production (badge/tri) : null si le dossier
+// n'a AUCUNE épreuve (ne pas afficher de badge, exclu du tri Simulation/BAT).
+function _dossierEpreuvePhase(dossierId){
+  const list = _dossierBats(dossierId);
+  if (!list.length) return null;
+  return _batBallState(dossierId).phase;
+}
+
 function _canPaoBat(){ return ['pao','admin','chef_atelier'].includes(currentUser?.role); }
 function _canCommercialBat(){ return ['commerciale','admin'].includes(currentUser?.role); }
 function _batWhen(iso){ if(!iso) return ''; const d=new Date(iso); return isNaN(d.getTime())?'':d.toLocaleString('fr-FR',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}); }
@@ -13642,6 +13663,11 @@ function setProdFilter(f, btn) {
     const idx = { TOUS:0, A_FAIRE:1, EN_COURS:2, TERMINE:3, EN_RETARD:4 }[f];
     if (idx != null && all[idx]) all[idx].classList.add('prod-filter-btn--active');
   }
+  renderTaches();
+}
+
+function setProdPhaseFilter(f) {
+  _prodPhaseFilter = f;
   renderTaches();
 }
 
@@ -16420,6 +16446,13 @@ function renderTaches() {
   if (prodDateFilter.mois || prodDateFilter.annee)
     libreList = libreList.filter(t => _matchDateFilter(t.dateAssignation, prodDateFilter));
 
+  // Tri par type d'épreuve (Simulation / BAT) : ne garde que les dossiers dont la
+  // phase d'épreuve courante correspond ; les tâches libres (sans dossier) sortent.
+  if (_prodPhaseFilter !== 'all') {
+    dossierList = dossierList.filter(t => _dossierEpreuvePhase(t.dossierId) === _prodPhaseFilter);
+    libreList = [];
+  }
+
   // Mettre à jour les compteurs dans les boutons filtre (sur données non filtrées par date)
   const allVisible = _merged.filter(t => canViewAllProd || _sameOp(t.operateur, myLabel));
   const retardCount = allVisible.filter(t => _tacheRetardFlag(t)).length;
@@ -16488,6 +16521,7 @@ function renderTaches() {
           ${prio}
           ${client}
           ${produit}
+          ${(() => { const ph = _dossierEpreuvePhase(dossierId); return ph ? `<span class="prod-phase-badge prod-phase-badge--${ph}">${ph==='simulation'?'🎨 Simulation':'🧾 BAT'}</span>` : ''; })()}
           ${d && d.dateLivraisonProd ? _prodDeadlineChip(d.dateLivraisonProd) : ''}
         </div>
         <div class="prod-group-right">
