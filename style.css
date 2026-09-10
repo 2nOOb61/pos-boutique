@@ -1575,6 +1575,8 @@ tr:hover td {
 .batk-pao-card-h{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 13px;background:var(--surface2);border-bottom:1px solid var(--border)}
 .batk-pao-name{font-size:13.5px;font-weight:800;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .batk-pao-tot{font-size:10.5px;font-weight:800;color:var(--muted);background:var(--surface);border:1px solid var(--border);border-radius:999px;padding:2px 9px;white-space:nowrap}
+/* Barre de filtre par date (réutilise .pcf-toolbar/.pcf-segs) */
+.batk-datebar{margin:0 0 14px}
 /* En-tête de section : toggle + impression globale */
 .batk-pao-hrow{display:flex;align-items:center;gap:8px;margin:0 0 10px}
 .batk-pao-hrow .batk-pao-h{flex:1;margin:0}

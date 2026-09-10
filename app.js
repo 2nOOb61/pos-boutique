@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '179 · 2026-09-10';
+const APP_VERSION = '180 · 2026-09-10';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -12316,6 +12316,50 @@ let _batPhaseFilter = 'all';   // all | simulation | bat — sépare les épreuv
 function setBatPhaseFilter(f){ _batPhaseFilter = f; renderSuiviBat(); }
 function _batBucket(code){ return (code === 'pao' || code === 'refaire') ? 'pao' : code; }
 
+// ── Filtre par date (Tout / Ce mois / 7 jours / plage Du–Au) — même logique que Finances ──
+// Filtre sur la date de la DERNIÈRE action de l'épreuve (validée/envoyée/créée).
+let _batDateState = { period: 'all', from: '', to: '' };
+function setBatPeriod(v){ _batDateState.period = v; _batDateState.from = ''; _batDateState.to = ''; renderSuiviBat(); }
+// Pas de re-render sur oninput (détruirait l'<input date> en cours de saisie) : au blur.
+function setBatFrom(v){ _batDateState.from = v; _batDateState.period = null; }
+function setBatTo(v){ _batDateState.to = v; _batDateState.period = null; }
+function commitBatDates(){ renderSuiviBat(); }
+function setBatClearDates(){ _batDateState.from = ''; _batDateState.to = ''; _batDateState.period = 'all'; renderSuiviBat(); }
+function _batDateRange(){
+  if (_batDateState.from || _batDateState.to){
+    return { from: _batDateState.from ? new Date(_batDateState.from + 'T00:00:00') : null,
+             to:   _batDateState.to   ? new Date(_batDateState.to   + 'T23:59:59') : null };
+  }
+  const now = new Date();
+  if (_batDateState.period === 'week'){ const f = new Date(now); f.setDate(f.getDate() - 6); f.setHours(0,0,0,0); return { from:f, to:null }; }
+  if (_batDateState.period === 'month'){ return { from: new Date(now.getFullYear(), now.getMonth(), 1), to:null }; }
+  return { from:null, to:null };
+}
+// Horodatage de référence d'une ligne = dernière action de son BAT (repli : début d'état).
+function _batRowTs(r){
+  const b = r && r.st && r.st.bat;
+  const iso = b ? (b.decidedAt || b.sentAt || b.createdAt) : null;
+  const t = iso ? new Date(iso).getTime() : (r && r.st && r.st.since ? new Date(r.st.since).getTime() : NaN);
+  return isNaN(t) ? null : t;
+}
+function _batRowInRange(r){
+  const rg = _batDateRange();
+  if (!rg.from && !rg.to) return true;
+  const t = _batRowTs(r);
+  if (t == null) return false;
+  if (rg.from && t < rg.from.getTime()) return false;
+  if (rg.to   && t > rg.to.getTime())   return false;
+  return true;
+}
+function _batDatePeriodLabel(){
+  if (_batDateState.from || _batDateState.to){
+    const f = _batDateState.from ? new Date(_batDateState.from + 'T00:00:00').toLocaleDateString('fr-FR') : '…';
+    const t = _batDateState.to   ? new Date(_batDateState.to   + 'T00:00:00').toLocaleDateString('fr-FR') : "aujourd'hui";
+    return `${f} → ${t}`;
+  }
+  return _batDateState.period === 'week' ? '7 derniers jours' : _batDateState.period === 'month' ? 'Ce mois' : 'Toutes les périodes';
+}
+
 function _batBoardRows(){
   if (typeof _ensureDossierLinks === 'function') _ensureDossierLinks();
   const rows = [];
@@ -12398,8 +12442,10 @@ let _batSeenTs = (function(){ const v = Number(localStorage.getItem('pos-bat-see
 // Regroupe les dossiers BAT par PAO (= créateur du dernier BAT du dossier).
 // Sert au « Classement par PAO » : charge et états par graphiste.
 function _batPaoGroups(){
-  // Le classement par PAO respecte le tri par type d'épreuve (Simulation / BAT).
-  const rows = _batBoardRows().filter(r => _batPhaseFilter === 'all' || r.st.phase === _batPhaseFilter);
+  // Le classement par PAO respecte le tri par type d'épreuve (Simulation / BAT) ET la période.
+  const rows = _batBoardRows()
+    .filter(_batRowInRange)
+    .filter(r => _batPhaseFilter === 'all' || r.st.phase === _batPhaseFilter);
   const map = {}; const order = [];
   rows.forEach(r => {
     const b = r.st.bat;
@@ -12490,7 +12536,7 @@ function _printBatPaoDoc(groups, title){
   }).join('');
   _printWindow(title + ' — FOREVER MG', `
     <div class="rpt-title">${escapeHtml(title)}</div>
-    <div class="rpt-period">Filtre : ${_batPhaseFilterLabel()} · ${groups.length} PAO · ${groups.reduce((s,g)=>s+g.rows.length,0)} épreuve(s)</div>
+    <div class="rpt-period">Filtre : ${_batPhaseFilterLabel()} · ${_batDatePeriodLabel()} · ${groups.length} PAO · ${groups.reduce((s,g)=>s+g.rows.length,0)} épreuve(s)</div>
     ${sections}
   `);
 }
@@ -12499,7 +12545,7 @@ async function renderSuiviBat(force){
   if (force && APPS_SCRIPT_URL) { try { await loadBatsFromScript(); } catch(e){} }
   const cont = document.getElementById('suiviBatContent');
   if (!cont) return;
-  const all = _batBoardRows();
+  const all = _batBoardRows().filter(_batRowInRange);
   const counts = { all:all.length, pao:0, commercial:0, client:0, valide:0 };
   all.forEach(r => { counts[r.bucket] = (counts[r.bucket] || 0) + 1; });
   // Répartition par phase (Simulation numérique vs BAT physique) pour le tri.
@@ -12547,8 +12593,19 @@ async function renderSuiviBat(force){
       </div>
     </div>`;
 
-  // ── Flux « Dernières actions » — regroupé PAR OPÉRATEUR ──
-  const events = _batActivityEvents(24);
+  // ── Flux « Dernières actions » — regroupé PAR OPÉRATEUR (respecte la période) ──
+  const _evRange = _batDateRange();
+  let events = _batActivityEvents(0);
+  if (_evRange.from || _evRange.to){
+    events = events.filter(e => {
+      const t = new Date(e.ts).getTime();
+      if (isNaN(t)) return false;
+      if (_evRange.from && t < _evRange.from.getTime()) return false;
+      if (_evRange.to   && t > _evRange.to.getTime())   return false;
+      return true;
+    });
+  }
+  events = events.slice(0, 24);
   const maxTs = events.reduce((mx, e) => { const t = new Date(e.ts).getTime(); return t > mx ? t : mx; }, 0);
   // Regroupe par opérateur ; l'ordre des groupes suit l'activité la plus récente
   // (events déjà triés du plus récent au plus ancien), les actions restent triées
@@ -12677,7 +12734,23 @@ async function renderSuiviBat(force){
     </div>`;
   }).join('') : `<div class="batb-empty">Aucun dossier dans cet état.</div>`;
 
-  cont.innerHTML = cockpit + feed + paoSection + `<div class="batb-list">${list}</div>`;
+  // ── Barre de filtre par date (Tout / Ce mois / 7 jours / plage Du–Au) ──
+  const _dseg = (val, label) => `<button class="pcf-seg ${_batDateState.period === val ? 'active' : ''}" onclick="setBatPeriod('${val}')">${label}</button>`;
+  const _dInput = 'border:none;background:transparent;font-size:12px;font-weight:600;color:var(--text);font-family:inherit;outline:none;width:122px';
+  const _dLbl = 'font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)';
+  const dateBar = `
+    <div class="pcf-toolbar batk-datebar">
+      <div class="pcf-segs">${_dseg('all','Tout')}${_dseg('month','Ce mois')}${_dseg('week','7 jours')}</div>
+      <div class="pcf-segs" style="gap:7px;align-items:center;padding:4px 9px">
+        <span style="${_dLbl}">Du</span>
+        <input type="date" id="batDateFrom" value="${_batDateState.from || ''}" oninput="setBatFrom(this.value)" onblur="commitBatDates()" style="${_dInput}" />
+        <span style="${_dLbl}">Au</span>
+        <input type="date" id="batDateTo" value="${_batDateState.to || ''}" oninput="setBatTo(this.value)" onblur="commitBatDates()" style="${_dInput}" />
+        ${(_batDateState.from || _batDateState.to) ? `<button onclick="setBatClearDates()" title="Effacer la plage de dates" style="border:none;background:var(--surface);color:var(--muted);cursor:pointer;font-size:15px;line-height:1;padding:2px 7px;border-radius:6px">×</button>` : ''}
+      </div>
+    </div>`;
+
+  cont.innerHTML = cockpit + dateBar + feed + paoSection + `<div class="batb-list">${list}</div>`;
 
   // Mémorise le dernier horodatage vu (les prochaines actions plus récentes flasheront « Nouveau »).
   if (maxTs > _batSeenTs){ _batSeenTs = maxTs; try { localStorage.setItem('pos-bat-seen', String(maxTs)); } catch(e){} }
