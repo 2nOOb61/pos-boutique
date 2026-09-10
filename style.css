@@ -1577,6 +1577,11 @@ tr:hover td {
 .batk-pao-tot{font-size:10.5px;font-weight:800;color:var(--muted);background:var(--surface);border:1px solid var(--border);border-radius:999px;padding:2px 9px;white-space:nowrap}
 .batk-pao-stats{display:flex;flex-wrap:wrap;gap:5px 12px;padding:9px 13px 4px}
 .batk-pao-stat{font-size:11px;font-weight:700}
+/* Répartition Simulation / BAT par graphiste (classement PAO) */
+.batk-pao-phases{display:flex;flex-wrap:wrap;gap:6px;padding:8px 13px 2px}
+.batk-pao-ph{font-size:10.5px;font-weight:800;padding:2px 9px;border-radius:999px}
+.batk-pao-ph--sim{color:#6d28d9;background:#f3ecfe}
+.batk-pao-ph--bat{color:#1d4ed8;background:#eaf1fb}
 .batk-pao-items{display:flex;flex-direction:column;padding:4px 8px 8px}
 .batk-pao-item{display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:7px 6px;border:none;background:transparent;border-radius:8px;cursor:pointer;transition:background .12s;font-family:inherit}
 .batk-pao-item:hover{background:var(--surface2)}

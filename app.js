@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '174 · 2026-09-10';
+const APP_VERSION = '175 · 2026-09-10';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -12231,14 +12231,16 @@ let _batSeenTs = (function(){ const v = Number(localStorage.getItem('pos-bat-see
 // Regroupe les dossiers BAT par PAO (= créateur du dernier BAT du dossier).
 // Sert au « Classement par PAO » : charge et états par graphiste.
 function _batPaoGroups(){
-  const rows = _batBoardRows();
+  // Le classement par PAO respecte le tri par type d'épreuve (Simulation / BAT).
+  const rows = _batBoardRows().filter(r => _batPhaseFilter === 'all' || r.st.phase === _batPhaseFilter);
   const map = {}; const order = [];
   rows.forEach(r => {
     const b = r.st.bat;
     const pao = (b && b.createdBy) ? b.createdBy : '—';
-    if (!map[pao]){ map[pao] = { pao, rows:[], counts:{ pao:0, commercial:0, client:0, valide:0 } }; order.push(map[pao]); }
+    if (!map[pao]){ map[pao] = { pao, rows:[], counts:{ pao:0, commercial:0, client:0, valide:0 }, phase:{ simulation:0, bat:0 } }; order.push(map[pao]); }
     map[pao].rows.push(r);
     map[pao].counts[r.bucket] = (map[pao].counts[r.bucket] || 0) + 1;
+    map[pao].phase[r.st.phase] = (map[pao].phase[r.st.phase] || 0) + 1;
   });
   // Tri : d'abord ceux qui ont le plus de BAT encore actifs (non validés), puis le total.
   order.forEach(g => { g.active = g.rows.filter(r => r.bucket !== 'valide').length; });
@@ -12362,6 +12364,11 @@ async function renderSuiviBat(force){
       ['🔵', g.counts.client,     '#2563eb', 'attente'],
       ['🟢', g.counts.valide,     '#16a34a', 'validés'],
     ].filter(x => x[1] > 0).map(x => `<span class="batk-pao-stat" style="color:${x[2]}">${x[0]} ${x[1]} ${x[3]}</span>`).join('');
+    // Répartition Simulation / BAT de ce graphiste
+    const phaseMini = [
+      ['🎨', g.phase.simulation, 'batk-pao-ph--sim', 'Simulation'],
+      ['🧾', g.phase.bat,        'batk-pao-ph--bat', 'BAT'],
+    ].filter(x => x[1] > 0).map(x => `<span class="batk-pao-ph ${x[2]}">${x[0]} ${x[1]} ${x[3]}</span>`).join('');
     const items = g.rows.slice(0, 6).map(r => {
       const st = r.st;
       return `<button class="batk-pao-item" onclick="openAttribForDossier('${r.d.id}')" title="${escapeHtml(st.label)}">
@@ -12375,8 +12382,9 @@ async function renderSuiviBat(force){
     return `<div class="batk-pao-card">
         <div class="batk-pao-card-h">
           <span class="batk-pao-name">🎨 ${escapeHtml(g.pao)}</span>
-          <span class="batk-pao-tot">${g.rows.length} BAT</span>
+          <span class="batk-pao-tot">${g.rows.length} épreuve${g.rows.length>1?'s':''}</span>
         </div>
+        ${phaseMini ? `<div class="batk-pao-phases">${phaseMini}</div>` : ''}
         ${mini ? `<div class="batk-pao-stats">${mini}</div>` : ''}
         <div class="batk-pao-items">${items}${more}</div>
       </div>`;
