@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '173 · 2026-09-10';
+const APP_VERSION = '174 · 2026-09-10';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -12145,6 +12145,8 @@ function _batSectionInner(d){
 // ============================================================
 let _batBoardFilter = 'all';   // all | pao | commercial | client | valide
 function setBatBoardFilter(f){ _batBoardFilter = f; renderSuiviBat(); }
+let _batPhaseFilter = 'all';   // all | simulation | bat — sépare les épreuves par type
+function setBatPhaseFilter(f){ _batPhaseFilter = f; renderSuiviBat(); }
 function _batBucket(code){ return (code === 'pao' || code === 'refaire') ? 'pao' : code; }
 
 function _batBoardRows(){
@@ -12264,6 +12266,9 @@ async function renderSuiviBat(force){
   const all = _batBoardRows();
   const counts = { all:all.length, pao:0, commercial:0, client:0, valide:0 };
   all.forEach(r => { counts[r.bucket] = (counts[r.bucket] || 0) + 1; });
+  // Répartition par phase (Simulation numérique vs BAT physique) pour le tri.
+  const phaseCounts = { all:all.length, simulation:0, bat:0 };
+  all.forEach(r => { phaseCounts[r.st.phase] = (phaseCounts[r.st.phase] || 0) + 1; });
 
   // Retards : échéance de livraison dépassée, BAT non encore validé.
   const todayIso = (typeof _calTodayIso === 'function') ? _calTodayIso() : new Date().toISOString().slice(0,10);
@@ -12289,11 +12294,19 @@ async function renderSuiviBat(force){
     { k:'valide',     lbl:'🟢 Validés',      n:counts.valide },
   ].map(f => `<button class="batk-filter${_batBoardFilter===f.k?' batk-filter--active':''}" onclick="setBatBoardFilter('${f.k}')">${f.lbl}<span class="batk-filter-n">${f.n}</span></button>`).join('');
 
+  // Tri par type d'épreuve : Toutes / 🎨 Simulation / 🧾 BAT
+  const phaseSeg = [
+    { k:'all',        lbl:'Toutes',        n:phaseCounts.all },
+    { k:'simulation', lbl:'🎨 Simulation', n:phaseCounts.simulation },
+    { k:'bat',        lbl:'🧾 BAT',         n:phaseCounts.bat },
+  ].map(f => `<button class="batk-phasebtn${_batPhaseFilter===f.k?' batk-phasebtn--active':''}" onclick="setBatPhaseFilter('${f.k}')">${f.lbl}<span class="batk-phasebtn-n">${f.n}</span></button>`).join('');
+
   const cockpit = `
     <div class="batk-cockpit">
       <div class="batk-kpis">${kpis}</div>
       <div class="batk-cockpit-right">
         <div class="batk-clock" id="batClock">${clock}</div>
+        <div class="batk-phaseseg">${phaseSeg}</div>
         <div class="batk-filters">${filters}</div>
       </div>
     </div>`;
@@ -12379,7 +12392,9 @@ async function renderSuiviBat(force){
     </div>` : '';
 
   // ── Liste des dossiers (filtrée) ──
-  const rows = _batBoardFilter === 'all' ? all : all.filter(r => r.bucket === _batBoardFilter);
+  const rows = all
+    .filter(r => _batBoardFilter === 'all' || r.bucket === _batBoardFilter)
+    .filter(r => _batPhaseFilter === 'all' || r.st.phase === _batPhaseFilter);
   const list = rows.length ? rows.map(r => {
     const st = r.st;
     const urgent = r.bucket === 'client' && r.days != null && r.days >= 3;

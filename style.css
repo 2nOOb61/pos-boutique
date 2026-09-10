@@ -1519,6 +1519,14 @@ tr:hover td {
 .batk-filter--active{background:#38bdf8;border-color:#38bdf8;color:#04212e}
 .batk-filter-n{font-size:10px;font-weight:800;background:rgba(0,0,0,.2);border-radius:999px;padding:1px 6px;min-width:15px;text-align:center}
 .batk-filter--active .batk-filter-n{background:rgba(0,0,0,.14)}
+/* Tri par type d'épreuve (Simulation / BAT) — segmented control distinct */
+.batk-phaseseg{display:inline-flex;gap:2px;padding:3px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:999px}
+.batk-phasebtn{border:none;background:transparent;color:#cbd5e1;border-radius:999px;padding:5px 12px;font-size:12px;font-weight:700;
+  cursor:pointer;transition:.14s;display:inline-flex;align-items:center;gap:6px;font-family:inherit}
+.batk-phasebtn:hover{color:#fff}
+.batk-phasebtn--active{background:#fff;color:#0f1a24;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+.batk-phasebtn-n{font-size:10px;font-weight:800;background:rgba(0,0,0,.18);color:inherit;border-radius:999px;padding:1px 6px;min-width:15px;text-align:center}
+.batk-phasebtn--active .batk-phasebtn-n{background:rgba(0,0,0,.1)}
 /* Flux d'activité (dernières actions par opérateur) */
 .batk-feed{border:1px solid var(--border);border-radius:14px;background:var(--surface);margin-bottom:16px;overflow:hidden}
 .batk-feed-h{display:flex;align-items:center;justify-content:space-between;padding:11px 14px;border-bottom:1px solid var(--border);
@@ -1580,6 +1588,7 @@ tr:hover td {
 @media (max-width:600px){
   .batk-cockpit-right{align-items:stretch}
   .batk-filters{justify-content:flex-start}
+  .batk-phaseseg{align-self:flex-start}
   .batk-kpi{min-width:calc(33.33% - 7px)}
 }
 
