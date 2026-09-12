@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '181 · 2026-09-12';
+const APP_VERSION = '182 · 2026-09-12';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -252,6 +252,7 @@ const PAGE_ACCESS = {
   machines:       ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','gestionnaire','commerciale'],
   calendrier:     ['admin','commerciale','chef_atelier','gestionnaire'],
   'suivi-bat':    ['admin','commerciale','chef_atelier','pao','gestionnaire'],
+  finitions:      ['admin','chef_atelier','finition','operateur_prod','machiniste','pao','gestionnaire','commerciale'],
   messagerie:     ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
 };
 // Pages réservées au SUPER ADMIN uniquement (les autres admins ne les voient pas).
@@ -650,6 +651,7 @@ function showPage(id, btn, bnavBtn) {
   if (id==='machines')     { _enterMachinesPage(); }
   if (id==='calendrier')   { _ensureDossierLinks(); renderCalendrier(); if (APPS_SCRIPT_URL) Promise.all([loadCommandesFromScript(), loadReservationsFromScript()]).then(() => { _ensureDossierLinks(); renderCalendrier(); }).catch(()=>{}); }
   if (id==='suivi-bat')    { renderSuiviBat(); if (APPS_SCRIPT_URL) Promise.all([loadBatsFromScript(), loadDossiers(), loadCommandesFromScript()]).then(() => renderSuiviBat()).catch(()=>{}); }
+  if (id==='finitions')    { renderFinitionsPage(); if (APPS_SCRIPT_URL) Promise.all([loadDossiers(), _loadTachesQuietly(), _loadFinitionsFromScript()]).then(() => renderFinitionsPage()).catch(()=>{}); }
   if (id==='messagerie')   { loadMessagerie(); _autoRefreshMessagerie(); }
   if (id==='patron')       { renderControlFinance(); renderPatronEncaissements(); renderPatronDashboard(); _autoRefreshPatron(); loadEncaissementsFromScript().then(renderPatronEncaissements).catch(()=>{}); }
   if (id==='journal')      { loadJournal(); }
@@ -10241,6 +10243,31 @@ function _finInjectStyle(){
   .fin-btn.primary{background:var(--fin-accent,#b4661f);border-color:var(--fin-accent,#b4661f);color:#fff}
   .fin-btn:focus-visible{outline:2px solid var(--fin-accent,#b4661f);outline-offset:2px}
   @media (max-width:720px){ .fin-grid{grid-template-columns:1fr 1fr} .fin-cols{grid-template-columns:1fr} }
+  /* ── page Finitions ── */
+  .finp-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px}
+  .finp-kpi{border:1px solid var(--color-border,#e5e3df);border-left:4px solid var(--k,#b4661f);border-radius:11px;padding:12px 14px;background:var(--color-surface,#fff)}
+  .finp-kpi .v{font-size:26px;font-weight:800;line-height:1;color:var(--color-text,#1c1917)}
+  .finp-kpi .l{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--color-text-muted,#78716c);margin-top:4px}
+  .finp-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+  .finp-seg{display:inline-flex;background:var(--color-bg,#f5f4f2);border:1px solid var(--color-border,#e5e3df);border-radius:10px;padding:3px;gap:3px}
+  .finp-seg button{border:0;background:transparent;color:var(--color-text-muted,#78716c);font-weight:700;font-size:12.5px;padding:7px 13px;border-radius:8px;cursor:pointer}
+  .finp-seg button[aria-selected="true"]{background:#b4661f;color:#fff}
+  .finp-search{flex:1;min-width:170px;font:inherit;font-size:13.5px;padding:8px 12px;border:1px solid var(--color-border,#e5e3df);border-radius:9px;background:var(--color-surface,#fff);color:var(--color-text,#1c1917)}
+  .finp-tablewrap{overflow-x:auto;border:1px solid var(--color-border,#e5e3df);border-radius:12px}
+  table.finp-table{width:100%;border-collapse:collapse;min-width:640px}
+  .finp-table th{text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted,#78716c);padding:9px 12px;border-bottom:1px solid var(--color-border,#e5e3df);background:var(--color-bg,#faf8f4);white-space:nowrap}
+  .finp-table td{padding:9px 12px;border-bottom:1px solid var(--color-border,#f0ece5);font-size:13px;color:var(--color-text,#1c1917);vertical-align:middle}
+  .finp-table tr:last-child td{border-bottom:0}
+  .finp-table tr:hover td{background:var(--color-bg,#faf8f4)}
+  .finp-ref{font-family:monospace;font-weight:600}
+  .finp-type{display:inline-flex;gap:5px;align-items:center;font-size:12px;font-weight:600;white-space:nowrap}
+  .finp-badge{display:inline-flex;gap:5px;align-items:center;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap}
+  .finp-badge--ok{background:#e3f1e8;color:#2e7d52}
+  .finp-badge--todo{background:#fef3c7;color:#b45309}
+  .finp-open{border:1px solid #b4661f;background:#b4661f;color:#fff;font-weight:600;font-size:12.5px;padding:7px 13px;border-radius:8px;cursor:pointer;white-space:nowrap}
+  .finp-open:hover{filter:brightness(1.06)}
+  .finp-empty{text-align:center;color:var(--color-text-muted,#78716c);padding:40px 20px;font-size:14px}
+  @media (max-width:640px){ .finp-kpis{grid-template-columns:1fr 1fr 1fr;gap:8px} .finp-kpi .v{font-size:20px} }
   `;
   document.head.appendChild(st);
 }
@@ -10348,6 +10375,7 @@ async function openFicheFinition(dossierId, tacheId){
   document.body.style.overflow = 'hidden';
 
   let variant = _finVariantForDossier(d);
+  _finSetVariant(variant);   // applique la variante tout de suite (accent + panneau), avant le chargement serveur
   // Pré-remplissage par défaut (surchargé si une fiche existe déjà côté serveur)
   const today = new Date().toISOString().slice(0,10);
   ov.querySelector('[data-fin="date"]').value = today;
@@ -10401,6 +10429,10 @@ async function saveFicheFinition(dossierId, tacheId){
       operateur: currentUser?.label || fin.responsable,
       message:`${currentUser?.label||'Un opérateur'} a enregistré la fiche de finition — dossier ${fin.numeroDossier||dossierId}`
     });
+    // Rafraîchir la page Finitions si elle est ouverte (statut → Remplie)
+    const _fi = finitionsAll.findIndex(x => x.dossierId === dossierId);
+    if (_fi >= 0) finitionsAll[_fi] = { ...finitionsAll[_fi], ...fin }; else finitionsAll.push(fin);
+    if (document.getElementById('page-finitions')?.classList.contains('active')) renderFinitionsPage();
     closeFicheFinition();
   } else {
     showToast('Échec de l\'enregistrement : ' + ((r&&r.error)||'réseau'), 'error');
@@ -10455,6 +10487,114 @@ function printFicheFinition(dossierId){
        <div style="flex:1"><div style="border-bottom:1px solid #999;height:34px"></div><small style="color:#78716c">Contrôle qualité</small></div>
        <div style="flex:1"><div style="border-bottom:1px solid #999;height:34px"></div><small style="color:#78716c">Visa responsable</small></div>
      </div>`);
+}
+
+// ── Page « Finitions » : liste de toutes les fiches (à remplir / remplies) ──
+let finitionsAll = [];
+let _finPageFilter = 'all';   // all | todo | done
+let _finPageSearch = '';
+
+async function _loadFinitionsFromScript(){
+  if (!APPS_SCRIPT_URL) return;
+  try { const r = await apiCall({ action:'getFinition' }); if (r && r.ok) finitionsAll = r.finitions || []; } catch(e){}
+}
+
+// Lignes de la page = dossiers ayant une tâche FINITION OU une fiche déjà enregistrée.
+function _finPageRows(){
+  const finMap = {};
+  (finitionsAll||[]).forEach(f => { if (f && f.dossierId) finMap[f.dossierId] = f; });
+  const ids = new Set();
+  (taches||[]).forEach(t => { if (t.etapeCode === 'FINITION' && t.dossierId && t.dossierId !== 'LIBRE') ids.add(t.dossierId); });
+  Object.keys(finMap).forEach(id => ids.add(id));
+  const rows = [];
+  ids.forEach(id => {
+    const d = (dossiers||[]).find(x => x.id === id) || null;
+    const f = finMap[id] || null;
+    if (!d && !f) return;
+    const tache = (taches||[]).find(t => t.dossierId === id && t.etapeCode === 'FINITION');
+    const variante = (f && f.variante) || _finVariantForDossier(d || {});
+    rows.push({
+      dossierId: id,
+      tacheId: tache ? tache.id : '',
+      numero: (d && d.numeroDossier) || (f && f.numeroDossier) || id,
+      client: (d && d.client) || (f && f.client) || '',
+      produit: (d && d.produit) || (f && f.produit) || '',
+      qteCmd: (d && d.quantite) || (f && f.qtteCommandee) || '',
+      qteProd: (f && f.qtteProduite) || '',
+      variante,
+      done: !!f,
+      responsable: (f && f.responsable) || (tache && tache.operateur) || '',
+      savedAt: (f && f.savedAt) || ''
+    });
+  });
+  // À remplir d'abord, puis les plus récemment enregistrées
+  rows.sort((a,b) => (a.done?1:0) - (b.done?1:0) || String(b.savedAt).localeCompare(String(a.savedAt)));
+  return rows;
+}
+
+function setFinPageFilter(f){ _finPageFilter = f; renderFinitionsPage(); }
+function setFinPageSearch(v){ _finPageSearch = v; _finPageRenderBody(); }
+
+function _finPageRenderBody(){
+  const host = document.getElementById('finitionsBody'); if (!host) return;
+  const q = (_finPageSearch||'').trim().toLowerCase();
+  let rows = _finPageRows();
+  if (_finPageFilter === 'todo') rows = rows.filter(r => !r.done);
+  else if (_finPageFilter === 'done') rows = rows.filter(r => r.done);
+  if (q) rows = rows.filter(r => (r.numero+' '+r.client+' '+r.produit).toLowerCase().includes(q));
+
+  if (!rows.length){
+    host.innerHTML = `<div class="finp-empty">Aucune fiche à afficher.<br><small>Les dossiers apparaissent ici dès qu'une tâche « Finition » leur est attribuée.</small></div>`;
+    return;
+  }
+  const body = rows.map(r => {
+    const ic = r.variante === 'carterie' ? '📇' : '🪵';
+    const tname = r.variante === 'carterie' ? 'Carterie' : 'Bois';
+    const badge = r.done
+      ? `<span class="finp-badge finp-badge--ok">✓ Remplie</span>`
+      : `<span class="finp-badge finp-badge--todo">○ À remplir</span>`;
+    const qte = (r.qteProd!=='' ? r.qteProd : '—') + ' / ' + (r.qteCmd!=='' ? r.qteCmd : '—');
+    return `<tr>
+      <td class="finp-ref">${_finEsc(r.numero)}</td>
+      <td>${_finEsc(r.client||'—')}</td>
+      <td>${_finEsc(r.produit||'—')}</td>
+      <td><span class="finp-type">${ic} ${tname}</span></td>
+      <td style="font-variant-numeric:tabular-nums;white-space:nowrap">${_finEsc(qte)}</td>
+      <td>${badge}</td>
+      <td style="color:var(--color-text-muted,#78716c);white-space:nowrap">${_finEsc(r.savedAt||'—')}</td>
+      <td style="text-align:right"><button class="finp-open" onclick="openFicheFinition('${r.dossierId}','${r.tacheId}')">${r.done?'Voir / modifier':'Remplir'}</button></td>
+    </tr>`;
+  }).join('');
+  host.innerHTML = `<div class="finp-tablewrap"><table class="finp-table">
+    <thead><tr><th>N° Dossier</th><th>Client</th><th>Article</th><th>Type</th><th>Qté prod./cmd.</th><th>Statut</th><th>Enregistrée</th><th></th></tr></thead>
+    <tbody>${body}</tbody></table></div>`;
+}
+
+function renderFinitionsPage(reload){
+  _finInjectStyle();
+  const host = document.getElementById('finitionsContent'); if (!host) return;
+  if (reload && APPS_SCRIPT_URL){
+    _loadFinitionsFromScript().then(() => renderFinitionsPage(false)).catch(()=>{});
+  }
+  const rows = _finPageRows();
+  const total = rows.length;
+  const done  = rows.filter(r => r.done).length;
+  const todo  = total - done;
+  const seg = (k,label) => `<button role="tab" aria-selected="${_finPageFilter===k}" onclick="setFinPageFilter('${k}')">${label}</button>`;
+  host.innerHTML = `
+    <div class="finp-kpis">
+      <div class="finp-kpi" style="--k:#b4661f"><div class="v">${total}</div><div class="l">Dossiers en finition</div></div>
+      <div class="finp-kpi" style="--k:#b45309"><div class="v">${todo}</div><div class="l">À remplir</div></div>
+      <div class="finp-kpi" style="--k:#2e7d52"><div class="v">${done}</div><div class="l">Remplies</div></div>
+    </div>
+    <div class="finp-bar">
+      <div class="finp-seg" role="tablist">
+        ${seg('all','Toutes')}${seg('todo','À remplir')}${seg('done','Remplies')}
+      </div>
+      <input class="finp-search" type="search" placeholder="Rechercher (dossier, client, article)…" value="${_finEsc(_finPageSearch)}" oninput="setFinPageSearch(this.value)">
+    </div>
+    <div id="finitionsBody"></div>`;
+  _finPageRenderBody();
 }
 
 function printAttributionReport() {
