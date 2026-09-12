@@ -35,6 +35,14 @@ const MACHINE_HEADERS  = ['ID','Machine','RefType','RefID','RefLabel','Client','
 const DOSSIER_HEADERS = ['ID','NumeroDossier','Client','Produit','Quantite','Statut',
   'Progression','DateCreation','DateLivraison','Priorite','SourceVente','Notes'];
 
+// Feuille Finitions : fiche d'atelier de l'étape FINITION (traçabilité seule pour
+// l'instant — pas de déduction de stock). Une ligne par dossier (upsert sur ID).
+// Consommables = JSON du formulaire (cases cochées + champs « Autres »/textes).
+const SHEET_FINITIONS   = 'Finitions';
+const FINITION_HEADERS_ = ['ID','DossierId','TacheId','NumeroDossier','Client','Produit',
+  'Variante','QtteCommandee','QtteProduite','Responsable','DateFinition','HeureDebut',
+  'HeureFin','Consommables','Remarques','SavedBy','SavedAt'];
+
 // ── Audit : enregistrement des actions critiques ───────────
 function _logAction_(action, user, detail) {
   try {
@@ -120,6 +128,8 @@ function doPost(e) {
     else if (action === 'getEncaissements')  result = handleGetEncaissements(data);
     else if (action === 'addBat')            result = handleAddBat(data);
     else if (action === 'getBats')           result = handleGetBats(data);
+    else if (action === 'saveFinition')      result = handleSaveFinition(data);
+    else if (action === 'getFinition')       result = handleGetFinition(data);
     else if (action === 'addArretCaisse')    result = handleAddArretCaisse(data);
     else if (action === 'getArretsCaisse')   result = handleGetArretsCaisse(data);
     else if (action === 'logActivity')       result = handleLogActivity(data);
@@ -189,6 +199,8 @@ function doGet(e) {
       else if (action === 'updateCommande')    result = handleUpdateCommande(data);
       else if (action === 'addEncaissement')   result = handleAddEncaissement(data);
       else if (action === 'addBat')            result = handleAddBat(data);
+      else if (action === 'saveFinition')      result = handleSaveFinition(data);
+      else if (action === 'getFinition')       result = handleGetFinition(data);
       else if (action === 'addArretCaisse')    result = handleAddArretCaisse(data);
       else if (action === 'updateDossier')     result = handleUpdateDossier(data);
       else if (action === 'cloturerDossier')   result = handleCloturerDossier(data);
@@ -234,6 +246,7 @@ function doGet(e) {
     if (action === 'getCommandes')    return jsonResp(handleGetCommandes(e.parameter));
     if (action === 'getEncaissements') return jsonResp(handleGetEncaissements(e.parameter));
     if (action === 'getBats')          return jsonResp(handleGetBats(e.parameter));
+    if (action === 'getFinition')      return jsonResp(handleGetFinition(e.parameter));
     if (action === 'getArretsCaisse')  return jsonResp(handleGetArretsCaisse(e.parameter));
     if (action === 'getDossiers')     return jsonResp(handleGetDossiers(e.parameter));
     if (action === 'getTaches')       return jsonResp(handleGetTaches(e.parameter));
@@ -798,6 +811,60 @@ function handleGetBats(data) {
   }).filter(x => x.id);
   if (data && data.dossierId) list = list.filter(x => String(x.dossierId) === String(data.dossierId));
   return { ok:true, bats:list };
+}
+
+// ── Fiche de FINITION (étape atelier) : persistance Sheet ──
+// Upsert par ID (= 'FIN_' + dossierId → une fiche par dossier). Traçabilité seule :
+// on enregistre quels consommables ont servi, sans toucher au stock.
+function handleSaveFinition(data) {
+  const f = data.finition;
+  if (!f || !f.dossierId) return { ok:false, error:'Finition invalide' };
+  const ss = getSS();
+  const sh = ss.getSheetByName(SHEET_FINITIONS) || ensureSheet(ss, SHEET_FINITIONS, FINITION_HEADERS_);
+  let conso = '{}';
+  try { conso = (typeof f.consommables === 'string') ? f.consommables : JSON.stringify(f.consommables || {}); } catch (_) { conso = '{}'; }
+  const id = String(f.id || ('FIN_' + f.dossierId));
+  const row = [
+    id, String(f.dossierId), String(f.tacheId || ''), String(f.numeroDossier || ''),
+    String(f.client || ''), String(f.produit || ''), String(f.variante || 'bois'),
+    String(f.qtteCommandee || ''), String(f.qtteProduite || ''), String(f.responsable || ''),
+    String(f.dateFinition || ''), String(f.heureDebut || ''), String(f.heureFin || ''),
+    conso, String(f.remarques || ''), String(f.savedBy || ''), String(f.savedAt || '')
+  ];
+  const last = sh.getLastRow();
+  if (last > 1) {
+    const ids = sh.getRange(2, 1, last - 1, 1).getValues();
+    for (let i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]) === id) {
+        sh.getRange(i + 2, 1, 1, row.length).setValues([row]);
+        return { ok:true, id, updated:true };
+      }
+    }
+  }
+  sh.appendRow(row);
+  return { ok:true, id };
+}
+
+function handleGetFinition(data) {
+  const sh = getSS().getSheetByName(SHEET_FINITIONS);
+  if (!sh) return { ok:true, finition:null, finitions:[] };
+  const last = sh.getLastRow();
+  if (last <= 1) return { ok:true, finition:null, finitions:[] };
+  const width = Math.min(FINITION_HEADERS_.length, sh.getLastColumn());
+  const rows = sh.getRange(2, 1, last - 1, width).getValues();
+  let list = rows.map(r => {
+    let conso = {};
+    try { conso = r[13] ? JSON.parse(r[13]) : {}; } catch (_) { conso = {}; }
+    return {
+      id:String(r[0]), dossierId:String(r[1]), tacheId:String(r[2]), numeroDossier:String(r[3]),
+      client:String(r[4]), produit:String(r[5]), variante:String(r[6] || 'bois'),
+      qtteCommandee:String(r[7]), qtteProduite:String(r[8]), responsable:String(r[9]),
+      dateFinition:String(r[10]), heureDebut:String(r[11]), heureFin:String(r[12]),
+      consommables:conso, remarques:String(r[14]), savedBy:String(r[15]), savedAt:String(r[16])
+    };
+  }).filter(x => x.id);
+  if (data && data.dossierId) list = list.filter(x => String(x.dossierId) === String(data.dossierId));
+  return { ok:true, finition:(list[list.length - 1] || null), finitions:list };
 }
 
 // ── Arrêts de caisse (clôtures) : persistance Sheet ────────

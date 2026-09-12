@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '180 · 2026-09-10';
+const APP_VERSION = '181 · 2026-09-12';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -4583,7 +4583,7 @@ async function apiCall(payload) {
   if (!APPS_SCRIPT_URL) return null;
 
   // ── LECTURES & LOGIN : requête GET avec params individuels ─
-  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getEncaissements', 'getBats', 'getArretsCaisse', 'getJournal', 'getDossiers', 'getTaches', 'getDashboard', 'getControlPatron', 'getComments', 'getNotifs', 'getModifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles', 'getMachineSessions'];
+  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getEncaissements', 'getBats', 'getFinition', 'getArretsCaisse', 'getJournal', 'getDossiers', 'getTaches', 'getDashboard', 'getControlPatron', 'getComments', 'getNotifs', 'getModifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles', 'getMachineSessions'];
   if (getActions.includes(payload.action)) {
     const buildUrl = () => {
       let url = APPS_SCRIPT_URL + '?action=' + payload.action;
@@ -10134,6 +10134,329 @@ function _printWindow(title, bodyHtml) {
   w.document.close();
 }
 
+// ============================================================
+// FICHE DE FINITION — étape atelier (traçabilité, sans stock)
+// ============================================================
+// Digitalisation de la fiche papier FINITION (2 variantes : BOIS / CARTERIE).
+// S'ouvre depuis une tâche FINITION (déjà déverrouillée seulement quand le BAT est
+// terminé, garde du pipeline). Enregistre QUELS consommables ont servi ; ne déduit
+// PAS encore le stock. Les papiers portent déjà des codes (Pn001…) → prêts pour une
+// déduction MouvementsStock ultérieure.
+const FICHE_FINITION_DATA = {
+  bois: {
+    label:'Bois & matériaux rigides', icon:'🪵', accent:'#b4661f',
+    groups:[
+      { key:'colle', title:'Colle utilisée', autres:true,
+        items:['Colle bois blanc','Quick bond','Fevicol double seringue','Fox / Jaguar','Coller plexi','Scotch 3D','Scotch double face'] },
+      { key:'matiere', title:'Matière première', autres:true,
+        items:['Plexi 3mm','Plexi 5mm','Acrylique 3mm','Acrylique 5mm','Bois 3mm','Bois 5mm','Bois massif','MDF','Alucobond'] },
+      { key:'lasure', title:'Lasure', autres:false,
+        items:['Palissandre','Incolore','Clair','Châtaignier'],
+        extraText:{ key:'peinture', label:'Peinture (atao) / teinte', placeholder:'Référence peinture…' } },
+      { key:'accessoires', title:'Accessoires',
+        textarea:{ key:'accessoires', placeholder:'Visserie, suspension, entretoises, LED…' } },
+      { key:'rem', title:'Remarques',
+        textarea:{ key:'rem', placeholder:'Observations finition, défauts, retouches, consignes livraison…' } },
+    ]
+  },
+  carterie: {
+    label:'Carterie & papiers', icon:'📇', accent:'#2f6db0',
+    groups:[
+      { key:'autocollant', title:'Autocollant', autres:true, items:['Blanc','Transparent','Papier autocollant A4'] },
+      { key:'colle', title:'Colle utilisée · ampiasaina', autres:true, items:['Vynilic','Fox / Jaguar','Scotch double face','Bougie / cire','Bombe'] },
+      { key:'valopy', title:'Papier valopy · enveloppe', autres:false,
+        items:[['Papier nacré / P39','Pn001'],['Papier mat / Bristol','Pm001'],['Papier brillant','Pb001'],['Papier antemoro','Pe001']] },
+      { key:'interieur', title:'Papier intérieur', autres:false,
+        items:[['Papier nacré / P39','Pn001'],['Papier mat / Bristol','Pm001'],['Papier brillant','Pb001'],['Papier antemoro','Pe001']] },
+      { key:'pelliculage', title:'Pelliculage', autres:false, items:['Pelliculage mat','Pelliculage brillant'] },
+      { key:'accessoires', title:'Accessoires', textarea:{ key:'accessoires', placeholder:'Ruban, œillet, pochette…' } },
+      { key:'rem', title:'Remarque', textarea:{ key:'rem', placeholder:'Observations finition carterie…' } },
+    ]
+  }
+};
+
+function _finEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// Heuristique : deviner la variante depuis le produit du dossier (l'opérateur peut la
+// changer via la bascule). Carterie = cartes/faire-part/papier ; sinon bois par défaut.
+function _finVariantForDossier(d){
+  const t = ((d && (d.produit||'')) + ' ' + (d && (d.notes||''))).toLowerCase();
+  if (/cart|faire[- ]?part|invitation|enveloppe|valopy|papeterie|pochette|menu|badge papier/.test(t)) return 'carterie';
+  return 'bois';
+}
+
+function _finInjectStyle(){
+  if (document.getElementById('fin-style')) return;
+  const st = document.createElement('style');
+  st.id = 'fin-style';
+  st.textContent = `
+  .finov{position:fixed;inset:0;z-index:9999;background:rgba(20,16,11,.55);backdrop-filter:blur(3px);
+    display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:16px 10px}
+  .fin-card{background:var(--color-surface,#fff);color:var(--color-text,#1c1917);width:100%;max-width:900px;
+    border-radius:16px;box-shadow:0 18px 60px rgba(0,0,0,.35);overflow:hidden;margin:auto}
+  .fin-head{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:3px solid var(--fin-accent,#b4661f);
+    background:linear-gradient(180deg,var(--color-surface,#fff),var(--color-bg,#faf8f4))}
+  .fin-head .fin-mark{width:40px;height:40px;border-radius:10px;background:var(--fin-accent,#b4661f);color:#fff;display:grid;place-items:center;font-size:20px;flex:none}
+  .fin-head .fin-ht{flex:1;min-width:0}
+  .fin-head .fin-ht b{font-size:16px;font-weight:700;display:block;line-height:1.2}
+  .fin-head .fin-ht small{color:var(--color-text-muted,#78716c);font-size:11.5px}
+  .fin-bat{display:inline-flex;gap:5px;align-items:center;background:#e3f1e8;color:#2e7d52;border:1px solid rgba(46,125,82,.35);
+    font-weight:700;font-size:11px;padding:5px 10px;border-radius:999px;flex:none}
+  .fin-x{border:0;background:transparent;font-size:24px;line-height:1;color:var(--color-text-muted,#78716c);cursor:pointer;padding:4px 8px;flex:none}
+  .fin-scroll{max-height:calc(100vh - 190px);overflow:auto;padding:16px 18px}
+  .fin-seg{display:inline-flex;background:var(--color-bg,#f5f4f2);border:1px solid var(--color-border,#e5e3df);border-radius:10px;padding:3px;gap:3px;margin-bottom:14px}
+  .fin-seg button{border:0;background:transparent;color:var(--color-text-muted,#78716c);font-weight:700;font-size:13px;padding:8px 16px;border-radius:8px;cursor:pointer}
+  .fin-seg button[aria-selected="true"]{background:var(--fin-accent,#b4661f);color:#fff}
+  .fin-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px 12px;margin-bottom:14px}
+  .fin-f{display:flex;flex-direction:column;gap:4px;min-width:0}
+  .fin-f.c2{grid-column:span 2}
+  .fin-f label{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--color-text-muted,#78716c);display:flex;gap:6px;align-items:center}
+  .fin-f .fin-mg{font-style:italic;font-weight:500;letter-spacing:0;text-transform:none;color:#a8a29e}
+  .fin-auto{font-size:8.5px;font-family:monospace;background:var(--fin-soft,#f7ebdd);color:var(--fin-accent,#b4661f);border:1px solid rgba(0,0,0,.08);border-radius:4px;padding:1px 5px;text-transform:uppercase}
+  .fin-f input,.fin-f textarea,.fin-autres input,.fin-autres textarea{font:inherit;font-size:13.5px;color:var(--color-text,#1c1917);
+    background:var(--color-bg,#fbfaf7);border:1px solid var(--color-border,#ddd5c8);border-radius:8px;padding:8px 10px;width:100%}
+  .fin-f input[readonly]{background:var(--color-bg,#f5f4f2);color:var(--fin-accent,#b4661f);font-family:monospace;border-style:dashed}
+  .fin-f input:focus,.fin-f textarea:focus,.fin-autres input:focus,.fin-autres textarea:focus{outline:0;border-color:var(--fin-accent,#b4661f);box-shadow:0 0 0 3px var(--fin-soft,#f7ebdd)}
+  .fin-cols{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+  .fin-block{border:1px solid var(--color-border,#e5e3df);border-radius:11px;overflow:hidden}
+  .fin-block.full{grid-column:1/-1}
+  .fin-block h4{margin:0;padding:9px 12px;font-size:11.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+    background:var(--color-bg,#faf8f4);border-bottom:1px solid var(--color-border,#e5e3df)}
+  .fin-body{padding:6px}
+  .fin-opt{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:8px;cursor:pointer;position:relative}
+  .fin-opt:hover{background:var(--color-bg,#faf8f4)}
+  .fin-opt input{position:absolute;opacity:0;width:0;height:0}
+  .fin-box{width:18px;height:18px;border:1.8px solid var(--color-border,#ddd5c8);border-radius:5px;flex:none;display:grid;place-items:center;font-size:12px;color:#fff}
+  .fin-opt input:checked ~ .fin-box{background:var(--fin-accent,#b4661f);border-color:var(--fin-accent,#b4661f)}
+  .fin-opt input:checked ~ .fin-box::after{content:'✓'}
+  .fin-opt input:focus-visible ~ .fin-box{outline:2px solid var(--fin-accent,#b4661f);outline-offset:2px}
+  .fin-lbl{flex:1;font-size:13.5px;min-width:0}
+  .fin-opt input:checked ~ .fin-lbl{font-weight:600}
+  .fin-code{font-family:monospace;font-size:10px;color:var(--fin-accent,#b4661f);background:var(--fin-soft,#f7ebdd);padding:2px 6px;border-radius:5px;flex:none}
+  .fin-autres{display:flex;flex-direction:column;gap:4px;padding:8px;border-top:1px dashed var(--color-border,#e5e3df);margin-top:2px}
+  .fin-autres span{font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--color-text-muted,#78716c)}
+  .fin-autres textarea{min-height:52px;resize:vertical}
+  .fin-foot{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;padding:12px 18px;border-top:1px solid var(--color-border,#e5e3df);background:var(--color-bg,#faf8f4)}
+  .fin-btn{font-weight:600;font-size:13px;border:1px solid var(--color-border,#e5e3df);background:var(--color-surface,#fff);color:var(--color-text,#1c1917);padding:9px 16px;border-radius:9px;cursor:pointer}
+  .fin-btn.primary{background:var(--fin-accent,#b4661f);border-color:var(--fin-accent,#b4661f);color:#fff}
+  .fin-btn:focus-visible{outline:2px solid var(--fin-accent,#b4661f);outline-offset:2px}
+  @media (max-width:720px){ .fin-grid{grid-template-columns:1fr 1fr} .fin-cols{grid-template-columns:1fr} }
+  `;
+  document.head.appendChild(st);
+}
+
+function _finGroupsHtml(variant){
+  const cfg = FICHE_FINITION_DATA[variant];
+  return cfg.groups.map(g => {
+    const full = (g.textarea || g.key==='rem') ? ' full' : '';
+    let inner = '';
+    if (g.items){
+      inner = g.items.map((it,i) => {
+        const label = Array.isArray(it) ? it[0] : it;
+        const code  = Array.isArray(it) ? it[1] : '';
+        const key   = `${variant}-${g.key}-${i}`;
+        return `<label class="fin-opt"><input type="checkbox" data-fin="${key}"><span class="fin-box"></span><span class="fin-lbl">${_finEsc(label)}</span>${code?`<span class="fin-code">${code}</span>`:''}</label>`;
+      }).join('');
+      if (g.autres) inner += `<div class="fin-autres"><span>Autres</span><input type="text" data-fin="${variant}-${g.key}-autres" placeholder="Préciser…"></div>`;
+      if (g.extraText) inner += `<div class="fin-autres"><span>${_finEsc(g.extraText.label)}</span><input type="text" data-fin="${variant}-${g.extraText.key}" placeholder="${_finEsc(g.extraText.placeholder||'')}"></div>`;
+    } else if (g.textarea){
+      inner = `<div class="fin-autres" style="border-top:0;margin-top:0"><textarea data-fin="${variant}-${g.textarea.key}" placeholder="${_finEsc(g.textarea.placeholder||'')}"></textarea></div>`;
+    }
+    return `<div class="fin-block${full}"><h4>${_finEsc(g.title)}</h4><div class="fin-body">${inner}</div></div>`;
+  }).join('');
+}
+
+function _finCollect(root){
+  const map = {};
+  root.querySelectorAll('[data-fin]').forEach(el => {
+    map[el.dataset.fin] = (el.type === 'checkbox') ? !!el.checked : (el.value || '');
+  });
+  return map;
+}
+function _finRestore(root, map){
+  if (!map) return;
+  root.querySelectorAll('[data-fin]').forEach(el => {
+    if (!(el.dataset.fin in map)) return;
+    const v = map[el.dataset.fin];
+    if (el.type === 'checkbox') el.checked = !!v; else el.value = (v==null?'':v);
+  });
+}
+
+function _finSetVariant(v){
+  const ov = document.getElementById('finOverlay'); if (!ov) return;
+  const cfg = FICHE_FINITION_DATA[v];
+  ov.setAttribute('data-fin-variant', v);
+  ov.style.setProperty('--fin-accent', cfg.accent);
+  ov.style.setProperty('--fin-soft', v==='carterie' ? '#e6eef7' : '#f7ebdd');
+  ov.querySelectorAll('.fin-seg button').forEach(b => b.setAttribute('aria-selected', b.dataset.v===v));
+  ov.querySelector('#finPanel-bois').hidden = v!=='bois';
+  ov.querySelector('#finPanel-carterie').hidden = v!=='carterie';
+  ov.querySelector('#finMark').textContent = cfg.icon;
+  ov.querySelector('#finTitle').textContent = 'Finition — ' + cfg.label;
+}
+
+async function openFicheFinition(dossierId, tacheId){
+  const d = (dossiers||[]).find(x => x.id === dossierId) || { id:dossierId };
+  _finInjectStyle();
+  const old = document.getElementById('finOverlay'); if (old) old.remove();
+
+  const numero = d.numeroDossier || d.id || '';
+  const traceFields = `
+    <div class="fin-grid">
+      <div class="fin-f c2"><label>Responsable <span class="fin-mg">· olona manao azy</span></label><input type="text" data-fin="resp" placeholder="Nom de l'opérateur"></div>
+      <div class="fin-f"><label>Date</label><input type="date" data-fin="date"></div>
+      <div class="fin-f"><label>Qté produite</label><input type="number" data-fin="qteprod" placeholder="0"></div>
+      <div class="fin-f"><label>Heure début <span class="fin-mg">· nanombohana</span></label><input type="time" data-fin="hd"></div>
+      <div class="fin-f"><label>Heure fin <span class="fin-mg">· fiafarany</span></label><input type="time" data-fin="hf"></div>
+    </div>`;
+
+  const ov = document.createElement('div');
+  ov.className = 'finov';
+  ov.id = 'finOverlay';
+  ov.setAttribute('data-tache', tacheId||'');
+  ov.innerHTML = `
+    <div class="fin-card" role="dialog" aria-modal="true" aria-label="Fiche de finition">
+      <div class="fin-head">
+        <div class="fin-mark" id="finMark">🪵</div>
+        <div class="fin-ht"><b id="finTitle">Finition</b><small>Fiche atelier · dossier ${_finEsc(numero)}</small></div>
+        <span class="fin-bat">✓ BAT validé</span>
+        <button class="fin-x" onclick="closeFicheFinition()" aria-label="Fermer">×</button>
+      </div>
+      <div class="fin-scroll">
+        <div class="fin-seg" role="tablist">
+          <button role="tab" data-v="bois" onclick="_finSetVariant('bois')">🪵 BOIS</button>
+          <button role="tab" data-v="carterie" onclick="_finSetVariant('carterie')">📇 CARTERIE</button>
+        </div>
+        <div class="fin-grid">
+          <div class="fin-f"><label>CMD / Dossier <span class="fin-auto">auto</span></label><input type="text" value="${_finEsc(numero)}" readonly></div>
+          <div class="fin-f"><label>Client <span class="fin-auto">auto</span></label><input type="text" value="${_finEsc(d.client||'')}" readonly></div>
+          <div class="fin-f c2"><label>Article <span class="fin-mg">· ho atao</span> <span class="fin-auto">auto</span></label><input type="text" value="${_finEsc(d.produit||'')}" readonly></div>
+          <div class="fin-f"><label>Qté commandée <span class="fin-auto">auto</span></label><input type="text" value="${_finEsc(d.quantite||'')}" readonly></div>
+        </div>
+        ${traceFields}
+        <div id="finPanel-bois"><div class="fin-cols">${_finGroupsHtml('bois')}</div></div>
+        <div id="finPanel-carterie" hidden><div class="fin-cols">${_finGroupsHtml('carterie')}</div></div>
+      </div>
+      <div class="fin-foot">
+        <button class="fin-btn" onclick="printFicheFinition('${dossierId}')">🖨 Imprimer</button>
+        <button class="fin-btn" onclick="closeFicheFinition()">Fermer</button>
+        <button class="fin-btn primary" onclick="saveFicheFinition('${dossierId}','${tacheId||''}')">✓ Enregistrer</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  ov.addEventListener('click', e => { if (e.target === ov) closeFicheFinition(); });
+  document.body.style.overflow = 'hidden';
+
+  let variant = _finVariantForDossier(d);
+  // Pré-remplissage par défaut (surchargé si une fiche existe déjà côté serveur)
+  const today = new Date().toISOString().slice(0,10);
+  ov.querySelector('[data-fin="date"]').value = today;
+  ov.querySelector('[data-fin="resp"]').value = currentUser?.label || '';
+
+  // Charger une fiche existante (reprise/modification)
+  try {
+    const r = await apiCall({ action:'getFinition', dossierId });
+    const f = r && r.ok ? r.finition : null;
+    if (f){
+      if (f.variante && FICHE_FINITION_DATA[f.variante]) variant = f.variante;
+      _finRestore(ov, f.consommables || {});
+      if (f.responsable)  ov.querySelector('[data-fin="resp"]').value = f.responsable;
+      if (f.dateFinition) ov.querySelector('[data-fin="date"]').value = f.dateFinition;
+      if (f.heureDebut)   ov.querySelector('[data-fin="hd"]').value = f.heureDebut;
+      if (f.heureFin)     ov.querySelector('[data-fin="hf"]').value = f.heureFin;
+      if (f.qtteProduite) ov.querySelector('[data-fin="qteprod"]').value = f.qtteProduite;
+    }
+  } catch(e){}
+  _finSetVariant(variant);
+}
+
+function closeFicheFinition(){
+  const ov = document.getElementById('finOverlay');
+  if (ov) ov.remove();
+  document.body.style.overflow = '';
+}
+
+async function saveFicheFinition(dossierId, tacheId){
+  const ov = document.getElementById('finOverlay'); if (!ov) return;
+  const d = (dossiers||[]).find(x => x.id === dossierId) || { id:dossierId };
+  const variant = ov.getAttribute('data-fin-variant') || 'bois';
+  const map = _finCollect(ov);
+  const fin = {
+    id:'FIN_'+dossierId, dossierId, tacheId: tacheId || ov.getAttribute('data-tache') || '',
+    numeroDossier: d.numeroDossier || '', client: d.client || '', produit: d.produit || '',
+    variante: variant, qtteCommandee: d.quantite || '',
+    qtteProduite: map['qteprod'] || '', responsable: map['resp'] || '',
+    dateFinition: map['date'] || '', heureDebut: map['hd'] || '', heureFin: map['hf'] || '',
+    consommables: map, remarques: map[variant+'-rem'] || '',
+    savedBy: currentUser?.label || '', savedAt: new Date().toLocaleString('fr-FR')
+  };
+  try { localStorage.setItem('fin_'+dossierId, JSON.stringify(fin)); } catch(e){}
+  const btn = ov.querySelector('.fin-btn.primary'); if (btn){ btn.disabled = true; btn.textContent = 'Enregistrement…'; }
+  let r = { ok:true };
+  if (APPS_SCRIPT_URL) { try { r = await apiCall({ action:'saveFinition', finition:fin }); } catch(e){ r = { ok:false, error:e.message }; } }
+  if (r && r.ok){
+    showToast('Fiche de finition enregistrée');
+    _addNotification({
+      dossierId, numeroDossier: fin.numeroDossier, etapeCode:'FINITION', etapeLabel:'Finition',
+      operateur: currentUser?.label || fin.responsable,
+      message:`${currentUser?.label||'Un opérateur'} a enregistré la fiche de finition — dossier ${fin.numeroDossier||dossierId}`
+    });
+    closeFicheFinition();
+  } else {
+    showToast('Échec de l\'enregistrement : ' + ((r&&r.error)||'réseau'), 'error');
+    if (btn){ btn.disabled = false; btn.textContent = '✓ Enregistrer'; }
+  }
+}
+
+function printFicheFinition(dossierId){
+  const ov = document.getElementById('finOverlay');
+  const d = (dossiers||[]).find(x => x.id === dossierId) || { id:dossierId };
+  const variant = ov ? (ov.getAttribute('data-fin-variant')||'bois') : 'bois';
+  const map = ov ? _finCollect(ov) : {};
+  const cfg = FICHE_FINITION_DATA[variant];
+  const row = (l,v) => `<tr><td style="width:34%;color:#78716c;font-weight:600">${l}</td><td>${_finEsc(v||'—')}</td></tr>`;
+  const ident = `<table>${
+    row('CMD / Dossier', d.numeroDossier||d.id||'') +
+    row('Client', d.client||'') +
+    row('Article', d.produit||'') +
+    row('Qté commandée', d.quantite||'') +
+    row('Qté produite', map['qteprod']||'') +
+    row('Responsable', map['resp']||'') +
+    row('Date', map['date']||'') +
+    row('Heure début → fin', ((map['hd']||'—')+' → '+(map['hf']||'—'))) +
+    row('Type de fiche', cfg.label)
+  }</table>`;
+
+  const sections = cfg.groups.map(g => {
+    let body = '';
+    if (g.items){
+      const on = g.items.map((it,i)=>({ label:Array.isArray(it)?it[0]:it, code:Array.isArray(it)?it[1]:'', on:!!map[`${variant}-${g.key}-${i}`] })).filter(c=>c.on);
+      const autres = map[`${variant}-${g.key}-autres`];
+      const extra = g.extraText ? map[`${variant}-${g.extraText.key}`] : '';
+      if (!on.length && !autres && !extra) return '';
+      body = on.map(c => `<span class="fin-p-chip">✓ ${_finEsc(c.label)}${c.code?' ('+c.code+')':''}</span>`).join(' ');
+      if (autres) body += ` <span class="fin-p-chip">Autres : ${_finEsc(autres)}</span>`;
+      if (extra)  body += ` <span class="fin-p-chip">${_finEsc(g.extraText.label)} : ${_finEsc(extra)}</span>`;
+    } else if (g.textarea){
+      const v = map[`${variant}-${g.textarea.key}`]; if (!v) return '';
+      body = `<div>${_finEsc(v).replace(/\n/g,'<br>')}</div>`;
+    }
+    return `<div class="section-title">${_finEsc(g.title)}</div><div style="margin-bottom:10px">${body}</div>`;
+  }).join('');
+
+  const style = `<style>.fin-p-chip{display:inline-block;background:#f5f4f2;border:1px solid #e5e3df;border-radius:20px;padding:3px 10px;margin:2px 3px;font-size:11px}</style>`;
+  _printWindow('Fiche de finition — ' + (d.numeroDossier||d.id||''),
+    `${style}<div class="rpt-title">Fiche de finition — ${cfg.icon} ${_finEsc(cfg.label)}</div>
+     <div class="rpt-period">Dossier ${_finEsc(d.numeroDossier||d.id||'')} · ${_finEsc(d.client||'')}</div>
+     ${ident}
+     <div style="margin-top:14px">${sections || '<em style="color:#a8a29e">Aucun consommable coché.</em>'}</div>
+     <div style="margin-top:26px;display:flex;gap:40px">
+       <div style="flex:1"><div style="border-bottom:1px solid #999;height:34px"></div><small style="color:#78716c">Opérateur finition</small></div>
+       <div style="flex:1"><div style="border-bottom:1px solid #999;height:34px"></div><small style="color:#78716c">Contrôle qualité</small></div>
+       <div style="flex:1"><div style="border-bottom:1px solid #999;height:34px"></div><small style="color:#78716c">Visa responsable</small></div>
+     </div>`);
+}
+
 function printAttributionReport() {
   if (typeof _syncDossierDates === 'function') _syncDossierDates();  // réf. canoniques avant impression
   const moisLabel  = attrDateFilter.mois  ? _MOIS_FR[+attrDateFilter.mois]  : '';
@@ -14073,6 +14396,7 @@ function _buildMonDashboard() {
       <div class="mon-task-card__status" style="color:${sColor}">${sTxt}</div>
       ${isEC?_chronoBadge(t,'mon'):''}
       ${btn}
+      ${(t.etapeCode==='FINITION' && t.dossierId!=='LIBRE')?`<button onclick="openFicheFinition('${t.dossierId}','${t.id}')" class="mon-task-card__btn" style="background:#b4661f;color:#fff;margin-top:6px">🪵 Fiche finition</button>`:''}
     </div>`;
   }).join('');
 
@@ -14237,6 +14561,9 @@ function _tacheRow(t) {
   const kbItems = [];
   if (!isLibre) {
     kbItems.push(`<button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();openAttribForDossier('${t.dossierId}')">${_kebabIcon('eye')}<span>Voir le dossier</span></button>`);
+    if (t.etapeCode === 'FINITION') {
+      kbItems.push(`<button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();openFicheFinition('${t.dossierId}','${t.id}')">${_kebabIcon('print')}<span>Fiche de finition</span></button>`);
+    }
     kbItems.push(`<button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printFicheTravailDossier('${t.dossierId}')">${_kebabIcon('print')}<span>Fiche de travail (à remplir)</span></button>`);
     kbItems.push(`<button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printDossier('${t.dossierId}')">${_kebabIcon('print')}<span>Imprimer le dossier</span></button>`);
   }
