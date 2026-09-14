@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '183 · 2026-09-14';
+const APP_VERSION = '184 · 2026-09-14';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -12669,11 +12669,18 @@ function batCreate(dossierId, kind){
   const tag  = k === 'simulation' ? 'SIMU' : 'BAT';
   const inp = document.createElement('input');
   inp.type = 'file'; inp.accept = 'image/*,.pdf'; inp.multiple = true;
+  // IMPORTANT (mobile) : sur iOS Safari et plusieurs WebView Android, un <input type=file>
+  // détaché du DOM n'ouvre pas le sélecteur de façon fiable et son `change` ne se déclenche
+  // pas → les opérateurs sur téléphone « n'arrivent pas à envoyer ». On le rattache au DOM
+  // (caché) avant .click(), puis on le retire une fois le traitement fini.
+  inp.style.display = 'none';
+  document.body.appendChild(inp);
+  const _cleanupInp = () => { try { inp.remove(); } catch(_){} };
   inp.onchange = async () => {
     const picked = inp.files ? Array.from(inp.files) : [];
-    if (!picked.length) return;
+    if (!picked.length) { _cleanupInp(); return; }
     const tooBig = picked.find(f => f.size > 12 * 1024 * 1024);
-    if (tooBig) { showToast(`« ${tooBig.name} » trop lourd (max 12 Mo)`, 'error'); return; }
+    if (tooBig) { showToast(`« ${tooBig.name} » trop lourd (max 12 Mo)`, 'error'); _cleanupInp(); return; }
     const files = [];
     for (let i = 0; i < picked.length; i++) {
       const f = picked[i];
@@ -12688,6 +12695,7 @@ function batCreate(dossierId, kind){
         }
       } catch(e){ showToast(`Upload de « ${f.name} » impossible`, 'warning'); }
     }
+    _cleanupInp();
     _batCreateRound(dossierId, files, k);
   };
   inp.click();
