@@ -41,7 +41,7 @@ const DOSSIER_HEADERS = ['ID','NumeroDossier','Client','Produit','Quantite','Sta
 const SHEET_FINITIONS   = 'Finitions';
 const FINITION_HEADERS_ = ['ID','DossierId','TacheId','NumeroDossier','Client','Produit',
   'Variante','QtteCommandee','QtteProduite','Responsable','DateFinition','HeureDebut',
-  'HeureFin','Consommables','Remarques','SavedBy','SavedAt'];
+  'HeureFin','Consommables','Remarques','SavedBy','SavedAt','Attachments_JSON'];
 
 // ── Audit : enregistrement des actions critiques ───────────
 function _logAction_(action, user, detail) {
@@ -821,15 +821,23 @@ function handleSaveFinition(data) {
   if (!f || !f.dossierId) return { ok:false, error:'Finition invalide' };
   const ss = getSS();
   const sh = ss.getSheetByName(SHEET_FINITIONS) || ensureSheet(ss, SHEET_FINITIONS, FINITION_HEADERS_);
+  // Migration douce : colonne Attachments_JSON ajoutée après coup → poser l'en-tête
+  // manquant sur les feuilles créées avant (sinon les métadonnées seraient perdues).
+  if (sh.getLastColumn() < FINITION_HEADERS_.length) {
+    sh.getRange(1, 1, 1, FINITION_HEADERS_.length).setValues([FINITION_HEADERS_])
+      .setBackground('#1a4a3a').setFontColor('#ffffff').setFontWeight('bold');
+  }
   let conso = '{}';
   try { conso = (typeof f.consommables === 'string') ? f.consommables : JSON.stringify(f.consommables || {}); } catch (_) { conso = '{}'; }
+  let atts = '[]';
+  try { atts = (typeof f.attachments === 'string') ? f.attachments : JSON.stringify(f.attachments || []); } catch (_) { atts = '[]'; }
   const id = String(f.id || ('FIN_' + f.dossierId));
   const row = [
     id, String(f.dossierId), String(f.tacheId || ''), String(f.numeroDossier || ''),
     String(f.client || ''), String(f.produit || ''), String(f.variante || 'bois'),
     String(f.qtteCommandee || ''), String(f.qtteProduite || ''), String(f.responsable || ''),
     String(f.dateFinition || ''), String(f.heureDebut || ''), String(f.heureFin || ''),
-    conso, String(f.remarques || ''), String(f.savedBy || ''), String(f.savedAt || '')
+    conso, String(f.remarques || ''), String(f.savedBy || ''), String(f.savedAt || ''), atts
   ];
   const last = sh.getLastRow();
   if (last > 1) {
@@ -855,12 +863,15 @@ function handleGetFinition(data) {
   let list = rows.map(r => {
     let conso = {};
     try { conso = r[13] ? JSON.parse(r[13]) : {}; } catch (_) { conso = {}; }
+    let atts = [];
+    try { atts = r[17] ? JSON.parse(r[17]) : []; } catch (_) { atts = []; }
     return {
       id:String(r[0]), dossierId:String(r[1]), tacheId:String(r[2]), numeroDossier:String(r[3]),
       client:String(r[4]), produit:String(r[5]), variante:String(r[6] || 'bois'),
       qtteCommandee:String(r[7]), qtteProduite:String(r[8]), responsable:String(r[9]),
       dateFinition:String(r[10]), heureDebut:String(r[11]), heureFin:String(r[12]),
-      consommables:conso, remarques:String(r[14]), savedBy:String(r[15]), savedAt:String(r[16])
+      consommables:conso, remarques:String(r[14]), savedBy:String(r[15]), savedAt:String(r[16]),
+      attachments:atts
     };
   }).filter(x => x.id);
   if (data && data.dossierId) list = list.filter(x => String(x.dossierId) === String(data.dossierId));

@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '182 · 2026-09-12';
+const APP_VERSION = '183 · 2026-09-14';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -10326,6 +10326,7 @@ async function openFicheFinition(dossierId, tacheId){
   const d = (dossiers||[]).find(x => x.id === dossierId) || { id:dossierId };
   _finInjectStyle();
   const old = document.getElementById('finOverlay'); if (old) old.remove();
+  finAttachments = [];
 
   const numero = d.numeroDossier || d.id || '';
   const traceFields = `
@@ -10363,6 +10364,15 @@ async function openFicheFinition(dossierId, tacheId){
         ${traceFields}
         <div id="finPanel-bois"><div class="fin-cols">${_finGroupsHtml('bois')}</div></div>
         <div id="finPanel-carterie" hidden><div class="fin-cols">${_finGroupsHtml('carterie')}</div></div>
+        <div class="fin-attach">
+          <label style="display:block;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-muted,#78716c);margin:16px 0 8px">Pièces jointes <span class="fin-mg">· sary / rakitra</span></label>
+          <label for="finAttachInput" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:var(--fin-soft,#f7ebdd);color:var(--fin-accent,#b4661f);border:1px dashed rgba(180,102,31,.45);border-radius:9px;cursor:pointer;font-size:13px;font-weight:600">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+            Ajouter photo / fichier
+          </label>
+          <input id="finAttachInput" type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv" multiple style="display:none" onchange="addFinAttachments(this.files)" />
+          <div id="finAttachPreviews" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"></div>
+        </div>
       </div>
       <div class="fin-foot">
         <button class="fin-btn" onclick="printFicheFinition('${dossierId}')">🖨 Imprimer</button>
@@ -10376,6 +10386,7 @@ async function openFicheFinition(dossierId, tacheId){
 
   let variant = _finVariantForDossier(d);
   _finSetVariant(variant);   // applique la variante tout de suite (accent + panneau), avant le chargement serveur
+  renderFinAttachments();
   // Pré-remplissage par défaut (surchargé si une fiche existe déjà côté serveur)
   const today = new Date().toISOString().slice(0,10);
   ov.querySelector('[data-fin="date"]').value = today;
@@ -10393,6 +10404,7 @@ async function openFicheFinition(dossierId, tacheId){
       if (f.heureDebut)   ov.querySelector('[data-fin="hd"]').value = f.heureDebut;
       if (f.heureFin)     ov.querySelector('[data-fin="hf"]').value = f.heureFin;
       if (f.qtteProduite) ov.querySelector('[data-fin="qteprod"]').value = f.qtteProduite;
+      if (Array.isArray(f.attachments)) { finAttachments = f.attachments.slice(); renderFinAttachments(); }
     }
   } catch(e){}
   _finSetVariant(variant);
@@ -10404,22 +10416,98 @@ function closeFicheFinition(){
   document.body.style.overflow = '';
 }
 
+// ── Fiche finition : pièces jointes (photos / PDF / Word / Excel) ──
+// Même mécanique que les réservations : lecture locale (base64) pour l'aperçu,
+// puis montée sur Drive au moment de l'enregistrement (on ne persiste que les
+// métadonnées fileId/URL, jamais le base64, pour ne pas saturer le Sheet).
+let finAttachments = [];
+
+async function addFinAttachments(files){
+  if (!files || !files.length) return;
+  const MAX = 8;
+  if (finAttachments.length >= MAX){ showToast(`Maximum ${MAX} pièces jointes`, 'error'); return; }
+  const remaining = MAX - finAttachments.length;
+  for (const file of Array.from(files).slice(0, remaining)){
+    if (file.size > 8 * 1024 * 1024){ showToast(`${file.name} trop volumineux (max 8 Mo)`, 'error'); continue; }
+    try {
+      let data;
+      if (file.type.startsWith('image/')) data = await _resizeImage(file, 1200, 1200);
+      else data = await new Promise((res, rej) => { const r = new FileReader(); r.onload = e => res(e.target.result); r.onerror = rej; r.readAsDataURL(file); });
+      finAttachments.push({ name:file.name, type:file.type, data });
+    } catch(e){ showToast('Erreur lecture : ' + file.name, 'error'); }
+  }
+  renderFinAttachments();
+  const inp = document.getElementById('finAttachInput'); if (inp) inp.value = '';
+}
+
+function removeFinAttachment(idx){ finAttachments.splice(idx, 1); renderFinAttachments(); }
+
+function renderFinAttachments(){
+  const c = document.getElementById('finAttachPreviews'); if (!c) return;
+  if (!finAttachments.length){ c.innerHTML = ''; return; }
+  c.innerHTML = finAttachments.map((a, i) => {
+    const isImg = (a.type||'').startsWith('image/');
+    const href  = a.data || a.viewUrl || a.dlUrl || '';
+    let thumb;
+    if (isImg && a.data)
+      thumb = `<img src="${a.data}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1.5px solid var(--color-border);display:block" />`;
+    else if (isImg && a.fileId)
+      thumb = `<img src="https://drive.google.com/thumbnail?id=${a.fileId}&sz=w200" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1.5px solid var(--color-border);display:block" onerror="this.style.display='none'" />`;
+    else
+      thumb = `<div style="width:64px;height:64px;border-radius:8px;border:1.5px solid var(--color-border);background:var(--color-bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px">
+           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="var(--fin-accent,#b4661f)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+           <span style="font-size:9px;color:var(--color-text-muted);text-transform:uppercase;font-weight:700">${(a.name||'').split('.').pop()}</span>
+         </div>`;
+    return `<div style="position:relative;display:inline-block;cursor:pointer" onclick="${href?`window.open('${href}','_blank')`:''}" title="${a.name||''}">
+      ${thumb}
+      <button onclick="event.stopPropagation();removeFinAttachment(${i})" style="position:absolute;top:-6px;right:-6px;background:var(--color-danger,#dc2626);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;line-height:1">×</button>
+    </div>`;
+  }).join('');
+}
+
+// Montée Drive des pièces jointes ajoutées localement (base64 → fileId/URL).
+// Celles déjà uploadées (fileId présent) sont conservées telles quelles.
+async function _uploadFinAttachments(list){
+  const uploaded = [];
+  for (let i = 0; i < list.length; i++){
+    const att = list[i];
+    if (att.fileId || !att.data){ uploaded.push(att); continue; }
+    showLoader(`Upload pièce jointe ${i+1}/${list.length} : ${att.name}`);
+    try {
+      const r = await apiCall({ action:'uploadFile', fileName:att.name, mimeType:att.type, base64Data:att.data });
+      if (r && r.ok) uploaded.push({ name:r.fileName||att.name, type:att.type, fileId:r.fileId, viewUrl:r.viewUrl, dlUrl:r.dlUrl });
+      else uploaded.push(att);
+    } catch(e){ uploaded.push(att); }
+  }
+  return uploaded;
+}
+
 async function saveFicheFinition(dossierId, tacheId){
   const ov = document.getElementById('finOverlay'); if (!ov) return;
   const d = (dossiers||[]).find(x => x.id === dossierId) || { id:dossierId };
   const variant = ov.getAttribute('data-fin-variant') || 'bois';
   const map = _finCollect(ov);
+  const btn = ov.querySelector('.fin-btn.primary'); if (btn){ btn.disabled = true; btn.textContent = 'Enregistrement…'; }
+
+  // Montée Drive des pièces jointes (avant sauvegarde) → on ne persiste que
+  // les métadonnées fileId/URL, jamais le base64 (Sheet + GET trop lourds).
+  let attList = finAttachments;
+  if (APPS_SCRIPT_URL && finAttachments.some(a => a.data && !a.fileId)){
+    try { attList = await _uploadFinAttachments([...finAttachments]); finAttachments = attList; renderFinAttachments(); } catch(e){}
+    hideLoader();
+  }
+  const attMeta = (attList||[]).map(a => ({ name:a.name||'', type:a.type||'', fileId:a.fileId||'', viewUrl:a.viewUrl||'', dlUrl:a.dlUrl||'' }));
+
   const fin = {
     id:'FIN_'+dossierId, dossierId, tacheId: tacheId || ov.getAttribute('data-tache') || '',
     numeroDossier: d.numeroDossier || '', client: d.client || '', produit: d.produit || '',
     variante: variant, qtteCommandee: d.quantite || '',
     qtteProduite: map['qteprod'] || '', responsable: map['resp'] || '',
     dateFinition: map['date'] || '', heureDebut: map['hd'] || '', heureFin: map['hf'] || '',
-    consommables: map, remarques: map[variant+'-rem'] || '',
+    consommables: map, remarques: map[variant+'-rem'] || '', attachments: attMeta,
     savedBy: currentUser?.label || '', savedAt: new Date().toLocaleString('fr-FR')
   };
   try { localStorage.setItem('fin_'+dossierId, JSON.stringify(fin)); } catch(e){}
-  const btn = ov.querySelector('.fin-btn.primary'); if (btn){ btn.disabled = true; btn.textContent = 'Enregistrement…'; }
   let r = { ok:true };
   if (APPS_SCRIPT_URL) { try { r = await apiCall({ action:'saveFinition', finition:fin }); } catch(e){ r = { ok:false, error:e.message }; } }
   if (r && r.ok){
@@ -10476,12 +10564,19 @@ function printFicheFinition(dossierId){
     return `<div class="section-title">${_finEsc(g.title)}</div><div style="margin-bottom:10px">${body}</div>`;
   }).join('');
 
+  const attHtml = (finAttachments && finAttachments.length)
+    ? `<div class="section-title">Pièces jointes</div><div style="margin-bottom:10px">${
+        finAttachments.map(a => `<span class="fin-p-chip">📎 ${_finEsc(a.name||'fichier')}</span>`).join(' ')
+      }</div>`
+    : '';
+
   const style = `<style>.fin-p-chip{display:inline-block;background:#f5f4f2;border:1px solid #e5e3df;border-radius:20px;padding:3px 10px;margin:2px 3px;font-size:11px}</style>`;
   _printWindow('Fiche de finition — ' + (d.numeroDossier||d.id||''),
     `${style}<div class="rpt-title">Fiche de finition — ${cfg.icon} ${_finEsc(cfg.label)}</div>
      <div class="rpt-period">Dossier ${_finEsc(d.numeroDossier||d.id||'')} · ${_finEsc(d.client||'')}</div>
      ${ident}
      <div style="margin-top:14px">${sections || '<em style="color:#a8a29e">Aucun consommable coché.</em>'}</div>
+     ${attHtml}
      <div style="margin-top:26px;display:flex;gap:40px">
        <div style="flex:1"><div style="border-bottom:1px solid #999;height:34px"></div><small style="color:#78716c">Opérateur finition</small></div>
        <div style="flex:1"><div style="border-bottom:1px solid #999;height:34px"></div><small style="color:#78716c">Contrôle qualité</small></div>
