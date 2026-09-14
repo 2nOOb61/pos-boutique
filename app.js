@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '184 · 2026-09-14';
+const APP_VERSION = '185 · 2026-09-14';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -1196,8 +1196,11 @@ async function loadEncaissementsFromScript() {
 // ── Suivi BAT : sync serveur (upsert) ──────────────────────
 async function syncBatToScript(b) {
   if (!APPS_SCRIPT_URL) return;
-  try { await apiCall({ action: 'addBat', bat: b }); }
-  catch (err) { console.warn('Sync BAT GAS:', err); _batRetryQueue.push(b); }
+  // Ne JAMAIS envoyer les fichiers en attente (base64) au serveur : URL géante (GET
+  // ?payload) + Sheet alourdi. Seules les metadata Drive (b.files) sont persistées.
+  const { pendingFiles, ...clean } = b;
+  try { await apiCall({ action: 'addBat', bat: clean }); }
+  catch (err) { console.warn('Sync BAT GAS:', err); _batRetryQueue.push(clean); }
 }
 let _batRetryQueue = [];
 function _flushBatQueue() {
@@ -1218,7 +1221,13 @@ async function loadBatsFromScript() {
     let changed = false;
     r.bats.forEach(sb => {
       const k = String(sb.id);
-      if (!byId[k] || JSON.stringify(byId[k]) !== JSON.stringify(sb)) { byId[k] = sb; changed = true; }
+      const local = byId[k];
+      // Préserver les fichiers encore en attente d'upload (base64 local) que le serveur
+      // ne connaît pas, et fusionner les fichiers Drive → la sync ne perd aucune PJ.
+      if (local && Array.isArray(local.pendingFiles) && local.pendingFiles.length) {
+        sb = { ...sb, pendingFiles: local.pendingFiles, files: _batMergeFiles(local.files, sb.files) };
+      }
+      if (!local || JSON.stringify(local) !== JSON.stringify(sb)) { byId[k] = sb; changed = true; }
     });
     if (changed) {
       bats = Object.values(byId);
@@ -3803,6 +3812,7 @@ function initPWA() {
     // persistance Sheet → enfin visibles par tous les postes.
     try { _flushCmdPhotoQueue(); } catch(e) {}
     try { _flushCmdAttQueue();   } catch(e) {}
+    try { _flushBatFilesQueue(); } catch(e) {} // reprise montée Drive des fichiers Simulation/BAT
   });
   if (!navigator.onLine) document.getElementById('offlineBadge').classList.add('show');
 }
@@ -9469,7 +9479,8 @@ function _startNotifPolling() {
     _flushTlPhotoQueue();
     _flushCmdPhotoQueue(); // reprise montée Drive des PJ commande insérées hors ligne
     _flushCmdAttQueue();   // reprise persistance PJ commande → visibles par tous les postes
-    _flushBatQueue();      // reprise sync BAT
+    _flushBatQueue();      // reprise sync BAT (metadata)
+    _flushBatFilesQueue(); // reprise montée Drive des fichiers Simulation/BAT en attente
     // Suivi BAT : rafraîchir en direct si l'Attribution ou le tableau de bord est ouvert
     if (APPS_SCRIPT_URL && document.getElementById('page-attribution')?.classList.contains('active')) {
       loadBatsFromScript().then(() => { if (selectedDossier) _refreshBatUi(selectedDossier.id); }).catch(()=>{});
@@ -12650,15 +12661,21 @@ function _batReadFile(f){ return new Promise((res,rej)=>{ const r=new FileReader
 // avant le multi-fichiers ou renvoyés par un serveur plus ancien.
 function _batFiles(b){
   if (!b) return [];
+  const out = [];
   if (Array.isArray(b.files) && b.files.length) {
-    return b.files.filter(Boolean).map(f => ({
-      name: f.name || 'Fichier', viewUrl: f.viewUrl || f.url || '', dlUrl: f.dlUrl || '', type: f.type || ''
+    b.files.filter(Boolean).forEach(f => out.push({
+      name: f.name || 'Fichier', viewUrl: f.viewUrl || f.url || '', dlUrl: f.dlUrl || '', type: f.type || '', pending:false
+    }));
+  } else if (b.fileUrl || b.fileName) {
+    out.push({ name: b.fileName || 'Voir le BAT', viewUrl: b.fileUrl || '', dlUrl: b.fileDlUrl || '', type: b.fileType || '', pending:false });
+  }
+  // Fichiers en attente d'upload (base64 local) → affichés « en cours » (reprise auto).
+  if (Array.isArray(b.pendingFiles) && b.pendingFiles.length) {
+    b.pendingFiles.filter(Boolean).forEach(f => out.push({
+      name: f.name || 'Fichier', viewUrl: '', dlUrl: '', type: f.type || '', pending:true
     }));
   }
-  if (b.fileUrl || b.fileName) {
-    return [{ name: b.fileName || 'Voir le BAT', viewUrl: b.fileUrl || '', dlUrl: b.fileDlUrl || '', type: b.fileType || '' }];
-  }
-  return [];
+  return out;
 }
 
 // ── Actions ────────────────────────────────────────────────
@@ -12681,30 +12698,34 @@ function batCreate(dossierId, kind){
     if (!picked.length) { _cleanupInp(); return; }
     const tooBig = picked.find(f => f.size > 12 * 1024 * 1024);
     if (tooBig) { showToast(`« ${tooBig.name} » trop lourd (max 12 Mo)`, 'error'); _cleanupInp(); return; }
-    const files = [];
+    // LOCAL-FIRST (connexion instable) : on lit + COMPRESSE les fichiers en local, on crée
+    // le round tout de suite avec ces fichiers « en attente », PUIS on les monte sur Drive
+    // en arrière-plan avec reprise auto (online + polling 30s). Rien n'est perdu, même hors ligne.
+    const pending = [];
     for (let i = 0; i < picked.length; i++) {
       const f = picked[i];
-      showToast(picked.length > 1 ? `Envoi de ${nounF}… (${i + 1}/${picked.length})` : `Envoi de ${nounF}…`);
+      showToast(picked.length > 1 ? `Préparation de ${nounF}… (${i + 1}/${picked.length})` : `Préparation de ${nounF}…`);
       try {
-        const dataUrl = await _batReadFile(f);
-        if (APPS_SCRIPT_URL) {
-          const ext = (f.name.split('.').pop() || 'jpg');
-          const r = await apiCall({ action:'uploadFile', fileName:`${tag}-${dossierId}-${Date.now()}-${i + 1}.${ext}`, mimeType:f.type || 'application/octet-stream', base64Data:dataUrl });
-          if (r && r.ok) files.push({ name:f.name, viewUrl:r.viewUrl || '', dlUrl:r.dlUrl || '', type:f.type || '' });
-          else showToast(`Upload de « ${f.name} » échoué`, 'warning');
-        }
-      } catch(e){ showToast(`Upload de « ${f.name} » impossible`, 'warning'); }
+        // Compression des images (photo tél. ~6 Mo → ~300 Ko) = envoi fiable sur réseau
+        // faible ; les PDF et autres fichiers restent intacts.
+        const dataUrl = (f.type && f.type.startsWith('image/'))
+          ? await _resizeImage(f, 1600, 1600)
+          : await _batReadFile(f);
+        pending.push({ name:f.name, type:f.type || 'application/octet-stream', data:dataUrl });
+      } catch(e){ showToast(`Lecture de « ${f.name} » impossible`, 'warning'); }
     }
     _cleanupInp();
-    _batCreateRound(dossierId, files, k);
+    if (!pending.length) return;
+    _batCreateRound(dossierId, [], k, pending);
   };
   inp.click();
 }
 
-function _batCreateRound(dossierId, files, kind){
+function _batCreateRound(dossierId, files, kind, pendingFiles){
   const k    = kind === 'simulation' ? 'simulation' : 'bat';
   const noun = k === 'simulation' ? 'Simulation' : 'BAT';
-  const list = Array.isArray(files) ? files.filter(Boolean) : (files ? [files] : []);
+  const list  = Array.isArray(files) ? files.filter(Boolean) : (files ? [files] : []);
+  const pList = Array.isArray(pendingFiles) ? pendingFiles.filter(Boolean) : [];
   const first = list[0] || null;
   const d = dossiers.find(x => x.id === dossierId) || selectedDossier;
   // Version indépendante par type d'épreuve : Simulation v1, v2… ET BAT v1, v2…
@@ -12714,6 +12735,7 @@ function _batCreateRound(dossierId, files, kind){
     id: _genUid('BAT'), dossierId, numeroDossier: (d && d.numeroDossier) || '',
     version, kind:k, status: 'a_envoyer',
     files: list,
+    pendingFiles: pList,   // fichiers en base64 pas encore montés sur Drive → reprise auto
     // champs mono-fichier conservés (rétro-compat serveur/anciens clients) = 1ᵉʳ fichier
     fileName: first ? first.name : '', fileUrl: first ? first.viewUrl : '',
     fileDlUrl: first ? first.dlUrl : '', fileType: first ? first.type : '',
@@ -12725,8 +12747,77 @@ function _batCreateRound(dossierId, files, kind){
   syncBatToScript(bat);
   _addNotification({ dossierId, numeroDossier: bat.numeroDossier, etapeCode:'BAT', etapeLabel:`${noun} à envoyer`, operateur:_myOpLabel(),
     message:`${noun} v${version} prête — à envoyer au client (${bat.numeroDossier || 'dossier'}) — par ${_myOpLabel()}` });
-  showToast(`${noun} v${version} créée — le commercial est notifié`);
+  if (pList.length) {
+    showToast(navigator.onLine
+      ? `${noun} v${version} créée — envoi des fichiers en cours…`
+      : `${noun} v${version} créée — fichiers en attente (connexion) — envoi auto au retour du réseau`);
+    _uploadBatFiles(bat.id);
+  } else {
+    showToast(`${noun} v${version} créée — le commercial est notifié`);
+  }
   _refreshBatUi(dossierId);
+}
+
+// ── Upload des fichiers d'épreuve sur Drive, résistant à une connexion instable ──
+// Les fichiers sont d'abord gardés en local (bat.pendingFiles, base64) puis montés sur
+// Drive un par un ; ceux qui échouent RESTENT en attente et sont réessayés au retour de
+// connexion + par le polling 30s. Idempotent (garde par batId → pas de double upload).
+var _batFilesUploading = new Set();
+async function _uploadBatFiles(batId){
+  if (!APPS_SCRIPT_URL || !navigator.onLine) return;
+  if (_batFilesUploading.has(String(batId))) return;
+  const b = bats.find(x => String(x.id) === String(batId));
+  if (!b || !Array.isArray(b.pendingFiles) || !b.pendingFiles.length) return;
+  _batFilesUploading.add(String(batId));
+  try {
+    const tag = _batKind(b) === 'simulation' ? 'SIMU' : 'BAT';
+    const done = [];          // metadata Drive montées cette fois
+    const stillPending = [];  // fichiers non montés → reprise ultérieure
+    const src = b.pendingFiles.slice();
+    for (let i = 0; i < src.length; i++) {
+      const f = src[i];
+      if (!f || !f.data) continue;
+      const ext = (f.name && f.name.includes('.')) ? f.name.split('.').pop() : ((f.type && f.type.split('/')[1]) || 'jpg');
+      let ok = false;
+      try {
+        const r = await apiCall({ action:'uploadFile', fileName:`${tag}-${b.dossierId}-${Date.now()}-${i + 1}.${ext}`, mimeType:f.type || 'application/octet-stream', base64Data:f.data });
+        if (r && r.ok) { done.push({ name:f.name, viewUrl:r.viewUrl || '', dlUrl:r.dlUrl || '', type:f.type || '' }); ok = true; }
+      } catch(e){ ok = false; }
+      if (!ok) stillPending.push(f); // échec réseau → on garde le base64 pour reprise
+    }
+    if (!done.length) return; // rien n'a pu monter → on retentera au prochain cycle
+    b.files = _batMergeFiles(b.files, done);
+    b.pendingFiles = stillPending;
+    // mono-compat : renseigner le 1ᵉʳ fichier si encore vide
+    if (!b.fileUrl && b.files[0]) { b.fileName = b.files[0].name; b.fileUrl = b.files[0].viewUrl; b.fileDlUrl = b.files[0].dlUrl; b.fileType = b.files[0].type; }
+    saveData();
+    syncBatToScript(b); // persiste les metadata Drive (sans les base64) → visible par tous les postes
+    _refreshBatUi(b.dossierId);
+    if (document.getElementById('page-suivi-bat')?.classList.contains('active')) { try { renderSuiviBat(); } catch(e){} }
+    showToast(stillPending.length
+      ? `${done.length} fichier(s) envoyé(s) — ${stillPending.length} en attente`
+      : `${done.length} fichier(s) d'épreuve envoyé(s) sur Drive`);
+  } finally {
+    _batFilesUploading.delete(String(batId));
+  }
+}
+// Rejoue la montée Drive des fichiers d'épreuve en attente (reprise au retour de
+// connexion + polling 30s). Appelée sans argument.
+async function _flushBatFilesQueue(){
+  if (!APPS_SCRIPT_URL || !navigator.onLine) return;
+  const pend = bats.filter(b => Array.isArray(b.pendingFiles) && b.pendingFiles.length);
+  for (const b of pend) { await _uploadBatFiles(b.id); }
+}
+// Union dédupliquée des fichiers d'épreuve (par viewUrl/dlUrl/name) — ne perd rien.
+function _batMergeFiles(a, b){
+  const out = [], seen = new Set();
+  [...(a || []), ...(b || [])].forEach(x => {
+    if (!x) return;
+    const key = x.viewUrl || x.dlUrl || x.name;
+    if (!key || seen.has(key)) return;
+    seen.add(key); out.push(x);
+  });
+  return out;
 }
 
 function batMarkSent(batId){
@@ -12844,7 +12935,9 @@ function _batSectionInner(d){
     const kindTag = `<span class="bat-kind bat-kind--${isSim?'sim':'bat'}">${isSim?'🎨 Simulation':'🧾 BAT'}</span>`;
     const files = _batFiles(b);
     const fileLink = files.length
-      ? files.map(f => `<a href="${f.viewUrl}" target="_blank" class="bat-file">📎 ${escapeHtml(f.name || 'Voir le fichier')}</a>`).join('')
+      ? files.map(f => f.pending
+          ? `<span class="bat-file" style="color:#d97706;cursor:default" title="En attente d'envoi — sera montée sur Drive dès que la connexion le permet">⏳ ${escapeHtml(f.name || 'Fichier')} — en cours…</span>`
+          : `<a href="${f.viewUrl}" target="_blank" class="bat-file">📎 ${escapeHtml(f.name || 'Voir le fichier')}</a>`).join('')
       : '<span class="bat-nofile">Pas de fichier joint</span>';
     const timeline = [
       b.createdAt ? `Créé ${_batWhen(b.createdAt)}${b.createdBy?' · '+escapeHtml(b.createdBy):''}` : '',
