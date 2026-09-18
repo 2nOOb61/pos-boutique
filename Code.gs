@@ -2798,7 +2798,7 @@ function _safeParse(val, fallback) {
 const SHEET_DEMANDES_ACHAT  = 'DemandesAchat';
 const DEMANDE_ACHAT_HEADERS = ['ID','Ref','DossierID','Besoin','Quantite',
   'DateLivraisonClient','Motif','DateDemande','Statut','Images','Notes','CreePar','Timestamp',
-  'Prix','Fournisseur','Contact'];
+  'Prix','Fournisseur','Contact','Client','Demandeur'];
 
 // Ajoute les colonnes manquantes à une feuille DemandesAchat déjà créée (migration
 // en douceur : Prix/Fournisseur/Contact ajoutés après coup).
@@ -2837,7 +2837,9 @@ function handleGetDemandesAchat(data) {
     timestamp:           String(r[12] || ''),
     prix:                Number(r[13]) || 0,
     fournisseur:         String(r[14] || ''),
-    contact:             String(r[15] || '')
+    contact:             String(r[15] || ''),
+    client:              String(r[16] || ''),
+    demandeur:           String(r[17] || '')
   }));
   return { ok:true, demandes };
 }
@@ -2857,7 +2859,8 @@ function handleSaveDemandeAchat(data) {
       d.motif || '', d.dateDemande || '', d.statut || 'A_ACHETER',
       JSON.stringify(d.images || []), d.notes || '', d.creePar || '',
       d.timestamp || new Date().toISOString(),
-      d.prix != null ? d.prix : '', d.fournisseur || '', d.contact || ''
+      d.prix != null ? d.prix : '', d.fournisseur || '', d.contact || '',
+      d.client || '', d.demandeur || ''
     ];
     const rows = sh.getDataRange().getValues();
     for (let i = 1; i < rows.length; i++) {

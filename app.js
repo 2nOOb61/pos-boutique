@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '185 · 2026-09-14';
+const APP_VERSION = '186 · 2026-09-18';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -18376,7 +18376,7 @@ function deleteDemandeAchat(id) {
 function openDemandeAchat(dossierId, demandeId) {
   _daCtx = { dossierId: dossierId || '', demandeId: demandeId || '' };
   _daImages = [];
-  let pre = { ref:'', besoin:'', quantite:1, dateLivraisonClient:'', motif:'Commande', dateDemande:'', notes:'', prix:'', fournisseur:'', contact:'', statut:'A_ACHETER' };
+  let pre = { ref:'', client:'', besoin:'', quantite:1, dateLivraisonClient:'', motif:'Commande', dateDemande:'', demandeur:'', notes:'', prix:'', fournisseur:'', contact:'', statut:'A_ACHETER' };
 
   if (demandeId) {
     const d = demandesAchat.find(x => String(x.id) === String(demandeId));
@@ -18385,9 +18385,10 @@ function openDemandeAchat(dossierId, demandeId) {
     const dos = (Array.isArray(dossiers) ? dossiers : []).find(x => x.id === dossierId);
     const existing = _demandeForDossier(dossierId);
     if (existing) { _daCtx.demandeId = existing.id; pre = { ...pre, ...existing }; _daImages = Array.isArray(existing.images) ? existing.images.slice() : []; }
-    else if (dos) pre = { ...pre, ref:dos.numeroDossier||'', besoin:dos.produit||'', quantite:dos.quantite||1, dateLivraisonClient:dos.dateLivraison||'' };
+    else if (dos) pre = { ...pre, ref:dos.numeroDossier||'', client:dos.client||'', besoin:dos.produit||'', quantite:dos.quantite||1, dateLivraisonClient:dos.dateLivraison||'' };
   }
   if (!pre.dateDemande) { const t = new Date(); pre.dateDemande = `${String(t.getDate()).padStart(2,'0')}/${String(t.getMonth()+1).padStart(2,'0')}/${t.getFullYear()}`; }
+  if (!pre.demandeur) pre.demandeur = currentUser?.label || currentUser?.username || '';
 
   const isLinked = !!_daCtx.dossierId;
   const _inp = 'width:100%;padding:9px 11px;border:1.5px solid var(--color-border);border-radius:8px;font-size:13.5px;font-family:inherit;outline:none;color:var(--color-text-primary);background:var(--color-surface)';
@@ -18404,10 +18405,28 @@ function openDemandeAchat(dossierId, demandeId) {
         <button onclick="closeDemandeAchat()" style="background:none;border:none;cursor:pointer;font-size:22px;color:var(--color-text-muted);line-height:1">×</button>
       </div>
       <div style="padding:18px 20px;display:flex;flex-direction:column;gap:13px">
+        ${!demandeId ? `
+        <div style="background:var(--surface2);border:1.5px dashed var(--color-border);border-radius:10px;padding:11px 12px">
+          <label style="${_lbl};margin-bottom:6px">📋 Coller la demande (remplissage auto)</label>
+          <textarea id="daPaste" rows="3" placeholder="Colle ici le bloc de la demande (BESOINS, QTT, DATE DE LIVRAISON, MOTIFS, DEMANDEUR…)" style="${_inp};resize:vertical;font-size:12.5px"></textarea>
+          <button type="button" onclick="_daParsePaste()" style="margin-top:8px;background:var(--color-primary);color:#fff;border:none;padding:7px 13px;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer">Remplir depuis le collage</button>
+          <div style="font-size:11px;color:var(--color-text-muted);margin-top:6px">Le N° dossier et le client ne sont pas remplis ici — ils seront liés à la commande ci-dessous.</div>
+        </div>` : ''}
         <div><label style="${_lbl}">Besoin (article à acheter) *</label><input id="daBesoin" type="text" value="${escapeHtml(pre.besoin||'')}" placeholder="Ex: Chop à bière" style="${_inp}"/></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:11px">
           <div><label style="${_lbl}">Quantité *</label><input id="daQty" type="number" min="1" value="${Number(pre.quantite)||1}" style="${_inp}"/></div>
-          <div><label style="${_lbl}">Réf. commande</label><input id="daRef" type="text" value="${escapeHtml(pre.ref||'')}" placeholder="CMD-332" ${isLinked?'readonly':''} style="${_inp}${isLinked?';opacity:.7':''}"/></div>
+          <div><label style="${_lbl}">Demandeur</label><input id="daDemandeur" type="text" value="${escapeHtml(pre.demandeur||'')}" placeholder="Ex: Manda" style="${_inp}"/></div>
+        </div>
+        ${!isLinked ? `
+        <div><label style="${_lbl}">Lier à une commande client</label>
+          <select id="daCommande" onchange="_daLinkCommande(this.value)" style="${_inp}">
+            <option value="">— Aucune (à lier plus tard) —</option>
+            ${(Array.isArray(dossiers)?dossiers:[]).slice().sort((a,b)=>String(b.numeroDossier||'').localeCompare(String(a.numeroDossier||''),'fr',{numeric:true})).map(dd=>`<option value="${dd.id}" ${_daCtx.dossierId===dd.id?'selected':''}>${escapeHtml((dd.numeroDossier||dd.id)+' · '+(dd.client||'—')+(dd.produit?' · '+dd.produit:''))}</option>`).join('')}
+          </select>
+        </div>` : ''}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:11px">
+          <div><label style="${_lbl}">N° dossier / réf.</label><input id="daRef" type="text" value="${escapeHtml(pre.ref||'')}" placeholder="CMD-527" ${isLinked?'readonly':''} style="${_inp}${isLinked?';opacity:.7':''}"/></div>
+          <div><label style="${_lbl}">Client</label><input id="daClient" type="text" value="${escapeHtml(pre.client||'')}" placeholder="Ex: MVOLA" ${isLinked?'readonly':''} style="${_inp}${isLinked?';opacity:.7':''}"/></div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:11px">
           <div><label style="${_lbl}">Date livraison client</label><input id="daDateLiv" type="text" value="${escapeHtml(pre.dateLivraisonClient||'')}" placeholder="23.07.26" style="${_inp}"/></div>
@@ -18415,7 +18434,8 @@ function openDemandeAchat(dossierId, demandeId) {
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:11px">
           <div><label style="${_lbl}">Motif</label>
-            <select id="daMotif" style="${_inp}">${DEMANDE_ACHAT_MOTIFS.map(m => `<option value="${m}" ${(pre.motif||'').toLowerCase()===m.toLowerCase()?'selected':''}>${m}</option>`).join('')}</select>
+            <input id="daMotif" type="text" list="daMotifList" value="${escapeHtml(pre.motif||'')}" placeholder="Ex: BAT physique" style="${_inp}"/>
+            <datalist id="daMotifList">${DEMANDE_ACHAT_MOTIFS.map(m => `<option value="${m}"></option>`).join('')}</datalist>
           </div>
           <div><label style="${_lbl}">Statut</label>
             <select id="daStatut" style="${_inp}">${DEMANDE_STATUTS.map(s => `<option value="${s.code}" ${(pre.statut===s.code || (pre.statut==='ACHETE'&&s.code==='RECU'))?'selected':''}>${s.label}</option>`).join('')}</select>
@@ -18446,6 +18466,66 @@ function openDemandeAchat(dossierId, demandeId) {
   setTimeout(() => document.getElementById('daBesoin')?.focus(), 80);
 }
 function closeDemandeAchat() { const m = document.getElementById('demandeAchatModal'); if (m) m.style.display = 'none'; }
+
+// Normalise une date collée ("19-09-2026", "18 - 09 - 2026", "18.09.26") → "JJ/MM/AAAA"
+// (format attendu par _parseFrDate). Rend la chaîne brute si aucune date reconnue.
+function _daNormDate(raw) {
+  const m = String(raw || '').match(/(\d{1,2})\s*[\/.\-]\s*(\d{1,2})\s*[\/.\-]\s*(\d{2,4})/);
+  if (!m) return String(raw || '').trim();
+  let d = m[1].padStart(2, '0'), mo = m[2].padStart(2, '0'), y = m[3];
+  if (y.length === 2) y = '20' + y;
+  return `${d}/${mo}/${y}`;
+}
+
+// Remplit le formulaire d'achat depuis le bloc collé par l'opérateur.
+// Option A : on IGNORE volontairement le N° dossier et le client (l'acheteur les liera
+// à la commande via le sélecteur). Tolérant : émojis/puces, ordre des lignes, accents,
+// séparateurs de date variés.
+function _daParsePaste() {
+  const box = document.getElementById('daPaste');
+  if (!box || !box.value.trim()) { showToast('Colle d\'abord le texte de la demande', 'error'); return; }
+  const lines = box.value.split(/\r?\n/);
+  const norm = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z]/g, '');
+  const get = prefixes => {
+    for (const ln of lines) {
+      const clean = ln.replace(/^[^A-Za-zÀ-ÿ]+/, ''); // retire émojis/puces/espaces en tête
+      const idx = clean.indexOf(':');
+      if (idx < 0) continue;
+      const key = norm(clean.slice(0, idx));
+      if (key && prefixes.some(p => key.startsWith(p))) return clean.slice(idx + 1).trim();
+    }
+    return '';
+  };
+  const set = (id, val) => { const el = document.getElementById(id); if (el && val != null && val !== '') el.value = val; };
+  let filled = 0;
+  const besoin = get(['BESOIN']);                    if (besoin) { set('daBesoin', besoin); filled++; }
+  const qtt    = get(['QTT', 'QUANTITE', 'QTE', 'QTY', 'QUANTITY']);
+  if (qtt) { const n = parseInt(qtt, 10); if (n > 0) { set('daQty', n); filled++; } }
+  const dLiv   = get(['DATEDELIVRAISON', 'DATELIVRAISON']); if (dLiv) { set('daDateLiv', _daNormDate(dLiv)); filled++; }
+  const dDem   = get(['DATEDEDEMANDE', 'DATEDEMANDE']);     if (dDem) { set('daDateDem', _daNormDate(dDem)); filled++; }
+  const motif  = get(['MOTIF']);                     if (motif) { set('daMotif', motif); filled++; }
+  const dem    = get(['DEMANDEUR', 'DEMANDEPAR']);    if (dem)   { set('daDemandeur', dem); filled++; }
+  // Unité de quantité éventuelle ("1 m") → reportée en note pour ne rien perdre.
+  if (qtt && /[a-zA-Z]/.test(qtt)) {
+    const nEl = document.getElementById('daNotes');
+    if (nEl) { const add = 'Qté demandée : ' + qtt; if (!nEl.value.includes(add)) nEl.value = (nEl.value ? nEl.value.trim() + '\n' : '') + add; }
+  }
+  if (filled) showToast('Champs remplis (' + filled + ') — pense à lier la commande', 'success');
+  else showToast('Aucun champ reconnu dans le texte collé', 'error');
+}
+
+// Lie la demande à une commande client (dossier) : remplit N° dossier + client (+ date
+// de livraison si vide) et mémorise le dossierId qui sera enregistré.
+function _daLinkCommande(dossierId) {
+  _daCtx.dossierId = dossierId || '';
+  const refI = document.getElementById('daRef'), cliI = document.getElementById('daClient'), dlI = document.getElementById('daDateLiv');
+  if (!dossierId) return;
+  const dos = (Array.isArray(dossiers) ? dossiers : []).find(x => x.id === dossierId);
+  if (!dos) return;
+  if (refI) refI.value = dos.numeroDossier || dos.id || '';
+  if (cliI) cliI.value = dos.client || '';
+  if (dlI && !dlI.value) dlI.value = dos.dateLivraison || '';
+}
 
 function _daRenderImgGrid() {
   const grid = document.getElementById('daImgGrid');
@@ -18488,6 +18568,8 @@ async function saveDemandeAchatForm() {
   const d = existing || { id: 'DA_' + Date.now() + '_' + Math.random().toString(36).slice(2,6), statut:'A_ACHETER', creePar: currentUser?.label || 'Gestionnaire', timestamp: new Date().toISOString() };
   d.dossierId           = _daCtx.dossierId || d.dossierId || '';
   d.ref                 = document.getElementById('daRef')?.value.trim() || '';
+  d.client              = document.getElementById('daClient')?.value.trim() || '';
+  d.demandeur           = document.getElementById('daDemandeur')?.value.trim() || '';
   d.besoin              = besoin;
   d.quantite            = qty;
   d.dateLivraisonClient = document.getElementById('daDateLiv')?.value.trim() || '';
