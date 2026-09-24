@@ -146,6 +146,7 @@ function doPost(e) {
     else if (action === 'getTaches')         result = handleGetTaches(data);
     else if (action === 'deleteTache')       result = handleDeleteTache(data);
     else if (action === 'deleteTachesDossier') result = handleDeleteTachesDossier(data);
+    else if (action === 'saveTacheSubtasks') result = handleSaveTacheSubtasks(data);
     else if (action === 'pointerAction')     result = handlePointerAction(data);
     else if (action === 'getDashboard')      result = handleGetDashboard();
     else if (action === 'getControlPatron')  result = handleGetControlPatron(data);
@@ -153,6 +154,7 @@ function doPost(e) {
     else if (action === 'getDriveFolderUrl') result = handleGetDriveFolderUrl();
     else if (action === 'clearAllData')      result = handleClearAllData(data);
     else if (action === 'addComment')        result = handleAddComment(data);
+    else if (action === 'setCommentReactions') result = handleSetCommentReactions(data);
     else if (action === 'saveNotif')         result = handleSaveNotif(data);
     else if (action === 'saveModif')         result = handleSaveModif(data);
     else if (action === 'resolveModif')      result = handleResolveModif(data);
@@ -208,7 +210,9 @@ function doGet(e) {
       else if (action === 'pointerAction')     result = handlePointerAction(data);
       else if (action === 'deleteTache')       result = handleDeleteTache(data);
       else if (action === 'deleteTachesDossier') result = handleDeleteTachesDossier(data);
+      else if (action === 'saveTacheSubtasks') result = handleSaveTacheSubtasks(data);
       else if (action === 'addComment')        result = handleAddComment(data);
+      else if (action === 'setCommentReactions') result = handleSetCommentReactions(data);
       else if (action === 'saveNotif')         result = handleSaveNotif(data);
       else if (action === 'saveModif')         result = handleSaveModif(data);
       else if (action === 'resolveModif')      result = handleResolveModif(data);
@@ -2041,6 +2045,49 @@ function handleSetTacheLibrePhotos(data) {
   }
 }
 
+// ── SOUS-TÂCHES (checklist d'une tâche) — colonne 17 `Subtasks`, JSON ──────
+// Une sous-tâche = { id, texte, done, par, ts }. La progression d'une tâche
+// affichée dans le tableau Kanban en est déduite (done / total).
+const TACHE_SUBTASKS_COL = 17;
+
+// Migration douce : les feuilles Taches créées avant ces colonnes en ont 12 ou 15.
+function _ensureTacheCols_(sh) {
+  if (sh.getLastColumn() < 16) sh.getRange(1, 16).setValue('Equipe');
+  if (sh.getLastColumn() < TACHE_SUBTASKS_COL) sh.getRange(1, TACHE_SUBTASKS_COL).setValue('Subtasks');
+}
+
+// Même garde-fou que pour les photos : la limite Sheets est de 50 000 car./cellule.
+function _serializeSubtasks_(list) {
+  if (!Array.isArray(list) || !list.length) return '';
+  try {
+    const json = JSON.stringify(list);
+    return json.length <= 45000 ? json : '';
+  } catch (e) { return ''; }
+}
+
+function handleSaveTacheSubtasks(data) {
+  if (!data.tacheId) return { ok:false, error:'tacheId requis' };
+  const sh = getSS().getSheetByName(SHEET_TACHES);
+  if (!sh) return { ok:false, error:'Feuille Taches introuvable' };
+  const json = _serializeSubtasks_(data.subtasks);
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(6000);
+    _ensureTacheCols_(sh);
+    const ids = sh.getRange(2, 1, Math.max(0, sh.getLastRow() - 1), 1).getValues();
+    for (let i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]) === String(data.tacheId)) {
+        sh.getRange(i + 2, TACHE_SUBTASKS_COL).setValue(json);
+        CacheService.getScriptCache().remove('dashboard_v1');
+        return { ok:true };
+      }
+    }
+    return { ok:false, error:'Tâche introuvable' };
+  } finally {
+    try { lock.releaseLock(); } catch(e) {}
+  }
+}
+
 function handleGetTaches(data) {
   const sh = getSS().getSheetByName(SHEET_TACHES);
   if (!sh) return { ok:true, taches:[] };
@@ -2080,6 +2127,7 @@ function handleGetTaches(data) {
       : String(r[13]);
     if (r[14]) { try { t.photos = JSON.parse(r[14]); } catch (e) {} }
     if (r[15]) t.shift = String(r[15]); // Équipe : 'Jour' | 'Nuit' (col 16)
+    if (r[16]) { try { t.subtasks = JSON.parse(r[16]); } catch (e) {} } // checklist (col 17)
     if (data && data.operateur && data.operateur !== 'TOUS' && t.operateur !== data.operateur) continue;
     if (data && data.dossierId && t.dossierId !== data.dossierId) continue;
     list.push(t);
@@ -2166,7 +2214,9 @@ function _deleteTacheDriveFiles_(photosCell) {
 function handlePointerAction(data) {
   if (!data.tacheId) return { ok:false, error:'tacheId requis' };
   if (!data.action_) return { ok:false, error:'action_ requise' };
-  const validActions = ['START','END','VALIDER'];
+  // REOPEN / RESET : marche arrière du tableau Kanban (glisser une carte d'une colonne
+  // vers une colonne précédente). Réservées côté front aux admins / chefs d'atelier.
+  const validActions = ['START','END','VALIDER','REOPEN','RESET'];
   if (!validActions.includes(data.action_)) {
     return { ok:false, error:'action_ invalide : ' + data.action_ };
   }
@@ -2189,6 +2239,20 @@ function handlePointerAction(data) {
       sh.getRange(i + 1, 1, 1, rowData.length).setValues([rowData]);
       _logAction_('TACHE_START', data.operateur||String(rows[i][5]),
         'Tâche:' + data.tacheId + ' étape:' + rows[i][3]);
+    } else if (data.action_ === 'REOPEN' || data.action_ === 'RESET') {
+      // Marche arrière : on efface la date de fin (et la date de début pour un RESET
+      // complet), puis on recalcule la progression du dossier d'après les tâches
+      // réelles — sinon le dossier resterait figé sur son ancienne avance.
+      const back = data.action_ === 'REOPEN';
+      rowData[6] = back ? 'EN_COURS' : 'A_FAIRE';
+      rowData[9] = '';                                  // DateFin effacée
+      if (back) { if (!rowData[8]) rowData[8] = now; }   // rouvrir sans début connu → repart maintenant
+      else      { rowData[8] = ''; }                     // RESET : DateDebut effacée aussi
+      sh.getRange(i + 1, 1, 1, rowData.length).setValues([rowData]);
+      _logAction_(back ? 'TACHE_REOPEN' : 'TACHE_RESET', data.operateur||String(rows[i][5]),
+        'Tâche:' + data.tacheId + ' étape:' + rows[i][3]);
+      const dossierR = rows[i][1];
+      if (dossierR && String(dossierR) !== 'LIBRE') majProgressionDossier_(ss, dossierR, rows[i][3]);
     } else {
       rowData[6]  = 'TERMINE';
       rowData[9]  = now;
@@ -2745,11 +2809,21 @@ function _ctrlParseDate(v) {
 // ============================================================
 const SHEET_COMMENTS = 'Commentaires';
 
+// Colonne 10 `Reactions` : { "👍": ["Gino","Malala"], … } — ajoutée après coup,
+// d'où la migration douce sur les feuilles Commentaires déjà créées à 9 colonnes.
+const COMMENT_HEADERS = ['ID','DossierID','NumeroDossier','Auteur','Role','Texte',
+  'Mentions','Attachments','Timestamp','Reactions'];
+function _ensureCommentCols_(sh) {
+  if (sh.getLastColumn() < COMMENT_HEADERS.length) {
+    sh.getRange(1, COMMENT_HEADERS.length).setValue('Reactions');
+  }
+}
+
 function handleGetComments(data) {
   const dossierId = data.dossierId || '';
   const ss = SpreadsheetApp.openById(SHEET_ID);
-  const sh = ensureSheet(ss, SHEET_COMMENTS,
-    ['ID','DossierID','NumeroDossier','Auteur','Role','Texte','Mentions','Attachments','Timestamp']);
+  const sh = ensureSheet(ss, SHEET_COMMENTS, COMMENT_HEADERS);
+  _ensureCommentCols_(sh);
   const rows = sh.getDataRange().getValues().slice(1);
   const comments = rows
     .filter(r => !dossierId || String(r[1]) === String(dossierId))
@@ -2762,15 +2836,16 @@ function handleGetComments(data) {
       text:          String(r[5]),
       mentions:      _safeParse(r[6], []),
       attachments:   _safeParse(r[7], []),
-      timestamp:     String(r[8])
+      timestamp:     String(r[8]),
+      reactions:     _safeParse(r[9], {})
     }));
   return { ok: true, comments };
 }
 
 function handleAddComment(data) {
   const ss = SpreadsheetApp.openById(SHEET_ID);
-  const sh = ensureSheet(ss, SHEET_COMMENTS,
-    ['ID','DossierID','NumeroDossier','Auteur','Role','Texte','Mentions','Attachments','Timestamp']);
+  const sh = ensureSheet(ss, SHEET_COMMENTS, COMMENT_HEADERS);
+  _ensureCommentCols_(sh);
   const id = data.id || ('CMT_' + Date.now() + '_' + Math.random().toString(36).slice(2,6));
   sh.appendRow([
     id,
@@ -2781,9 +2856,36 @@ function handleAddComment(data) {
     data.text          || '',
     JSON.stringify(data.mentions     || []),
     JSON.stringify(data.attachments  || []),
-    data.timestamp     || new Date().toISOString()
+    data.timestamp     || new Date().toISOString(),
+    JSON.stringify(data.reactions    || {})
   ]);
   return { ok: true, commentId: id };
+}
+
+// Réactions emoji sur un commentaire : le front envoie la map complète
+// { emoji: [auteurs] } après un toggle local (dernier écrivain gagne, comme
+// pour les autres écritures de l'app — le volume de réactions ne justifie pas
+// une fusion côté serveur).
+function handleSetCommentReactions(data) {
+  if (!data.commentId) return { ok:false, error:'commentId requis' };
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sh = ensureSheet(ss, SHEET_COMMENTS, COMMENT_HEADERS);
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(6000);
+    _ensureCommentCols_(sh);
+    const ids = sh.getRange(2, 1, Math.max(0, sh.getLastRow() - 1), 1).getValues();
+    for (let i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]) === String(data.commentId)) {
+        sh.getRange(i + 2, COMMENT_HEADERS.length)
+          .setValue(JSON.stringify(data.reactions || {}));
+        return { ok:true };
+      }
+    }
+    return { ok:false, error:'Commentaire introuvable' };
+  } finally {
+    try { lock.releaseLock(); } catch(e) {}
+  }
 }
 
 function _safeParse(val, fallback) {

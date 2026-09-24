@@ -26,7 +26,7 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20260918-achatpaste">
+<link rel="stylesheet" href="./style.css?v=20260924-kanban">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
@@ -1027,6 +1027,10 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
           <button class="nav-btn sidebar-btn" data-roles="admin,chef_atelier,operateur_prod,machiniste,pao,finition,livreur,caissier,commerciale,utilisateur,gestionnaire,comptable" onclick="showPage('production',this)" aria-label="Production">
             <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg></span>
             <span class="sidebar-label">Production</span>
+          </button>
+          <button class="nav-btn sidebar-btn" data-roles="admin,chef_atelier,operateur_prod,machiniste,pao,finition,livreur,gestionnaire,commerciale" onclick="showPage('tableau',this)" aria-label="Tableau des taches">
+            <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="6" height="18" rx="1"/><rect x="10" y="3" width="6" height="12" rx="1"/><rect x="17" y="3" width="4" height="8" rx="1"/></svg></span>
+            <span class="sidebar-label">Tableau</span>
           </button>
           <button class="nav-btn sidebar-btn" data-roles="admin,chef_atelier,operateur_prod,machiniste,pao,finition,gestionnaire,commerciale" onclick="showPage('machines',this)" aria-label="Machines">
             <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
@@ -2286,6 +2290,21 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
       </button>
     </div>
     <div id="finitionsContent"></div>
+  </div>
+
+  <div class="page" id="page-tableau" data-roles="admin,chef_atelier,operateur_prod,machiniste,pao,finition,livreur,gestionnaire,commerciale">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:16px">
+      <div>
+        <h1 style="font-size:21px;font-weight:800;color:var(--text);margin:0">Tableau des t&acirc;ches</h1>
+        <p style="font-size:13px;color:var(--muted);margin:3px 0 0">Vue Kanban : faites glisser une t&acirc;che pour la d&eacute;marrer ou la terminer, d&eacute;coupez-la en sous-t&acirc;ches et discutez dessus</p>
+      </div>
+      <button onclick="renderKanbanPage(true)" title="Actualiser depuis le serveur"
+        style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);cursor:pointer;font-size:13px;font-weight:600">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        Actualiser
+      </button>
+    </div>
+    <div id="kanbanContent"></div>
   </div>
 
   <div class="page" id="page-calendrier" data-roles="admin,commerciale,chef_atelier,gestionnaire">
@@ -3564,7 +3583,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260918-achatpaste"></script>
+<script src="./app.js?v=20260924-kanban"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

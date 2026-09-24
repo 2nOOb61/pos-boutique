@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '186 · 2026-09-18';
+const APP_VERSION = '187 · 2026-09-24';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -227,6 +227,7 @@ const PAGE_LABELS = {
   'mon-dashboard': 'Mon tableau de bord',
   attribution:     'Attribution / Dossiers',
   production:      'Production / Tâches',
+  tableau:         'Tableau des tâches (Kanban)',
   messagerie:      'Messagerie',
   config:          'Configuration (admin)',
   users:           'Gestion utilisateurs (admin)',
@@ -254,6 +255,7 @@ const PAGE_ACCESS = {
   'suivi-bat':    ['admin','commerciale','chef_atelier','pao','gestionnaire'],
   finitions:      ['admin','chef_atelier','finition','operateur_prod','machiniste','pao','gestionnaire','commerciale'],
   messagerie:     ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
+  tableau:        ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','gestionnaire','commerciale'],
 };
 // Pages réservées au SUPER ADMIN uniquement (les autres admins ne les voient pas).
 const SUPERADMIN_ONLY_PAGES = ['users', 'journal'];
@@ -652,6 +654,7 @@ function showPage(id, btn, bnavBtn) {
   if (id==='calendrier')   { _ensureDossierLinks(); renderCalendrier(); if (APPS_SCRIPT_URL) Promise.all([loadCommandesFromScript(), loadReservationsFromScript()]).then(() => { _ensureDossierLinks(); renderCalendrier(); }).catch(()=>{}); }
   if (id==='suivi-bat')    { renderSuiviBat(); if (APPS_SCRIPT_URL) Promise.all([loadBatsFromScript(), loadDossiers(), loadCommandesFromScript()]).then(() => renderSuiviBat()).catch(()=>{}); }
   if (id==='finitions')    { renderFinitionsPage(); if (APPS_SCRIPT_URL) Promise.all([loadDossiers(), _loadTachesQuietly(), _loadFinitionsFromScript()]).then(() => renderFinitionsPage()).catch(()=>{}); }
+  if (id==='tableau')      { renderKanbanPage(); if (APPS_SCRIPT_URL) Promise.all([loadDossiers(), _loadTachesQuietly()]).then(() => renderKanbanPage()).catch(()=>{}); }
   if (id==='messagerie')   { loadMessagerie(); _autoRefreshMessagerie(); }
   if (id==='patron')       { renderControlFinance(); renderPatronEncaissements(); renderPatronDashboard(); _autoRefreshPatron(); loadEncaissementsFromScript().then(renderPatronEncaissements).catch(()=>{}); }
   if (id==='journal')      { loadJournal(); }
@@ -17980,6 +17983,7 @@ async function pointerStart(tacheId) {
     });
     renderTaches();
     if (document.getElementById('page-achats')?.classList.contains('active')) renderAchats();
+    if (document.getElementById('page-tableau')?.classList.contains('active')) renderKanbanPage();
     showToast('Tâche démarrée');
   }
 }
@@ -18045,6 +18049,7 @@ async function confirmPointage() {
     }
     renderTaches();
     if (document.getElementById('page-achats')?.classList.contains('active')) renderAchats();
+    if (document.getElementById('page-tableau')?.classList.contains('active')) renderKanbanPage();
     closeModal('pointageModal');
     showToast(dossierComplet ? 'Dossier complet à 100% — prêt à livrer !' : 'Tâche terminée ');
   }
@@ -21213,3 +21218,757 @@ function saveCommandeRapide() {
 })();
 
 // initModulesProduction est appelé lazily depuis showPage (attribution/production)
+
+// ============================================================
+// TABLEAU (KANBAN) — page dédiée, inspirée de Tinyly
+// Trois colonnes (À faire / En cours / Terminé) alimentées par les MÊMES
+// tâches que la page Production (taches + tachesLibres) : le tableau est une
+// autre vue, pas un second référentiel. Déplacer une carte = pointer :
+//   A_FAIRE → EN_COURS  : pointerStart()            (garde : étapes précédentes)
+//   → TERMINE           : modal de pointage existant (commentaire de fin)
+//   marche arrière      : actions GAS REOPEN / RESET (admin & chef d'atelier)
+// Chaque carte porte une checklist de sous-tâches (colonne Sheet `Subtasks`)
+// et un fil de discussion avec réactions (feuille Commentaires, clé
+// dossierId = "TACHE:<id>").
+// ============================================================
+function _kbEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+const KB_COLS = [
+  { k:'A_FAIRE',  label:'À faire',  color:'#b45309' },
+  { k:'EN_COURS', label:'En cours', color:'#2563eb' },
+  { k:'TERMINE',  label:'Terminé',  color:'#16a34a' },
+];
+const KB_REACTIONS = ['👍','✅','🔥','❤️','😂','🙏'];
+
+let _kbScope  = 'mine';   // 'mine' = mes tâches | 'all' = toute l'équipe
+let _kbSearch = '';
+let _kbEtape  = 'TOUS';
+let _kbOp     = 'TOUS';
+let _kbDetailId = null;   // tâche ouverte dans le panneau de détail
+
+// Clé de fil de discussion d'une tâche dans la feuille Commentaires.
+function _kbTacheKey(id){ return 'TACHE:' + id; }
+
+function _kbFind(id){
+  return _allTachesMerged().find(t => String(t.id) === String(id)) || null;
+}
+
+// Admin / chef d'atelier : peuvent remettre une tâche en arrière (REOPEN / RESET).
+function _kbCanRewind(){
+  return ['admin','chef_atelier'].includes(currentUser?.role);
+}
+// Vue « toute l'équipe » réservée aux rôles de pilotage ; un opérateur voit ses tâches.
+function _kbCanSeeAll(){
+  return ['admin','chef_atelier','gestionnaire','commerciale','comptable'].includes(currentUser?.role);
+}
+
+function _kbDossierOf(t){
+  if (!t || !t.dossierId || t.dossierId === 'LIBRE') return null;
+  return (dossiers||[]).find(d => d.id === t.dossierId) || null;
+}
+
+function _kbSubProgress(t){
+  const list = Array.isArray(t && t.subtasks) ? t.subtasks : [];
+  const total = list.length;
+  const done  = list.filter(s => s && s.done).length;
+  return { done, total, pct: total ? Math.round(done/total*100) : 0 };
+}
+
+function _kbCommentsOf(id){
+  const key = _kbTacheKey(id);
+  return (dossierComments||[])
+    .filter(c => c.dossierId === key)
+    .sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+}
+
+// Compteur par tâche calculé en UN passage par rendu : `dossierComments` porte
+// tous les fils de l'app (souvent des milliers de lignes), un filtre par carte
+// coûterait cher sur les téléphones des opérateurs.
+let _kbComCount = {};
+function _kbBuildComCounts(){
+  _kbComCount = {};
+  (dossierComments||[]).forEach(c => {
+    const k = c && typeof c.dossierId === 'string' ? c.dossierId : '';
+    if (k.indexOf('TACHE:') !== 0) return;
+    const id = k.slice(6);
+    _kbComCount[id] = (_kbComCount[id] || 0) + 1;
+  });
+}
+
+// Liste de base : toutes les tâches connues, cloisonnées selon la portée choisie.
+function _kbAllVisible(){
+  let list = _allTachesMerged().filter(t => t && t.id);
+  const me = currentUser?.label || currentUser?.username || '';
+  if (_kbScope === 'mine' || !_kbCanSeeAll()) list = list.filter(t => _sameOp(t.operateur, me));
+  if (_kbEtape !== 'TOUS') list = list.filter(t => (t.etapeCode||'') === _kbEtape);
+  if (_kbOp    !== 'TOUS') list = list.filter(t => _sameOp(t.operateur, _kbOp));
+  const q = (_kbSearch||'').trim().toLowerCase();
+  if (q) list = list.filter(t => {
+    const d = _kbDossierOf(t);
+    return ((t.numeroDossier||'') + ' ' + (t.etapeLabel||'') + ' ' + (t.titre||'') + ' ' +
+            (t.operateur||'') + ' ' + ((d&&d.client)||'') + ' ' + ((d&&d.produit)||'')).toLowerCase().includes(q);
+  });
+  return list;
+}
+
+function _kbSortCards(list){
+  // Retard d'abord, puis priorité haute, puis échéance la plus proche, puis récentes.
+  const prioRank = p => ({ 'Urgente':0, 'Haute':1, 'Normale':2, 'Basse':3 })[p] ?? 2;
+  const dueMs = t => { const d = t.echeance ? new Date(t.echeance+'T00:00:00') : null; return d && !isNaN(d) ? d.getTime() : Infinity; };
+  return list.slice().sort((a,b) =>
+    (_tacheRetardFlag(b)?1:0) - (_tacheRetardFlag(a)?1:0)
+    || prioRank(a.priorite) - prioRank(b.priorite)
+    || dueMs(a) - dueMs(b)
+    || String(b.id).localeCompare(String(a.id))
+  );
+}
+
+// ── Carte ────────────────────────────────────────────────────
+function _kbCardHtml(t){
+  const d     = _kbDossierOf(t);
+  const etape = ETAPES_CONFIG.find(e => e.code === t.etapeCode);
+  const isLibre = t.dossierId === 'LIBRE' || String(t.id).startsWith('TL_');
+  const titre = isLibre ? (t.titre || t.etapeLabel || 'Tâche libre') : (t.etapeLabel || t.etapeCode || '—');
+  const ref   = isLibre ? 'Tâche libre' : (t.numeroDossier || t.dossierId || '');
+  const color = isLibre ? '#7c3aed' : (etape?.color || '#78716c');
+  const sub   = _kbSubProgress(t);
+  const nbCom = _kbComCount[t.id] || 0;
+  const retard = _tacheRetardFlag(t);
+  const canMove = _kbCanActOn(t);
+
+  const due = t.echeance ? (() => {
+    const dt = new Date(t.echeance + 'T00:00:00');
+    if (isNaN(dt)) return '';
+    const days = Math.round((dt - new Date(new Date().toDateString())) / 86400000);
+    const late = days < 0 && t.statut !== 'TERMINE';
+    return `<span class="kb-chip ${late?'kb-chip--late':''}">📅 ${dt.toLocaleDateString('fr-FR',{day:'2-digit',month:'short'})}</span>`;
+  })() : '';
+
+  const prio = t.priorite ? `<span class="kb-chip kb-chip--prio">${_kbEsc(t.priorite)}</span>` : '';
+  const chrono = t.statut === 'EN_COURS' ? _chronoBadge(t, 'kb') : '';
+  const bar = sub.total
+    ? `<div class="kb-prog" title="${sub.done}/${sub.total} sous-tâches">
+         <div class="kb-prog-bar"><i style="width:${sub.pct}%;background:${color}"></i></div>
+         <span>${sub.done}/${sub.total}</span>
+       </div>` : '';
+
+  // Boutons d'action : toujours disponibles (le glisser-déposer reste un raccourci).
+  let actions = '';
+  if (t.statut === 'A_FAIRE' && canMove)
+    actions = `<button class="kb-act kb-act--go" onclick="event.stopPropagation();_kbMove('${t.id}','EN_COURS')">▶ Démarrer</button>`;
+  else if (t.statut === 'EN_COURS' && canMove)
+    actions = `<button class="kb-act kb-act--done" onclick="event.stopPropagation();_kbMove('${t.id}','TERMINE')">✓ Terminer</button>`;
+  else if (t.statut === 'TERMINE' && _kbCanRewind())
+    actions = `<button class="kb-act" onclick="event.stopPropagation();_kbMove('${t.id}','EN_COURS')">↩ Rouvrir</button>`;
+
+  return `<article class="kb-card${retard?' kb-card--late':''}" data-tid="${t.id}" data-statut="${t.statut||'A_FAIRE'}"
+      style="--kc:${color}" onclick="openTacheDetail('${t.id}')" title="Ouvrir le détail (sous-tâches, discussion)">
+    <div class="kb-card-top">
+      <span class="kb-etape">${_kbEsc(titre)}</span>
+      ${retard ? '<span class="kb-late">⚠ retard</span>' : ''}
+    </div>
+    <div class="kb-ref">${_kbEsc(ref)}${d && d.client ? ' · ' + _kbEsc(d.client) : ''}</div>
+    ${d && d.produit ? `<div class="kb-prod">${_kbEsc(d.produit)}</div>` : ''}
+    ${bar}
+    <div class="kb-chips">${prio}${due}${chrono}</div>
+    <div class="kb-card-foot">
+      <span class="kb-op" title="Opérateur assigné">${_kbEsc(t.operateur||'—')}</span>
+      <span class="kb-meta">
+        ${sub.total ? `<span title="Sous-tâches">☑ ${sub.done}/${sub.total}</span>` : ''}
+        ${nbCom ? `<span title="Commentaires">💬 ${nbCom}</span>` : ''}
+      </span>
+    </div>
+    ${actions ? `<div class="kb-actions">${actions}</div>` : ''}
+  </article>`;
+}
+
+// Même règle que la production : opérateur assigné, admin/chef, ou gestionnaire sur un achat.
+function _kbCanActOn(t){ return typeof _canActOnTache === 'function' ? _canActOnTache(t) : true; }
+
+// ── Rendu de la page ─────────────────────────────────────────
+function _kbSetScope(v){ _kbScope = v; renderKanbanPage(); }
+function _kbSetEtape(v){ _kbEtape = v; _kbRenderBoard(); }
+function _kbSetOp(v){ _kbOp = v; _kbRenderBoard(); }
+function _kbSetSearch(v){ _kbSearch = v; _kbRenderBoard(); }
+
+function renderKanbanPage(reload){
+  _kbInjectStyle();
+  const host = document.getElementById('kanbanContent');
+  if (!host) return;
+  if (reload && APPS_SCRIPT_URL){
+    Promise.all([loadDossiers(), _loadTachesQuietly()]).then(() => renderKanbanPage(false)).catch(()=>{});
+  }
+  const all = _kbAllVisible();
+  const cnt = k => all.filter(t => (t.statut||'A_FAIRE') === k).length;
+  const retard = all.filter(t => _tacheRetardFlag(t)).length;
+
+  const ops = [...new Set(_allTachesMerged().map(t => (t.operateur||'').trim()).filter(Boolean))]
+    .sort((a,b)=>a.localeCompare(b,'fr'));
+  const opOpts = ['<option value="TOUS">Tous les opérateurs</option>']
+    .concat(ops.map(o => `<option value="${_kbEsc(o)}" ${_kbOp===o?'selected':''}>${_kbEsc(o)}</option>`)).join('');
+  const etOpts = ['<option value="TOUS">Toutes les étapes</option>']
+    .concat(ETAPES_CONFIG.map(e => `<option value="${e.code}" ${_kbEtape===e.code?'selected':''}>${_kbEsc(e.short||e.label)}</option>`)).join('');
+
+  const scopeSeg = _kbCanSeeAll() ? `
+    <div class="kb-seg" role="tablist">
+      <button role="tab" aria-selected="${_kbScope==='mine'}" onclick="_kbSetScope('mine')">Mes tâches</button>
+      <button role="tab" aria-selected="${_kbScope==='all'}"  onclick="_kbSetScope('all')">Toute l'équipe</button>
+    </div>` : '';
+
+  host.innerHTML = `
+    <div class="kb-kpis">
+      <div class="kb-kpi" style="--k:#78716c"><div class="v">${all.length}</div><div class="l">Tâches affichées</div></div>
+      <div class="kb-kpi" style="--k:#b45309"><div class="v">${cnt('A_FAIRE')}</div><div class="l">À faire</div></div>
+      <div class="kb-kpi" style="--k:#2563eb"><div class="v">${cnt('EN_COURS')}</div><div class="l">En cours</div></div>
+      <div class="kb-kpi" style="--k:#16a34a"><div class="v">${cnt('TERMINE')}</div><div class="l">Terminées</div></div>
+      <div class="kb-kpi" style="--k:#dc2626"><div class="v">${retard}</div><div class="l">En retard</div></div>
+    </div>
+    <div class="kb-bar">
+      ${scopeSeg}
+      <select class="kb-select" onchange="_kbSetEtape(this.value)">${etOpts}</select>
+      <select class="kb-select" onchange="_kbSetOp(this.value)">${opOpts}</select>
+      <input class="kb-search" type="search" placeholder="Rechercher (dossier, client, étape)…"
+             value="${_kbEsc(_kbSearch)}" oninput="_kbSetSearch(this.value)">
+    </div>
+    <div class="kb-hint">Glissez une carte d'une colonne à l'autre pour la faire avancer — sur mobile, appuyez et maintenez la carte. Touchez une carte pour ouvrir ses sous-tâches et sa discussion.</div>
+    <div id="kanbanBoard"></div>`;
+  _kbRenderBoard();
+}
+
+function _kbRenderBoard(){
+  const host = document.getElementById('kanbanBoard');
+  if (!host) return;
+  const all = _kbAllVisible();
+  _kbBuildComCounts();
+  host.innerHTML = `<div class="kb-board" id="kbBoard">` + KB_COLS.map(c => {
+    const list = _kbSortCards(all.filter(t => (t.statut||'A_FAIRE') === c.k));
+    const cards = list.length
+      ? list.map(_kbCardHtml).join('')
+      : `<div class="kb-empty">Aucune tâche</div>`;
+    return `<section class="kb-col" data-col="${c.k}" style="--kc:${c.color}">
+      <header class="kb-colhead"><span class="kb-coldot"></span>${c.label}<span class="kb-coln">${list.length}</span></header>
+      <div class="kb-list">${cards}</div>
+    </section>`;
+  }).join('') + `</div>`;
+  _kbBindDnd();
+  _ensureChronoTick();
+}
+
+// ── Glisser-déposer (souris + tactile) ───────────────────────
+// Pas de HTML5 drag&drop : il ne fonctionne pas sur mobile, où travaillent les
+// opérateurs. Un drag « pointer events » maison couvre souris ET tactile —
+// avec appui long (260 ms) au doigt pour ne pas confisquer le défilement.
+let _kbDrag = null;
+
+function _kbBindDnd(){
+  document.querySelectorAll('#kbBoard .kb-card').forEach(card => {
+    card.addEventListener('pointerdown', _kbPointerDown);
+  });
+}
+
+function _kbPointerDown(e){
+  if (e.button != null && e.button !== 0) return;
+  if (_kbDrag) _kbCleanupDrag();   // sécurité : un drag interrompu ne doit pas coller
+  const card = e.currentTarget;
+  if (e.target.closest('button,a,input,select,textarea')) return;
+  const t = _kbFind(card.dataset.tid);
+  if (!t) return;
+  // Une tâche qu'on ne peut pas pointer ne se déplace pas (mais reste cliquable).
+  if (!_kbCanActOn(t) && !_kbCanRewind()) return;
+
+  _kbDrag = { id:card.dataset.tid, from:card.dataset.statut, card,
+              x:e.clientX, y:e.clientY, x0:e.clientX, y0:e.clientY,
+              touch:e.pointerType !== 'mouse', started:false, moved:false, ghost:null, over:null };
+  if (_kbDrag.touch) _kbDrag.lp = setTimeout(() => { if (_kbDrag && !_kbDrag.moved) _kbStartDrag(); }, 260);
+  window.addEventListener('pointermove', _kbPointerMove, { passive:false });
+  window.addEventListener('pointerup', _kbPointerUp);
+  window.addEventListener('pointercancel', _kbPointerUp);
+}
+
+function _kbStartDrag(){
+  const d = _kbDrag; if (!d || d.started) return;
+  d.started = true;
+  const r = d.card.getBoundingClientRect();
+  const g = d.card.cloneNode(true);
+  g.classList.add('kb-ghost');
+  g.style.width = r.width + 'px';
+  g.style.left = r.left + 'px';
+  g.style.top  = r.top + 'px';
+  d.dx = d.x - r.left; d.dy = d.y - r.top;
+  document.body.appendChild(g);
+  d.ghost = g;
+  d.card.classList.add('kb-card--dragging');
+  document.body.classList.add('kb-dragging');
+  if (navigator.vibrate) { try { navigator.vibrate(12); } catch(e){} }
+}
+
+function _kbPointerMove(e){
+  const d = _kbDrag; if (!d) return;
+  d.x = e.clientX; d.y = e.clientY;
+  const dist = Math.hypot(e.clientX - d.x0, e.clientY - d.y0);
+  if (!d.started){
+    if (!d.touch && dist > 6) _kbStartDrag();
+    else if (d.touch && dist > 12) { d.moved = true; clearTimeout(d.lp); _kbCleanupDrag(); } // c'est un défilement
+    if (!d.started) return;
+  }
+  e.preventDefault();
+  d.ghost.style.left = (e.clientX - d.dx) + 'px';
+  d.ghost.style.top  = (e.clientY - d.dy) + 'px';
+
+  const col = document.elementFromPoint(e.clientX, e.clientY)?.closest('.kb-col');
+  if (d.over && d.over !== col) d.over.classList.remove('kb-col--over');
+  if (col) col.classList.add('kb-col--over');
+  d.over = col;
+
+  // Auto-défilement horizontal du tableau quand on approche des bords.
+  const board = document.getElementById('kbBoard');
+  if (board){
+    const b = board.getBoundingClientRect();
+    if (e.clientX > b.right - 60) board.scrollLeft += 14;
+    else if (e.clientX < b.left + 60) board.scrollLeft -= 14;
+  }
+}
+
+function _kbPointerUp(){
+  const d = _kbDrag; if (!d) return;
+  clearTimeout(d.lp);
+  const target = d.started && d.over ? d.over.dataset.col : null;
+  const id = d.id, from = d.from;
+  _kbCleanupDrag();
+  if (target && target !== from) _kbMove(id, target);
+}
+
+let _kbClickGuard = 0;   // un relâchement après glissement ne doit pas ouvrir le détail
+
+function _kbCleanupDrag(){
+  const d = _kbDrag; if (!d) return;
+  clearTimeout(d.lp);
+  if (d.started) _kbClickGuard = Date.now();
+  if (d.ghost) d.ghost.remove();
+  if (d.over)  d.over.classList.remove('kb-col--over');
+  d.card.classList.remove('kb-card--dragging');
+  document.body.classList.remove('kb-dragging');
+  window.removeEventListener('pointermove', _kbPointerMove);
+  window.removeEventListener('pointerup', _kbPointerUp);
+  window.removeEventListener('pointercancel', _kbPointerUp);
+  _kbDrag = null;
+}
+
+// ── Déplacement d'une tâche entre colonnes ───────────────────
+async function _kbMove(id, to){
+  const t = _kbFind(id);
+  if (!t) return;
+  const from = t.statut || 'A_FAIRE';
+  if (from === to) return;
+
+  // Avancer : on réutilise strictement les chemins de pointage existants,
+  // gardes comprises (ordre des étapes, opérateur assigné, commentaire de fin).
+  if (to === 'EN_COURS' && from === 'A_FAIRE'){
+    await pointerStart(id);
+    renderKanbanPage();
+    return;
+  }
+  if (to === 'TERMINE'){
+    if (from === 'A_FAIRE'){
+      showToast('Démarrez la tâche avant de la terminer.', 'error');
+      return;
+    }
+    openPointage(id, t.etapeCode, t.numeroDossier || (t.titre || 'Tâche libre'));
+    return; // confirmPointage() rafraîchit le tableau
+  }
+
+  // Marche arrière (Terminé → En cours, ou → À faire)
+  if (!_kbCanRewind()){
+    showToast("Seul un admin ou un chef d'atelier peut ramener une tâche en arrière.", 'error');
+    return;
+  }
+  const act = to === 'EN_COURS' ? 'REOPEN' : 'RESET';
+  const lbl = to === 'EN_COURS' ? 'rouvrir cette tâche (retour En cours)' : 'remettre cette tâche À faire (pointage effacé)';
+  if (!confirm('Confirmer : ' + lbl + ' ?')) return;
+
+  let r = { ok:true };
+  if (APPS_SCRIPT_URL){
+    r = await apiCall({ action:'pointerAction', tacheId:id, action_:act,
+                        operateur: currentUser?.label || '' });
+  }
+  if (!r || !r.ok){ showToast((r && r.error) || 'Déplacement impossible', 'error'); return; }
+
+  const isLibre = String(id).startsWith('TL_');
+  const local = isLibre ? tachesLibres.find(x => x.id === id) : taches.find(x => x.id === id);
+  const apply = o => { if (!o) return;
+    o.statut = to;
+    o.dateFin = ''; delete o.endTs;
+    if (to === 'A_FAIRE'){ o.dateDebut = ''; delete o.startTs; }
+    else if (!o.startTs){ o.dateDebut = new Date().toLocaleString('fr-FR'); o.startTs = Date.now(); }
+  };
+  apply(local);
+  if (isLibre) { apply(taches.find(x => x.id === id)); saveTachesLibres(); }
+  saveTaches();
+
+  _addNotification({
+    dossierId: t.dossierId, numeroDossier: t.numeroDossier || 'Tâche libre',
+    etapeCode: t.etapeCode, etapeLabel: t.etapeLabel,
+    operateur: currentUser?.label || t.operateur,
+    message: `${currentUser?.label} a ramené "${t.etapeLabel || t.titre}" en « ${to === 'EN_COURS' ? 'En cours' : 'À faire'} »`
+             + (t.numeroDossier ? ` — dossier ${t.numeroDossier}` : ''),
+  });
+  renderKanbanPage();
+  if (typeof renderTaches === 'function') renderTaches();
+  showToast(to === 'EN_COURS' ? 'Tâche rouverte' : 'Tâche remise à faire');
+}
+
+// ============================================================
+// PANNEAU DE DÉTAIL — sous-tâches + discussion
+// ============================================================
+function openTacheDetail(id){
+  if (Date.now() - _kbClickGuard < 350) return;  // clic généré par la fin d'un glisser-déposer
+  const t = _kbFind(id);
+  if (!t) return;
+  _kbDetailId = id;
+  _kbInjectStyle();
+  let ov = document.getElementById('kbDetailOv');
+  if (!ov){
+    ov = document.createElement('div');
+    ov.id = 'kbDetailOv';
+    ov.className = 'kbov';
+    ov.addEventListener('click', e => { if (e.target === ov) closeTacheDetail(); });
+    document.body.appendChild(ov);
+  }
+  ov.style.display = 'flex';
+  _kbRenderDetail();
+  // Charger le fil depuis le serveur puis re-rendre (affichage immédiat du cache local)
+  if (APPS_SCRIPT_URL){
+    loadCommentsForDossier(_kbTacheKey(id)).then(() => { if (_kbDetailId === id) _kbRenderComments(); }).catch(()=>{});
+  }
+}
+
+function closeTacheDetail(){
+  _kbDetailId = null;
+  const ov = document.getElementById('kbDetailOv');
+  if (ov) ov.style.display = 'none';
+  if (document.getElementById('page-tableau')?.classList.contains('active')) _kbRenderBoard();
+}
+
+function _kbRenderDetail(){
+  const ov = document.getElementById('kbDetailOv');
+  const t  = _kbFind(_kbDetailId);
+  if (!ov || !t) return;
+  const d = _kbDossierOf(t);
+  const isLibre = t.dossierId === 'LIBRE' || String(t.id).startsWith('TL_');
+  const etape = ETAPES_CONFIG.find(e => e.code === t.etapeCode);
+  const color = isLibre ? '#7c3aed' : (etape?.color || '#78716c');
+  const titre = isLibre ? (t.titre || t.etapeLabel || 'Tâche libre') : (t.etapeLabel || t.etapeCode);
+  const stCol = KB_COLS.find(c => c.k === (t.statut||'A_FAIRE')) || KB_COLS[0];
+
+  ov.innerHTML = `<div class="kb-dcard" style="--kc:${color}">
+    <header class="kb-dhead">
+      <div class="kb-dmark">${isLibre ? '★' : (etape?.icon || '•')}</div>
+      <div class="kb-dht">
+        <h3>${_kbEsc(titre)}</h3>
+        <p>${_kbEsc(isLibre ? 'Tâche libre' : (t.numeroDossier || ''))}${d && d.client ? ' · ' + _kbEsc(d.client) : ''}${d && d.produit ? ' · ' + _kbEsc(d.produit) : ''}</p>
+      </div>
+      <span class="kb-dstat" style="--sc:${stCol.color}">${stCol.label}</span>
+      <button class="kb-dclose" onclick="closeTacheDetail()" aria-label="Fermer">✕</button>
+    </header>
+    <div class="kb-dbody">
+      <div class="kb-dmeta">
+        <span><b>Opérateur</b> ${_kbEsc(t.operateur||'—')}</span>
+        ${t.priorite ? `<span><b>Priorité</b> ${_kbEsc(t.priorite)}</span>` : ''}
+        ${t.echeance ? `<span><b>Échéance</b> ${_kbEsc(t.echeance)}</span>` : ''}
+        ${t.dateDebut ? `<span><b>Début</b> ${_kbEsc(t.dateDebut)}</span>` : ''}
+        ${t.dateFin   ? `<span><b>Fin</b> ${_kbEsc(t.dateFin)}</span>`     : ''}
+      </div>
+
+      <section class="kb-dsec">
+        <h4>Sous-tâches <span id="kbDSubCount"></span></h4>
+        <div id="kbDSubs"></div>
+        <div class="kb-dadd">
+          <input id="kbDSubInput" type="text" placeholder="Ajouter une sous-tâche…"
+                 onkeydown="if(event.key==='Enter')_kbAddSubtask('${t.id}')">
+          <button onclick="_kbAddSubtask('${t.id}')">Ajouter</button>
+        </div>
+      </section>
+
+      <section class="kb-dsec">
+        <h4>Discussion</h4>
+        <div id="kbDComments" class="kb-dthread"></div>
+        <div class="kb-dadd">
+          <input id="kbDMsg" type="text" placeholder="Écrire un message…"
+                 onkeydown="if(event.key==='Enter')_kbSendComment('${t.id}')">
+          <button onclick="_kbSendComment('${t.id}')">Envoyer</button>
+        </div>
+      </section>
+    </div>
+  </div>`;
+  _kbRenderSubs();
+  _kbRenderComments();
+}
+
+// ── Sous-tâches ──────────────────────────────────────────────
+function _kbRenderSubs(){
+  const t = _kbFind(_kbDetailId);
+  const host = document.getElementById('kbDSubs');
+  if (!t || !host) return;
+  const list = Array.isArray(t.subtasks) ? t.subtasks : [];
+  const p = _kbSubProgress(t);
+  const cnt = document.getElementById('kbDSubCount');
+  if (cnt) cnt.textContent = list.length ? `— ${p.done}/${p.total} (${p.pct}%)` : '';
+  if (!list.length){
+    host.innerHTML = `<div class="kb-dempty">Aucune sous-tâche. Découpez la tâche pour suivre son avancement.</div>`;
+    return;
+  }
+  host.innerHTML =
+    `<div class="kb-prog kb-prog--big"><div class="kb-prog-bar"><i style="width:${p.pct}%"></i></div><span>${p.pct}%</span></div>` +
+    list.map(s => `<label class="kb-sub${s.done?' kb-sub--done':''}">
+      <input type="checkbox" ${s.done?'checked':''} onchange="_kbToggleSubtask('${t.id}','${s.id}')">
+      <span class="kb-sub-t">${_kbEsc(s.texte)}</span>
+      ${s.done && s.par ? `<span class="kb-sub-by">${_kbEsc(s.par)}</span>` : ''}
+      <button class="kb-sub-x" onclick="event.preventDefault();_kbDelSubtask('${t.id}','${s.id}')" aria-label="Supprimer">✕</button>
+    </label>`).join('');
+}
+
+// Écrit la checklist localement puis sur le Sheet (colonne Subtasks).
+function _kbSaveSubtasks(t){
+  const isLibre = String(t.id).startsWith('TL_');
+  const sync = o => { if (o) o.subtasks = t.subtasks; };
+  sync(taches.find(x => x.id === t.id));
+  if (isLibre){ sync(tachesLibres.find(x => x.id === t.id)); saveTachesLibres(); }
+  saveTaches();
+  _kbRenderSubs();
+  if (document.getElementById('page-tableau')?.classList.contains('active')) _kbRenderBoard();
+  if (APPS_SCRIPT_URL){
+    apiCall({ action:'saveTacheSubtasks', tacheId:t.id, subtasks:t.subtasks })
+      .then(r => { if (!r || !r.ok) showToast('Sous-tâches non synchronisées (hors ligne ?)', 'error'); })
+      .catch(() => showToast('Sous-tâches non synchronisées (hors ligne ?)', 'error'));
+  }
+}
+
+// Récupère l'objet de tâche « porteur » (celui des tableaux globaux) pour écrire dessus.
+function _kbOwner(id){
+  return taches.find(x => x.id === id) || tachesLibres.find(x => x.id === id) || null;
+}
+
+function _kbAddSubtask(id){
+  const input = document.getElementById('kbDSubInput');
+  const txt = (input?.value || '').trim();
+  if (!txt) return;
+  const t = _kbOwner(id);
+  if (!t){ showToast('Tâche introuvable', 'error'); return; }
+  t.subtasks = Array.isArray(t.subtasks) ? t.subtasks : [];
+  if (t.subtasks.length >= 40){ showToast('40 sous-tâches maximum', 'error'); return; }
+  t.subtasks.push({ id:_genUid('S'), texte:txt.slice(0,160), done:false, par:'', ts:new Date().toISOString() });
+  input.value = '';
+  _kbSaveSubtasks(t);
+}
+
+function _kbToggleSubtask(id, sid){
+  const t = _kbOwner(id); if (!t || !Array.isArray(t.subtasks)) return;
+  const s = t.subtasks.find(x => x.id === sid); if (!s) return;
+  s.done = !s.done;
+  s.par  = s.done ? (currentUser?.label || currentUser?.username || '') : '';
+  s.ts   = new Date().toISOString();
+  _kbSaveSubtasks(t);
+}
+
+function _kbDelSubtask(id, sid){
+  const t = _kbOwner(id); if (!t || !Array.isArray(t.subtasks)) return;
+  t.subtasks = t.subtasks.filter(x => x.id !== sid);
+  _kbSaveSubtasks(t);
+}
+
+// ── Discussion + réactions ───────────────────────────────────
+function _kbRenderComments(){
+  const host = document.getElementById('kbDComments');
+  if (!host || !_kbDetailId) return;
+  const list = _kbCommentsOf(_kbDetailId);
+  if (!list.length){
+    host.innerHTML = `<div class="kb-dempty">Aucun message. Ouvrez la discussion sur cette tâche.</div>`;
+    return;
+  }
+  const me = currentUser?.label || currentUser?.username || '';
+  host.innerHTML = list.map(c => {
+    const when = (() => { const d = new Date(c.timestamp); return isNaN(d) ? '' : d.toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); })();
+    const rx = c.reactions && typeof c.reactions === 'object' ? c.reactions : {};
+    const reacts = KB_REACTIONS.map(em => {
+      const who = Array.isArray(rx[em]) ? rx[em] : [];
+      const mine = who.some(n => _sameOp(n, me));
+      if (!who.length && !mine) return `<button class="kb-rx kb-rx--off" onclick="_kbToggleReaction('${c.id}','${em}')" title="Réagir">${em}</button>`;
+      return `<button class="kb-rx${mine?' kb-rx--on':''}" onclick="_kbToggleReaction('${c.id}','${em}')" title="${_kbEsc(who.join(', '))}">${em} ${who.length}</button>`;
+    }).join('');
+    return `<div class="kb-msg${_sameOp(c.author, me)?' kb-msg--me':''}">
+      <div class="kb-msg-h"><b>${_kbEsc(c.author||'—')}</b><span>${_kbEsc(when)}</span></div>
+      <div class="kb-msg-t">${_kbEsc(c.text||'')}</div>
+      <div class="kb-msg-rx">${reacts}</div>
+    </div>`;
+  }).join('');
+  host.scrollTop = host.scrollHeight;
+}
+
+function _kbSendComment(id){
+  const input = document.getElementById('kbDMsg');
+  const text = (input?.value || '').trim();
+  if (!text) return;
+  const t = _kbFind(id);
+  const comment = {
+    id:            'CMT_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
+    dossierId:     _kbTacheKey(id),
+    numeroDossier: (t && t.numeroDossier) || 'Tâche',
+    author:        currentUser?.label || currentUser?.username || 'Anonyme',
+    authorRole:    currentUser?.role || '',
+    text,
+    mentions:      [],
+    attachments:   [],
+    reactions:     {},
+    timestamp:     new Date().toISOString()
+  };
+  dossierComments.push(comment);
+  saveComments();
+  input.value = '';
+  _kbRenderComments();
+  if (document.getElementById('page-tableau')?.classList.contains('active')) _kbRenderBoard();
+
+  if (t){
+    _addNotification({
+      dossierId: t.dossierId, numeroDossier: t.numeroDossier || 'Tâche libre',
+      etapeCode: 'COMMENT', etapeLabel: 'Commentaire de tâche',
+      operateur: comment.author,
+      message: `${comment.author} a commenté la tâche "${t.etapeLabel || t.titre || ''}" : "${text.slice(0,70)}${text.length>70?'…':''}"`
+    });
+  }
+  if (APPS_SCRIPT_URL) apiCall({ action:'addComment', ...comment }).catch(()=>{});
+}
+
+function _kbToggleReaction(commentId, emoji){
+  const c = (dossierComments||[]).find(x => x.id === commentId);
+  if (!c) return;
+  const me = currentUser?.label || currentUser?.username || 'Anonyme';
+  const rx = (c.reactions && typeof c.reactions === 'object') ? c.reactions : {};
+  const who = Array.isArray(rx[emoji]) ? rx[emoji].slice() : [];
+  const i = who.findIndex(n => _sameOp(n, me));
+  if (i >= 0) who.splice(i, 1); else who.push(me);
+  if (who.length) rx[emoji] = who; else delete rx[emoji];
+  c.reactions = rx;
+  saveComments();
+  _kbRenderComments();
+  if (APPS_SCRIPT_URL) apiCall({ action:'setCommentReactions', commentId, reactions:rx }).catch(()=>{});
+}
+
+// ── Styles (injectés une fois) ───────────────────────────────
+function _kbInjectStyle(){
+  if (document.getElementById('kb-style')) return;
+  const st = document.createElement('style');
+  st.id = 'kb-style';
+  st.textContent = `
+  .kb-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:12px}
+  .kb-kpi{background:var(--color-surface,#fff);border:1px solid var(--color-border,#e7e1d8);border-left:4px solid var(--k);
+    border-radius:12px;padding:10px 12px}
+  .kb-kpi .v{font-size:22px;font-weight:800;color:var(--k);line-height:1.1;font-variant-numeric:tabular-nums}
+  .kb-kpi .l{font-size:11.5px;color:var(--color-text-muted,#78716c);font-weight:600;margin-top:2px}
+  .kb-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+  .kb-seg{display:inline-flex;background:var(--color-bg,#f5f1ea);border:1px solid var(--color-border,#e7e1d8);border-radius:10px;padding:3px;gap:3px}
+  .kb-seg button{border:none;background:transparent;padding:6px 12px;border-radius:8px;font-size:12.5px;font-weight:700;
+    color:var(--color-text-muted,#78716c);cursor:pointer}
+  .kb-seg button[aria-selected="true"]{background:var(--color-surface,#fff);color:var(--color-text,#1c1917);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+  .kb-select,.kb-search{padding:8px 10px;border-radius:9px;border:1px solid var(--color-border,#e7e1d8);
+    background:var(--color-surface,#fff);color:var(--color-text,#1c1917);font-size:12.5px}
+  .kb-search{flex:1;min-width:180px}
+  .kb-hint{font-size:11.5px;color:var(--color-text-muted,#78716c);margin:0 0 10px}
+  .kb-board{display:flex;gap:12px;overflow-x:auto;align-items:flex-start;padding-bottom:8px}
+  .kb-col{flex:1 1 300px;min-width:270px;background:var(--color-bg,#f7f4ef);border:1px solid var(--color-border,#e7e1d8);
+    border-radius:14px;display:flex;flex-direction:column;overflow:hidden}
+  .kb-col--over{outline:2px dashed var(--kc);outline-offset:-3px;background:color-mix(in srgb,var(--kc) 8%,var(--color-bg,#f7f4ef))}
+  .kb-colhead{display:flex;align-items:center;gap:7px;padding:10px 12px;font-size:13px;font-weight:800;
+    color:var(--color-text,#1c1917);border-top:3px solid var(--kc);background:var(--color-surface,#fff)}
+  .kb-coldot{width:8px;height:8px;border-radius:50%;background:var(--kc)}
+  .kb-coln{margin-left:auto;background:var(--kc);color:#fff;border-radius:20px;padding:1px 8px;font-size:11.5px}
+  .kb-list{padding:10px;display:flex;flex-direction:column;gap:9px;min-height:90px;max-height:64vh;overflow-y:auto}
+  .kb-empty{text-align:center;color:var(--color-text-muted,#a8a29e);font-size:12px;padding:18px 6px}
+  .kb-card{background:var(--color-surface,#fff);border:1px solid var(--color-border,#e7e1d8);border-left:3px solid var(--kc);
+    border-radius:11px;padding:9px 10px;cursor:pointer;touch-action:pan-y;user-select:none;
+    box-shadow:0 1px 2px rgba(0,0,0,.05);transition:box-shadow .12s,transform .12s}
+  .kb-card:hover{box-shadow:0 3px 10px rgba(0,0,0,.10);transform:translateY(-1px)}
+  .kb-card--late{border-color:#fca5a5}
+  .kb-card--dragging{opacity:.35}
+  .kb-ghost{position:fixed;z-index:10000;pointer-events:none;transform:rotate(1.5deg);
+    box-shadow:0 14px 34px rgba(0,0,0,.3);opacity:.96}
+  body.kb-dragging{cursor:grabbing}
+  .kb-card-top{display:flex;align-items:flex-start;gap:6px}
+  .kb-etape{font-size:13px;font-weight:800;color:var(--color-text,#1c1917);line-height:1.25;flex:1}
+  .kb-late{font-size:10px;font-weight:800;color:#b91c1c;background:#fee2e2;border-radius:6px;padding:1px 5px;white-space:nowrap}
+  .kb-ref{font-size:11.5px;color:var(--color-text-muted,#78716c);margin-top:2px;font-weight:600}
+  .kb-prod{font-size:11.5px;color:var(--color-text-muted,#a8a29e);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .kb-prog{display:flex;align-items:center;gap:6px;margin-top:7px}
+  .kb-prog-bar{flex:1;height:5px;border-radius:4px;background:var(--color-bg,#ece7df);overflow:hidden}
+  .kb-prog-bar i{display:block;height:100%;background:var(--kc,#2563eb);border-radius:4px;transition:width .2s}
+  .kb-prog span{font-size:10.5px;font-weight:700;color:var(--color-text-muted,#78716c);font-variant-numeric:tabular-nums}
+  .kb-prog--big{margin:2px 0 10px}
+  .kb-prog--big .kb-prog-bar{height:8px}
+  .kb-chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+  .kb-chip{font-size:10.5px;font-weight:700;border-radius:6px;padding:2px 6px;background:var(--color-bg,#f1ece4);
+    color:var(--color-text-muted,#78716c)}
+  .kb-chip--late{background:#fee2e2;color:#b91c1c}
+  .kb-chip--prio{background:#fef3c7;color:#92400e}
+  .prod-chrono--kb{font-size:10.5px;font-weight:800;color:#1d4ed8;background:#dbeafe;border-radius:6px;padding:2px 6px;
+    font-variant-numeric:tabular-nums}
+  .kb-card-foot{display:flex;align-items:center;gap:8px;margin-top:8px;padding-top:7px;border-top:1px dashed var(--color-border,#ece7df)}
+  .kb-op{font-size:11px;font-weight:700;color:var(--color-text,#44403c);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .kb-meta{margin-left:auto;display:flex;gap:8px;font-size:11px;color:var(--color-text-muted,#78716c);white-space:nowrap}
+  .kb-actions{margin-top:8px}
+  .kb-act{width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--color-border,#e7e1d8);
+    background:var(--color-bg,#f7f4ef);color:var(--color-text,#1c1917);font-size:12px;font-weight:700;cursor:pointer}
+  .kb-act--go{background:#2563eb;border-color:#2563eb;color:#fff}
+  .kb-act--done{background:#16a34a;border-color:#16a34a;color:#fff}
+  .kbov{position:fixed;inset:0;z-index:9998;background:rgba(20,16,11,.55);backdrop-filter:blur(3px);
+    display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:16px 10px}
+  .kb-dcard{background:var(--color-surface,#fff);color:var(--color-text,#1c1917);width:100%;max-width:680px;border-radius:16px;
+    box-shadow:0 18px 60px rgba(0,0,0,.35);overflow:hidden;margin:auto}
+  .kb-dhead{display:flex;align-items:center;gap:11px;padding:13px 16px;border-bottom:3px solid var(--kc);
+    background:linear-gradient(180deg,var(--color-surface,#fff),var(--color-bg,#faf8f4))}
+  .kb-dmark{width:38px;height:38px;border-radius:10px;background:var(--kc);color:#fff;display:grid;place-items:center;
+    font-size:17px;font-weight:800;flex:none}
+  .kb-dht{flex:1;min-width:0}
+  .kb-dht h3{margin:0;font-size:16px;font-weight:800}
+  .kb-dht p{margin:2px 0 0;font-size:12px;color:var(--color-text-muted,#78716c);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .kb-dstat{font-size:11px;font-weight:800;color:#fff;background:var(--sc);border-radius:20px;padding:3px 10px;white-space:nowrap}
+  .kb-dclose{border:none;background:transparent;font-size:18px;cursor:pointer;color:var(--color-text-muted,#78716c);padding:4px 6px}
+  .kb-dbody{padding:14px 16px 18px;max-height:76vh;overflow-y:auto}
+  .kb-dmeta{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--color-text-muted,#78716c);margin-bottom:14px}
+  .kb-dmeta b{color:var(--color-text,#44403c);font-weight:700;margin-right:4px}
+  .kb-dsec{margin-top:16px;padding-top:14px;border-top:1px solid var(--color-border,#ece7df)}
+  .kb-dsec:first-of-type{margin-top:0;padding-top:0;border-top:none}
+  .kb-dsec h4{margin:0 0 9px;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;
+    color:var(--color-text-muted,#78716c)}
+  .kb-dempty{font-size:12px;color:var(--color-text-muted,#a8a29e);padding:8px 0}
+  .kb-sub{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:9px;background:var(--color-bg,#f7f4ef);
+    margin-bottom:6px;cursor:pointer}
+  .kb-sub input{width:16px;height:16px;flex:none;accent-color:#16a34a;cursor:pointer}
+  .kb-sub-t{flex:1;font-size:13px}
+  .kb-sub--done .kb-sub-t{text-decoration:line-through;color:var(--color-text-muted,#a8a29e)}
+  .kb-sub-by{font-size:10.5px;color:var(--color-text-muted,#a8a29e)}
+  .kb-sub-x{border:none;background:transparent;color:var(--color-text-muted,#a8a29e);cursor:pointer;font-size:12px;padding:2px 4px}
+  .kb-sub-x:hover{color:#dc2626}
+  .kb-dadd{display:flex;gap:7px;margin-top:9px}
+  .kb-dadd input{flex:1;padding:9px 11px;border-radius:9px;border:1px solid var(--color-border,#e7e1d8);
+    background:var(--color-surface,#fff);color:var(--color-text,#1c1917);font-size:13px}
+  .kb-dadd button{padding:9px 14px;border-radius:9px;border:none;background:var(--kc,#2563eb);color:#fff;
+    font-size:12.5px;font-weight:700;cursor:pointer}
+  .kb-dthread{max-height:280px;overflow-y:auto;display:flex;flex-direction:column;gap:9px}
+  .kb-msg{background:var(--color-bg,#f7f4ef);border-radius:11px;padding:8px 10px}
+  .kb-msg--me{background:color-mix(in srgb,var(--kc) 9%,var(--color-bg,#f7f4ef))}
+  .kb-msg-h{display:flex;gap:8px;align-items:baseline;font-size:11.5px;color:var(--color-text-muted,#78716c)}
+  .kb-msg-h b{color:var(--color-text,#1c1917);font-size:12.5px}
+  .kb-msg-h span{margin-left:auto}
+  .kb-msg-t{font-size:13px;margin-top:3px;white-space:pre-wrap;word-break:break-word}
+  .kb-msg-rx{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
+  .kb-rx{border:1px solid var(--color-border,#e7e1d8);background:var(--color-surface,#fff);border-radius:20px;
+    padding:1px 7px;font-size:11.5px;cursor:pointer;line-height:1.6}
+  .kb-rx--on{border-color:#2563eb;background:#dbeafe;font-weight:700}
+  .kb-rx--off{opacity:.35}
+  .kb-rx--off:hover{opacity:1}
+  @media (max-width:768px){
+    .kb-col{min-width:82vw}
+    .kb-list{max-height:none}
+    .kb-dbody{max-height:70vh}
+  }`;
+  document.head.appendChild(st);
+}
