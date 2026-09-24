@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '188 · 2026-09-24';
+const APP_VERSION = '189 · 2026-09-24';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -12005,6 +12005,37 @@ function _renderDossierRow(d) {
 // Emphase « À attribuer » (étape courante sans opérateur). Couleurs :
 // rouge=retard, orange=proche échéance / à attribuer, bleu=en cours, vert=terminé.
 // ════════════════════════════════════════════════════════════
+// ── Largeur de la liste des dossiers ──────────────────────────────────────
+// Le panneau de droite occupait 420 px en permanence, meme quand il n'affichait
+// que << Selectionnez un dossier >>. Tant qu'aucun dossier n'est ouvert la liste
+// prend donc toute la largeur ; `_attrWide` permet en plus de replier le panneau
+// a la demande (memorise par poste) pour naviguer au large meme dossier ouvert.
+let _attrWide = false;
+try { _attrWide = localStorage.getItem('pos-attr-wide') === '1'; } catch(e) {}
+
+function _attrApplyLayout(remesurer) {
+  const layout = document.getElementById('attrLayout');
+  if (!layout) return;
+  layout.classList.toggle('attr-layout--wide', _attrWide || !selectedDossier);
+  // Nettoyer les styles en ligne poses par l'ancienne bascule liste/cartes
+  layout.style.gridTemplateColumns = '';
+  const right = document.getElementById('attrRight');
+  if (right) right.style.display = '';
+  if (!remesurer) return;
+  // La largeur change -> la hauteur d'une ligne peut changer : on recale la fenetre.
+  _fitAttrLayout();
+  _attrRowHMeasured = false;
+  _attrWinPorts = _attrWinScrollPorts();
+  _attrWinFrom = _attrWinTo = -1;
+  _attrWinRender(true);
+}
+
+function _attrToggleWide() {
+  _attrWide = !_attrWide;
+  try { localStorage.setItem('pos-attr-wide', _attrWide ? '1' : '0'); } catch(e) {}
+  renderDossiers(); // la barre d'outils porte l'etat du bouton
+}
+
 let _attrFilter  = 'TOUS';  // TOUS|A_ATTRIBUER|EN_COURS|RETARD|TERMINE
 let _attrSort    = { key:'echeance', dir:'asc' }; // echeance|retard|progression|client|priorite|etape
 let _attrDensity = 'compact';
@@ -12099,6 +12130,7 @@ function _renderAttrCockpit(list) {
       <select class="select-input" onchange="_attrSetSort(this.value)" title="Trier">${sortOpts}</select>
       <button class="pcok-iconbtn" title="Sens du tri" onclick="_attrToggleSortDir()">${dirIcon}</button>
       <button class="pcok-iconbtn pcok-density" title="Vue compacte / détaillée" onclick="_attrToggleDensity()">${_attrDensity==='compact'?'Détaillé':'Compact'}</button>
+      <button class="pcok-iconbtn" title="${_attrWide?'Réafficher le panneau du dossier à droite':'Élargir la liste sur toute la largeur'}" onclick="_attrToggleWide()">${_attrWide?'◧ Panneau':'⛶ Élargir'}</button>
     </div>
   </div>`;
 
@@ -12111,6 +12143,7 @@ function _renderAttrCockpit(list) {
     : `<div class="pcok-empty"><p>Aucun dossier dans ce filtre</p></div>`;
 
   container.innerHTML = `<div class="pcok pcok--attr">${toolbar}${count}${table}${more}</div>`;
+  _attrApplyLayout(false);
   _fitAttrLayout();
   _attrWinRows = page;
   _attrRowHMeasured = false;
@@ -12602,20 +12635,10 @@ function toggleDossierView(mode) {
   // Mettre à jour les boutons toggle
   document.getElementById('viewToggleList')?.classList.toggle('view-toggle-btn--active', mode === 'list');
   document.getElementById('viewToggleCard')?.classList.toggle('view-toggle-btn--active', mode === 'card');
-  // En vue carte : panel droit masqué jusqu'à sélection, liste prend toute la largeur
-  const layout = document.getElementById('attrLayout');
-  const right  = document.getElementById('attrRight');
-  if (layout && right) {
-    if (mode === 'card') {
-      layout.style.gridTemplateColumns = '1fr';
-      right.style.display = 'none';
-    } else {
-      layout.style.gridTemplateColumns = '';
-      right.style.display = '';
-    }
-  }
-  // Réinitialiser la sélection pour éviter un panel orphelin
+  // Réinitialiser la sélection pour éviter un panel orphelin : sans dossier
+  // ouvert, _attrApplyLayout donne toute la largeur à la liste.
   selectedDossier = null;
+  _attrApplyLayout(false);
   renderDossiers();
 }
 
@@ -12737,13 +12760,9 @@ function _renderDossierCardGrid(list) {
 
 async function selectDossier(id) {
   selectedDossier = dossiers.find(d => d.id === id);
-  // En vue carte : faire apparaître le panel droit et réduire la grille
-  if (_dossierView === 'card') {
-    const layout = document.getElementById('attrLayout');
-    const right  = document.getElementById('attrRight');
-    if (layout) layout.style.gridTemplateColumns = '1fr 420px';
-    if (right)  right.style.display = '';
-  }
+  // Le panneau de détail réapparaît dès qu'un dossier est ouvert (sauf si
+  // l'opérateur a explicitement replié le panneau via « Élargir »).
+  _attrApplyLayout(_dossierView !== 'card');
   // Mise à jour légère : surligner la ligne sélectionnée sans tout re-rendre
   if (_dossierView === 'card') renderDossiers(); else _attrSyncSelectedRow();
   // Mobile : masquer la liste, afficher le panneau détail

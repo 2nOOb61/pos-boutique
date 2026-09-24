@@ -26,11 +26,15 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20260924-perfpj">
+<link rel="stylesheet" href="./style.css?v=20260924-attrlarge">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
-.attr-layout { display:grid; grid-template-columns:1fr 420px; gap:16px; align-items:start; }
+/* Le panneau de droite prend une part RAISONNABLE de l'ecran (il occupait 420 px
+   fixes : sur un portable 1366, la liste tombait a ~660 px et la colonne
+   << Ref / Client >> etait ecrasee a ~90 px). minmax(0,1fr) evite que le tableau
+   pousse la colonne de gauche au-dela de la place disponible. */
+.attr-layout { display:grid; grid-template-columns:minmax(0,1fr) clamp(340px,24vw,400px); gap:16px; align-items:start; }
 @media(max-width:900px) {
   .attr-layout { grid-template-columns:1fr; }
   .attr-right { position:static; }
@@ -40,6 +44,11 @@
 }
 @media(min-width:901px) {
   .btn-back-dossier { display:none !important; }
+  /* Liste sur TOUTE la largeur : tant qu'aucun dossier n'est ouvert (le panneau
+     n'affichait qu'un texte d'invite en occupant 420 px), ou quand l'operateur
+     replie le panneau avec le bouton de la barre d'outils. */
+  .attr-layout--wide { grid-template-columns:minmax(0,1fr); }
+  .attr-layout--wide .attr-right { display:none; }
   /* Hauteur de repli — surchargée dynamiquement par _fitAttrLayout() (JS) qui
      mesure la position réelle sous l'en-tête pour éviter tout débordement. */
   #attrLeft { height:calc(100vh - 200px); overflow:hidden; }
@@ -3583,7 +3592,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260924-perfpj"></script>
+<script src="./app.js?v=20260924-attrlarge"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
