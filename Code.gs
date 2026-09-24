@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // FOREVER MG — Système Unifié POS + Attribution + Production
 // Google Apps Script — Code.gs
 // ============================================================
@@ -3020,6 +3020,11 @@ function handleClearAllData(data) {
 // ============================================================
 const ALLOWED_MIMES_  = [
   'image/jpeg','image/png','image/webp','image/gif','application/pdf',
+  // Formats photo natifs des téléphones / scanners : sans eux, une photo iPhone
+  // (image/heic) était refusée et la pièce jointe n'arrivait jamais sur Drive —
+  // donc invisible sur tous les postes sauf celui qui l'avait ajoutée.
+  'image/heic','image/heif','image/heic-sequence','image/heif-sequence',
+  'image/avif','image/bmp','image/tiff',
   'application/msword',                                                       // .doc
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',  // .docx
   'application/vnd.ms-excel',                                                 // .xls
@@ -3032,6 +3037,7 @@ const MAX_FILE_BYTES_ = 10 * 1024 * 1024; // 10 Mo
 // pas file.type pour les .docx/.xlsx (vide ou "application/octet-stream").
 const EXT_MIMES_ = {
   jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', webp:'image/webp', gif:'image/gif',
+  heic:'image/heic', heif:'image/heif', avif:'image/avif', bmp:'image/bmp', tif:'image/tiff', tiff:'image/tiff',
   pdf:'application/pdf',
   doc:'application/msword',
   docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -3107,7 +3113,7 @@ function handleUploadFile(data) {
 
     // Validation du type MIME
     if (!ALLOWED_MIMES_.includes(mimeType)) {
-      return { ok:false, error:'Type de fichier non autorisé. Formats acceptés : images, PDF, Word, Excel.' };
+      return { ok:false, error:'Type non autorisé (' + mimeType + '). Formats acceptés : images, PDF, Word, Excel.' };
     }
 
     const base64     = data.base64Data || '';
@@ -3116,7 +3122,7 @@ function handleUploadFile(data) {
 
     // Validation de la taille (10 Mo max)
     if (bytes.length > MAX_FILE_BYTES_) {
-      return { ok:false, error:'Fichier trop volumineux (max 10 Mo).' };
+      return { ok:false, error:'Fichier trop volumineux (' + Math.round(bytes.length / 1048576) + ' Mo, max 10 Mo).' };
     }
 
     const blob   = Utilities.newBlob(bytes, mimeType, fileName);

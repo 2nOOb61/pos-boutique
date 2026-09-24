@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '187 · 2026-09-24';
+const APP_VERSION = '188 · 2026-09-24';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -1364,21 +1364,11 @@ async function addResAttachments(files) {
   if (resAttachments.length >= MAX) { showToast(`Maximum ${MAX} pièces jointes`, 'error'); return; }
   const remaining = MAX - resAttachments.length;
   for (const file of Array.from(files).slice(0, remaining)) {
-    if (file.size > 8 * 1024 * 1024) { showToast(`${file.name} trop volumineux (max 8 Mo)`, 'error'); continue; }
+    const _rej = _attRejectReason(file);
+    if (_rej) { showToast(_rej, 'error'); continue; }
     try {
-      let data;
-      if (file.type.startsWith('image/')) {
-        data = await _resizeImage(file, 1200, 1200);
-      } else {
-        data = await new Promise((res, rej) => {
-          const r = new FileReader();
-          r.onload = e => res(e.target.result);
-          r.onerror = rej;
-          r.readAsDataURL(file);
-        });
-      }
-      resAttachments.push({ name: file.name, type: file.type, data });
-    } catch(e) { showToast('Erreur lecture : ' + file.name, 'error'); }
+      resAttachments.push(await _attFromFile(file, 1200, 1200));
+    } catch(e) { showToast(e.message || ('Erreur lecture : ' + file.name), 'error'); }
   }
   renderResAttachments();
   document.getElementById('resAttachmentsInput').value = '';
@@ -6655,15 +6645,12 @@ async function addCmdPhotos(files) {
   const remaining = 5 - cmdModalPhotos.length;
   if (remaining <= 0) { showToast('Maximum 5 pièces jointes par commande', 'error'); return; }
   for (const file of Array.from(files).slice(0, remaining)) {
-    if (file.size > 8 * 1024 * 1024) { showToast(file.name + ' trop volumineux (max 8 Mo)', 'error'); continue; }
+    const _rej = _attRejectReason(file);
+    if (_rej) { showToast(_rej, 'error'); continue; }
     try {
       // Images : compressées (600×600 jpeg). Documents (PDF/Word/Excel) : lus tels quels.
-      const isImg = (file.type || '').startsWith('image/');
-      const data  = isImg
-        ? await _resizeImage(file, 600, 600)
-        : await new Promise((res, rej) => { const r = new FileReader(); r.onload = e => res(e.target.result); r.onerror = rej; r.readAsDataURL(file); });
-      cmdModalPhotos.push({ name: file.name, type: file.type || '', data });
-    } catch(e) { showToast('Erreur lecture: ' + file.name, 'error'); }
+      cmdModalPhotos.push(await _attFromFile(file, 600, 600));
+    } catch(e) { showToast(e.message || ('Erreur lecture: ' + file.name), 'error'); }
   }
   renderCmdPhotos();
   document.getElementById('cmdPhotosInput').value = '';
@@ -6688,6 +6675,80 @@ function _resizeImage(file, maxW, maxH) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+// ============================================================
+// PIECES JOINTES — lecture/compression commune a TOUS les modules
+// (commande, commentaire, messagerie, reservation, finition, BAT/Simulation)
+//
+// Deux pieges corriges ici, tous deux invisibles pour celui qui envoie et
+// responsables des PJ « visibles sur un poste, absentes sur les autres » :
+//
+//  1. TYPE MIME. _resizeImage() recompresse TOUJOURS en image/jpeg, mais les
+//     appelants declaraient `type: file.type` (le type d'ORIGINE). Une photo
+//     iPhone (image/heic) partait donc annoncee « image/heic » : Apps Script la
+//     refuse (type non autorise), l'upload Drive echoue, et la PJ reste en
+//     base64 sur le seul poste qui l'a ajoutee. On derive desormais le type du
+//     contenu REELLEMENT produit, et on aligne l'extension du nom.
+//
+//  2. TAILLE. Les modules refusaient les fichiers > 8 Mo (12 Mo pour le BAT)
+//     AVANT compression, alors que le backend accepte 10 Mo APRES. Une photo de
+//     telephone recente depasse souvent 8 Mo alors qu'elle part a ~300 Ko une
+//     fois compressee : elle etait refusee pour rien. On ne plafonne donc que ce
+//     qui part tel quel (PDF/Word/Excel), a la limite reellement appliquee par
+//     le backend, et on verifie la taille APRES compression.
+// ============================================================
+const ATT_MAX_BYTES     = 10 * 1024 * 1024;  // = MAX_FILE_BYTES_ (Code.gs)
+const ATT_MAX_IMG_BYTES = 40 * 1024 * 1024;  // garde-fou lecture navigateur
+
+// Type MIME reellement contenu dans la data URL produite
+function _attTypeOf(dataUrl, fallback) {
+  const m = /^data:([^;,]+)/.exec(String(dataUrl || ''));
+  return (m && m[1]) || fallback || 'application/octet-stream';
+}
+
+// Aligne l'extension du nom sur le type reel (photo.heic -> photo.jpg)
+function _attAlignName(name, type) {
+  const EXT = { 'image/jpeg':'jpg', 'image/png':'png', 'image/webp':'webp', 'image/gif':'gif', 'application/pdf':'pdf' };
+  const want = EXT[type];
+  const cur  = String(name || '').split('.').pop().toLowerCase();
+  if (!want || cur === want || (want === 'jpg' && cur === 'jpeg')) return name || 'fichier';
+  return String(name || 'fichier').replace(/\.[^.\/]+$/, '') + '.' + want;
+}
+
+// Poids reel (octets) d'une data URL base64
+function _attBytes(dataUrl) {
+  const i = String(dataUrl || '').indexOf(',');
+  return i < 0 ? 0 : Math.ceil((String(dataUrl).length - i - 1) * 0.75);
+}
+
+// Refus AVANT lecture. Renvoie '' si le fichier passe, sinon le message a afficher.
+function _attRejectReason(file) {
+  const isImg = (file.type || '').startsWith('image/');
+  const max   = isImg ? ATT_MAX_IMG_BYTES : ATT_MAX_BYTES;
+  if (file.size > max) return `« ${file.name} » trop volumineux (max ${Math.round(max / 1048576)} Mo)`;
+  return '';
+}
+
+// Lit un fichier en piece jointe prete a l'envoi : { name, type, data }.
+// Images -> recompressees (JPEG) ; autres fichiers -> lus tels quels.
+// Leve une Error avec un message affichable si le fichier ne peut pas partir.
+async function _attFromFile(file, maxW, maxH) {
+  const isImg = (file.type || '').startsWith('image/');
+  let data;
+  if (isImg) {
+    try { data = await _resizeImage(file, maxW || 1200, maxH || 1200); }
+    catch (e) {
+      // Format que le navigateur ne sait pas decoder (HEIC sur Android, TIFF…) :
+      // on envoie l'original, le backend accepte ces types depuis la v121.
+      data = await new Promise((res, rej) => { const r = new FileReader(); r.onload = ev => res(ev.target.result); r.onerror = rej; r.readAsDataURL(file); });
+    }
+  } else {
+    data = await new Promise((res, rej) => { const r = new FileReader(); r.onload = ev => res(ev.target.result); r.onerror = rej; r.readAsDataURL(file); });
+  }
+  if (_attBytes(data) > ATT_MAX_BYTES) throw new Error(`« ${file.name} » reste trop lourd apres compression (max ${Math.round(ATT_MAX_BYTES / 1048576)} Mo)`);
+  const type = _attTypeOf(data, file.type);
+  return { name: _attAlignName(file.name, type), type, data };
 }
 
 function renderCmdPhotos() {
@@ -10442,13 +10503,11 @@ async function addFinAttachments(files){
   if (finAttachments.length >= MAX){ showToast(`Maximum ${MAX} pièces jointes`, 'error'); return; }
   const remaining = MAX - finAttachments.length;
   for (const file of Array.from(files).slice(0, remaining)){
-    if (file.size > 8 * 1024 * 1024){ showToast(`${file.name} trop volumineux (max 8 Mo)`, 'error'); continue; }
+    const _rej = _attRejectReason(file);
+    if (_rej){ showToast(_rej, 'error'); continue; }
     try {
-      let data;
-      if (file.type.startsWith('image/')) data = await _resizeImage(file, 1200, 1200);
-      else data = await new Promise((res, rej) => { const r = new FileReader(); r.onload = e => res(e.target.result); r.onerror = rej; r.readAsDataURL(file); });
-      finAttachments.push({ name:file.name, type:file.type, data });
-    } catch(e){ showToast('Erreur lecture : ' + file.name, 'error'); }
+      finAttachments.push(await _attFromFile(file, 1200, 1200));
+    } catch(e){ showToast(e.message || ('Erreur lecture : ' + file.name), 'error'); }
   }
   renderFinAttachments();
   const inp = document.getElementById('finAttachInput'); if (inp) inp.value = '';
@@ -10483,6 +10542,7 @@ function renderFinAttachments(){
 // Celles déjà uploadées (fileId présent) sont conservées telles quelles.
 async function _uploadFinAttachments(list){
   const uploaded = [];
+  _finAttachErrors = [];
   for (let i = 0; i < list.length; i++){
     const att = list[i];
     if (att.fileId || !att.data){ uploaded.push(att); continue; }
@@ -10490,11 +10550,13 @@ async function _uploadFinAttachments(list){
     try {
       const r = await apiCall({ action:'uploadFile', fileName:att.name, mimeType:att.type, base64Data:att.data });
       if (r && r.ok) uploaded.push({ name:r.fileName||att.name, type:att.type, fileId:r.fileId, viewUrl:r.viewUrl, dlUrl:r.dlUrl });
-      else uploaded.push(att);
-    } catch(e){ uploaded.push(att); }
+      else { _finAttachErrors.push(`« ${att.name} » : ${(r && r.error) || 'refus du serveur'}`); uploaded.push(att); }
+    } catch(e){ _finAttachErrors.push(`« ${att.name} » : réseau indisponible`); uploaded.push(att); }
   }
   return uploaded;
 }
+// Échecs du dernier _uploadFinAttachments (vidé à chaque appel)
+var _finAttachErrors = [];
 
 async function saveFicheFinition(dossierId, tacheId){
   const ov = document.getElementById('finOverlay'); if (!ov) return;
@@ -10506,11 +10568,20 @@ async function saveFicheFinition(dossierId, tacheId){
   // Montée Drive des pièces jointes (avant sauvegarde) → on ne persiste que
   // les métadonnées fileId/URL, jamais le base64 (Sheet + GET trop lourds).
   let attList = finAttachments;
+  _finAttachErrors = []; // on repart d'une ardoise propre à chaque enregistrement
   if (APPS_SCRIPT_URL && finAttachments.some(a => a.data && !a.fileId)){
     try { attList = await _uploadFinAttachments([...finAttachments]); finAttachments = attList; renderFinAttachments(); } catch(e){}
     hideLoader();
   }
-  const attMeta = (attList||[]).map(a => ({ name:a.name||'', type:a.type||'', fileId:a.fileId||'', viewUrl:a.viewUrl||'', dlUrl:a.dlUrl||'' }));
+  // On ne persiste QUE les pièces jointes réellement montées sur Drive. Une PJ
+  // dont l'upload a échoué n'a ni fileId ni URL, et le base64 n'est pas enregistré :
+  // la conserver produisait une ligne « pièce jointe » que personne ne pouvait
+  // ouvrir sur les autres postes. On la laisse donc en attente dans le modal et on
+  // prévient l'opérateur au lieu de l'enregistrer vide.
+  const attMeta = (attList||[])
+    .filter(a => a && (a.fileId || a.viewUrl))
+    .map(a => ({ name:a.name||'', type:a.type||'', fileId:a.fileId||'', viewUrl:a.viewUrl||'', dlUrl:a.dlUrl||'' }));
+  if (_finAttachErrors.length) showToast('Pièce(s) jointe(s) NON enregistrée(s) — ' + _finAttachErrors.join(' · '), 'error');
 
   const fin = {
     id:'FIN_'+dossierId, dossierId, tacheId: tacheId || ov.getAttribute('data-tache') || '',
@@ -10535,7 +10606,13 @@ async function saveFicheFinition(dossierId, tacheId){
     const _fi = finitionsAll.findIndex(x => x.dossierId === dossierId);
     if (_fi >= 0) finitionsAll[_fi] = { ...finitionsAll[_fi], ...fin }; else finitionsAll.push(fin);
     if (document.getElementById('page-finitions')?.classList.contains('active')) renderFinitionsPage();
-    closeFicheFinition();
+    // Si des pièces jointes n'ont pas pu monter, on garde la fiche ouverte : un
+    // nouvel « Enregistrer » ne réessaiera que les pièces jointes manquantes.
+    if (_finAttachErrors.length) {
+      if (btn){ btn.disabled = false; btn.textContent = '✓ Enregistrer'; }
+    } else {
+      closeFicheFinition();
+    }
   } else {
     showToast('Échec de l\'enregistrement : ' + ((r&&r.error)||'réseau'), 'error');
     if (btn){ btn.disabled = false; btn.textContent = '✓ Enregistrer'; }
@@ -11184,13 +11261,11 @@ async function addCommentAttachment(files) {
   if (commentAttachments.length >= MAX) { showToast('Maximum 4 fichiers par commentaire', 'error'); return; }
   const remaining = MAX - commentAttachments.length;
   for (const file of Array.from(files).slice(0, remaining)) {
-    if (file.size > 8*1024*1024) { showToast(file.name+' trop volumineux (max 8 Mo)', 'error'); continue; }
+    const _rej = _attRejectReason(file);
+    if (_rej) { showToast(_rej, 'error'); continue; }
     try {
-      const data = file.type.startsWith('image/')
-        ? await _resizeImage(file, 1200, 1200)
-        : await new Promise((res,rej) => { const r=new FileReader(); r.onload=e=>res(e.target.result); r.onerror=rej; r.readAsDataURL(file); });
-      commentAttachments.push({ name:file.name, type:file.type, data });
-    } catch(e) { showToast('Erreur : '+file.name, 'error'); }
+      commentAttachments.push(await _attFromFile(file, 1200, 1200));
+    } catch(e) { showToast(e.message || ('Erreur : '+file.name), 'error'); }
   }
   renderCommentAttachments();
   const input = document.getElementById('commentAttachInput');
@@ -11422,13 +11497,11 @@ async function addMsgAttachment(files) {
   if (msgAttachments.length >= MAX) { showToast('Maximum 4 fichiers par message', 'error'); return; }
   const remaining = MAX - msgAttachments.length;
   for (const file of Array.from(files).slice(0, remaining)) {
-    if (file.size > 8*1024*1024) { showToast(file.name+' trop volumineux (max 8 Mo)', 'error'); continue; }
+    const _rej = _attRejectReason(file);
+    if (_rej) { showToast(_rej, 'error'); continue; }
     try {
-      const data = file.type.startsWith('image/')
-        ? await _resizeImage(file, 1200, 1200)
-        : await new Promise((res,rej) => { const r=new FileReader(); r.onload=e=>res(e.target.result); r.onerror=rej; r.readAsDataURL(file); });
-      msgAttachments.push({ name:file.name, type:file.type, data });
-    } catch(e) { showToast('Erreur : '+file.name, 'error'); }
+      msgAttachments.push(await _attFromFile(file, 1200, 1200));
+    } catch(e) { showToast(e.message || ('Erreur : '+file.name), 'error'); }
   }
   renderMsgAttachments();
   const input = document.getElementById('msgGlobalAttachInput');
@@ -11938,8 +12011,23 @@ let _attrDensity = 'compact';
 let _attrLimit   = 80;
 const _ATTR_PAGE = 80;
 
-function _buildAttrRow(d) {
-  const dt = (Array.isArray(taches) ? taches : []).filter(t => t.dossierId === d.id);
+// Index taches -> dossier, construit UNE fois par rendu. Sans lui, chaque ligne
+// reparcourait tout le tableau `taches` : O(dossiers x taches) a chaque rendu.
+function _tachesParDossier() {
+  const m = new Map();
+  (Array.isArray(taches) ? taches : []).forEach(t => {
+    const k = t && t.dossierId; if (!k) return;
+    const a = m.get(k); if (a) a.push(t); else m.set(k, [t]);
+  });
+  return m;
+}
+
+function _buildAttrRow(d, idx) {
+  // `idx` optionnel : Map(dossierId -> taches). Absent (ou appele via .map qui
+  // passe un entier) : on retombe sur le filtre complet, comportement d'origine.
+  const dt = (idx && typeof idx.get === 'function')
+    ? (idx.get(d.id) || [])
+    : (Array.isArray(taches) ? taches : []).filter(t => t.dossierId === d.id);
   const clos = _dossierClosed(d); // clôture admin → 100 % même sans (ou avec partielle) attribution
   const pct = _dossierPct(dt, d);
   const isDone = clos || pct === 100;
@@ -11992,7 +12080,8 @@ function _attrSortRows(rows) {
 function _renderAttrCockpit(list) {
   const container = document.getElementById('dossierListContainer');
   if (!container) return;
-  const all = list.map(_buildAttrRow);
+  const _idxT = _tachesParDossier();
+  const all = list.map(d => _buildAttrRow(d, _idxT));
   const cnt = k => all.filter(r => _attrMatch(r, k)).length;
   const filtered = _attrSortRows(all.filter(r => _attrMatch(r, _attrFilter)));
   const page = filtered.slice(0, _attrLimit);
@@ -12016,11 +12105,100 @@ function _renderAttrCockpit(list) {
   const count = `<div class="pcok-count">${filtered.length} dossier${filtered.length>1?'s':''}${_attrFilter!=='TOUS'?' · filtré':''}</div>`;
   const more = filtered.length > _attrLimit
     ? `<div class="pcok-more"><button onclick="_attrShowMore()">Afficher plus (${filtered.length - _attrLimit} restants)</button></div>` : '';
-  const table = page.length ? `<div class="pcok-tablewrap"><table class="pcok-table"><thead>${_attrThead()}</thead><tbody>${page.map(_attrRow).join('')}</tbody></table></div>`
+  // Le <tbody> est rempli par _attrWinRender (fenetrage) : seules les lignes
+  // visibles + un tampon sont reellement dans le DOM.
+  const table = page.length ? `<div class="pcok-tablewrap"><table class="pcok-table"><thead>${_attrThead()}</thead><tbody id="attrTbody"></tbody></table></div>`
     : `<div class="pcok-empty"><p>Aucun dossier dans ce filtre</p></div>`;
 
   container.innerHTML = `<div class="pcok pcok--attr">${toolbar}${count}${table}${more}</div>`;
   _fitAttrLayout();
+  _attrWinRows = page;
+  _attrRowHMeasured = false;
+  _attrWinFrom = _attrWinTo = -1;
+  _attrWinBind();
+  _attrWinRender(true);
+}
+
+// ============================================================
+// FENETRAGE DES LIGNES - defilement fluide de l'Attribution
+// Seules les lignes visibles (+ un tampon) sont reellement dans le DOM ; deux
+// lignes << ressort >> de hauteur pure conservent la hauteur totale du tableau,
+// donc l'ascenseur reste exact. Le cout d'un defilement ne depend plus du
+// nombre de dossiers mais du nombre de lignes affichees a l'ecran.
+// ============================================================
+const _ATTR_WIN_BUF = 10;   // lignes de tampon au-dessus et en dessous
+let _attrWinRows      = [];
+let _attrRowH         = 49; // hauteur d'une ligne, mesuree au 1er rendu
+let _attrRowHMeasured = false;
+let _attrWinFrom = -1, _attrWinTo = -1, _attrWinRaf = 0;
+let _attrWinPageBound = false;
+let _attrWinPorts = [];
+
+function _attrWinTick() {
+  if (_attrWinRaf) return;
+  _attrWinRaf = requestAnimationFrame(() => { _attrWinRaf = 0; _attrWinRender(false); });
+}
+
+// Qui defile ? Cela depend de la largeur : en grand ecran c'est
+// #dossierListContainer (hauteur forcee par _fitAttrLayout), en colonne empilee
+// c'est .main-content. On releve donc TOUS les conteneurs qui rognent la liste et
+// on intersecte leurs rectangles pour connaitre la bande reellement visible.
+function _attrWinScrollPorts() {
+  const ports = [];
+  let n = document.getElementById('dossierListContainer');
+  while (n && n !== document.body && n !== document.documentElement) {
+    const oy = getComputedStyle(n).overflowY;
+    if ((oy === 'auto' || oy === 'scroll' || oy === 'hidden') && n.clientHeight > 0) ports.push(n);
+    n = n.parentElement;
+  }
+  return ports;
+}
+
+function _attrWinBind() {
+  _attrWinPorts = _attrWinScrollPorts();
+  if (_attrWinPageBound) return;
+  _attrWinPageBound = true;
+  // `scroll` ne remonte pas, mais il passe bien en phase de CAPTURE sur document :
+  // un seul ecouteur suffit donc, quel que soit le conteneur qui defile.
+  document.addEventListener('scroll', _attrWinTick, { capture: true, passive: true });
+}
+
+function _attrWinRender(force) {
+  const tb = document.getElementById('attrTbody');
+  if (!tb) return;
+  if (!_attrWinPorts.length) _attrWinPorts = _attrWinScrollPorts();
+  const total = _attrWinRows.length;
+  const rowH  = _attrRowH > 10 ? _attrRowH : 49;
+  // Le haut du <tbody> correspond TOUJOURS a la position virtuelle de la ligne 0
+  // (les ressorts sont a l'interieur), donc ce repere reste valable quel que soit
+  // l'etat de la fenetre. On le compare a la zone visible, dans le repere fenetre.
+  const rect  = tb.getBoundingClientRect();
+  let viewTop = 0, viewBottom = window.innerHeight || 800;
+  for (let i = 0; i < _attrWinPorts.length; i++) {
+    const r = _attrWinPorts[i].getBoundingClientRect();
+    if (r.top    > viewTop)    viewTop    = r.top;
+    if (r.bottom < viewBottom) viewBottom = r.bottom;
+  }
+  const viewH = Math.max(120, viewBottom - viewTop);
+  const first = Math.max(0, Math.floor((viewTop - rect.top) / rowH) - _ATTR_WIN_BUF);
+  const visN  = Math.ceil(viewH / rowH) + _ATTR_WIN_BUF * 2;
+  const last  = Math.min(total, first + visN);
+  if (!force && first === _attrWinFrom && last === _attrWinTo) return;
+  _attrWinFrom = first; _attrWinTo = last;
+  closeAllKebabs(); // un menu ouvert sur une ligne recyclee n'aurait plus de support
+  const cols = _attrDensity === 'detaille' ? 9 : 8;
+  const pad  = h => h > 0 ? `<tr class="pcok-pad"><td colspan="${cols}" style="height:${h}px;padding:0;border:none"></td></tr>` : '';
+  tb.innerHTML = pad(first * rowH)
+    + _attrWinRows.slice(first, last).map(_attrRow).join('')
+    + pad(Math.max(0, total - last) * rowH);
+  // Mesure de la hauteur reelle d'une ligne, une seule fois par rendu complet
+  // (compact != detaille, densite d'ecran variable) puis on recale la fenetre.
+  if (!_attrRowHMeasured) {
+    _attrRowHMeasured = true;
+    const r0 = tb.querySelector('.pcok-row');
+    const h  = r0 ? r0.offsetHeight : 0;
+    if (h > 10 && Math.abs(h - _attrRowH) > 1) { _attrRowH = h; _attrWinFrom = _attrWinTo = -1; _attrWinRender(true); }
+  }
 }
 
 function _attrThead() {
@@ -12041,6 +12219,26 @@ function _attrThead() {
     ${th('progression','Prog.')}
     <th class="pcok-th"></th>
   </tr>`;
+}
+
+// Menu << ... >> d'une ligne d'Attribution : le HTML n'est cree qu'au premier clic
+// sur la ligne concernee, puis reutilise. Avant, chaque ligne embarquait son menu
+// (cache) : avec ~150 dossiers cela faisait 60 % des noeuds de la page et rendait
+// le defilement saccade sur les postes de l'atelier.
+function _attrKebabMenu(id) {
+  return `<div class="kebab-menu" id="kb-dos${id}" role="menu">
+    <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();selectDossier('${id}')">${_kebabIcon('eye')}<span>Ouvrir / attribuer</span></button>
+    <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printFicheTravailDossier('${id}')">${_kebabIcon('print')}<span>Fiche de travail (à remplir)</span></button>
+    <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printDossier('${id}')">${_kebabIcon('print')}<span>Imprimer le dossier</span></button>
+    ${['admin','chef_atelier'].includes(currentUser?.role) ? `<button class="kebab-item danger" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();resetTachesDossier('${id}')">${_kebabIcon('reset')}<span>Réinitialiser les tâches</span></button>` : ''}
+  </div>`;
+}
+
+function _attrKebab(id, ev) {
+  if (ev) ev.stopPropagation();
+  const wrap = ev && ev.currentTarget && ev.currentTarget.closest('.kebab-wrap');
+  if (wrap && !wrap.querySelector('.kebab-menu')) wrap.insertAdjacentHTML('beforeend', _attrKebabMenu(id));
+  toggleKebab('dos' + id, ev);
 }
 
 function _attrRow(r) {
@@ -12068,12 +12266,9 @@ function _attrRow(r) {
   const accent = r.isDone ? '' : r.needsAssign ? 'inset 3px 0 0 #e8834a' : (r.days!=null&&r.days<0) ? 'inset 3px 0 0 #dc2626' : r.hasEnCours ? 'inset 3px 0 0 #2563eb' : '';
   const sel = selectedDossier?.id === r.id ? 'pcok-row--sel' : '';
   const _dots = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>';
-  const kebab = `<div class="kebab-wrap"><button class="kebab-btn" aria-label="Plus d'actions" onclick="toggleKebab('dos${r.id}',event)">${_dots}</button><div class="kebab-menu" id="kb-dos${r.id}" role="menu">
-    <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();selectDossier('${r.id}')">${_kebabIcon('eye')}<span>Ouvrir / attribuer</span></button>
-    <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printFicheTravailDossier('${r.id}')">${_kebabIcon('print')}<span>Fiche de travail (à remplir)</span></button>
-    <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printDossier('${r.id}')">${_kebabIcon('print')}<span>Imprimer le dossier</span></button>
-    ${['admin','chef_atelier'].includes(currentUser?.role) ? `<button class="kebab-item danger" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();resetTachesDossier('${r.id}')">${_kebabIcon('reset')}<span>Réinitialiser les tâches</span></button>` : ''}
-  </div></div>`;
+  // Menu << ... >> construit A LA DEMANDE (voir _attrKebab) : pre-generer un menu
+  // par ligne representait 29 noeuds DOM et 70 % du HTML de chaque ligne.
+  const kebab = `<div class="kebab-wrap"><button class="kebab-btn" aria-label="Plus d'actions" onclick="_attrKebab('${r.id}',event)">${_dots}</button></div>`;
   return `<tr class="pcok-row ${sel}" id="attrrow-${r.id}" ${accent?`style="box-shadow:${accent}"`:''} onclick="selectDossier('${r.id}')">
     <td class="pcok-td-prio">${prio}</td>
     <td class="pcok-td-client"><div class="pcok-client">${_pcokEsc(r.client)}</div><div class="pcok-ref">${_pcokEsc(r.ref)}</div></td>
@@ -12132,7 +12327,7 @@ function _fitAttrLayout() {
 let _fitAttrRaf = 0;
 window.addEventListener('resize', () => {
   cancelAnimationFrame(_fitAttrRaf);
-  _fitAttrRaf = requestAnimationFrame(_fitAttrLayout);
+  _fitAttrRaf = requestAnimationFrame(() => { _fitAttrLayout(); _attrWinPorts = _attrWinScrollPorts(); _attrWinRender(true); });
 });
 
 // ════════════════════════════════════════════════════════════
@@ -12224,8 +12419,9 @@ function _blocSortRows(rows) {
 function renderBlocages() {
   const container = document.getElementById('blocagesContainer');
   if (!container) return;
+  const _idxBl = _tachesParDossier();
   const base = (Array.isArray(dossiers) ? dossiers : [])
-    .map(_buildAttrRow)
+    .map(d => _buildAttrRow(d, _idxBl))
     .map(_buildBlocRow)
     // Un blocage = dossier non terminé ET (échéance dépassée OU délai interne dépassé OU non attribué)
     .filter(r => !r.isDone && (r.deadlineLate || r.taskRetard || r.needsAssign));
@@ -12699,8 +12895,8 @@ function batCreate(dossierId, kind){
   inp.onchange = async () => {
     const picked = inp.files ? Array.from(inp.files) : [];
     if (!picked.length) { _cleanupInp(); return; }
-    const tooBig = picked.find(f => f.size > 12 * 1024 * 1024);
-    if (tooBig) { showToast(`« ${tooBig.name} » trop lourd (max 12 Mo)`, 'error'); _cleanupInp(); return; }
+    const tooBig = picked.map(_attRejectReason).find(Boolean);
+    if (tooBig) { showToast(tooBig, 'error'); _cleanupInp(); return; }
     // LOCAL-FIRST (connexion instable) : on lit + COMPRESSE les fichiers en local, on crée
     // le round tout de suite avec ces fichiers « en attente », PUIS on les monte sur Drive
     // en arrière-plan avec reprise auto (online + polling 30s). Rien n'est perdu, même hors ligne.
@@ -12710,12 +12906,10 @@ function batCreate(dossierId, kind){
       showToast(picked.length > 1 ? `Préparation de ${nounF}… (${i + 1}/${picked.length})` : `Préparation de ${nounF}…`);
       try {
         // Compression des images (photo tél. ~6 Mo → ~300 Ko) = envoi fiable sur réseau
-        // faible ; les PDF et autres fichiers restent intacts.
-        const dataUrl = (f.type && f.type.startsWith('image/'))
-          ? await _resizeImage(f, 1600, 1600)
-          : await _batReadFile(f);
-        pending.push({ name:f.name, type:f.type || 'application/octet-stream', data:dataUrl });
-      } catch(e){ showToast(`Lecture de « ${f.name} » impossible`, 'warning'); }
+        // faible ; les PDF et autres fichiers restent intacts. Le type déclaré est
+        // celui du contenu produit, pas celui du fichier source (cf. _attFromFile).
+        pending.push(await _attFromFile(f, 1600, 1600));
+      } catch(e){ showToast(e.message || `Lecture de « ${f.name} » impossible`, 'warning'); }
     }
     _cleanupInp();
     if (!pending.length) return;
@@ -12775,18 +12969,29 @@ async function _uploadBatFiles(batId){
   try {
     const tag = _batKind(b) === 'simulation' ? 'SIMU' : 'BAT';
     const done = [];          // metadata Drive montées cette fois
-    const stillPending = [];  // fichiers non montés → reprise ultérieure
+    const stillPending = [];  // fichiers non montés (réseau) → reprise ultérieure
+    const refused = [];       // refusés par le serveur → abandonnés + signalés
     const src = b.pendingFiles.slice();
     for (let i = 0; i < src.length; i++) {
       const f = src[i];
       if (!f || !f.data) continue;
       const ext = (f.name && f.name.includes('.')) ? f.name.split('.').pop() : ((f.type && f.type.split('/')[1]) || 'jpg');
-      let ok = false;
+      let ok = false, refus = '';
       try {
         const r = await apiCall({ action:'uploadFile', fileName:`${tag}-${b.dossierId}-${Date.now()}-${i + 1}.${ext}`, mimeType:f.type || 'application/octet-stream', base64Data:f.data });
         if (r && r.ok) { done.push({ name:f.name, viewUrl:r.viewUrl || '', dlUrl:r.dlUrl || '', type:f.type || '' }); ok = true; }
-      } catch(e){ ok = false; }
+        // Le serveur a REPONDU et a refusé (type interdit, trop lourd…) : réessayer
+        // est inutile. Avant, ce fichier restait « en attente » indéfiniment et
+        // n'était donc jamais visible sur les autres postes, sans aucun message.
+        else if (r && r.ok === false) refus = r.error || 'fichier refusé par le serveur';
+      } catch(e){ ok = false; } // réseau KO → à rejouer
+      if (refus) { refused.push(`« ${f.name} » : ${refus}`); continue; }
       if (!ok) stillPending.push(f); // échec réseau → on garde le base64 pour reprise
+    }
+    if (refused.length) {
+      b.pendingFiles = stillPending;
+      saveData(); _refreshBatUi(b.dossierId);
+      showToast('Pièce(s) jointe(s) refusée(s) — ' + refused.join(' · '), 'error');
     }
     if (!done.length) return; // rien n'a pu monter → on retentera au prochain cycle
     b.files = _batMergeFiles(b.files, done);

@@ -1,11 +1,11 @@
-// ============================================================
+﻿// ============================================================
 // SERVICE WORKER — Boutique POS
 // Stratégie : Stale-While-Revalidate pour HTML/JS/CSS — chargement
 //             INSTANTANÉ depuis le cache (crucial en réseau lent/instable,
 //             ex. data mobile à quelques Ko/s) + mise à jour en arrière-plan.
 //             Cache First pour icônes/manifest.
 // ============================================================
-const CACHE_NAME = 'boutique-pos-v187';
+const CACHE_NAME = 'boutique-pos-v188';
 const OFFLINE_URL = './index.html';
 
 const STATIC_ASSETS = [
