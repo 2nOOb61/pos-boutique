@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '191 · 2026-09-24';
+const APP_VERSION = '192 · 2026-09-24';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -21464,6 +21464,35 @@ const KB_COLS = [
 ];
 const KB_REACTIONS = ['👍','✅','🔥','❤️','😂','🙏'];
 
+// ── BANDES PAR METIER ────────────────────────────────────────
+// Le tableau melangeait les taches de tous les corps de metier : un chef
+// d'atelier voyait 40 cartes sans savoir qui attendait quoi. Chaque bande
+// regroupe les etapes d'un metier et garde ses 3 colonnes A faire / En cours /
+// Terminé. Le decoupage suit ROLE_ETAPE_MAP (la table des droits), pour que la
+// bande d'un operateur contienne exactement les etapes qu'il peut pointer.
+const KB_POLES = [
+  { k:'COMMERCIAL', label:'Commercial',    color:'#0d9488', etapes:['VALID_CMD','RETOUR_CLIENT','VALID_CLIENT2'] },
+  { k:'PAO',        label:'PAO',           color:'#6c63ff', etapes:['PAO','MODIFICATIONS','BAT'] },
+  { k:'ACHAT',      label:'Achat',         color:'#d97706', etapes:['ACHAT'] },
+  { k:'PRODUCTION', label:'Production',    color:'#e8834a', etapes:['PRODUCTION'] },
+  { k:'FINITION',   label:'Finition',      color:'#1a4a3a', etapes:['FINITION'] },
+  { k:'LIVRAISON',  label:'Livraison',     color:'#16a34a', etapes:['LIVRE'] },
+  // Fourre-tout : taches libres (etapeCode 'LIBRE') et tout code inconnu, pour
+  // qu'aucune tache ne disparaisse silencieusement du tableau.
+  { k:'AUTRES',     label:'Taches libres', color:'#78716c', etapes:[] },
+];
+const _KB_POLE_OF = (() => { const m = {}; KB_POLES.forEach(p => p.etapes.forEach(e => { m[e] = p.k; })); return m; })();
+function _kbPoleOf(t){ return _KB_POLE_OF[(t && t.etapeCode) || ''] || 'AUTRES'; }
+
+// Bandes repliees, memorisees par poste (un finisseur replie Commercial/PAO).
+let _kbPoleClosed = {};
+try { _kbPoleClosed = JSON.parse(localStorage.getItem('pos-kb-poles') || '{}') || {}; } catch(e) { _kbPoleClosed = {}; }
+function _kbTogglePole(k){
+  _kbPoleClosed[k] = !_kbPoleClosed[k];
+  try { localStorage.setItem('pos-kb-poles', JSON.stringify(_kbPoleClosed)); } catch(e) {}
+  _kbRenderBoard();
+}
+
 let _kbScope  = 'mine';   // 'mine' = mes tâches | 'all' = toute l'équipe
 let _kbSearch = '';
 let _kbEtape  = 'TOUS';
@@ -21664,16 +21693,44 @@ function _kbRenderBoard(){
   if (!host) return;
   const all = _kbAllVisible();
   _kbBuildComCounts();
-  host.innerHTML = `<div class="kb-board" id="kbBoard">` + KB_COLS.map(c => {
-    const list = _kbSortCards(all.filter(t => (t.statut||'A_FAIRE') === c.k));
-    const cards = list.length
-      ? list.map(_kbCardHtml).join('')
-      : `<div class="kb-empty">Aucune tâche</div>`;
-    return `<section class="kb-col" data-col="${c.k}" style="--kc:${c.color}">
-      <header class="kb-colhead"><span class="kb-coldot"></span>${c.label}<span class="kb-coln">${list.length}</span></header>
-      <div class="kb-list">${cards}</div>
+
+  // Un seul passage pour repartir les taches dans les bandes.
+  const par = {};
+  KB_POLES.forEach(p => { par[p.k] = []; });
+  all.forEach(t => { par[_kbPoleOf(t)].push(t); });
+
+  // Vue pilotage (« toute l'équipe ») : on garde les bandes vides, l'absence de
+  // carte est elle-même une information (personne n'a de travail à cette étape).
+  // Vue opérateur : on masque les métiers qui ne le concernent pas.
+  const pilotage = _kbScope === 'all' && _kbCanSeeAll();
+  const bandes = KB_POLES.filter(p => par[p.k].length || (pilotage && p.k !== 'AUTRES'));
+  if (!bandes.length) { host.innerHTML = `<div class="kb-empty">Aucune tâche</div>`; return; }
+
+  host.innerHTML = bandes.map(p => {
+    const list   = par[p.k];
+    const closed = !!_kbPoleClosed[p.k];
+    const n      = k => list.filter(t => (t.statut||'A_FAIRE') === k).length;
+    const late   = list.filter(t => _tacheRetardFlag(t)).length;
+    const nt     = n('TERMINE');
+    const board  = closed ? '' : `<div class="kb-board">` + KB_COLS.map(c => {
+      const cl = _kbSortCards(list.filter(t => (t.statut||'A_FAIRE') === c.k));
+      return `<section class="kb-col" data-col="${c.k}" style="--kc:${c.color}">
+        <header class="kb-colhead"><span class="kb-coldot"></span>${c.label}<span class="kb-coln">${cl.length}</span></header>
+        <div class="kb-list">${cl.length ? cl.map(_kbCardHtml).join('') : `<div class="kb-empty">Aucune tâche</div>`}</div>
+      </section>`;
+    }).join('') + `</div>`;
+    return `<section class="kb-lane ${closed?'kb-lane--closed':''}" style="--kp:${p.color}">
+      <button type="button" class="kb-lanehead" aria-expanded="${!closed}" onclick="_kbTogglePole('${p.k}')">
+        <span class="kb-lanedot"></span>
+        <span class="kb-lanelbl">${_kbEsc(p.label)}</span>
+        <span class="kb-lanen">${list.length}</span>
+        <span class="kb-lanemini">${n('A_FAIRE')} à faire · ${n('EN_COURS')} en cours · ${nt} terminé${nt>1?'es':'e'}</span>
+        ${late ? `<span class="kb-lanelate">${late} en retard</span>` : ''}
+        <svg class="kb-lanechev" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      ${board}
     </section>`;
-  }).join('') + `</div>`;
+  }).join('');
   _kbBindDnd();
   _ensureChronoTick();
 }
@@ -21685,7 +21742,8 @@ function _kbRenderBoard(){
 let _kbDrag = null;
 
 function _kbBindDnd(){
-  document.querySelectorAll('#kbBoard .kb-card').forEach(card => {
+  // Une bande par metier => plusieurs .kb-board : on ne peut plus viser #kbBoard.
+  document.querySelectorAll('#kanbanBoard .kb-card').forEach(card => {
     card.addEventListener('pointerdown', _kbPointerDown);
   });
 }
@@ -21744,8 +21802,8 @@ function _kbPointerMove(e){
   if (col) col.classList.add('kb-col--over');
   d.over = col;
 
-  // Auto-défilement horizontal du tableau quand on approche des bords.
-  const board = document.getElementById('kbBoard');
+  // Auto-défilement horizontal de la bande survolée quand on approche des bords.
+  const board = col ? col.closest('.kb-board') : null;
   if (board){
     const b = board.getBoundingClientRect();
     if (e.clientX > b.right - 60) board.scrollLeft += 14;
@@ -22098,6 +22156,23 @@ function _kbInjectStyle(){
   .kb-search{flex:1;min-width:180px}
   .kb-hint{font-size:11.5px;color:var(--color-text-muted,#78716c);margin:0 0 10px}
   .kb-board{display:flex;gap:12px;overflow-x:auto;align-items:flex-start;padding-bottom:8px}
+  /* Bandes par metier */
+  .kb-lane{border:1px solid var(--color-border,#e7e1d8);border-radius:14px;background:var(--color-surface,#fff);
+    margin-bottom:12px;overflow:hidden}
+  .kb-lanehead{display:flex;align-items:center;gap:9px;width:100%;padding:10px 13px;border:none;background:transparent;
+    border-left:4px solid var(--kp);cursor:pointer;font-family:inherit;text-align:left}
+  .kb-lanehead:hover{background:var(--color-bg,#f7f4ef)}
+  .kb-lanedot{width:9px;height:9px;border-radius:50%;background:var(--kp);flex:none}
+  .kb-lanelbl{font-size:13px;font-weight:800;color:var(--color-text,#1c1917);text-transform:uppercase;letter-spacing:.03em}
+  .kb-lanen{background:var(--kp);color:#fff;border-radius:20px;padding:1px 9px;font-size:11.5px;font-weight:800;flex:none}
+  .kb-lanemini{font-size:11.5px;color:var(--color-text-muted,#78716c);font-weight:600;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis}
+  .kb-lanelate{font-size:10.5px;font-weight:800;color:#b91c1c;background:#fee2e2;border-radius:6px;padding:2px 7px;flex:none}
+  .kb-lanechev{margin-left:auto;color:var(--color-text-muted,#78716c);transition:transform .18s;flex:none}
+  .kb-lane--closed .kb-lanechev{transform:rotate(-90deg)}
+  .kb-lane .kb-board{padding:0 10px 10px}
+  .kb-lane .kb-list{max-height:46vh}
+  @media(max-width:700px){ .kb-lanemini{display:none} }
   .kb-col{flex:1 1 300px;min-width:270px;background:var(--color-bg,#f7f4ef);border:1px solid var(--color-border,#e7e1d8);
     border-radius:14px;display:flex;flex-direction:column;overflow:hidden}
   .kb-col--over{outline:2px dashed var(--kc);outline-offset:-3px;background:color-mix(in srgb,var(--kc) 8%,var(--color-bg,#f7f4ef))}
