@@ -26,15 +26,26 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20260924-attrlarge">
+<link rel="stylesheet" href="./style.css?v=20260924-panneaularge2">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
-/* Le panneau de droite prend une part RAISONNABLE de l'ecran (il occupait 420 px
-   fixes : sur un portable 1366, la liste tombait a ~660 px et la colonne
-   << Ref / Client >> etait ecrasee a ~90 px). minmax(0,1fr) evite que le tableau
-   pousse la colonne de gauche au-dela de la place disponible. */
-.attr-layout { display:grid; grid-template-columns:minmax(0,1fr) clamp(340px,24vw,400px); gap:16px; align-items:start; }
+/* Repartition liste / panneau de dossier.
+   Le panneau etait fige a 420 px : la fiche (client, echeances, commande,
+   briefing, discussion) y etait a l'etroit. Il occupe desormais un peu plus de
+   la MOITIE de la zone quand un dossier est ouvert (~890 px sur un 1850),
+   plafonne a 900 px pour ne pas devenir une bande sur tres grand ecran.
+   Le pourcentage se calcule sur la grille, donc la liste ne deborde jamais ;
+   minmax(0,1fr) empeche le tableau de pousser la colonne de gauche.
+   `100vw - 960px` : le panneau absorbe la largeur DISPONIBLE AU-DELA de ~960 px,
+   ce qui garde une liste d'environ 680 px a toutes les tailles (sur un 1366 ou un
+   1440, un panneau a 55 % laisserait une liste de ~480 px, illisible a 8 colonnes).
+   Le `min(55%, …)` borne ensuite la part du panneau sur tres grand ecran.
+   Rappel : sans dossier ouvert (ou via le bouton << Elargir >>), la liste prend
+   toute la largeur — cf. .attr-layout--wide.
+     1366 -> liste 676 / panneau 406      1850 -> liste 696 / panneau 870
+     1440 -> liste 676 / panneau 480      1920 -> liste 727 / panneau 909  */
+.attr-layout { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,min(55%,max(360px,100vw - 960px))); gap:16px; align-items:start; }
 @media(max-width:900px) {
   .attr-layout { grid-template-columns:1fr; }
   .attr-right { position:static; }
@@ -3592,7 +3603,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260924-attrlarge"></script>
+<script src="./app.js?v=20260924-panneaularge2"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
