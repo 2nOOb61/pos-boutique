@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '192 · 2026-09-24';
+const APP_VERSION = '193 · 2026-09-25';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -9538,13 +9538,16 @@ async function loadNotifsFromGAS(spawnPopups) {
 function _startNotifPolling() {
   if (_notifPollInterval) clearInterval(_notifPollInterval);
   _notifPollInterval = setInterval(async () => {
-    if (document.hidden) return; // ne pas polluer quand l'onglet est en arrière-plan
+    // Les FILES DE REPRISE tournent même onglet caché : sur mobile la PAO quitte
+    // l'app dès la pièce jointe choisie, et l'envoi Drive restait alors bloqué
+    // indéfiniment (« en attente de connexion ») jusqu'au retour dans l'onglet.
     _flushNotifRetryQueue();
     _flushTlPhotoQueue();
     _flushCmdPhotoQueue(); // reprise montée Drive des PJ commande insérées hors ligne
     _flushCmdAttQueue();   // reprise persistance PJ commande → visibles par tous les postes
     _flushBatQueue();      // reprise sync BAT (metadata)
     _flushBatFilesQueue(); // reprise montée Drive des fichiers Simulation/BAT en attente
+    if (document.hidden) return; // le reste (rendu, notifs) ne sert à rien onglet caché
     // Suivi BAT : rafraîchir en direct si l'Attribution ou le tableau de bord est ouvert
     if (APPS_SCRIPT_URL && document.getElementById('page-attribution')?.classList.contains('active')) {
       loadBatsFromScript().then(() => { if (selectedDossier) _refreshBatUi(selectedDossier.id); }).catch(()=>{});
@@ -12890,7 +12893,8 @@ function _batFiles(b){
   // Fichiers en attente d'upload (base64 local) → affichés « en cours » (reprise auto).
   if (Array.isArray(b.pendingFiles) && b.pendingFiles.length) {
     b.pendingFiles.filter(Boolean).forEach(f => out.push({
-      name: f.name || 'Fichier', viewUrl: '', dlUrl: '', type: f.type || '', pending:true
+      name: f.name || 'Fichier', viewUrl: '', dlUrl: '', type: f.type || '', pending:true,
+      err: f.lastError || '', tries: Number(f.tries) || 0
     }));
   }
   return out;
@@ -12964,9 +12968,9 @@ function _batCreateRound(dossierId, files, kind, pendingFiles){
   _addNotification({ dossierId, numeroDossier: bat.numeroDossier, etapeCode:'BAT', etapeLabel:`${noun} à envoyer`, operateur:_myOpLabel(),
     message:`${noun} v${version} prête — à envoyer au client (${bat.numeroDossier || 'dossier'}) — par ${_myOpLabel()}` });
   if (pList.length) {
-    showToast(navigator.onLine
-      ? `${noun} v${version} créée — envoi des fichiers en cours…`
-      : `${noun} v${version} créée — fichiers en attente (connexion) — envoi auto au retour du réseau`);
+    // Le fichier est DÉJÀ enregistré localement et la version est créée : on ne
+    // parle donc plus de « connexion », ce que la PAO lisait comme un refus.
+    showToast(`${noun} v${version} créée — envoi du/des fichier(s) en cours…`);
     _uploadBatFiles(bat.id);
   } else {
     showToast(`${noun} v${version} créée — le commercial est notifié`);
@@ -12979,8 +12983,28 @@ function _batCreateRound(dossierId, files, kind, pendingFiles){
 // Drive un par un ; ceux qui échouent RESTENT en attente et sont réessayés au retour de
 // connexion + par le polling 30s. Idempotent (garde par batId → pas de double upload).
 var _batFilesUploading = new Set();
+var _batFilesRetryTimer = null;
+// Relance rapprochée après un échec (le polling 30 s reste le filet de sécurité).
+function _scheduleBatFilesRetry(ms){
+  if (_batFilesRetryTimer) return;
+  _batFilesRetryTimer = setTimeout(() => { _batFilesRetryTimer = null; _flushBatFilesQueue(); }, ms || 8000);
+}
+// Renvoi manuel demandé depuis la fiche (bouton « Renvoyer maintenant »).
+function batResendFiles(batId){
+  const b = bats.find(x => String(x.id) === String(batId));
+  if (!b || !Array.isArray(b.pendingFiles) || !b.pendingFiles.length) { showToast('Tous les fichiers sont déjà envoyés'); return; }
+  showToast(`Nouvel envoi de ${b.pendingFiles.length} fichier(s)…`);
+  _uploadBatFiles(batId);
+}
 async function _uploadBatFiles(batId){
-  if (!APPS_SCRIPT_URL || !navigator.onLine) return;
+  if (!APPS_SCRIPT_URL) return;
+  // NE PAS tester navigator.onLine ici. Sur plusieurs postes (WebView Android,
+  // Windows derrière un proxy/VPN, réseau d'entreprise capté) le navigateur se
+  // déclare « hors ligne » alors que la connexion fonctionne : l'envoi n'était
+  // alors JAMAIS tenté NI rejoué (même garde dans _flushBatFilesQueue), et la
+  // pièce jointe restait « en attente (connexion) » pour toujours — c'est le
+  // « votre connexion ne vous le permet pas » signalé par la PAO. Une vraie
+  // coupure se traduit simplement par un fetch en échec → reprise normale.
   if (_batFilesUploading.has(String(batId))) return;
   const b = bats.find(x => String(x.id) === String(batId));
   if (!b || !Array.isArray(b.pendingFiles) || !b.pendingFiles.length) return;
@@ -12995,22 +13019,37 @@ async function _uploadBatFiles(batId){
       const f = src[i];
       if (!f || !f.data) continue;
       const ext = (f.name && f.name.includes('.')) ? f.name.split('.').pop() : ((f.type && f.type.split('/')[1]) || 'jpg');
-      let ok = false, refus = '';
+      // Nom de fichier STABLE (calculé une fois puis mémorisé) : une reprise après
+      // coupure réécrit le même nom, donc un éventuel doublon Drive est identifiable.
+      if (!f.upName) f.upName = `${tag}-${b.dossierId}-${Date.now()}-${i + 1}.${ext}`;
+      let ok = false, refus = '', why = '';
       try {
-        const r = await apiCall({ action:'uploadFile', fileName:`${tag}-${b.dossierId}-${Date.now()}-${i + 1}.${ext}`, mimeType:f.type || 'application/octet-stream', base64Data:f.data });
+        const r = await apiCall({ action:'uploadFile', fileName:f.upName, mimeType:f.type || 'application/octet-stream', base64Data:f.data });
         if (r && r.ok) { done.push({ name:f.name, viewUrl:r.viewUrl || '', dlUrl:r.dlUrl || '', type:f.type || '' }); ok = true; }
         // Le serveur a REPONDU et a refusé (type interdit, trop lourd…) : réessayer
         // est inutile. Avant, ce fichier restait « en attente » indéfiniment et
         // n'était donc jamais visible sur les autres postes, sans aucun message.
         else if (r && r.ok === false) refus = r.error || 'fichier refusé par le serveur';
-      } catch(e){ ok = false; } // réseau KO → à rejouer
+        else why = 'serveur injoignable'; // apiCall a renvoyé null = fetch en échec
+      } catch(e){ ok = false; why = e.message || 'réseau indisponible'; }
       if (refus) { refused.push(`« ${f.name} » : ${refus}`); continue; }
-      if (!ok) stillPending.push(f); // échec réseau → on garde le base64 pour reprise
+      if (!ok) {
+        // Motif conservé sur le fichier : la fiche affiche la VRAIE cause au lieu
+        // d'un vague « connexion », et le compteur de tentatives montre que ça vit.
+        f.tries = (Number(f.tries) || 0) + 1;
+        f.lastError = why || 'réseau indisponible';
+        stillPending.push(f); // échec réseau → on garde le base64 pour reprise
+      }
     }
     if (refused.length) {
       b.pendingFiles = stillPending;
       saveData(); _refreshBatUi(b.dossierId);
       showToast('Pièce(s) jointe(s) refusée(s) — ' + refused.join(' · '), 'error');
+    }
+    if (stillPending.length) {
+      b.pendingFiles = stillPending;
+      saveData(); _refreshBatUi(b.dossierId);
+      _scheduleBatFilesRetry(8000); // relance rapprochée, sans attendre le polling 30 s
     }
     if (!done.length) return; // rien n'a pu monter → on retentera au prochain cycle
     b.files = _batMergeFiles(b.files, done);
@@ -13031,7 +13070,7 @@ async function _uploadBatFiles(batId){
 // Rejoue la montée Drive des fichiers d'épreuve en attente (reprise au retour de
 // connexion + polling 30s). Appelée sans argument.
 async function _flushBatFilesQueue(){
-  if (!APPS_SCRIPT_URL || !navigator.onLine) return;
+  if (!APPS_SCRIPT_URL) return;   // pas de garde navigator.onLine — cf. _uploadBatFiles
   const pend = bats.filter(b => Array.isArray(b.pendingFiles) && b.pendingFiles.length);
   for (const b of pend) { await _uploadBatFiles(b.id); }
 }
@@ -13163,9 +13202,18 @@ function _batSectionInner(d){
     const files = _batFiles(b);
     const fileLink = files.length
       ? files.map(f => f.pending
-          ? `<span class="bat-file" style="color:#d97706;cursor:default" title="En attente d'envoi — sera montée sur Drive dès que la connexion le permet">⏳ ${escapeHtml(f.name || 'Fichier')} — en cours…</span>`
+          ? `<span class="bat-file bat-file--wait" title="${escapeHtml(f.err ? `Dernier échec : ${f.err} (${f.tries} tentative${f.tries > 1 ? 's' : ''}) — l'app réessaie toute seule` : 'Le fichier est enregistré, son envoi vers Drive est en cours')}">⏳ ${escapeHtml(f.name || 'Fichier')} — envoi en cours…</span>`
           : `<a href="${f.viewUrl}" target="_blank" class="bat-file">📎 ${escapeHtml(f.name || 'Voir le fichier')}</a>`).join('')
       : '<span class="bat-nofile">Pas de fichier joint</span>';
+    // Bandeau d'attente : dit clairement que RIEN n'est perdu, donne le motif réel
+    // et un bouton de renvoi immédiat (la PAO n'a plus à attendre un hypothétique
+    // « retour du réseau » qui, navigator.onLine bloqué à false, n'arrivait jamais).
+    const pend = files.filter(f => f.pending);
+    const pendWhy = pend.map(f => f.err).filter(Boolean)[0] || '';
+    const pendBar = pend.length ? `<div class="bat-pend">
+        <span class="bat-pend-txt">⏳ ${pend.length} fichier(s) enregistré(s), pas encore sur Drive — les autres postes ne les voient pas encore.${pendWhy ? ` <i>(${escapeHtml(pendWhy)})</i>` : ''}</span>
+        <button class="bat-btn bat-btn--resend" onclick="batResendFiles('${b.id}')">Renvoyer maintenant</button>
+      </div>` : '';
     const timeline = [
       b.createdAt ? `Créé ${_batWhen(b.createdAt)}${b.createdBy?' · '+escapeHtml(b.createdBy):''}` : '',
       b.sentAt ? `Envoyé ${_batWhen(b.sentAt)}${b.sentBy?' · '+escapeHtml(b.sentBy):''}` : '',
@@ -13178,6 +13226,7 @@ function _batSectionInner(d){
           <span class="bat-stat" style="color:${sColor};background:${sBg}">${BAT_STATUS_LABEL[b.status]||b.status}</span>
           ${fileLink}
         </div>
+        ${pendBar}
         ${b.retours ? `<div class="bat-retours"><b>Retours client :</b> ${escapeHtml(b.retours)}</div>` : ''}
         ${timeline ? `<div class="bat-time">${timeline}</div>` : ''}
       </div>`;
