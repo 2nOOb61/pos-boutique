@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '194 · 2026-09-29';
+const APP_VERSION = '195 · 2026-09-29';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -10856,6 +10856,44 @@ function _sviEtapeState(te, closed){
   return { state:'todo', startMs:null, endMs:null, durMs:0 };
 }
 
+// Retard d'une COMMANDE — même définition que le cockpit Production
+// (`_tacheRetardFlag`), mais remontée au niveau du dossier et détaillée pour pouvoir
+// dire POURQUOI. Deux causes, cumulables :
+//   ① échéance de livraison dépassée (condition du dossier, évaluée une seule fois) ;
+//   ② étape en cours qui dépasse son rythme cible (`rythmeProduction`, via
+//      `_getTacheRetardInfo` — source de vérité partagée avec Production).
+// Une commande terminée n'est jamais en retard. Retourne null si tout va bien.
+function _sviRetard(d, dt, done){
+  if (done) return null;
+  const ymd  = _toIsoDate(d.dateLivraisonProd || d.dateLivraison || '');
+  const days = ymd ? _daysUntil(ymd) : null;
+  const jours = (days != null && days < 0) ? -days : 0;
+  // On garde le dépassement le PLUS important : c'est lui qui explique le blocage.
+  let pire = null;
+  dt.forEach(t => {
+    const info = _getTacheRetardInfo(t);
+    if (!info.isRetard) return;
+    if (!pire || info.depassement > pire.depassement) {
+      const e = ETAPES_CONFIG.find(x => x.code === t.etapeCode);
+      pire = { depassement:info.depassement, ecoule:info.minutesEcoulees, cible:info.delai,
+               short:(e && e.short) || t.etapeCode };
+    }
+  });
+  if (!jours && !pire) return null;
+  const raisons = [], detail = [];
+  if (jours){
+    raisons.push('Livraison dépassée de ' + jours + ' j');
+    detail.push('Échéance du ' + (_dispDate(ymd) || ymd) + ' dépassée de ' + jours + ' jour' + (jours>1?'s':'') + '.');
+  }
+  if (pire){
+    raisons.push(pire.short + ' en cours depuis ' + _sviDur(pire.ecoule*60000));
+    detail.push('Étape « ' + pire.short + ' » : ' + _sviDur(pire.ecoule*60000)
+      + ' écoulées pour une cible de ' + _sviDur(pire.cible*60000)
+      + ' (+' + _sviDur(pire.depassement*60000) + ').');
+  }
+  return { jours, etape:pire, label:raisons.join(' · '), title:detail.join(' ') };
+}
+
 // Une ligne de suivi par dossier. `idx` = Map(dossierId -> tâches) (_tachesParDossier).
 function _sviRow(d, idx){
   const dt     = idx.get(d.id) || [];
@@ -10886,6 +10924,7 @@ function _sviRow(d, idx){
     quantite:d.quantite || '', dateLiv:d.dateLivraisonProd || d.dateLivraison || '',
     etapes, pct, done, started, cur, curIdx, nbDone, nbAppl, startMs, endMs,
     totalMs: startMs ? ((endMs || Date.now()) - startMs) : 0,
+    retard: _sviRetard(d, dt, done),
     statut: done ? 'done' : (started ? 'encours' : 'todo')
   };
 }
@@ -10934,15 +10973,26 @@ function _sviRenderBody(){
       : '<span class="svi-badge svi-badge--todo">○ Pas démarrée</span>';
     const pos = r.done ? 'Livrée'
               : (r.curIdx >= 0 ? 'Étape ' + (r.curIdx+1) + '/' + ETAPES_CONFIG.length : 'En attente');
-    const liv = r.dateLiv ? '<span class="svi-meta">Livraison ' + _sviEsc(_dispDate(r.dateLiv) || r.dateLiv) + '</span>' : '';
+    const liv = r.dateLiv
+      ? '<span class="svi-meta' + (r.retard && r.retard.jours ? ' svi-meta--late' : '') + '">Livraison '
+        + _sviEsc(_dispDate(r.dateLiv) || r.dateLiv) + '</span>'
+      : '';
+    // Bandeau d'alerte sur sa propre ligne : la barre du bas est déjà dense, et le motif
+    // du retard doit rester lisible sans survol (sur mobile il n'y a pas d'infobulle).
+    const alerte = r.retard
+      ? '<div class="svi-late" title="' + _sviEsc(r.retard.title) + '">'
+        + '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
+        + '<span>' + _sviEsc(r.retard.label) + '</span></div>'
+      : '';
     const age = r.startMs ? '<span class="svi-meta">' + (r.done ? 'Traitée en ' : 'Ouverte depuis ') + _sviDur(r.totalMs) + '</span>' : '';
-    return '<button type="button" class="svi-card' + (r.done ? ' svi-card--done' : '') + '" onclick="openSuiviDossier(\'' + _sviEsc(r.id) + '\')">'
+    return '<button type="button" class="svi-card' + (r.done ? ' svi-card--done' : '') + (r.retard ? ' svi-card--late' : '') + '" onclick="openSuiviDossier(\'' + _sviEsc(r.id) + '\')">'
       + '<div class="svi-card-top">'
       +   '<div class="svi-id"><b>' + _sviEsc(r.numero) + '</b><span>' + _sviEsc(r.client||'—') + '</span></div>'
       +   etat
       + '</div>'
       + '<div class="svi-prod">' + _sviEsc(r.produit||'—') + (r.quantite ? ' <span class="svi-qte">×' + _sviEsc(r.quantite) + '</span>' : '') + '</div>'
       + _sviStepper(r)
+      + alerte
       + '<div class="svi-card-bot">'
       +   '<div class="svi-bar"><i style="width:' + r.pct + '%"></i></div>'
       +   '<span class="svi-pct">' + r.pct + '%</span>'
@@ -11104,6 +11154,15 @@ function _sviInjectStyle(){
     background:var(--color-surface,#fff);border:1px solid var(--color-border,#e5e3df);border-radius:13px;padding:13px 15px}
   .svi-card:hover{border-color:#b4661f;box-shadow:0 2px 10px rgba(180,102,31,.13)}
   .svi-card--done{opacity:.72}
+  /* Alerte retard : bord gauche rouge + bandeau. Volontairement PAS de fond rouge
+     sur toute la carte — avec plusieurs commandes en retard la liste deviendrait
+     illisible et l'alerte perdrait sa force. */
+  .svi-card--late{border-color:#f0b4b4;border-left:4px solid #dc2626;padding-left:12px}
+  .svi-card--late:hover{border-color:#dc2626;box-shadow:0 2px 10px rgba(220,38,38,.16)}
+  .svi-late{display:flex;align-items:center;gap:6px;margin:0 0 9px;padding:5px 9px;border-radius:8px;
+    background:#fdeaea;color:#b91c1c;font-size:11.5px;font-weight:700;line-height:1.3}
+  .svi-late svg{flex:none}
+  .svi-meta--late{color:#b91c1c;font-weight:700}
   .svi-card-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
   .svi-id{display:flex;flex-direction:column;min-width:0}
   .svi-id b{font-family:monospace;font-size:13.5px;font-weight:700;color:var(--color-text,#1c1917)}
