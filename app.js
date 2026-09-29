@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '195 · 2026-09-29';
+const APP_VERSION = '196 · 2026-09-29';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -10937,6 +10937,15 @@ function _sviRows(){
   return rows;
 }
 
+// « En retard » n'est PAS un statut : une commande en retard est aussi « en production »
+// ou « pas démarrée ». C'est donc un onglet transversal, et son compteur recoupe
+// volontairement les autres — seul « Toutes » fait la somme des statuts.
+function _sviMatchTab(r, f){
+  if (f === 'all')  return true;
+  if (f === 'late') return !!r.retard;
+  return r.statut === f;
+}
+
 function setSviFilter(f){ _sviFilter = f; renderSuiviPage(); }
 function setSviEtape(c){  _sviEtape  = c; _sviRenderBody(); }
 function setSviSearch(v){ _sviSearch = v; _sviRenderBody(); }
@@ -10955,13 +10964,18 @@ function _sviRenderBody(){
   const host = document.getElementById('suiviBody'); if (!host) return;
   const q = (_sviSearch||'').trim().toLowerCase();
   let rows = _sviRows();
-  if (_sviFilter !== 'all') rows = rows.filter(r => r.statut === _sviFilter);
+  rows = rows.filter(r => _sviMatchTab(r, _sviFilter));
   if (_sviEtape) rows = rows.filter(r => r.cur === _sviEtape);
   if (q) rows = rows.filter(r => (r.numero+' '+r.client+' '+r.produit).toLowerCase().includes(q));
 
   if (!rows.length){
-    host.innerHTML = '<div class="svi-empty">Aucune commande à afficher.<br>'
-      + '<small>Les commandes apparaissent ici dès qu\'un dossier est créé (vente ou réservation).</small></div>';
+    // Sur l'onglet « En retard », une liste vide est une BONNE nouvelle : le message
+    // générique « aucune commande à afficher » ferait croire à un filtre mal réglé.
+    host.innerHTML = (_sviFilter === 'late' && !_sviEtape && !q)
+      ? '<div class="svi-empty">✓ Aucune commande en retard.<br>'
+        + '<small>Toutes les étapes en cours tiennent leur rythme cible, et aucune échéance de livraison n\'est dépassée.</small></div>'
+      : '<div class="svi-empty">Aucune commande à afficher.<br>'
+        + '<small>Les commandes apparaissent ici dès qu\'un dossier est créé (vente ou réservation).</small></div>';
     return;
   }
   host.innerHTML = rows.map(r => {
@@ -11013,11 +11027,13 @@ function renderSuiviPage(reload){
   const encours = rows.filter(r => r.statut === 'encours').length;
   const todo    = rows.filter(r => r.statut === 'todo').length;
   const done    = rows.filter(r => r.statut === 'done').length;
-  const seg = (k,label,n) => '<button role="tab" aria-selected="' + (_sviFilter===k) + '" onclick="setSviFilter(\'' + k + '\')">' + label + ' <b>' + n + '</b></button>';
+  const late    = rows.filter(r => r.retard).length;
+  const seg = (k,label,n,cls) => '<button role="tab"' + (cls ? ' class="' + cls + '"' : '')
+    + ' aria-selected="' + (_sviFilter===k) + '" onclick="setSviFilter(\'' + k + '\')">' + label + ' <b>' + n + '</b></button>';
   // Le sélecteur ne propose que les étapes où stationnent des commandes DE L'ONGLET
   // ACTIF : proposer une étape absente de l'onglet donnerait une liste vide sans
   // cause visible. Si l'étape retenue disparaît (changement d'onglet), on la lâche.
-  const tabRows = _sviFilter === 'all' ? rows : rows.filter(r => r.statut === _sviFilter);
+  const tabRows = rows.filter(r => _sviMatchTab(r, _sviFilter));
   const actives = tabRows.filter(r => !r.done && r.cur);
   if (_sviEtape && !actives.some(r => r.cur === _sviEtape)) _sviEtape = '';
   const opts = ETAPES_CONFIG.filter(e => actives.some(r => r.cur === e.code))
@@ -11025,6 +11041,8 @@ function renderSuiviPage(reload){
             + _sviEsc(e.short) + ' (' + actives.filter(r => r.cur === e.code).length + ')</option>').join('');
   host.innerHTML =
       '<div class="svi-kpis">'
+    +   '<div class="svi-kpi svi-kpi--late' + (late ? '' : ' svi-kpi--ok') + '" style="--k:#dc2626">'
+    +     '<div class="v">' + late + '</div><div class="l">En retard</div></div>'
     +   '<div class="svi-kpi" style="--k:#e8834a"><div class="v">' + encours + '</div><div class="l">En production</div></div>'
     +   '<div class="svi-kpi" style="--k:#b45309"><div class="v">' + todo + '</div><div class="l">Pas démarrées</div></div>'
     +   '<div class="svi-kpi" style="--k:#16a34a"><div class="v">' + done + '</div><div class="l">Terminées</div></div>'
@@ -11032,7 +11050,7 @@ function renderSuiviPage(reload){
     + '</div>'
     + '<div class="svi-bar-tools">'
     +   '<div class="svi-seg" role="tablist">'
-    +     seg('encours','En production',encours) + seg('todo','Pas démarrées',todo)
+    +     seg('late','⚠ En retard',late,'svi-seg-late') + seg('encours','En production',encours) + seg('todo','Pas démarrées',todo)
     +     seg('done','Terminées',done) + seg('all','Toutes',total)
     +   '</div>'
     +   '<select class="svi-sel" onchange="setSviEtape(this.value)" aria-label="Filtrer par étape en cours">'
@@ -11138,10 +11156,20 @@ function _sviInjectStyle(){
   const st = document.createElement('style');
   st.id = 'svi-style';
   st.textContent = `
-  .svi-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
+  .svi-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:14px}
   .svi-kpi{border:1px solid var(--color-border,#e5e3df);border-left:4px solid var(--k,#b4661f);border-radius:11px;padding:12px 14px;background:var(--color-surface,#fff)}
   .svi-kpi .v{font-size:26px;font-weight:800;line-height:1;color:var(--color-text,#1c1917)}
   .svi-kpi .l{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--color-text-muted,#78716c);margin-top:4px}
+  /* KPI « En retard » : rouge quand il y a de quoi alerter, neutre à zéro — un compteur
+     rouge affichant 0 désensibiliserait à la couleur. */
+  .svi-kpi--late{background:#fdeaea;border-color:#f0b4b4}
+  .svi-kpi--late .v{color:#b91c1c}
+  .svi-kpi--late .l{color:#b91c1c;opacity:.85}
+  .svi-kpi--late.svi-kpi--ok{background:var(--color-surface,#fff);border-color:var(--color-border,#e5e3df);border-left-color:#16a34a}
+  .svi-kpi--late.svi-kpi--ok .v{color:var(--color-text-muted,#78716c)}
+  .svi-kpi--late.svi-kpi--ok .l{color:var(--color-text-muted,#78716c);opacity:1}
+  .svi-seg button.svi-seg-late{color:#b91c1c}
+  .svi-seg button.svi-seg-late[aria-selected="true"]{background:#dc2626;color:#fff}
   .svi-bar-tools{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
   .svi-seg{display:inline-flex;background:var(--color-bg,#f5f4f2);border:1px solid var(--color-border,#e5e3df);border-radius:10px;padding:3px;gap:3px;flex-wrap:wrap}
   .svi-seg button{border:0;background:transparent;color:var(--color-text-muted,#78716c);font-weight:700;font-size:12.5px;padding:7px 13px;border-radius:8px;cursor:pointer}
@@ -11218,7 +11246,8 @@ function _sviInjectStyle(){
   .svi-t-dates em{font-style:normal;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--color-text-muted,#78716c);margin-right:4px}
   .svi-t-dur{font-weight:700}
   .svi-t-dates--empty{margin-top:4px;font-size:12px;color:var(--color-text-muted,#a8a29e);font-style:italic}
-  @media (max-width:820px){ .svi-kpis{grid-template-columns:1fr 1fr;gap:8px} .svi-kpi .v{font-size:21px} }
+  @media (max-width:1180px){ .svi-kpis{grid-template-columns:repeat(3,1fr);gap:10px} }
+  @media (max-width:760px){ .svi-kpis{grid-template-columns:repeat(2,1fr);gap:8px} .svi-kpi .v{font-size:21px} }
   @media (max-width:560px){ .svi-list{grid-template-columns:1fr} .svi-search{min-width:0} .svi-t-dates{gap:11px} }
   `;
   document.head.appendChild(st);
