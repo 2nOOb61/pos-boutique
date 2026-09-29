@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '200 · 2026-09-29';
+const APP_VERSION = '201 · 2026-09-29';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -721,6 +721,30 @@ function renderProducts() {
       </div>
     </div>`).join('');
 }
+// ============================================================
+// RECHERCHE — ANTI-REBOND
+// ============================================================
+// Chaque barre de recherche redessinait sa page à CHAQUE caractère. Mesuré sur un jeu
+// réaliste (400 commandes, 250 réservations, 1500 dossiers, 3000 tâches) : 25 à 78 ms
+// par frappe sur un poste de bureau, donc 3 à 5 fois plus sur les postes de l'atelier
+// et les téléphones. Taper « rakoto » enchaînait six rendus complets et l'écran restait
+// figé entre les lettres — les caractères semblaient arriver en retard.
+//
+// On garde la saisie instantanée (l'état du filtre est posé tout de suite) et on ne
+// redessine QU'UNE fois la frappe retombée. 220 ms : au-dessus du rythme d'une frappe
+// normale (80-150 ms entre deux lettres, donc tout est regroupé) et en dessous du seuil
+// où l'attente se remarque.
+const _SEARCH_DEBOUNCE_MS = 220;
+const _searchTimers = Object.create(null);
+function _debSearch(cle, fn, ms){
+  clearTimeout(_searchTimers[cle]);
+  _searchTimers[cle] = setTimeout(() => { try { fn(); } catch(e) { console.warn('[recherche]', cle, e); } },
+                                  ms == null ? _SEARCH_DEBOUNCE_MS : ms);
+}
+
+// La caisse reste SANS anti-rebond, volontairement : son rendu coûte 3 ms (une grille
+// d'articles, sans agrégat), et la douchette code-barres envoie la référence d'un coup —
+// attendre 220 ms avant d'afficher l'article ralentirait l'encaissement.
 function filterProducts() { renderProducts(); }
 
 function addToCart(id) {
@@ -7502,7 +7526,7 @@ function _cmdSetSort(k){
 }
 function _cmdToggleSortDir(){ _cmdSort.dir = _cmdSort.dir==='asc' ? 'desc' : 'asc'; renderCmdCockpit(); }
 function _cmdToggleDensity(){ _cmdDensity = _cmdDensity==='compact' ? 'detaille' : 'compact'; renderCmdCockpit(); }
-function _cmdSetSearch(v){ _cmdSearch = v; _cmdLimit = _CMD_PAGE; _cmdRenderBody(); }
+function _cmdSetSearch(v){ _cmdSearch = v; _cmdLimit = _CMD_PAGE; _debSearch('cmd', _cmdRenderBody); }
 function _cmdShowMore(){ _cmdLimit += _CMD_PAGE; _cmdRenderBody(); }
 
 // ============================================================
@@ -10744,7 +10768,7 @@ function _finPageRows(){
 }
 
 function setFinPageFilter(f){ _finPageFilter = f; renderFinitionsPage(); }
-function setFinPageSearch(v){ _finPageSearch = v; _finPageRenderBody(); }
+function setFinPageSearch(v){ _finPageSearch = v; _debSearch('finp', _finPageRenderBody); }
 
 function _finPageRenderBody(){
   const host = document.getElementById('finitionsBody'); if (!host) return;
@@ -11127,7 +11151,7 @@ function setSviEtape(c){  _sviEtape  = c; if (c) _sviVue = 'liste'; renderSuiviP
 function setSviCommercial(v){ _sviCommercial = v; renderSuiviPage(); }
 // La recherche re-rend le corps SEUL : reconstruire toute la page à chaque frappe
 // ferait perdre le focus du champ. `_sviRenderBody` sait rendre l'un ou l'autre.
-function setSviSearch(v){ _sviSearch = v; _sviRenderBody(); }
+function setSviSearch(v){ _sviSearch = v; _debSearch('svi', _sviRenderBody); }
 
 // Entrer dans une phase (clic sur l'en-tête de colonne) ou dans une étape précise.
 function sviOuvrirPhase(key){
@@ -17016,7 +17040,14 @@ function setDelivGroupBy(v)  { _delivState.groupBy = v; renderLivraisons(); }
 function setDelivSort(v)     { if (_delivState.sort === v) _delivState.dir = _delivState.dir === 'asc' ? 'desc' : 'asc'; else { _delivState.sort = v; _delivState.dir = 'asc'; } renderLivraisons(); }
 function toggleDelivSortDir(){ _delivState.dir = _delivState.dir === 'asc' ? 'desc' : 'asc'; renderLivraisons(); }
 function toggleDelivDensity(){ _delivState.density = _delivState.density === 'compact' ? 'detaille' : 'compact'; renderLivraisons(); }
-function setDelivSearch(v)   { _delivState.q = v;      _delivLimit = _DELIV_PAGE; renderLivraisons(); }
+// ⚠ `renderLivraisons()` reconstruit `livraisonsContent` EN ENTIER, barre d'outils
+// comprise — donc le champ de recherche lui-même. À chaque caractère le champ était
+// remplacé par un nouveau noeud et l'opérateur PERDAIT LE FOCUS dès la première lettre :
+// la suite de la frappe n'arrivait nulle part. On ne redessine donc que le corps, comme
+// le font déjà les autres cockpits. Les compteurs d'onglets et les cartes d'alerte sont
+// bâtis sur `_delivBuildRows()` non filtré : ils ne dépendent pas de la recherche.
+function setDelivSearch(v)   { _delivState.q = v;      _delivLimit = _DELIV_PAGE;
+                               _debSearch('deliv', () => { _delivRenderAddrRecap(); _delivRenderBody(); }); }
 function setDelivDate(v)     { _delivState.date = _toIsoDate(v || ''); _delivLimit = _DELIV_PAGE; renderLivraisons(); }
 function clearDelivDate()    { _delivState.date = ''; _delivLimit = _DELIV_PAGE; renderLivraisons(); }
 function delivShowMore()     { _delivLimit += _DELIV_PAGE; renderLivraisons(); }
@@ -17098,7 +17129,10 @@ function calToggleDay(kind, iso){
 function setCalFilter(field, value){
   if(!(field in _calFilters)) return;
   _calFilters[field] = (value||'').trim ? value.trim() : (value||'');
-  renderCalendrier();
+  // Seule la saisie au clavier est temporisée : un menu déroulant ou une case à cocher
+  // doit répondre au clic sans délai.
+  if (field === 'q') _debSearch('cal', renderCalendrier);
+  else renderCalendrier();
 }
 
 // Filtres hors statut (utilisés aussi pour les KPI).
@@ -18028,7 +18062,7 @@ function setFinTo(v)     { _finState.to = v;   _finState.period = null; }
 function commitFinDates(){ renderFinances(); }
 function setFinClearDates() { _finState.from = ''; _finState.to = ''; _finState.period = 'all'; renderFinances(); }
 function setFinPay(v)    { _finState.pay = v;    renderFinances(); }
-function setFinSearch(v) { _finState.q = v;      renderFinances(); }
+function setFinSearch(v) { _finState.q = v;      _debSearch('fin', renderFinances); }
 function toggleFinItem(id) { if (_finItemOpen.has(id)) _finItemOpen.delete(id); else _finItemOpen.add(id); renderFinances(); }
 
 // Numérotation séquentielle STABLE des opérations (par date de création, sur TOUS les
@@ -18492,7 +18526,7 @@ function setPerfFrom(v)   { _perfState.from = v; _perfState.period = 'range'; }
 function setPerfTo(v)     { _perfState.to = v; _perfState.period = 'range'; }
 function commitPerfDates(){ renderPerf(); }
 function setPerfClearDates(){ _perfState.from = ''; _perfState.to = ''; _perfState.period = 'all'; renderPerf(); }
-function setPerfSearch(v) { _perfState.search = v; renderPerf(); }
+function setPerfSearch(v) { _perfState.search = v; _debSearch('perf', renderPerf); }
 function togglePerfOp(key){ if (_perfOpen.has(key)) _perfOpen.delete(key); else _perfOpen.add(key); renderPerf(); }
 
 // Format d'un délai/durée pouvant dépasser l'heure ou le jour.
@@ -19433,7 +19467,7 @@ function _cockpitSetSort(k){
 function _cockpitToggleSortDir(){ _cockpitSort.dir = _cockpitSort.dir==='asc' ? 'desc' : 'asc'; renderProdCockpit(); }
 function _cockpitToggleDensity(){ _cockpitDensity = _cockpitDensity==='compact' ? 'detaille' : 'compact'; renderProdCockpit(); }
 function _cockpitToggleOps(){ _cockpitOpsOpen = !_cockpitOpsOpen; renderProdCockpit(); }
-function _cockpitSetSearch(v){ _cockpitSearch = v; _cockpitLimit = _COCKPIT_PAGE; _cockpitRenderBody(); }
+function _cockpitSetSearch(v){ _cockpitSearch = v; _cockpitLimit = _COCKPIT_PAGE; _debSearch('cockpit', _cockpitRenderBody); }
 function _cockpitShowMore(){ _cockpitLimit += _COCKPIT_PAGE; _cockpitRenderBody(); }
 
 // La gestionnaire de stock EST l'acheteuse : elle peut démarrer/terminer
@@ -22926,7 +22960,7 @@ function _kbCanActOn(t){ return typeof _canActOnTache === 'function' ? _canActOn
 function _kbSetScope(v){ _kbScope = v; renderKanbanPage(); }
 function _kbSetEtape(v){ _kbEtape = v; _kbRenderBoard(); }
 function _kbSetOp(v){ _kbOp = v; _kbRenderBoard(); }
-function _kbSetSearch(v){ _kbSearch = v; _kbRenderBoard(); }
+function _kbSetSearch(v){ _kbSearch = v; _debSearch('kb', _kbRenderBoard); }
 
 function renderKanbanPage(reload){
   _kbInjectStyle();

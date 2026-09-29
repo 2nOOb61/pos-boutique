@@ -26,7 +26,7 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20260929-suiviui">
+<link rel="stylesheet" href="./style.css?v=20260929-recherche">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
@@ -1438,7 +1438,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
     <div class="hist-toolbar">
       <div class="hist-search">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input id="histSearch" type="search" placeholder="Rechercher un client, un article…" oninput="renderHistoryList()" autocomplete="off">
+        <input id="histSearch" type="search" placeholder="Rechercher un client, un article…" oninput="_debSearch('hist',renderHistoryList)" autocomplete="off">
       </div>
       <select id="histTypeFilter" onchange="renderHistoryList()" aria-label="Filtrer par type">
         <option value="all">Tous les types</option>
@@ -1518,7 +1518,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <div class="hist-search" style="max-width:240px;min-width:150px">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input id="resSearch" type="search" placeholder="Rechercher client, article…" oninput="renderReservations()" autocomplete="off">
+          <input id="resSearch" type="search" placeholder="Rechercher client, article…" oninput="_debSearch('res',renderReservations)" autocomplete="off">
         </div>
         <select id="resFilter" onchange="renderReservations()" style="padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px">
           <option value="pending">En attente</option>
@@ -1556,7 +1556,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <div class="hist-search" style="max-width:240px;min-width:150px">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input id="cmdSearch" type="search" placeholder="Rechercher client, article…" oninput="renderCommandes()" autocomplete="off">
+          <input id="cmdSearch" type="search" placeholder="Rechercher client, article…" oninput="_debSearch('cmdold',renderCommandes)" autocomplete="off">
         </div>
         <select id="cmdFilter" onchange="renderCommandes()" style="padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px">
           <option value="pending">En cours</option>
@@ -1646,7 +1646,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
         <select id="journalCat" onchange="renderJournal()" style="padding:7px 9px;border:1px solid var(--color-border);border-radius:8px;font-size:13px;min-width:130px"><option value="">Toutes</option></select>
       </label>
       <label style="display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--color-text-secondary);font-weight:600;flex:1;min-width:160px">Recherche
-        <input type="text" id="journalSearch" oninput="renderJournal()" placeholder="client, réf, détail…" style="padding:7px 9px;border:1px solid var(--color-border);border-radius:8px;font-size:13px">
+        <input type="text" id="journalSearch" oninput="_debSearch('jrn',renderJournal)" placeholder="client, réf, détail…" style="padding:7px 9px;border:1px solid var(--color-border);border-radius:8px;font-size:13px">
       </label>
       <button onclick="resetJournalFilters()" style="padding:8px 12px;background:none;border:1px solid var(--color-border);border-radius:8px;font-size:12px;color:var(--color-text-secondary);cursor:pointer">Réinitialiser</button>
     </div>
@@ -1895,7 +1895,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
       <div class="config-section-title" style="display:flex;align-items:center;justify-content:space-between">
         <span>Gestion des articles</span>
         <div style="display:flex;gap:8px">
-          <input class="filter-input" id="configSearch" placeholder="Rechercher..." oninput="renderConfigArticles()" style="max-width:200px;padding:8px 12px" />
+          <input class="filter-input" id="configSearch" placeholder="Rechercher..." oninput="_debSearch('cfg',renderConfigArticles)" style="max-width:200px;padding:8px 12px" />
           <button class="btn-add-product" onclick="openProductModal()">+ Nouvel article</button>
         </div>
       </div>
@@ -2029,7 +2029,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
         <!-- Recherche client-side -->
         <div class="dossier-search-wrap">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input id="dossierSearchInput" class="dossier-search-input" placeholder="Rechercher client, N° dossier, produit…" oninput="renderDossiers()" />
+          <input id="dossierSearchInput" class="dossier-search-input" placeholder="Rechercher client, N° dossier, produit…" oninput="_debSearch('dos',renderDossiers)" />
         </div>
         <div id="dossierListContainer" class="dossier-list-wrap"></div>
       </div>
@@ -2183,7 +2183,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
       </div>
       <div class="form-group">
         <label>Commande / réservation</label>
-        <input id="mchStartSearch" placeholder="🔎 Rechercher par nom de client ou référence…" oninput="_filterMachineSource()" autocomplete="off" style="margin-bottom:8px" />
+        <input id="mchStartSearch" placeholder="🔎 Rechercher par nom de client ou référence…" oninput="_debSearch('mch',_filterMachineSource)" autocomplete="off" style="margin-bottom:8px" />
         <select id="mchStartSource" size="6" onchange="onMachineSourceChange()"></select>
         <div id="mchStartSourceCount" style="font-size:11px;color:var(--muted);margin-top:4px"></div>
       </div>
@@ -3436,7 +3436,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
           <div class="ac-search-wrap">
             <input id="arretSoldeSearch" class="ac-search-input" type="text" autocomplete="off"
               placeholder="Rechercher par nom, contact ou référence…"
-              oninput="renderArretSoldeResults(this.value)" />
+              oninput="_debSearch('solde',()=>renderArretSoldeResults(document.getElementById('arretSoldeSearch').value))" />
           </div>
           <div id="arretSoldeResults"></div>
         </section>
@@ -3622,7 +3622,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260929-suiviui"></script>
+<script src="./app.js?v=20260929-recherche"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
