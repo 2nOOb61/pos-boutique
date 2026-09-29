@@ -26,7 +26,7 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20260925-batpjfix">
+<link rel="stylesheet" href="./style.css?v=20260929-suivicommande">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
@@ -1055,6 +1055,10 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
           <button class="nav-btn sidebar-btn" data-roles="admin,chef_atelier,operateur_prod,machiniste,pao,finition,gestionnaire,commerciale" onclick="showPage('machines',this)" aria-label="Machines">
             <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
             <span class="sidebar-label">Machines</span>
+          </button>
+          <button class="nav-btn sidebar-btn" data-roles="admin,chef_atelier,operateur_prod,machiniste,pao,finition,livreur,caissier,commerciale,utilisateur,gestionnaire,comptable" onclick="showPage('suivi',this)" aria-label="Suivi commande">
+            <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg></span>
+            <span class="sidebar-label">Suivi commande</span>
           </button>
           <button class="nav-btn sidebar-btn" data-roles="admin,commerciale,chef_atelier,pao,gestionnaire" onclick="showPage('suivi-bat',this)" aria-label="Suivi BAT">
             <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg></span>
@@ -2295,6 +2299,21 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
     </div>
     <div id="suiviBatContent"></div>
     <div id="batCalContent" style="display:none"></div>
+  </div>
+
+  <div class="page" id="page-suivi" data-roles="admin,chef_atelier,operateur_prod,machiniste,pao,finition,livreur,caissier,commerciale,utilisateur,gestionnaire,comptable">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:16px">
+      <div>
+        <h1 style="font-size:21px;font-weight:800;color:var(--text);margin:0">Suivi commande</h1>
+        <p style="font-size:13px;color:var(--muted);margin:3px 0 0">Où en est chaque commande dans la production — cliquez une carte pour voir la frise détaillée des étapes</p>
+      </div>
+      <button onclick="renderSuiviPage(true)" title="Actualiser depuis le serveur"
+        style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;background:var(--surface2);color:var(--text);border:1px solid var(--border);cursor:pointer;font-size:13px;font-weight:600">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        Actualiser
+      </button>
+    </div>
+    <div id="suiviContent"></div>
   </div>
 
   <div class="page" id="page-finitions" data-roles="admin,chef_atelier,finition,operateur_prod,machiniste,pao,gestionnaire,commerciale">
@@ -3603,7 +3622,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20260925-batpjfix"></script>
+<script src="./app.js?v=20260929-suivicommande"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

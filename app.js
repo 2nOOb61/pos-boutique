@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '193 · 2026-09-25';
+const APP_VERSION = '194 · 2026-09-29';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -227,6 +227,7 @@ const PAGE_LABELS = {
   'mon-dashboard': 'Mon tableau de bord',
   attribution:     'Attribution / Dossiers',
   production:      'Production / Tâches',
+  suivi:           'Suivi commande',
   tableau:         'Tableau des tâches (Kanban)',
   messagerie:      'Messagerie',
   config:          'Configuration (admin)',
@@ -256,6 +257,8 @@ const PAGE_ACCESS = {
   finitions:      ['admin','chef_atelier','finition','operateur_prod','machiniste','pao','gestionnaire','commerciale'],
   messagerie:     ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
   tableau:        ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','gestionnaire','commerciale'],
+  // Suivi commande : lecture seule, aucun nom d'operateur affiche -> ouvert a tous les roles.
+  suivi:          ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
 };
 // Pages réservées au SUPER ADMIN uniquement (les autres admins ne les voient pas).
 const SUPERADMIN_ONLY_PAGES = ['users', 'journal'];
@@ -620,6 +623,8 @@ function showPage(id, btn, bnavBtn) {
   if (id !== 'suivi-bat' && typeof _stopBatClock === 'function') _stopBatClock();
   // Arrêter l'horloge live du cockpit Production si on quitte cette page
   if (id !== 'production' && typeof _stopProdClock === 'function') _stopProdClock();
+  // Arrêter le rafraîchissement auto du Suivi commande si on quitte cette page
+  if (id !== 'suivi' && typeof _sviStopAuto === 'function') _sviStopAuto();
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
   document.querySelectorAll('.bnav-btn').forEach(b=>b.classList.remove('active'));
@@ -655,6 +660,7 @@ function showPage(id, btn, bnavBtn) {
   if (id==='suivi-bat')    { renderSuiviBat(); if (APPS_SCRIPT_URL) Promise.all([loadBatsFromScript(), loadDossiers(), loadCommandesFromScript()]).then(() => renderSuiviBat()).catch(()=>{}); }
   if (id==='finitions')    { renderFinitionsPage(); if (APPS_SCRIPT_URL) Promise.all([loadDossiers(), _loadTachesQuietly(), _loadFinitionsFromScript()]).then(() => renderFinitionsPage()).catch(()=>{}); }
   if (id==='tableau')      { renderKanbanPage(); if (APPS_SCRIPT_URL) Promise.all([loadDossiers(), _loadTachesQuietly()]).then(() => renderKanbanPage()).catch(()=>{}); }
+  if (id==='suivi')        { renderSuiviPage(); _sviStartAuto(); if (APPS_SCRIPT_URL) Promise.all([loadDossiers(), _loadTachesQuietly()]).then(() => renderSuiviPage()).catch(()=>{}); }
   if (id==='messagerie')   { loadMessagerie(); _autoRefreshMessagerie(); }
   if (id==='patron')       { renderControlFinance(); renderPatronEncaissements(); renderPatronDashboard(); _autoRefreshPatron(); loadEncaissementsFromScript().then(renderPatronEncaissements).catch(()=>{}); }
   if (id==='journal')      { loadJournal(); }
@@ -10784,6 +10790,379 @@ function renderFinitionsPage(reload){
     </div>
     <div id="finitionsBody"></div>`;
   _finPageRenderBody();
+}
+
+// ============================================================
+// SUIVI COMMANDE — « où en est cette commande ? »
+// ------------------------------------------------------------
+// Les pages Production / Tableau / Attribution raisonnent en TÂCHES (qui fait
+// quoi). Cette page raisonne en COMMANDE : une carte par dossier, la frise des
+// 10 étapes du pipeline avec, pour chacune, sa date de début, sa date de fin et
+// le temps qu'elle a pris. Lecture seule : aucun pointage ne se fait d'ici.
+// Aucun nom d'opérateur n'est affiché (le cloisonnement `_canSeeAllOps` n'a donc
+// pas à s'appliquer) : la page montre l'avancement, pas les personnes.
+// ============================================================
+let _sviFilter  = 'encours';   // all | todo | encours | done
+let _sviSearch  = '';
+let _sviEtape   = '';          // code d'étape (« stationne à ») ou '' = toutes
+let _sviOpenId  = null;        // dossier ouvert dans la frise (pour le re-rendu)
+
+function _sviEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// Durée « échelle atelier » : un dossier vit des jours, pas des secondes.
+// 3j 4h · 4h 20m · 35m · <1m
+function _sviDur(ms){
+  if (!(ms > 0)) return '—';
+  const mn = Math.floor(ms / 60000);
+  if (mn < 1) return '<1m';
+  const j = Math.floor(mn / 1440), h = Math.floor((mn % 1440) / 60), m = mn % 60;
+  if (j > 0) return j + 'j' + (h ? ' ' + h + 'h' : '');
+  if (h > 0) return h + 'h' + (m ? ' ' + String(m).padStart(2,'0') + 'm' : '');
+  return m + 'm';
+}
+
+// Horodatages d'une tâche. `startTs`/`endTs` (epoch ms) viennent du serveur et sont
+// immunisés contre les écarts de fuseau ; `dateDebut`/`dateFin` ("dd/MM/yyyy HH:mm")
+// servent de secours pour les tâches créées hors ligne.
+function _sviStartMs(t){
+  if (t && t.startTs) return t.startTs;
+  const d = _parseFrDate(t && (t.dateDebut || t.dateAssignation));
+  return d ? d.getTime() : null;
+}
+function _sviEndMs(t){
+  if (t && t.endTs) return t.endTs;
+  const d = _parseFrDate(t && t.dateFin);
+  return d ? d.getTime() : null;
+}
+
+// État d'UNE étape pour UN dossier, à partir de ses tâches.
+//   done : toutes les tâches de l'étape sont terminées
+//   wip  : au moins une tâche en cours
+//   todo : attribuée, pas encore démarrée
+//   none : aucune tâche → étape non concernée par ce dossier (grise, sans durée)
+//   skip : idem mais sur un dossier clôturé → « non tracée » (clôture admin)
+function _sviEtapeState(te, closed){
+  if (!te.length) return { state: closed ? 'skip' : 'none', startMs:null, endMs:null, durMs:0 };
+  const starts = te.map(_sviStartMs).filter(v => v);
+  const ends   = te.map(_sviEndMs).filter(v => v);
+  const startMs = starts.length ? Math.min.apply(null, starts) : null;
+  const allDone = te.every(t => t.statut === 'TERMINE');
+  const anyWip  = te.some(t => t.statut === 'EN_COURS');
+  if (allDone){
+    const endMs = ends.length ? Math.max.apply(null, ends) : null;
+    return { state:'done', startMs, endMs, durMs: (startMs && endMs && endMs > startMs) ? endMs - startMs : 0 };
+  }
+  if (anyWip) return { state:'wip', startMs, endMs:null, durMs: startMs ? Date.now() - startMs : 0 };
+  return { state:'todo', startMs:null, endMs:null, durMs:0 };
+}
+
+// Une ligne de suivi par dossier. `idx` = Map(dossierId -> tâches) (_tachesParDossier).
+function _sviRow(d, idx){
+  const dt     = idx.get(d.id) || [];
+  const closed = _dossierClosed(d);
+  const etapes = ETAPES_CONFIG.map(e => {
+    const st = _sviEtapeState(dt.filter(t => t.etapeCode === e.code), closed);
+    return { code:e.code, label:e.label, short:e.short, color:e.color,
+             state: (closed && st.state === 'wip') ? 'done' : st.state,
+             startMs:st.startMs, endMs:st.endMs, durMs:st.durMs };
+  });
+  const pct     = _dossierPct(dt, d);
+  const done    = closed || pct === 100;
+  const started = etapes.some(s => s.state === 'done' || s.state === 'wip');
+  // Étape courante : statut serveur du dossier (source de vérité, avancée par
+  // majProgressionDossier_) ; à défaut, la première étape en cours puis la
+  // première attribuée non démarrée.
+  const cur = (!done && ETAPES_CONFIG.some(e => e.code === d.statut) ? d.statut : null)
+           || (done ? null : (etapes.find(s => s.state === 'wip')  || {}).code)
+           || (done ? null : (etapes.find(s => s.state === 'todo') || {}).code)
+           || null;
+  const curIdx  = cur ? ETAPES_CONFIG.findIndex(e => e.code === cur) : -1;
+  const nbDone  = etapes.filter(s => s.state === 'done').length;
+  const nbAppl  = etapes.filter(s => s.state !== 'none' && s.state !== 'skip').length;
+  const startMs = etapes.map(s => s.startMs).filter(v => v).sort((a,b) => a-b)[0] || null;
+  const endMs   = done ? (etapes.filter(s => s.state === 'done').map(s => s.endMs).filter(v => v).sort((a,b) => b-a)[0] || null) : null;
+  return {
+    id:d.id, numero:d.numeroDossier || d.id, client:d.client || '', produit:d.produit || '',
+    quantite:d.quantite || '', dateLiv:d.dateLivraisonProd || d.dateLivraison || '',
+    etapes, pct, done, started, cur, curIdx, nbDone, nbAppl, startMs, endMs,
+    totalMs: startMs ? ((endMs || Date.now()) - startMs) : 0,
+    statut: done ? 'done' : (started ? 'encours' : 'todo')
+  };
+}
+
+function _sviRows(){
+  const idx = _tachesParDossier();
+  const rows = (Array.isArray(dossiers) ? dossiers : []).map(d => _sviRow(d, idx));
+  // Les commandes actives d'abord (plus récemment démarrées), les livrées à la fin.
+  rows.sort((a,b) => (a.done?1:0) - (b.done?1:0) || (b.startMs||0) - (a.startMs||0));
+  return rows;
+}
+
+function setSviFilter(f){ _sviFilter = f; renderSuiviPage(); }
+function setSviEtape(c){  _sviEtape  = c; _sviRenderBody(); }
+function setSviSearch(v){ _sviSearch = v; _sviRenderBody(); }
+
+// Mini-frise de la carte : une pastille par étape, dans l'ordre du pipeline.
+function _sviStepper(r){
+  return '<div class="svi-steps" aria-hidden="true">' + r.etapes.map(s => {
+    const style = s.state === 'done' ? 'background:' + s.color + ';border-color:' + s.color
+                : s.state === 'wip'  ? 'background:#fff;border-color:' + s.color + ';box-shadow:0 0 0 3px ' + s.color + '33'
+                : '';
+    return '<span class="svi-dot svi-dot--' + s.state + '" style="' + style + '" title="' + _sviEsc(s.label) + '"></span>';
+  }).join('') + '</div>';
+}
+
+function _sviRenderBody(){
+  const host = document.getElementById('suiviBody'); if (!host) return;
+  const q = (_sviSearch||'').trim().toLowerCase();
+  let rows = _sviRows();
+  if (_sviFilter !== 'all') rows = rows.filter(r => r.statut === _sviFilter);
+  if (_sviEtape) rows = rows.filter(r => r.cur === _sviEtape);
+  if (q) rows = rows.filter(r => (r.numero+' '+r.client+' '+r.produit).toLowerCase().includes(q));
+
+  if (!rows.length){
+    host.innerHTML = '<div class="svi-empty">Aucune commande à afficher.<br>'
+      + '<small>Les commandes apparaissent ici dès qu\'un dossier est créé (vente ou réservation).</small></div>';
+    return;
+  }
+  host.innerHTML = rows.map(r => {
+    const cur  = r.cur ? ETAPES_CONFIG.find(e => e.code === r.cur) : null;
+    const etat = r.done
+      ? '<span class="svi-badge svi-badge--done">✓ Terminée</span>'
+      : cur
+      ? '<span class="svi-badge" style="background:' + cur.color + '1a;color:' + cur.color + '">● ' + _sviEsc(cur.short) + '</span>'
+      : '<span class="svi-badge svi-badge--todo">○ Pas démarrée</span>';
+    const pos = r.done ? 'Livrée'
+              : (r.curIdx >= 0 ? 'Étape ' + (r.curIdx+1) + '/' + ETAPES_CONFIG.length : 'En attente');
+    const liv = r.dateLiv ? '<span class="svi-meta">Livraison ' + _sviEsc(_dispDate(r.dateLiv) || r.dateLiv) + '</span>' : '';
+    const age = r.startMs ? '<span class="svi-meta">' + (r.done ? 'Traitée en ' : 'Ouverte depuis ') + _sviDur(r.totalMs) + '</span>' : '';
+    return '<button type="button" class="svi-card' + (r.done ? ' svi-card--done' : '') + '" onclick="openSuiviDossier(\'' + _sviEsc(r.id) + '\')">'
+      + '<div class="svi-card-top">'
+      +   '<div class="svi-id"><b>' + _sviEsc(r.numero) + '</b><span>' + _sviEsc(r.client||'—') + '</span></div>'
+      +   etat
+      + '</div>'
+      + '<div class="svi-prod">' + _sviEsc(r.produit||'—') + (r.quantite ? ' <span class="svi-qte">×' + _sviEsc(r.quantite) + '</span>' : '') + '</div>'
+      + _sviStepper(r)
+      + '<div class="svi-card-bot">'
+      +   '<div class="svi-bar"><i style="width:' + r.pct + '%"></i></div>'
+      +   '<span class="svi-pct">' + r.pct + '%</span>'
+      +   '<span class="svi-meta svi-meta--pos">' + pos + '</span>'
+      +   age + liv
+      + '</div></button>';
+  }).join('');
+}
+
+function renderSuiviPage(reload){
+  _sviInjectStyle();
+  const host = document.getElementById('suiviContent'); if (!host) return;
+  if (reload && APPS_SCRIPT_URL){
+    Promise.all([loadDossiers(), _loadTachesQuietly()]).then(() => renderSuiviPage(false)).catch(()=>{});
+  }
+  const rows    = _sviRows();
+  const total   = rows.length;
+  const encours = rows.filter(r => r.statut === 'encours').length;
+  const todo    = rows.filter(r => r.statut === 'todo').length;
+  const done    = rows.filter(r => r.statut === 'done').length;
+  const seg = (k,label,n) => '<button role="tab" aria-selected="' + (_sviFilter===k) + '" onclick="setSviFilter(\'' + k + '\')">' + label + ' <b>' + n + '</b></button>';
+  // Le sélecteur ne propose que les étapes où stationnent des commandes DE L'ONGLET
+  // ACTIF : proposer une étape absente de l'onglet donnerait une liste vide sans
+  // cause visible. Si l'étape retenue disparaît (changement d'onglet), on la lâche.
+  const tabRows = _sviFilter === 'all' ? rows : rows.filter(r => r.statut === _sviFilter);
+  const actives = tabRows.filter(r => !r.done && r.cur);
+  if (_sviEtape && !actives.some(r => r.cur === _sviEtape)) _sviEtape = '';
+  const opts = ETAPES_CONFIG.filter(e => actives.some(r => r.cur === e.code))
+    .map(e => '<option value="' + e.code + '"' + (_sviEtape===e.code?' selected':'') + '>'
+            + _sviEsc(e.short) + ' (' + actives.filter(r => r.cur === e.code).length + ')</option>').join('');
+  host.innerHTML =
+      '<div class="svi-kpis">'
+    +   '<div class="svi-kpi" style="--k:#e8834a"><div class="v">' + encours + '</div><div class="l">En production</div></div>'
+    +   '<div class="svi-kpi" style="--k:#b45309"><div class="v">' + todo + '</div><div class="l">Pas démarrées</div></div>'
+    +   '<div class="svi-kpi" style="--k:#16a34a"><div class="v">' + done + '</div><div class="l">Terminées</div></div>'
+    +   '<div class="svi-kpi" style="--k:#6c63ff"><div class="v">' + total + '</div><div class="l">Total commandes</div></div>'
+    + '</div>'
+    + '<div class="svi-bar-tools">'
+    +   '<div class="svi-seg" role="tablist">'
+    +     seg('encours','En production',encours) + seg('todo','Pas démarrées',todo)
+    +     seg('done','Terminées',done) + seg('all','Toutes',total)
+    +   '</div>'
+    +   '<select class="svi-sel" onchange="setSviEtape(this.value)" aria-label="Filtrer par étape en cours">'
+    +     '<option value="">Toutes les étapes</option>' + opts
+    +   '</select>'
+    +   '<input class="svi-search" type="search" placeholder="Rechercher (n° commande, client, article)…" value="' + _sviEsc(_sviSearch) + '" oninput="setSviSearch(this.value)">'
+    + '</div>'
+    + '<div id="suiviBody" class="svi-list"></div>';
+  _sviRenderBody();
+  if (_sviOpenId) openSuiviDossier(_sviOpenId, true);
+}
+
+// ── Frise détaillée d'une commande ──────────────────────────
+// Rafraichissement auto pendant que la page est ouverte : le suivi doit refleter
+// les pointages des collegues sans que l'utilisateur ait a cliquer « Actualiser ».
+// Onglet cache -> on saute le tour (economie de quota Apps Script).
+let _sviTimer = null;
+function _sviStopAuto(){ if (_sviTimer) { clearInterval(_sviTimer); _sviTimer = null; } }
+function _sviStartAuto(){
+  _sviStopAuto();
+  if (!APPS_SCRIPT_URL) return;
+  _sviTimer = setInterval(() => {
+    if (document.hidden) return;
+    if (!document.getElementById('page-suivi')?.classList.contains('active')) return _sviStopAuto();
+    Promise.all([loadDossiers(), _loadTachesQuietly()]).then(() => renderSuiviPage()).catch(()=>{});
+  }, 60000);
+}
+
+function closeSuiviDossier(){
+  _sviOpenId = null;
+  const ov = document.getElementById('sviOverlay'); if (ov) ov.remove();
+}
+
+function openSuiviDossier(id, keepScroll){
+  const d = (dossiers||[]).find(x => x.id === id); if (!d) return;
+  _sviInjectStyle();
+  const prev = document.getElementById('sviOverlay');
+  const scrollTop = (keepScroll && prev) ? ((prev.querySelector('.svi-scroll')||{}).scrollTop || 0) : 0;
+  if (prev) prev.remove();
+  _sviOpenId = id;
+
+  const r = _sviRow(d, _tachesParDossier());
+  const fmtTs = ms => ms ? new Date(ms).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' }) : '—';
+  const frise = r.etapes.map((s, i) => {
+    const badge = s.state === 'done' ? '<span class="svi-t-badge svi-t-badge--done">Terminée</span>'
+      : s.state === 'wip'  ? '<span class="svi-t-badge svi-t-badge--wip">En cours</span>'
+      : s.state === 'todo' ? '<span class="svi-t-badge svi-t-badge--todo">Attribuée</span>'
+      : s.state === 'skip' ? '<span class="svi-t-badge svi-t-badge--none">Non tracée</span>'
+      : '<span class="svi-t-badge svi-t-badge--none">Non concernée</span>';
+    const dates = (s.state === 'none' || s.state === 'skip')
+      ? '<div class="svi-t-dates--empty">Aucun pointage sur cette étape</div>'
+      : '<div class="svi-t-dates">'
+        + '<span><em>Début</em> ' + fmtTs(s.startMs) + '</span>'
+        + '<span><em>Fin</em> ' + (s.state==='done' ? fmtTs(s.endMs) : (s.state==='wip' ? 'en cours…' : '—')) + '</span>'
+        + '<span class="svi-t-dur"><em>Durée</em> ' + (s.state==='todo' ? '—' : _sviDur(s.durMs)) + '</span>'
+        + '</div>';
+    const dot = s.state === 'done' ? 'background:' + s.color + ';border-color:' + s.color + ';color:#fff'
+              : s.state === 'wip'  ? 'border-color:' + s.color + ';color:' + s.color + ';box-shadow:0 0 0 4px ' + s.color + '26'
+              : '';
+    return '<li class="svi-t svi-t--' + s.state + '">'
+      + '<span class="svi-t-dot" style="' + dot + '">' + (s.state==='done' ? '✓' : (i+1)) + '</span>'
+      + '<div class="svi-t-body">'
+      +   '<div class="svi-t-head"><b>' + _sviEsc(s.label) + '</b>' + badge + '</div>'
+      +   dates
+      + '</div></li>';
+  }).join('');
+
+  const cur = r.cur ? ETAPES_CONFIG.find(e => e.code === r.cur) : null;
+  const resume = r.done
+    ? 'Commande terminée' + (r.totalMs ? ' · traitée en <b>' + _sviDur(r.totalMs) + '</b>' : '')
+    : cur
+    ? 'En cours à l\'étape <b style="color:' + cur.color + '">' + _sviEsc(cur.label) + '</b>'
+      + (r.totalMs ? ' · ouverte depuis <b>' + _sviDur(r.totalMs) + '</b>' : '')
+    : 'Aucune étape démarrée pour l\'instant';
+
+  const ov = document.createElement('div');
+  ov.className = 'sviov'; ov.id = 'sviOverlay';
+  ov.onclick = e => { if (e.target === ov) closeSuiviDossier(); };
+  ov.innerHTML =
+      '<div class="svi-modal" role="dialog" aria-modal="true" aria-label="Suivi de la commande ' + _sviEsc(r.numero) + '">'
+    +   '<div class="svi-mhead">'
+    +     '<div class="svi-mht"><b>' + _sviEsc(r.numero) + '</b>'
+    +       '<small>' + _sviEsc(r.client||'—') + (r.produit ? ' · ' + _sviEsc(r.produit) : '') + (r.quantite ? ' ×' + _sviEsc(r.quantite) : '') + '</small>'
+    +     '</div>'
+    +     '<button class="svi-x" onclick="closeSuiviDossier()" aria-label="Fermer">×</button>'
+    +   '</div>'
+    +   '<div class="svi-scroll">'
+    +     '<div class="svi-resume">'
+    +       '<div class="svi-bar svi-bar--big"><i style="width:' + r.pct + '%"></i></div>'
+    +       '<div class="svi-resume-t"><b>' + r.pct + '%</b> · ' + r.nbDone + '/' + r.nbAppl + ' étape' + (r.nbAppl>1?'s':'') + ' terminée' + (r.nbDone>1?'s':'') + '</div>'
+    +       '<div class="svi-resume-s">' + resume + '</div>'
+    +       (r.dateLiv ? '<div class="svi-resume-s">Livraison prévue : <b>' + _sviEsc(_dispDate(r.dateLiv) || r.dateLiv) + '</b></div>' : '')
+    +     '</div>'
+    +     '<ul class="svi-tl">' + frise + '</ul>'
+    +   '</div>'
+    + '</div>';
+  document.body.appendChild(ov);
+  if (scrollTop) { const sc = ov.querySelector('.svi-scroll'); if (sc) sc.scrollTop = scrollTop; }
+}
+
+function _sviInjectStyle(){
+  if (document.getElementById('svi-style')) return;
+  const st = document.createElement('style');
+  st.id = 'svi-style';
+  st.textContent = `
+  .svi-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
+  .svi-kpi{border:1px solid var(--color-border,#e5e3df);border-left:4px solid var(--k,#b4661f);border-radius:11px;padding:12px 14px;background:var(--color-surface,#fff)}
+  .svi-kpi .v{font-size:26px;font-weight:800;line-height:1;color:var(--color-text,#1c1917)}
+  .svi-kpi .l{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--color-text-muted,#78716c);margin-top:4px}
+  .svi-bar-tools{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+  .svi-seg{display:inline-flex;background:var(--color-bg,#f5f4f2);border:1px solid var(--color-border,#e5e3df);border-radius:10px;padding:3px;gap:3px;flex-wrap:wrap}
+  .svi-seg button{border:0;background:transparent;color:var(--color-text-muted,#78716c);font-weight:700;font-size:12.5px;padding:7px 13px;border-radius:8px;cursor:pointer}
+  .svi-seg button b{font-weight:800;opacity:.7}
+  .svi-seg button[aria-selected="true"]{background:#b4661f;color:#fff}
+  .svi-sel,.svi-search{font:inherit;font-size:13.5px;padding:8px 12px;border:1px solid var(--color-border,#e5e3df);border-radius:9px;background:var(--color-surface,#fff);color:var(--color-text,#1c1917)}
+  .svi-search{flex:1;min-width:180px}
+  .svi-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px}
+  .svi-card{display:block;width:100%;text-align:left;font:inherit;cursor:pointer;
+    background:var(--color-surface,#fff);border:1px solid var(--color-border,#e5e3df);border-radius:13px;padding:13px 15px}
+  .svi-card:hover{border-color:#b4661f;box-shadow:0 2px 10px rgba(180,102,31,.13)}
+  .svi-card--done{opacity:.72}
+  .svi-card-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .svi-id{display:flex;flex-direction:column;min-width:0}
+  .svi-id b{font-family:monospace;font-size:13.5px;font-weight:700;color:var(--color-text,#1c1917)}
+  .svi-id span{font-size:13px;font-weight:600;color:var(--color-text,#1c1917);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .svi-badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap;flex:none}
+  .svi-badge--done{background:#e3f1e8;color:#2e7d52}
+  .svi-badge--todo{background:var(--color-bg,#f5f4f2);color:#78716c}
+  .svi-prod{font-size:12.5px;color:var(--color-text-muted,#78716c);margin:5px 0 9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .svi-qte{font-weight:700;color:var(--color-text,#1c1917)}
+  .svi-steps{display:flex;gap:4px;align-items:center;margin-bottom:9px}
+  .svi-dot{flex:1;height:7px;border-radius:99px;border:1px solid var(--color-border,#e5e3df);background:var(--color-bg,#f5f4f2)}
+  .svi-dot--none,.svi-dot--skip{opacity:.42}
+  .svi-card-bot{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .svi-bar{flex:1;min-width:70px;height:6px;border-radius:99px;background:var(--color-bg,#eee9e1);overflow:hidden}
+  .svi-bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#e8834a,#b4661f)}
+  .svi-pct{font-size:12px;font-weight:800;color:var(--color-text,#1c1917);font-variant-numeric:tabular-nums}
+  .svi-meta{font-size:11px;color:var(--color-text-muted,#78716c);white-space:nowrap}
+  .svi-meta--pos{font-weight:700}
+  .svi-empty{text-align:center;color:var(--color-text-muted,#78716c);padding:40px 20px;font-size:14px}
+  /* ── frise détaillée (modal) ── */
+  .sviov{position:fixed;inset:0;z-index:9999;background:rgba(20,16,11,.55);backdrop-filter:blur(3px);
+    display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:16px 10px}
+  .svi-modal{background:var(--color-surface,#fff);color:var(--color-text,#1c1917);width:100%;max-width:640px;
+    border-radius:16px;box-shadow:0 22px 60px rgba(0,0,0,.3);overflow:hidden;margin:auto}
+  .svi-mhead{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--color-border,#e5e3df);background:var(--color-bg,#faf8f4)}
+  .svi-mht{flex:1;min-width:0;display:flex;flex-direction:column}
+  .svi-mht b{font-family:monospace;font-size:15px;font-weight:800}
+  .svi-mht small{font-size:12.5px;color:var(--color-text-muted,#78716c);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .svi-x{border:0;background:transparent;font-size:26px;line-height:1;color:var(--color-text-muted,#78716c);cursor:pointer;padding:0 4px}
+  .svi-scroll{max-height:min(74vh,720px);overflow:auto;padding:16px 18px 20px}
+  .svi-resume{margin-bottom:16px}
+  .svi-bar--big{height:9px;margin-bottom:8px}
+  .svi-resume-t{font-size:13.5px;font-weight:700}
+  .svi-resume-s{font-size:12.5px;color:var(--color-text-muted,#78716c);margin-top:3px}
+  .svi-tl{list-style:none;margin:0;padding:0}
+  .svi-t{display:flex;gap:13px;position:relative;padding-bottom:14px}
+  .svi-t:not(:last-child)::before{content:'';position:absolute;left:13px;top:28px;bottom:0;width:2px;background:var(--color-border,#e5e3df)}
+  .svi-t--done:not(:last-child)::before{background:#c9e3d3}
+  .svi-t-dot{flex:none;width:28px;height:28px;border-radius:50%;border:2px solid var(--color-border,#e5e3df);
+    background:var(--color-surface,#fff);color:var(--color-text-muted,#78716c);
+    display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;position:relative;z-index:1}
+  .svi-t--none .svi-t-dot,.svi-t--skip .svi-t-dot{opacity:.45}
+  .svi-t-body{flex:1;min-width:0;padding-top:2px}
+  .svi-t-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .svi-t-head b{font-size:13.5px;font-weight:700}
+  .svi-t--none .svi-t-head b,.svi-t--skip .svi-t-head b{color:var(--color-text-muted,#78716c);font-weight:600}
+  .svi-t-badge{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap}
+  .svi-t-badge--done{background:#e3f1e8;color:#2e7d52}
+  .svi-t-badge--wip{background:#fef3c7;color:#b45309}
+  .svi-t-badge--todo{background:#e0f2fe;color:#0369a1}
+  .svi-t-badge--none{background:var(--color-bg,#f5f4f2);color:#a8a29e}
+  .svi-t-dates{display:flex;gap:16px;flex-wrap:wrap;margin-top:4px;font-size:12px;color:var(--color-text,#1c1917);font-variant-numeric:tabular-nums}
+  .svi-t-dates em{font-style:normal;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--color-text-muted,#78716c);margin-right:4px}
+  .svi-t-dur{font-weight:700}
+  .svi-t-dates--empty{margin-top:4px;font-size:12px;color:var(--color-text-muted,#a8a29e);font-style:italic}
+  @media (max-width:820px){ .svi-kpis{grid-template-columns:1fr 1fr;gap:8px} .svi-kpi .v{font-size:21px} }
+  @media (max-width:560px){ .svi-list{grid-template-columns:1fr} .svi-search{min-width:0} .svi-t-dates{gap:11px} }
+  `;
+  document.head.appendChild(st);
 }
 
 function printAttributionReport() {
