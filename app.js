@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '197 · 2026-09-29';
+const APP_VERSION = '198 · 2026-09-29';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -662,9 +662,10 @@ function showPage(id, btn, bnavBtn) {
   if (id==='tableau')      { renderKanbanPage(); if (APPS_SCRIPT_URL) Promise.all([loadDossiers(), _loadTachesQuietly()]).then(() => renderKanbanPage()).catch(()=>{}); }
   // Les fiches de finition ne sont chargées qu'à l'entrée (pas dans la boucle 60 s) :
   // sans elles, le point d'attention « fiche non remplie » se déclencherait à tort.
-  if (id==='suivi')        { renderSuiviPage(); _sviStartAuto();
-    if (APPS_SCRIPT_URL) Promise.all([loadDossiers(), _loadTachesQuietly(), _loadFinitionsFromScript()])
-      .then(() => { _sviFinLoaded = true; renderSuiviPage(); }).catch(()=>{}); }
+  if (id==='suivi')        { _ensureDossierLinks(); renderSuiviPage(); _sviStartAuto();
+    if (APPS_SCRIPT_URL) Promise.all([loadDossiers(), _loadTachesQuietly(), _loadFinitionsFromScript(),
+        loadCommandesFromScript(), loadReservationsFromScript()])
+      .then(() => { _sviFinLoaded = true; _ensureDossierLinks(); renderSuiviPage(); }).catch(()=>{}); }
   if (id==='messagerie')   { loadMessagerie(); _autoRefreshMessagerie(); }
   if (id==='patron')       { renderControlFinance(); renderPatronEncaissements(); renderPatronDashboard(); _autoRefreshPatron(); loadEncaissementsFromScript().then(renderPatronEncaissements).catch(()=>{}); }
   if (id==='journal')      { loadJournal(); }
@@ -10812,6 +10813,8 @@ let _sviFilter  = 'encours';   // all | todo | encours | done | late
 let _sviSearch  = '';
 let _sviEtape   = '';          // code d'étape (« stationne à ») ou '' = toutes
 let _sviFinLoaded = false;     // les fiches de finition ont-elles été chargées ?
+let _sviCommercial = '';       // nom du commercial filtré, '' = tous
+
 
 // Bandes dépliées — mémorisées par poste : le rafraîchissement auto (60 s) et
 // les changements de filtre re-rendent la liste, et replier ce que l'opérateur
@@ -10822,6 +10825,16 @@ let _sviExpanded = (function(){
 })();
 function _sviSaveOpen(){
   try { localStorage.setItem('pos-svi-open', JSON.stringify([..._sviExpanded])); } catch(e){}
+}
+
+// Groupes d'étape REPLIÉS (on mémorise les fermés : un groupe nouvellement peuplé
+// doit s'ouvrir tout seul, pas rester caché parce qu'il n'était pas dans la liste).
+let _sviGrpFermes = (function(){
+  try { return new Set(JSON.parse(localStorage.getItem('pos-svi-groupes') || '[]')); }
+  catch(e) { return new Set(); }
+})();
+function _sviSaveGroupes(){
+  try { localStorage.setItem('pos-svi-groupes', JSON.stringify([..._sviGrpFermes])); } catch(e){}
 }
 
 function _sviEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -10969,9 +10982,33 @@ function _sviRow(d, idx){
   };
 }
 
+// Commercial d'une commande : le dossier ne le stocke pas, mais la commande ou la
+// réservation d'origine porte son `caissier` — même source que le filtre « Filtrer par
+// commercial » de la page Commandes, pour que les deux écrans nomment les mêmes gens.
+// Double indexation : par `dossierId` (posé par `_ensureDossierLinks`) et par
+// sourceType:sourceId, qui rattrape les dossiers chargés depuis GAS.
+function _sviCommercialMap(){
+  const parDossier = new Map(), parSource = new Map();
+  const noter = (type, src) => {
+    if (!src) return;
+    const lab = _resolveOperatorLabel(src.caissier || '');
+    if (!lab) return;
+    if (src.dossierId) parDossier.set(src.dossierId, lab);
+    parSource.set(type + ':' + String(src.id), lab);
+  };
+  (Array.isArray(commandes)    ? commandes    : []).forEach(c => noter('commande', c));
+  (Array.isArray(reservations) ? reservations : []).forEach(r => noter('reservation', r));
+  return d => parDossier.get(d.id)
+    || (d.sourceType ? parSource.get(d.sourceType + ':' + String(d.sourceId)) : '')
+    || '';
+}
+
 function _sviRows(){
   const idx = _tachesParDossier();
-  const rows = (Array.isArray(dossiers) ? dossiers : []).map(d => _sviRow(d, idx));
+  const comm = _sviCommercialMap();
+  const rows = (Array.isArray(dossiers) ? dossiers : []).map(d => {
+    const r = _sviRow(d, idx); r.commercial = comm(d); return r;
+  });
   // Les commandes actives d'abord (plus récemment démarrées), les livrées à la fin.
   rows.sort((a,b) => (a.done?1:0) - (b.done?1:0) || (b.startMs||0) - (a.startMs||0));
   return rows;
@@ -10988,6 +11025,7 @@ function _sviMatchTab(r, f){
 
 function setSviFilter(f){ _sviFilter = f; renderSuiviPage(); }
 function setSviEtape(c){  _sviEtape  = c; _sviRenderBody(); }
+function setSviCommercial(v){ _sviCommercial = v; _sviRenderBody(); }
 function setSviSearch(v){ _sviSearch = v; _sviRenderBody(); }
 
 // ── Frise des étapes ────────────────────────────────────────
@@ -11094,7 +11132,7 @@ function _sviPointsHtml(r){
     + '</div>').join('');
 }
 
-// ── Liste en accordéon ──────────────────────────────────────
+// ── Liste en accordéon, groupée par étape ───────────────────
 function sviToggle(id){
   if (_sviExpanded.has(id)) _sviExpanded.delete(id); else _sviExpanded.add(id);
   _sviSaveOpen();
@@ -11106,6 +11144,11 @@ function openSuiviDossier(id){
   _sviExpanded.add(id); _sviSaveOpen(); _sviRenderBody();
   const el = document.querySelector('.svi-acc-row[data-id="' + id + '"]');
   if (el) el.scrollIntoView({ block:'center', behavior:'smooth' });
+}
+function sviToggleGroupe(code){
+  if (_sviGrpFermes.has(code)) _sviGrpFermes.delete(code); else _sviGrpFermes.add(code);
+  _sviSaveGroupes();
+  _sviRenderBody();
 }
 
 // Échéance côté droit : la date seule ne dit pas s'il reste du temps.
@@ -11120,73 +11163,130 @@ function _sviEcheance(r){
   return { date:d, sous:'Dans ' + n + ' jour' + (n>1?'s':''), late:false };
 }
 
+// Une bande = une commande. Extraite du rendu de liste pour que les groupes par
+// étape et une éventuelle liste à plat produisent exactement la même bande.
+function _sviBande(r){
+  const ouvert = _sviExpanded.has(r.id);
+  const ech    = _sviEcheance(r);
+  const cur    = r.cur ? ETAPES_CONFIG.find(e => e.code === r.cur) : null;
+  const etat   = r.done
+    ? '<span class="svi-badge svi-badge--done">✓ Terminée</span>'
+    : cur
+    ? '<span class="svi-badge" style="background:' + cur.color + '1a;color:' + cur.color + '">● ' + _sviEsc(cur.short) + '</span>'
+    : '<span class="svi-badge svi-badge--todo">○ Pas démarrée</span>';
+  // Pastille de retard dans l'en-tête : elle doit rester visible bande repliée,
+  // sinon l'alerte disparaît dès qu'on referme la commande.
+  const chip = r.retard
+    ? '<span class="svi-chip-late" title="' + _sviEsc(r.retard.title) + '">⚠ Retard</span>' : '';
+
+  const corps = ouvert
+    ? '<div class="svi-acc-body">'
+      + _sviFrise(r)
+      + '<h4 class="svi-h4">Points d\'attention</h4>'
+      + _sviPointsHtml(r)
+      + '</div>'
+    : '';
+
+  return '<section class="svi-acc-row' + (r.done ? ' svi-acc-row--done' : '')
+    + (r.retard ? ' svi-acc-row--late' : '') + '" data-id="' + _sviEsc(r.id) + '">'
+    + '<div class="svi-acc-head" role="button" tabindex="0" aria-expanded="' + ouvert + '"'
+    +   ' onclick="sviToggle(\'' + _sviEsc(r.id) + '\')"'
+    +   ' onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();sviToggle(\'' + _sviEsc(r.id) + '\')}">'
+    +   '<div class="svi-acc-id">'
+    +     '<div class="svi-acc-t">' + _sviEsc(r.numero) + chip + '</div>'
+    +     '<div class="svi-acc-s">Client : ' + _sviEsc(r.client||'—') + '</div>'
+    +     '<div class="svi-acc-s">Article : ' + _sviEsc(r.produit||'—')
+    +       (r.quantite ? ' <b>×' + _sviEsc(r.quantite) + '</b>' : '') + '</div>'
+    +     (r.commercial ? '<div class="svi-acc-s">Commercial : <b>' + _sviEsc(r.commercial) + '</b></div>' : '')
+    +   '</div>'
+    +   '<div class="svi-acc-pct">'
+    +     '<div class="svi-acc-lab">Avancement</div>'
+    +     '<div class="svi-acc-big">' + r.pct + '%</div>'
+    +     '<div class="svi-bar"><i style="width:' + r.pct + '%"></i></div>'
+    +     '<div class="svi-acc-s">' + r.nbDone + '/' + r.nbAppl + ' étape' + (r.nbAppl>1?'s':'') + ' · ' + etat + '</div>'
+    +   '</div>'
+    +   '<div class="svi-acc-ech">'
+    +     '<div class="svi-acc-lab">Livraison prévue</div>'
+    +     '<div class="svi-acc-date">' + _sviEsc(ech.date) + '</div>'
+    +     '<div class="svi-acc-s' + (ech.late ? ' svi-acc-s--late' : '') + '">' + _sviEsc(ech.sous) + '</div>'
+    +   '</div>'
+    + '</div>'
+    + corps
+    + '<button class="svi-acc-toggle" onclick="sviToggle(\'' + _sviEsc(r.id) + '\')">'
+    +   (ouvert ? 'Réduire ▲' : 'Déployer ▼') + '</button>'
+    + '</section>';
+}
+
+// Répartition des commandes en groupes, dans l'ORDRE DU PIPELINE : le tri par étape
+// n'est pas une option de tri, c'est la structure même de la page — on lit la file
+// d'attente de l'atelier de haut en bas.
+function _sviGroupes(rows){
+  const g = new Map();
+  ETAPES_CONFIG.forEach(e => g.set(e.code, { code:e.code, label:e.label, short:e.short, color:e.color, rows:[] }));
+  const done  = { code:'__DONE__',  label:'Commandes terminées', short:'Terminées', color:'#16a34a', rows:[] };
+  // Fourre-tout : un dossier sans étape identifiable ne doit jamais disparaître.
+  const autre = { code:'__AUTRE__', label:'Sans étape identifiée', short:'Sans étape', color:'#a8a29e', rows:[] };
+  rows.forEach(r => {
+    if (r.done) return done.rows.push(r);
+    if (r.cur && g.has(r.cur)) return g.get(r.cur).rows.push(r);
+    autre.rows.push(r);
+  });
+  const out = [...g.values()];
+  out.push(done);
+  if (autre.rows.length) out.push(autre);
+  return out;
+}
+
 function _sviRenderBody(){
   const host = document.getElementById('suiviBody'); if (!host) return;
   const q = (_sviSearch||'').trim().toLowerCase();
   let rows = _sviRows();
   rows = rows.filter(r => _sviMatchTab(r, _sviFilter));
   if (_sviEtape) rows = rows.filter(r => r.cur === _sviEtape);
-  if (q) rows = rows.filter(r => (r.numero+' '+r.client+' '+r.produit).toLowerCase().includes(q));
+  if (_sviCommercial) rows = rows.filter(r => _sameOp(r.commercial, _sviCommercial));
+  if (q) rows = rows.filter(r => (r.numero+' '+r.client+' '+r.produit+' '+r.commercial).toLowerCase().includes(q));
 
   if (!rows.length){
     // Sur l'onglet « En retard », une liste vide est une BONNE nouvelle : le message
     // générique « aucune commande à afficher » ferait croire à un filtre mal réglé.
-    host.innerHTML = (_sviFilter === 'late' && !_sviEtape && !q)
+    host.innerHTML = (_sviFilter === 'late' && !_sviEtape && !_sviCommercial && !q)
       ? '<div class="svi-empty">✓ Aucune commande en retard.<br>'
         + '<small>Toutes les étapes en cours tiennent leur rythme cible, et aucune échéance de livraison n\'est dépassée.</small></div>'
       : '<div class="svi-empty">Aucune commande à afficher.<br>'
-        + '<small>Les commandes apparaissent ici dès qu\'un dossier est créé (vente ou réservation).</small></div>';
+        + '<small>Aucune commande ne correspond aux filtres en cours.</small></div>';
     return;
   }
 
-  host.innerHTML = rows.map(r => {
-    const ouvert = _sviExpanded.has(r.id);
-    const ech    = _sviEcheance(r);
-    const cur    = r.cur ? ETAPES_CONFIG.find(e => e.code === r.cur) : null;
-    const etat   = r.done
-      ? '<span class="svi-badge svi-badge--done">✓ Terminée</span>'
-      : cur
-      ? '<span class="svi-badge" style="background:' + cur.color + '1a;color:' + cur.color + '">● ' + _sviEsc(cur.short) + '</span>'
-      : '<span class="svi-badge svi-badge--todo">○ Pas démarrée</span>';
-    // Pastille de retard dans l'en-tête : elle doit rester visible bande repliée,
-    // sinon l'alerte disparaît dès qu'on referme la commande.
-    const chip = r.retard
-      ? '<span class="svi-chip-late" title="' + _sviEsc(r.retard.title) + '">⚠ Retard</span>' : '';
+  // Les étapes vides ne sont montrées que sur une vue « pipeline » : elles disent
+  // « personne n'attend ici », ce qui est une information. Dès qu'un filtre restreint
+  // la vue (étape précise, commercial, recherche, onglet Terminées ou En retard),
+  // aligner dix en-têtes à zéro ne serait plus que du bruit.
+  const montrerVides = !_sviEtape && !_sviCommercial && !q
+    && (_sviFilter === 'all' || _sviFilter === 'encours');
 
-    const corps = ouvert
-      ? '<div class="svi-acc-body">'
-        + _sviFrise(r)
-        + '<h4 class="svi-h4">Points d\'attention</h4>'
-        + _sviPointsHtml(r)
-        + '</div>'
-      : '';
-
-    return '<section class="svi-acc-row' + (r.done ? ' svi-acc-row--done' : '')
-      + (r.retard ? ' svi-acc-row--late' : '') + '" data-id="' + _sviEsc(r.id) + '">'
-      + '<div class="svi-acc-head" role="button" tabindex="0" aria-expanded="' + ouvert + '"'
-      +   ' onclick="sviToggle(\'' + _sviEsc(r.id) + '\')"'
-      +   ' onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();sviToggle(\'' + _sviEsc(r.id) + '\')}">'
-      +   '<div class="svi-acc-id">'
-      +     '<div class="svi-acc-t">' + _sviEsc(r.numero) + chip + '</div>'
-      +     '<div class="svi-acc-s">Client : ' + _sviEsc(r.client||'—') + '</div>'
-      +     '<div class="svi-acc-s">Article : ' + _sviEsc(r.produit||'—')
-      +       (r.quantite ? ' <b>×' + _sviEsc(r.quantite) + '</b>' : '') + '</div>'
-      +   '</div>'
-      +   '<div class="svi-acc-pct">'
-      +     '<div class="svi-acc-lab">Avancement</div>'
-      +     '<div class="svi-acc-big">' + r.pct + '%</div>'
-      +     '<div class="svi-bar"><i style="width:' + r.pct + '%"></i></div>'
-      +     '<div class="svi-acc-s">' + r.nbDone + '/' + r.nbAppl + ' étape' + (r.nbAppl>1?'s':'') + ' · ' + etat + '</div>'
-      +   '</div>'
-      +   '<div class="svi-acc-ech">'
-      +     '<div class="svi-acc-lab">Livraison prévue</div>'
-      +     '<div class="svi-acc-date">' + _sviEsc(ech.date) + '</div>'
-      +     '<div class="svi-acc-s' + (ech.late ? ' svi-acc-s--late' : '') + '">' + _sviEsc(ech.sous) + '</div>'
-      +   '</div>'
-      + '</div>'
-      + corps
-      + '<button class="svi-acc-toggle" onclick="sviToggle(\'' + _sviEsc(r.id) + '\')">'
-      +   (ouvert ? 'Réduire ▲' : 'Déployer ▼') + '</button>'
+  const groupes = _sviGroupes(rows).filter(g => g.rows.length || montrerVides);
+  host.innerHTML = groupes.map(g => {
+    const n = g.rows.length;
+    if (!n){
+      return '<section class="svi-grp svi-grp--vide" style="--gc:' + g.color + '">'
+        + '<div class="svi-grp-head">'
+        +   '<span class="svi-grp-pastille"></span>'
+        +   '<span class="svi-grp-t">' + _sviEsc(g.short) + '</span>'
+        +   '<span class="svi-grp-lab">' + _sviEsc(g.label) + '</span>'
+        +   '<span class="svi-grp-n">Personne n\'attend ici</span>'
+        + '</div></section>';
+    }
+    const ferme = _sviGrpFermes.has(g.code);
+    return '<section class="svi-grp" style="--gc:' + g.color + '">'
+      + '<button class="svi-grp-head svi-grp-head--btn" aria-expanded="' + (!ferme) + '"'
+      +   ' onclick="sviToggleGroupe(\'' + g.code + '\')">'
+      +   '<span class="svi-grp-pastille"></span>'
+      +   '<span class="svi-grp-t">' + _sviEsc(g.short) + '</span>'
+      +   '<span class="svi-grp-lab">' + _sviEsc(g.label) + '</span>'
+      +   '<span class="svi-grp-n">' + n + ' commande' + (n>1?'s':'') + '</span>'
+      +   '<span class="svi-grp-chev">' + (ferme ? '▼' : '▲') + '</span>'
+      + '</button>'
+      + (ferme ? '' : '<div class="svi-grp-body">' + g.rows.map(_sviBande).join('') + '</div>')
       + '</section>';
   }).join('');
 }
@@ -11211,6 +11311,14 @@ function renderSuiviPage(reload){
   const tabRows = rows.filter(r => _sviMatchTab(r, _sviFilter));
   const actives = tabRows.filter(r => !r.done && r.cur);
   if (_sviEtape && !actives.some(r => r.cur === _sviEtape)) _sviEtape = '';
+  // Liste des commerciaux bâtie sur TOUTES les commandes, pas sur l'onglet actif :
+  // un filtre de personnes dont les noms apparaissent et disparaissent au gré des
+  // onglets serait déroutant, et la sélection resterait à un nom devenu invisible.
+  const commerciaux = [...new Set(rows.map(r => r.commercial).filter(Boolean))]
+    .sort((a,b) => a.localeCompare(b,'fr'));
+  const optsComm = commerciaux.map(c => '<option value="' + _sviEsc(c) + '"'
+    + (_sviCommercial===c ? ' selected' : '') + '>' + _sviEsc(c)
+    + ' (' + rows.filter(r => _sameOp(r.commercial, c)).length + ')</option>').join('');
   const opts = ETAPES_CONFIG.filter(e => actives.some(r => r.cur === e.code))
     .map(e => '<option value="' + e.code + '"' + (_sviEtape===e.code?' selected':'') + '>'
             + _sviEsc(e.short) + ' (' + actives.filter(r => r.cur === e.code).length + ')</option>').join('');
@@ -11231,7 +11339,11 @@ function renderSuiviPage(reload){
     +   '<select class="svi-sel" onchange="setSviEtape(this.value)" aria-label="Filtrer par étape en cours">'
     +     '<option value="">Toutes les étapes</option>' + opts
     +   '</select>'
-    +   '<input class="svi-search" type="search" placeholder="Rechercher (n° commande, client, article)…" value="' + _sviEsc(_sviSearch) + '" oninput="setSviSearch(this.value)">'
+    +   (commerciaux.length
+        ? '<select class="svi-sel" onchange="setSviCommercial(this.value)" aria-label="Filtrer par commercial">'
+          + '<option value="">Tous les commerciaux</option>' + optsComm + '</select>'
+        : '')
+    +   '<input class="svi-search" type="search" placeholder="Rechercher (n° commande, client, article, commercial)…" value="' + _sviEsc(_sviSearch) + '" oninput="setSviSearch(this.value)">'
     + '</div>'
     + '<div id="suiviBody" class="svi-acc"></div>';
   _sviRenderBody();
@@ -11280,8 +11392,29 @@ function _sviInjectStyle(){
   .svi-search{flex:1;min-width:180px}
   .svi-empty{text-align:center;color:var(--color-text-muted,#78716c);padding:40px 20px;font-size:14px}
 
+  /* ── Groupes par étape ── */
+  .svi-acc{display:flex;flex-direction:column;gap:18px}
+  .svi-grp{border:1px solid var(--color-border,#e5e3df);border-radius:14px;overflow:hidden;background:var(--color-bg,#faf8f4)}
+  .svi-grp-head{display:flex;align-items:center;gap:11px;width:100%;text-align:left;font:inherit;
+    padding:12px 18px;background:var(--color-surface,#fff);border:0;border-bottom:1px solid var(--color-border,#e5e3df)}
+  .svi-grp-head--btn{cursor:pointer}
+  .svi-grp-head--btn:hover{background:var(--color-bg,#faf8f4)}
+  .svi-grp-pastille{flex:none;width:11px;height:11px;border-radius:50%;background:var(--gc,#b4661f)}
+  .svi-grp-t{font-size:14.5px;font-weight:800;color:var(--color-text,#1c1917);white-space:nowrap}
+  .svi-grp-lab{flex:1;min-width:0;font-size:12.5px;color:var(--color-text-muted,#78716c);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .svi-grp-n{flex:none;font-size:11.5px;font-weight:700;color:var(--gc,#b4661f);
+    background:var(--color-bg,#f5f4f2);border-radius:999px;padding:3px 11px;white-space:nowrap}
+  .svi-grp-chev{flex:none;font-size:11px;color:var(--color-text-muted,#a8a29e)}
+  .svi-grp-body{display:flex;flex-direction:column;gap:12px;padding:14px}
+  /* Étape sans commande : un simple bandeau, pas une carte vide — il dit
+     « personne n'attend ici » sans occuper la place d'un groupe rempli. */
+  .svi-grp--vide{background:transparent;border-style:dashed;opacity:.65}
+  .svi-grp--vide .svi-grp-head{background:transparent;border-bottom:0;padding:9px 18px}
+  .svi-grp--vide .svi-grp-t{font-size:13px;font-weight:700;color:var(--color-text-muted,#78716c)}
+  .svi-grp--vide .svi-grp-n{background:transparent;color:var(--color-text-muted,#a8a29e);font-weight:600;padding:0}
+
   /* ── Accordéon : une bande par commande ── */
-  .svi-acc{display:flex;flex-direction:column;gap:14px}
   .svi-acc-row{background:var(--color-surface,#fff);border:1px solid var(--color-border,#e5e3df);border-radius:14px;overflow:hidden}
   .svi-acc-row--done{opacity:.74}
   /* Retard : bord gauche rouge seulement. Un fond rouge sur toute la bande rendrait
@@ -11358,6 +11491,9 @@ function _sviInjectStyle(){
   @media (max-width:760px){ .svi-kpis{grid-template-columns:repeat(2,1fr);gap:8px} .svi-kpi .v{font-size:21px} }
   @media (max-width:560px){
     .svi-search{min-width:0}
+    .svi-grp-body{padding:10px}
+    .svi-grp-head{padding:11px 13px;gap:8px}
+    .svi-grp-lab{display:none}
     .svi-acc-head{padding:14px 15px 12px}
     .svi-acc-body{padding:4px 15px 14px}
     .svi-acc-t{font-size:17px}
