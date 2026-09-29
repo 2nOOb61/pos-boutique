@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '198 · 2026-09-29';
+const APP_VERSION = '199 · 2026-09-29';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -9491,9 +9491,13 @@ function _flushNotifRetryQueue() {
   });
 }
 
-function _addNotification({ dossierId, numeroDossier, etapeCode, etapeLabel, operateur, message }) {
+function _addNotification({ id, dossierId, numeroDossier, etapeCode, etapeLabel, operateur, message }) {
+  // `id` fourni = notification DÉDUITE d'un état (ex. retard de production) et non d'une
+  // action : la clé est déterministe pour qu'elle ne parte qu'une fois, même si plusieurs
+  // postes constatent le même retard. Déjà connue ici → on ne la rejoue pas.
+  if (id && notifications.some(x => x && x.id === id)) return;
   const notif = {
-    id: `N_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+    id: id || `N_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
     timestamp: new Date().toISOString(),
     dossierId, numeroDossier, etapeCode, etapeLabel, operateur,
     message: message || `${operateur} a terminé "${etapeLabel}" (${numeroDossier})`,
@@ -9566,6 +9570,9 @@ function _startNotifPolling() {
     if (APPS_SCRIPT_URL && document.getElementById('page-suivi-bat')?.classList.contains('active')) {
       loadBatsFromScript().then(() => renderSuiviBat()).catch(()=>{});
     }
+    // Retards de production : l'alerte doit partir même si personne n'a ouvert le
+    // Suivi commande. Silencieux tant que dossiers/tâches ne sont pas chargés.
+    try { _sviNotifRetards(); } catch(e){}
     const newCount = await loadNotifsFromGAS(true);
     if (newCount > 0 && document.getElementById('notifPanel')?.classList.contains('open')) {
       _renderNotifPanelList(); // rafraîchit le panneau si ouvert
@@ -9628,6 +9635,7 @@ function _notifPopStack() {
 function _notifPopColors(n) {
   const msg = n.message || '';
   const code = n.etapeCode || '';
+  if (code === 'RETARD_PROD')                              return { np:'#dc2626', npbg:'#fee2e2' };
   if (code === 'COMMENT' || msg.indexOf('@') !== -1)       return { np:'#7c3aed', npbg:'#f3e8ff' };
   if (code === 'ANNULE'  || /annul/i.test(msg))            return { np:'#dc2626', npbg:'#fee2e2' };
   if (/termin|100%|complet|livr/i.test(msg))               return { np:'#16a34a', npbg:'#dcfce7' };
@@ -9677,7 +9685,10 @@ function _buildNotifPopEl(n) {
   pop.querySelector('.notif-pop__meta').textContent = meta;
   pop.querySelector('.notif-pop__close').addEventListener('click', (e) => { e.stopPropagation(); _closeNotifPop(n); });
   pop.addEventListener('click', () => {
-    if (n.dossierId) { try { openAttribForDossier(n.dossierId); } catch(e){} }
+    // Un retard de production renvoie au Suivi commande : c'est là qu'est le bouton
+    // « Client prévenu », donc là que se termine ce que la notification demande.
+    if (n.etapeCode === 'RETARD_PROD' && n.dossierId) { try { openSuiviForDossier(n.dossierId); } catch(e){} }
+    else if (n.dossierId) { try { openAttribForDossier(n.dossierId); } catch(e){} }
     else            { try { openNotifPanel(); } catch(e){} }
     _closeNotifPop(n);
   });
@@ -10924,6 +10935,34 @@ function _sviRetard(d, dt, done){
   return { jours, etape:pire, label:raisons.join(' · '), title:detail.join(' ') };
 }
 
+// ── RETARD DE PRODUCTION & « prévenir le client » ───────────
+// Distinct du retard « atelier » de `_sviRetard` : ici une seule question, celle qui
+// engage la parole donnée au client — la DATE DE PRODUCTION (`dateLivraisonProd`,
+// la « Date production » de la commande) est-elle passée alors que la commande n'est
+// pas finie ? Pas de repli sur `dateLivraison` comme dans `_sviRetard` : une commande
+// sans date de production n'a rien promis à l'atelier, l'annoncer en retard serait faux.
+// Retourne 0 si tout va bien, sinon le nombre de jours de dépassement.
+function _sviProdLate(d, done){
+  if (done) return 0;
+  const ymd = _toIsoDate((d && d.dateLivraisonProd) || '');
+  if (!ymd) return 0;
+  const n = _daysUntil(ymd);
+  return (n != null && n < 0) ? -n : 0;
+}
+
+// Accusé « client prévenu » — porté par le DOSSIER (colonnes GAS ClientPrevenuLe /
+// ClientPrevenuPar), donc partagé par tous les postes : sans ça, deux commerciaux
+// appellent le même client, ou personne n'appelle en croyant que l'autre l'a fait.
+function _sviPrevenu(d){
+  const le = (d && d.clientPrevenuLe) || '';
+  if (!le) return null;
+  const dt = new Date(le);
+  const quand = isNaN(dt.getTime())
+    ? String(le)
+    : dt.toLocaleDateString('fr-FR') + ' à ' + dt.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
+  return { le, par:(d && d.clientPrevenuPar) || '', quand };
+}
+
 // Une ligne de suivi par dossier. `idx` = Map(dossierId -> tâches) (_tachesParDossier).
 //
 // ⚠ Le pourcentage est calculé sur les étapes de la FRISE, pas via `_dossierPct`.
@@ -10978,6 +11017,9 @@ function _sviRow(d, idx){
     etapes, frise, dt, pct, done, started, cur, curIdx, nbDone, nbAppl, startMs, endMs,
     totalMs: startMs ? ((endMs || Date.now()) - startMs) : 0,
     retard: _sviRetard(d, dt, done),
+    dateProd: d.dateLivraisonProd || '',
+    prodLate: _sviProdLate(d, done),
+    prevenu:  _sviPrevenu(d),
     statut: done ? 'done' : (started ? 'encours' : 'todo')
   };
 }
@@ -11076,7 +11118,24 @@ function _sviPoints(r){
   const canAssign = ['admin','chef_atelier'].includes(currentUser?.role);
   const voir = { label:'Voir le dossier', fn:"openAttribForDossier('" + _sviEsc(r.id) + "')" };
 
-  if (r.retard && r.retard.jours){
+  // Date de production dépassée : le point le plus important de la page, parce qu'il
+  // sort de l'atelier — c'est au CLIENT qu'on doit quelque chose. Il remplace le point
+  // générique ci-dessous quand les deux portent sur la même date (`_sviRetard` retient
+  // `dateLivraisonProd` en priorité), pour ne pas dire deux fois la même chose.
+  if (r.prodLate){
+    pts.push(r.prevenu
+      ? { ton:'ok',
+          texte:'Production en retard de ' + r.prodLate + ' jour' + (r.prodLate>1?'s':'')
+                + ' — client prévenu le ' + r.prevenu.quand
+                + (r.prevenu.par ? ' par ' + r.prevenu.par : '') + '.',
+          action: voir }
+      : { ton:'rouge',
+          texte:'Production en retard de ' + r.prodLate + ' jour' + (r.prodLate>1?'s':'')
+                + ' sur la date de production du ' + (_dispDate(r.dateProd) || r.dateProd)
+                + ' — le client n\'a pas encore été prévenu.',
+          action:{ label:'Client prévenu', fn:"sviMarquerPrevenu('" + _sviEsc(r.id) + "')" } });
+  }
+  if (r.retard && r.retard.jours && !r.prodLate){
     pts.push({ ton:'rouge',
       texte:'Livraison dépassée de ' + r.retard.jours + ' jour' + (r.retard.jours>1?'s':'')
             + (r.dateLiv ? ' (échéance du ' + (_dispDate(r.dateLiv) || r.dateLiv) + ')' : ''),
@@ -11142,13 +11201,127 @@ function sviToggle(id){
 // et l'amène sous les yeux.
 function openSuiviDossier(id){
   _sviExpanded.add(id); _sviSaveOpen(); _sviRenderBody();
-  const el = document.querySelector('.svi-acc-row[data-id="' + id + '"]');
+  let el = document.querySelector('.svi-acc-row[data-id="' + id + '"]');
+  // Onglet restreint, groupe replié, recherche en cours : la commande visée peut très
+  // bien ne pas être à l'écran. Venu d'une notification, on lève les filtres plutôt que
+  // de laisser l'utilisateur devant une page qui n'a pas bougé.
+  if (!el){
+    _sviFilter = 'all'; _sviEtape = ''; _sviCommercial = ''; _sviSearch = '';
+    _sviGrpFermes.clear(); _sviSaveGroupes();
+    renderSuiviPage();
+    el = document.querySelector('.svi-acc-row[data-id="' + id + '"]');
+  }
   if (el) el.scrollIntoView({ block:'center', behavior:'smooth' });
 }
 function sviToggleGroupe(code){
   if (_sviGrpFermes.has(code)) _sviGrpFermes.delete(code); else _sviGrpFermes.add(code);
   _sviSaveGroupes();
   _sviRenderBody();
+}
+
+// ── « Client prévenu » ──────────────────────────────────────
+// Écrit sur le dossier (donc visible de tous), en optimiste à l'écran puis confirmé
+// par GAS. En cas d'échec on REMET l'étiquette en rouge : laisser croire que l'appel
+// est tracé alors qu'il ne l'est pas serait pire que de ne rien marquer du tout.
+// Défaire est réservé à l'encadrement — sinon un clic malheureux efface la trace.
+function _sviPeutAnnulerPrevenu(){
+  return ['admin','chef_atelier'].includes(currentUser?.role);
+}
+function sviMarquerPrevenu(id){
+  const d = (Array.isArray(dossiers) ? dossiers : []).find(x => x && x.id === id);
+  if (!d) return;
+  if (!confirm('Confirmer que le client a été prévenu du retard sur ' + (d.numeroDossier || id) + ' ?')) return;
+  const avantLe = d.clientPrevenuLe || '', avantPar = d.clientPrevenuPar || '';
+  d.clientPrevenuLe  = new Date().toISOString();
+  d.clientPrevenuPar = (currentUser && (currentUser.label || currentUser.username)) || '';
+  _sviRenderBody();
+  _sviPushPrevenu(d, avantLe, avantPar);
+}
+function sviAnnulerPrevenu(id){
+  if (!_sviPeutAnnulerPrevenu()) return;
+  const d = (Array.isArray(dossiers) ? dossiers : []).find(x => x && x.id === id);
+  if (!d || !d.clientPrevenuLe) return;
+  if (!confirm('Annuler « client prévenu » sur ' + (d.numeroDossier || id) + ' ?\nL\'étiquette redeviendra rouge.')) return;
+  const avantLe = d.clientPrevenuLe, avantPar = d.clientPrevenuPar || '';
+  d.clientPrevenuLe = ''; d.clientPrevenuPar = '';
+  _sviRenderBody();
+  _sviPushPrevenu(d, avantLe, avantPar);
+}
+function _sviPushPrevenu(d, avantLe, avantPar){
+  if (!APPS_SCRIPT_URL) return;
+  const marque = !!d.clientPrevenuLe;
+  apiCall({ action:'setClientPrevenu', id:d.id, le:d.clientPrevenuLe || '', par:d.clientPrevenuPar || '' })
+    .then(r => {
+      if (r && r.ok) { showToast(marque ? '✓ Client prévenu — enregistré' : 'Marquage annulé'); return; }
+      throw new Error((r && r.error) || 'enregistrement refusé');
+    })
+    .catch(e => {
+      d.clientPrevenuLe = avantLe; d.clientPrevenuPar = avantPar;
+      _sviRenderBody();
+      showToast('Non enregistré (' + ((e && e.message) || 'réseau') + ') — le client reste à prévenir', 'error');
+    });
+}
+
+// ── Notification « retard de production » ───────────────────
+// Une commande dont la date de production est passée doit remonter D'ELLE-MÊME :
+// personne ne surveille une liste toute la journée. Elle passe par le canal habituel
+// (cloche + pop-up + feuille Notifs), donc tous les postes la reçoivent.
+// Clé déterministe `N_RTP_<dossier>_<date de prod>` = une seule notification par
+// commande et par date promise : elle repart si la date est reportée puis dépassée
+// à nouveau, jamais à chaque tour de boucle. Le garde-fou local évite de ré-émettre
+// depuis ce poste, et GAS ignore une clé déjà enregistrée (plusieurs postes ouverts).
+let _sviNotifSent = (function(){
+  try { return new Set(JSON.parse(localStorage.getItem('pos-svi-notif-retard') || '[]')); }
+  catch(e) { return new Set(); }
+})();
+const _SVI_NOTIF_MAX = 10;   // par passage : un rattrapage massif s'étale sur plusieurs tours
+
+function _sviNotifRetards(rows){
+  if (!Array.isArray(dossiers) || !dossiers.length) return;
+  // Sans les tâches, impossible de savoir qu'une commande est en fait finie sans avoir
+  // été clôturée : mieux vaut ne rien envoyer que d'alerter sur une commande déjà faite.
+  if (!rows && !(Array.isArray(taches) && taches.length)) return;
+  // La date de production n'est pas stockée sur la feuille Dossiers : elle est recopiée
+  // depuis la commande source. Sans ce rappel, un poste qui n'a pas ouvert le Suivi ne
+  // verrait aucune échéance.
+  try { if (typeof _syncDossierDates === 'function') _syncDossierDates(); } catch(e){}
+  const list = rows || _sviRows();
+  let envoyees = 0;
+  list.forEach(r => {
+    if (envoyees >= _SVI_NOTIF_MAX || !r.prodLate) return;
+    // Client déjà prévenu : la notification n'aurait plus rien à demander. On ne pose
+    // PAS la clé pour autant — si l'encadrement défait le marquage, l'alerte repart.
+    if (r.prevenu) return;
+    const key = 'N_RTP_' + r.id + '_' + (_toIsoDate(r.dateProd) || 'x');
+    if (_sviNotifSent.has(key)) return;
+    _sviNotifSent.add(key);
+    envoyees++;
+    _addNotification({
+      id:            key,
+      dossierId:     r.id,
+      numeroDossier: r.numero,
+      etapeCode:     'RETARD_PROD',
+      etapeLabel:    'Retard de production',
+      operateur:     'Suivi commande',
+      message: '⚠ ' + r.numero + ' — production en retard de ' + r.prodLate + ' jour'
+        + (r.prodLate > 1 ? 's' : '') + ' (date de production du '
+        + (_dispDate(r.dateProd) || r.dateProd) + ')'
+        + (r.client ? ' · ' + r.client : '') + ' — prévenir le client.'
+    });
+  });
+  if (envoyees){
+    try {
+      localStorage.setItem('pos-svi-notif-retard', JSON.stringify([..._sviNotifSent].slice(-400)));
+    } catch(e){}
+  }
+}
+
+// Atterrissage d'une notification de retard : la page Suivi, là où se trouve le bouton
+// « Client prévenu ». Les rôles sans accès retombent sur la fiche du dossier.
+function openSuiviForDossier(id){
+  if (!_effectivePages(currentUser).includes('suivi')) return openAttribForDossier(id);
+  showPage('suivi');
+  setTimeout(() => { try { openSuiviDossier(id); } catch(e){} }, 350);
 }
 
 // Échéance côté droit : la date seule ne dit pas s'il reste du temps.
@@ -11179,6 +11352,23 @@ function _sviBande(r){
   const chip = r.retard
     ? '<span class="svi-chip-late" title="' + _sviEsc(r.retard.title) + '">⚠ Retard</span>' : '';
 
+  // Étiquette « Prévenir le client » : elle ne parle QUE de la date de production
+  // dépassée — le seul retard que le client subit vraiment (la pastille ⚠ Retard, elle,
+  // couvre aussi les étapes trop lentes, qui regardent l'atelier). Cliquable, parce
+  // qu'un constat sans porte de sortie oblige à aller acter ailleurs. Elle reste
+  // visible bande repliée, sinon l'alerte disparaît dès qu'on referme la commande.
+  const prevTitle = r.prevenu
+    ? 'Client prévenu le ' + r.prevenu.quand + (r.prevenu.par ? ' par ' + r.prevenu.par : '')
+      + (_sviPeutAnnulerPrevenu() ? ' — cliquer pour annuler' : '')
+    : 'Production en retard de ' + r.prodLate + ' jour' + (r.prodLate>1?'s':'')
+      + ' — cliquer une fois le client prévenu';
+  const etiq = !r.prodLate ? ''
+    : r.prevenu
+    ? '<button type="button" class="svi-chip-ok" title="' + _sviEsc(prevTitle) + '"'
+      + ' onclick="event.stopPropagation();sviAnnulerPrevenu(\'' + _sviEsc(r.id) + '\')">✓ Client prévenu</button>'
+    : '<button type="button" class="svi-chip-tell" title="' + _sviEsc(prevTitle) + '"'
+      + ' onclick="event.stopPropagation();sviMarquerPrevenu(\'' + _sviEsc(r.id) + '\')">📞 Prévenir le client</button>';
+
   const corps = ouvert
     ? '<div class="svi-acc-body">'
       + _sviFrise(r)
@@ -11193,7 +11383,7 @@ function _sviBande(r){
     +   ' onclick="sviToggle(\'' + _sviEsc(r.id) + '\')"'
     +   ' onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();sviToggle(\'' + _sviEsc(r.id) + '\')}">'
     +   '<div class="svi-acc-id">'
-    +     '<div class="svi-acc-t">' + _sviEsc(r.numero) + chip + '</div>'
+    +     '<div class="svi-acc-t">' + _sviEsc(r.numero) + chip + etiq + '</div>'
     +     '<div class="svi-acc-s">Client : ' + _sviEsc(r.client||'—') + '</div>'
     +     '<div class="svi-acc-s">Article : ' + _sviEsc(r.produit||'—')
     +       (r.quantite ? ' <b>×' + _sviEsc(r.quantite) + '</b>' : '') + '</div>'
@@ -11347,6 +11537,9 @@ function renderSuiviPage(reload){
     + '</div>'
     + '<div id="suiviBody" class="svi-acc"></div>';
   _sviRenderBody();
+  // Les lignes viennent d'être calculées : on en profite pour lever les alertes de
+  // retard de production (idempotent — une clé déjà émise n'est jamais renvoyée).
+  try { _sviNotifRetards(rows); } catch(e){}
 }
 
 // Rafraichissement auto pendant que la page est ouverte : le suivi doit refleter
@@ -11423,7 +11616,7 @@ function _sviInjectStyle(){
   .svi-acc-head{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(150px,1fr) minmax(140px,.9fr);
     gap:18px;align-items:start;padding:16px 20px 14px;cursor:pointer}
   .svi-acc-head:hover{background:var(--color-bg,#faf8f4)}
-  .svi-acc-t{display:flex;align-items:center;gap:8px;font-family:monospace;font-size:19px;font-weight:800;color:var(--color-text,#1c1917);line-height:1.2}
+  .svi-acc-t{display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-family:monospace;font-size:19px;font-weight:800;color:var(--color-text,#1c1917);line-height:1.2}
   .svi-acc-s{font-size:12.5px;color:var(--color-text-muted,#78716c);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .svi-acc-s--late{color:#b91c1c;font-weight:700}
   .svi-acc-lab{font-size:12px;font-weight:700;color:var(--color-text,#1c1917);margin-bottom:2px}
@@ -11437,6 +11630,16 @@ function _sviInjectStyle(){
   .svi-badge--done{background:#e3f1e8;color:#2e7d52}
   .svi-badge--todo{background:var(--color-bg,#f5f4f2);color:#78716c}
   .svi-chip-late{font-family:inherit;font-size:10.5px;font-weight:800;letter-spacing:.02em;padding:3px 9px;border-radius:999px;background:#fdeaea;color:#b91c1c;white-space:nowrap}
+  /* Étiquette « prévenir le client » : même gabarit que la pastille de retard, mais
+     CLIQUABLE — d'où le curseur et le relief au survol. Rouge plein tant que l'appel
+     n'a pas été passé (elle doit accrocher l'œil au milieu d'une liste), verte et
+     discrète une fois la trace posée. */
+  .svi-chip-tell,.svi-chip-ok{font:inherit;font-size:10.5px;font-weight:800;letter-spacing:.02em;
+    padding:3px 9px;border-radius:999px;white-space:nowrap;cursor:pointer;border:1px solid transparent}
+  .svi-chip-tell{background:#dc2626;color:#fff}
+  .svi-chip-tell:hover{background:#b91c1c}
+  .svi-chip-ok{background:#e3f1e8;color:#2e7d52;border-color:#bfe0cb}
+  .svi-chip-ok:hover{background:#d5eadd}
   .svi-acc-toggle{display:block;width:100%;border:0;border-top:1px solid var(--color-border,#f0ece5);
     background:transparent;color:var(--color-text-muted,#78716c);font:inherit;font-size:12.5px;font-weight:700;
     padding:10px;cursor:pointer}

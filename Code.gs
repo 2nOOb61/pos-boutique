@@ -32,8 +32,12 @@ const MACHINE_HEADERS  = ['ID','Machine','RefType','RefID','RefLabel','Client','
 
 // En-têtes de la feuille Dossiers, partagés par tous les points de création
 // (vente, manuel, autre) pour éviter tout décalage de colonnes si l'un diverge.
+// Cols M/N = accusé « client prévenu » du Suivi commande (retard sur la date de
+// production). Sur les classeurs antérieurs elles sont créées à la première écriture
+// (handleSetClientPrevenu) : ensureSheet ne migre pas une feuille déjà en place.
 const DOSSIER_HEADERS = ['ID','NumeroDossier','Client','Produit','Quantite','Statut',
-  'Progression','DateCreation','DateLivraison','Priorite','SourceVente','Notes'];
+  'Progression','DateCreation','DateLivraison','Priorite','SourceVente','Notes',
+  'ClientPrevenuLe','ClientPrevenuPar'];
 
 // Feuille Finitions : fiche d'atelier de l'étape FINITION (traçabilité seule pour
 // l'instant — pas de déduction de stock). Une ligne par dossier (upsert sur ID).
@@ -156,6 +160,7 @@ function doPost(e) {
     else if (action === 'addComment')        result = handleAddComment(data);
     else if (action === 'setCommentReactions') result = handleSetCommentReactions(data);
     else if (action === 'saveNotif')         result = handleSaveNotif(data);
+    else if (action === 'setClientPrevenu')  result = handleSetClientPrevenu(data);
     else if (action === 'saveModif')         result = handleSaveModif(data);
     else if (action === 'resolveModif')      result = handleResolveModif(data);
     else if (action === 'getModifs')         result = handleGetModifs(data);
@@ -214,6 +219,7 @@ function doGet(e) {
       else if (action === 'addComment')        result = handleAddComment(data);
       else if (action === 'setCommentReactions') result = handleSetCommentReactions(data);
       else if (action === 'saveNotif')         result = handleSaveNotif(data);
+      else if (action === 'setClientPrevenu')  result = handleSetClientPrevenu(data);
       else if (action === 'saveModif')         result = handleSaveModif(data);
       else if (action === 'resolveModif')      result = handleResolveModif(data);
       else if (action === 'logActivity')       result = handleLogActivity(data);
@@ -1796,7 +1802,9 @@ function handleGetDossiers(data) {
   const LIMIT  = Number((data && data.limit)) || 300;
   const start  = Math.max(2, lastRow - LIMIT + 1);
   const nRows  = lastRow - start + 1;
-  const rows   = sh.getRange(start, 1, nRows, 12).getValues();
+  // 12 colonnes historiques + les 2 du « client prévenu » quand le classeur les a déjà.
+  const nCols  = Math.max(12, Math.min(sh.getLastColumn(), 14));
+  const rows   = sh.getRange(start, 1, nRows, nCols).getValues();
 
   let list   = [];
   for (let i = 0; i < rows.length; i++) {
@@ -1805,7 +1813,8 @@ function handleGetDossiers(data) {
     const dl = _fmtDateCell_(r[8]);  // livraison : ISO yyyy-MM-dd (harmonisé commandes/réservations)
     list.push({ id:r[0], numeroDossier:r[1], client:r[2], produit:r[3],
       quantite:Number(r[4]), statut:r[5], progression:Number(r[6]),
-      dateCreation:dc, dateLivraison:dl, priorite:r[9], sourceVente:r[10], notes:r[11] });
+      dateCreation:dc, dateLivraison:dl, priorite:r[9], sourceVente:r[10], notes:r[11],
+      clientPrevenuLe: _prevenuIso_(r[12]), clientPrevenuPar: r[13] ? String(r[13]) : '' });
   }
 
   if (data && data.statut && data.statut !== 'TOUS') {
@@ -1872,6 +1881,46 @@ function handleUpdateDossier(data) {
   }
   if (updated) CacheService.getScriptCache().remove('dashboard_v1');
   return updated ? { ok:true } : { ok:false, error:'Dossier introuvable' };
+}
+
+// Horodatage « client prévenu » : écrit en texte, mais un classeur peut l'avoir
+// converti en date (saisie manuelle, import). On rend toujours de l'ISO au frontend.
+function _prevenuIso_(v) {
+  if (!v) return '';
+  if (Object.prototype.toString.call(v) === '[object Date]') {
+    return isNaN(v.getTime()) ? '' : v.toISOString();
+  }
+  return String(v);
+}
+
+// Accusé « client prévenu » posé depuis le Suivi commande quand la DATE DE PRODUCTION
+// d'une commande est dépassée. Il vit sur le dossier (cols M/N) et non sur le poste :
+// c'est ce qui évite que deux commerciaux appellent le même client, ou qu'aucun
+// n'appelle en croyant que l'autre l'a fait. `le` vide = on défait le marquage.
+function handleSetClientPrevenu(data) {
+  if (!data || !data.id) return { ok:false, error:'id requis' };
+  const ss = getSS();
+  const sh = ss.getSheetByName(SHEET_DOSSIERS);
+  if (!sh) return { ok:false, error:'Feuille Dossiers introuvable' };
+  // Migration douce : les classeurs créés avant cette version n'ont que 12 colonnes.
+  if (sh.getLastColumn() < 14) {
+    sh.getRange(1, 13, 1, 2).setValues([['ClientPrevenuLe','ClientPrevenuPar']])
+      .setBackground('#1a4a3a').setFontColor('#ffffff').setFontWeight('bold');
+  }
+  const lastRow = sh.getLastRow();
+  if (lastRow <= 1) return { ok:false, error:'Dossier introuvable' };
+  const match = sh.getRange(2, 1, lastRow - 1, 1)
+    .createTextFinder(String(data.id)).matchEntireCell(true).findNext();
+  if (!match) return { ok:false, error:'Dossier introuvable' };
+  const le  = String(data.le  || '');
+  const par = String(data.par || '');
+  // Format texte imposé : Sheets convertirait l'ISO en date du classeur et l'heure
+  // exacte de l'appel se relirait de travers selon le fuseau.
+  sh.getRange(match.getRow(), 13, 1, 2).setNumberFormat('@').setValues([[le, le ? par : '']]);
+  _logAction_(le ? 'CLIENT_PREVENU' : 'CLIENT_PREVENU_ANNULE', par || 'frontend',
+    'Dossier ' + data.id + (le ? ' — client prévenu du retard de production' : ' — marquage annulé'));
+  CacheService.getScriptCache().remove('dashboard_v1');
+  return { ok:true };
 }
 
 // Clôture administrative d'un dossier : le passe directement à LIVRE / 100 % et
@@ -3181,8 +3230,18 @@ function handleSaveNotif(data) {
   const ss = getSS();
   const sh = ensureSheet(ss, SHEET_NOTIFS,
     ['ID','Timestamp','DossierID','NumeroDossier','EtapeCode','EtapeLabel','Operateur','Message']);
+  // Certaines notifications sont DÉDUITES d'un état (retard de production) et portent
+  // une clé déterministe : chaque poste ouvert constate le même retard et l'envoie de
+  // son côté. On n'en garde qu'une, sinon l'atelier reçoit la même alerte N fois.
+  const notifId = String(data.id || ('N_' + Date.now()));
+  const lastRowN = sh.getLastRow();
+  if (lastRowN > 1) {
+    const dup = sh.getRange(2, 1, lastRowN - 1, 1)
+      .createTextFinder(notifId).matchEntireCell(true).findNext();
+    if (dup) return { ok:true, duplicate:true };
+  }
   sh.appendRow([
-    data.id            || ('N_' + Date.now()),
+    notifId,
     data.timestamp     || new Date().toISOString(),
     data.dossierId     || '',
     data.numeroDossier || '',
