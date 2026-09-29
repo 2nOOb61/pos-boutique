@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '196 · 2026-09-29';
+const APP_VERSION = '197 · 2026-09-29';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -660,7 +660,11 @@ function showPage(id, btn, bnavBtn) {
   if (id==='suivi-bat')    { renderSuiviBat(); if (APPS_SCRIPT_URL) Promise.all([loadBatsFromScript(), loadDossiers(), loadCommandesFromScript()]).then(() => renderSuiviBat()).catch(()=>{}); }
   if (id==='finitions')    { renderFinitionsPage(); if (APPS_SCRIPT_URL) Promise.all([loadDossiers(), _loadTachesQuietly(), _loadFinitionsFromScript()]).then(() => renderFinitionsPage()).catch(()=>{}); }
   if (id==='tableau')      { renderKanbanPage(); if (APPS_SCRIPT_URL) Promise.all([loadDossiers(), _loadTachesQuietly()]).then(() => renderKanbanPage()).catch(()=>{}); }
-  if (id==='suivi')        { renderSuiviPage(); _sviStartAuto(); if (APPS_SCRIPT_URL) Promise.all([loadDossiers(), _loadTachesQuietly()]).then(() => renderSuiviPage()).catch(()=>{}); }
+  // Les fiches de finition ne sont chargées qu'à l'entrée (pas dans la boucle 60 s) :
+  // sans elles, le point d'attention « fiche non remplie » se déclencherait à tort.
+  if (id==='suivi')        { renderSuiviPage(); _sviStartAuto();
+    if (APPS_SCRIPT_URL) Promise.all([loadDossiers(), _loadTachesQuietly(), _loadFinitionsFromScript()])
+      .then(() => { _sviFinLoaded = true; renderSuiviPage(); }).catch(()=>{}); }
   if (id==='messagerie')   { loadMessagerie(); _autoRefreshMessagerie(); }
   if (id==='patron')       { renderControlFinance(); renderPatronEncaissements(); renderPatronDashboard(); _autoRefreshPatron(); loadEncaissementsFromScript().then(renderPatronEncaissements).catch(()=>{}); }
   if (id==='journal')      { loadJournal(); }
@@ -10796,16 +10800,29 @@ function renderFinitionsPage(reload){
 // SUIVI COMMANDE — « où en est cette commande ? »
 // ------------------------------------------------------------
 // Les pages Production / Tableau / Attribution raisonnent en TÂCHES (qui fait
-// quoi). Cette page raisonne en COMMANDE : une carte par dossier, la frise des
-// 10 étapes du pipeline avec, pour chacune, sa date de début, sa date de fin et
-// le temps qu'elle a pris. Lecture seule : aucun pointage ne se fait d'ici.
+// quoi). Cette page raisonne en COMMANDE : une bande dépliable par dossier, la
+// frise de ses étapes avec pour chacune sa date de début, sa date de fin et le
+// temps qu'elle a pris, plus les points d'attention et leur action.
+// Lecture seule pour l'avancement : aucun pointage ne se fait d'ici (les
+// actions des points d'attention renvoient vers l'écran compétent).
 // Aucun nom d'opérateur n'est affiché (le cloisonnement `_canSeeAllOps` n'a donc
 // pas à s'appliquer) : la page montre l'avancement, pas les personnes.
 // ============================================================
-let _sviFilter  = 'encours';   // all | todo | encours | done
+let _sviFilter  = 'encours';   // all | todo | encours | done | late
 let _sviSearch  = '';
 let _sviEtape   = '';          // code d'étape (« stationne à ») ou '' = toutes
-let _sviOpenId  = null;        // dossier ouvert dans la frise (pour le re-rendu)
+let _sviFinLoaded = false;     // les fiches de finition ont-elles été chargées ?
+
+// Bandes dépliées — mémorisées par poste : le rafraîchissement auto (60 s) et
+// les changements de filtre re-rendent la liste, et replier ce que l'opérateur
+// venait d'ouvrir serait insupportable.
+let _sviExpanded = (function(){
+  try { return new Set(JSON.parse(localStorage.getItem('pos-svi-open') || '[]')); }
+  catch(e) { return new Set(); }
+})();
+function _sviSaveOpen(){
+  try { localStorage.setItem('pos-svi-open', JSON.stringify([..._sviExpanded])); } catch(e){}
+}
 
 function _sviEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
@@ -10895,6 +10912,15 @@ function _sviRetard(d, dt, done){
 }
 
 // Une ligne de suivi par dossier. `idx` = Map(dossierId -> tâches) (_tachesParDossier).
+//
+// ⚠ Le pourcentage est calculé sur les étapes de la FRISE, pas via `_dossierPct`.
+// `_dossierPct` divise par les étapes « applicables » = celles portant au moins une
+// tâche. Un dossier dont la seule étape attribuée est terminée affichait donc
+// « 100 % · Terminée » alors qu'il attend simplement l'attribution de la suivante.
+// La frise ajoute l'étape courante (statut serveur) même sans tâche : tant qu'elle
+// n'est pas faite, la commande n'est pas finie. Quand l'étape courante porte déjà
+// une tâche — le cas de très loin le plus fréquent — les deux calculs coïncident,
+// donc la page ne diverge pas d'Attribution en fonctionnement normal.
 function _sviRow(d, idx){
   const dt     = idx.get(d.id) || [];
   const closed = _dossierClosed(d);
@@ -10904,25 +10930,39 @@ function _sviRow(d, idx){
              state: (closed && st.state === 'wip') ? 'done' : st.state,
              startMs:st.startMs, endMs:st.endMs, durMs:st.durMs };
   });
-  const pct     = _dossierPct(dt, d);
-  const done    = closed || pct === 100;
-  const started = etapes.some(s => s.state === 'done' || s.state === 'wip');
+
   // Étape courante : statut serveur du dossier (source de vérité, avancée par
   // majProgressionDossier_) ; à défaut, la première étape en cours puis la
   // première attribuée non démarrée.
-  const cur = (!done && ETAPES_CONFIG.some(e => e.code === d.statut) ? d.statut : null)
-           || (done ? null : (etapes.find(s => s.state === 'wip')  || {}).code)
-           || (done ? null : (etapes.find(s => s.state === 'todo') || {}).code)
-           || null;
+  const srv = ETAPES_CONFIG.some(e => e.code === d.statut) ? d.statut : null;
+  const curCand = srv
+    || (etapes.find(s => s.state === 'wip')  || {}).code
+    || (etapes.find(s => s.state === 'todo') || {}).code
+    || null;
+
+  // Frise = les étapes qui concernent ce dossier (au moins une tâche), plus
+  // l'étape courante même sans tâche — c'est elle qui attend une attribution.
+  const ordre = c => ETAPES_CONFIG.findIndex(e => e.code === c);
+  const frise = etapes.filter(s => s.state !== 'none' && s.state !== 'skip');
+  if (curCand && !closed && !frise.some(s => s.code === curCand)){
+    const e = etapes.find(s => s.code === curCand);
+    if (e) frise.push(e);
+  }
+  frise.sort((a,b) => ordre(a.code) - ordre(b.code));
+
+  const nbAppl  = frise.length;
+  const nbDone  = frise.filter(s => s.state === 'done').length;
+  const pct     = closed ? 100 : (nbAppl ? Math.round(nbDone / nbAppl * 100) : (Number(d.progression) || 0));
+  const done    = closed || (nbAppl > 0 && nbDone === nbAppl);
+  const started = etapes.some(s => s.state === 'done' || s.state === 'wip');
+  const cur     = done ? null : curCand;
   const curIdx  = cur ? ETAPES_CONFIG.findIndex(e => e.code === cur) : -1;
-  const nbDone  = etapes.filter(s => s.state === 'done').length;
-  const nbAppl  = etapes.filter(s => s.state !== 'none' && s.state !== 'skip').length;
   const startMs = etapes.map(s => s.startMs).filter(v => v).sort((a,b) => a-b)[0] || null;
   const endMs   = done ? (etapes.filter(s => s.state === 'done').map(s => s.endMs).filter(v => v).sort((a,b) => b-a)[0] || null) : null;
   return {
     id:d.id, numero:d.numeroDossier || d.id, client:d.client || '', produit:d.produit || '',
     quantite:d.quantite || '', dateLiv:d.dateLivraisonProd || d.dateLivraison || '',
-    etapes, pct, done, started, cur, curIdx, nbDone, nbAppl, startMs, endMs,
+    etapes, frise, dt, pct, done, started, cur, curIdx, nbDone, nbAppl, startMs, endMs,
     totalMs: startMs ? ((endMs || Date.now()) - startMs) : 0,
     retard: _sviRetard(d, dt, done),
     statut: done ? 'done' : (started ? 'encours' : 'todo')
@@ -10950,14 +10990,134 @@ function setSviFilter(f){ _sviFilter = f; renderSuiviPage(); }
 function setSviEtape(c){  _sviEtape  = c; _sviRenderBody(); }
 function setSviSearch(v){ _sviSearch = v; _sviRenderBody(); }
 
-// Mini-frise de la carte : une pastille par étape, dans l'ordre du pipeline.
-function _sviStepper(r){
-  return '<div class="svi-steps" aria-hidden="true">' + r.etapes.map(s => {
-    const style = s.state === 'done' ? 'background:' + s.color + ';border-color:' + s.color
-                : s.state === 'wip'  ? 'background:#fff;border-color:' + s.color + ';box-shadow:0 0 0 3px ' + s.color + '33'
-                : '';
-    return '<span class="svi-dot svi-dot--' + s.state + '" style="' + style + '" title="' + _sviEsc(s.label) + '"></span>';
-  }).join('') + '</div>';
+// ── Frise des étapes ────────────────────────────────────────
+// On n'affiche QUE les étapes qui concernent ce dossier (celles qui portent au
+// moins une tâche, plus l'étape courante) : un dossier simple en utilise 5 à 7
+// sur 10, et aligner les 10 à chaque fois écraserait la frise. La liste est
+// construite une seule fois dans `_sviRow` (`r.frise`), qui s'en sert aussi pour
+// le pourcentage — frise et compteur « N/M étapes » ne peuvent donc pas diverger.
+function _sviFrise(r){
+  const steps = r.frise;
+  if (!steps.length){
+    return '<div class="svi-frise-empty">Aucune étape attribuée pour l\'instant — la frise se remplira dès la première attribution.</div>';
+  }
+  const PALE = '#f3ded9';
+  const items = steps.map((s, i) => {
+    const prevDone = i > 0 && steps[i-1].state === 'done';
+    // Le segment qui relie i-1 à i prend la couleur de l'étape i-1 des DEUX côtés
+    // (son ::after et le ::before de i), sinon le trait change de teinte en son milieu.
+    const lb = i === 0 ? 'transparent' : (prevDone ? steps[i-1].color : PALE);
+    const la = i === steps.length-1 ? 'transparent' : (s.state === 'done' ? s.color : PALE);
+    const dot = s.state === 'done' ? 'background:' + s.color + ';border-color:' + s.color
+              : s.state === 'wip'  ? 'background:#fff;border-color:' + s.color + ';box-shadow:0 0 0 4px ' + s.color + '26'
+              : 'background:#fff;border-color:' + PALE;
+    const dates = s.state === 'done'
+        ? 'Terminée en ' + _sviDur(s.durMs)
+      : s.state === 'wip'
+        ? 'En cours depuis ' + _sviDur(s.durMs)
+      : s.state === 'todo'
+        ? 'Attribuée, pas démarrée'
+        : 'En attente d\'attribution';
+    return '<li class="svi-fr-step svi-fr-step--' + s.state + '" style="--lb:' + lb + ';--la:' + la + '" title="'
+      + _sviEsc(s.label + ' — ' + dates) + '">'
+      + '<span class="svi-fr-dot" style="' + dot + '">' + (s.state === 'done' ? '✓' : '') + '</span>'
+      + '<span class="svi-fr-lab">' + _sviEsc(s.short) + '</span>'
+      + '<span class="svi-fr-sub">' + _sviEsc(dates) + '</span>'
+      + '</li>';
+  }).join('');
+  return '<ul class="svi-frise">' + items + '</ul>';
+}
+
+// ── Points d'attention ──────────────────────────────────────
+// Chaque point porte l'action qui le résout, vers l'écran compétent — un constat
+// sans porte de sortie oblige à chercher le dossier à la main.
+// `openAttribForDossier` est un point d'entrée universel : il retombe sur une vue
+// lecture seule pour les rôles sans accès Attribution.
+function _sviPoints(r){
+  const pts = [];
+  const canAssign = ['admin','chef_atelier'].includes(currentUser?.role);
+  const voir = { label:'Voir le dossier', fn:"openAttribForDossier('" + _sviEsc(r.id) + "')" };
+
+  if (r.retard && r.retard.jours){
+    pts.push({ ton:'rouge',
+      texte:'Livraison dépassée de ' + r.retard.jours + ' jour' + (r.retard.jours>1?'s':'')
+            + (r.dateLiv ? ' (échéance du ' + (_dispDate(r.dateLiv) || r.dateLiv) + ')' : ''),
+      action: voir });
+  }
+  if (r.retard && r.retard.etape){
+    const e = r.retard.etape;
+    pts.push({ ton:'rouge',
+      texte:'L\'étape « ' + e.short + ' » dure ' + _sviDur(e.ecoule*60000)
+            + ' pour une cible de ' + _sviDur(e.cible*60000) + '.',
+      action: voir });
+  }
+  // Étape courante sans aucune tâche : le dossier est arrêté faute d'attribution.
+  if (!r.done && r.cur && !r.dt.some(t => t.etapeCode === r.cur)){
+    const e = ETAPES_CONFIG.find(x => x.code === r.cur);
+    pts.push({ ton:'ambre',
+      texte:'L\'étape « ' + ((e && e.short) || r.cur) + ' » n\'est attribuée à personne.',
+      action: canAssign ? { label:'Attribuer', fn:voir.fn } : voir });
+  }
+  // Validation client : c'est le client qu'on attend, pas l'atelier.
+  if (!r.done && (r.cur === 'RETOUR_CLIENT' || r.cur === 'VALID_CLIENT2')){
+    const t = r.dt.find(x => x.etapeCode === r.cur && x.statut === 'EN_COURS');
+    const depuis = t ? _sviStartMs(t) : null;
+    pts.push({ ton:'bleu',
+      texte:'En attente de la validation du client'
+            + (depuis ? ' depuis ' + _sviDur(Date.now() - depuis) : '') + '.',
+      action: voir });
+  }
+  // Fiche de finition : on ne l'annonce QUE si les fiches ont été chargées, sinon
+  // chaque dossier en finition serait signalé à tort au premier affichage.
+  if (_sviFinLoaded && !r.done){
+    const tf = r.dt.find(t => t.etapeCode === 'FINITION');
+    if (tf && !(finitionsAll||[]).some(f => f && f.dossierId === r.id)){
+      pts.push({ ton:'bleu', texte:'La fiche de finition n\'est pas encore remplie.',
+        action:{ label:'Remplir la fiche', fn:"openFicheFinition('" + _sviEsc(r.id) + "','" + _sviEsc(tf.id) + "')" } });
+    }
+  }
+  return pts;
+}
+
+function _sviPointsHtml(r){
+  const pts = _sviPoints(r);
+  if (!pts.length){
+    return '<div class="svi-pt svi-pt--ok"><span class="svi-pt-dot"></span>'
+      + '<span class="svi-pt-txt">Rien à signaler — la commande suit son cours.</span></div>';
+  }
+  return pts.map(p =>
+    '<div class="svi-pt svi-pt--' + p.ton + '">'
+    + '<span class="svi-pt-dot"></span>'
+    + '<span class="svi-pt-txt">' + _sviEsc(p.texte) + '</span>'
+    + '<button class="svi-pt-act" onclick="event.stopPropagation();' + p.action.fn + '">'
+    + _sviEsc(p.action.label) + '</button>'
+    + '</div>').join('');
+}
+
+// ── Liste en accordéon ──────────────────────────────────────
+function sviToggle(id){
+  if (_sviExpanded.has(id)) _sviExpanded.delete(id); else _sviExpanded.add(id);
+  _sviSaveOpen();
+  _sviRenderBody();
+}
+// Point d'entrée conservé (notifications, liens externes) : déplie la commande
+// et l'amène sous les yeux.
+function openSuiviDossier(id){
+  _sviExpanded.add(id); _sviSaveOpen(); _sviRenderBody();
+  const el = document.querySelector('.svi-acc-row[data-id="' + id + '"]');
+  if (el) el.scrollIntoView({ block:'center', behavior:'smooth' });
+}
+
+// Échéance côté droit : la date seule ne dit pas s'il reste du temps.
+function _sviEcheance(r){
+  if (r.done) return { date: r.dateLiv ? (_dispDate(r.dateLiv) || r.dateLiv) : '—', sous:'Livrée', late:false };
+  if (!r.dateLiv) return { date:'—', sous:'Pas de date fixée', late:false };
+  const d = _dispDate(r.dateLiv) || r.dateLiv;
+  const n = _daysUntil(_toIsoDate(r.dateLiv));
+  if (n == null) return { date:d, sous:'', late:false };
+  if (n < 0)  return { date:d, sous:(-n) + ' jour' + (-n>1?'s':'') + ' de retard', late:true };
+  if (n === 0) return { date:d, sous:"C'est aujourd'hui", late:false };
+  return { date:d, sous:'Dans ' + n + ' jour' + (n>1?'s':''), late:false };
 }
 
 function _sviRenderBody(){
@@ -10978,41 +11138,56 @@ function _sviRenderBody(){
         + '<small>Les commandes apparaissent ici dès qu\'un dossier est créé (vente ou réservation).</small></div>';
     return;
   }
+
   host.innerHTML = rows.map(r => {
-    const cur  = r.cur ? ETAPES_CONFIG.find(e => e.code === r.cur) : null;
-    const etat = r.done
+    const ouvert = _sviExpanded.has(r.id);
+    const ech    = _sviEcheance(r);
+    const cur    = r.cur ? ETAPES_CONFIG.find(e => e.code === r.cur) : null;
+    const etat   = r.done
       ? '<span class="svi-badge svi-badge--done">✓ Terminée</span>'
       : cur
       ? '<span class="svi-badge" style="background:' + cur.color + '1a;color:' + cur.color + '">● ' + _sviEsc(cur.short) + '</span>'
       : '<span class="svi-badge svi-badge--todo">○ Pas démarrée</span>';
-    const pos = r.done ? 'Livrée'
-              : (r.curIdx >= 0 ? 'Étape ' + (r.curIdx+1) + '/' + ETAPES_CONFIG.length : 'En attente');
-    const liv = r.dateLiv
-      ? '<span class="svi-meta' + (r.retard && r.retard.jours ? ' svi-meta--late' : '') + '">Livraison '
-        + _sviEsc(_dispDate(r.dateLiv) || r.dateLiv) + '</span>'
+    // Pastille de retard dans l'en-tête : elle doit rester visible bande repliée,
+    // sinon l'alerte disparaît dès qu'on referme la commande.
+    const chip = r.retard
+      ? '<span class="svi-chip-late" title="' + _sviEsc(r.retard.title) + '">⚠ Retard</span>' : '';
+
+    const corps = ouvert
+      ? '<div class="svi-acc-body">'
+        + _sviFrise(r)
+        + '<h4 class="svi-h4">Points d\'attention</h4>'
+        + _sviPointsHtml(r)
+        + '</div>'
       : '';
-    // Bandeau d'alerte sur sa propre ligne : la barre du bas est déjà dense, et le motif
-    // du retard doit rester lisible sans survol (sur mobile il n'y a pas d'infobulle).
-    const alerte = r.retard
-      ? '<div class="svi-late" title="' + _sviEsc(r.retard.title) + '">'
-        + '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
-        + '<span>' + _sviEsc(r.retard.label) + '</span></div>'
-      : '';
-    const age = r.startMs ? '<span class="svi-meta">' + (r.done ? 'Traitée en ' : 'Ouverte depuis ') + _sviDur(r.totalMs) + '</span>' : '';
-    return '<button type="button" class="svi-card' + (r.done ? ' svi-card--done' : '') + (r.retard ? ' svi-card--late' : '') + '" onclick="openSuiviDossier(\'' + _sviEsc(r.id) + '\')">'
-      + '<div class="svi-card-top">'
-      +   '<div class="svi-id"><b>' + _sviEsc(r.numero) + '</b><span>' + _sviEsc(r.client||'—') + '</span></div>'
-      +   etat
+
+    return '<section class="svi-acc-row' + (r.done ? ' svi-acc-row--done' : '')
+      + (r.retard ? ' svi-acc-row--late' : '') + '" data-id="' + _sviEsc(r.id) + '">'
+      + '<div class="svi-acc-head" role="button" tabindex="0" aria-expanded="' + ouvert + '"'
+      +   ' onclick="sviToggle(\'' + _sviEsc(r.id) + '\')"'
+      +   ' onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();sviToggle(\'' + _sviEsc(r.id) + '\')}">'
+      +   '<div class="svi-acc-id">'
+      +     '<div class="svi-acc-t">' + _sviEsc(r.numero) + chip + '</div>'
+      +     '<div class="svi-acc-s">Client : ' + _sviEsc(r.client||'—') + '</div>'
+      +     '<div class="svi-acc-s">Article : ' + _sviEsc(r.produit||'—')
+      +       (r.quantite ? ' <b>×' + _sviEsc(r.quantite) + '</b>' : '') + '</div>'
+      +   '</div>'
+      +   '<div class="svi-acc-pct">'
+      +     '<div class="svi-acc-lab">Avancement</div>'
+      +     '<div class="svi-acc-big">' + r.pct + '%</div>'
+      +     '<div class="svi-bar"><i style="width:' + r.pct + '%"></i></div>'
+      +     '<div class="svi-acc-s">' + r.nbDone + '/' + r.nbAppl + ' étape' + (r.nbAppl>1?'s':'') + ' · ' + etat + '</div>'
+      +   '</div>'
+      +   '<div class="svi-acc-ech">'
+      +     '<div class="svi-acc-lab">Livraison prévue</div>'
+      +     '<div class="svi-acc-date">' + _sviEsc(ech.date) + '</div>'
+      +     '<div class="svi-acc-s' + (ech.late ? ' svi-acc-s--late' : '') + '">' + _sviEsc(ech.sous) + '</div>'
+      +   '</div>'
       + '</div>'
-      + '<div class="svi-prod">' + _sviEsc(r.produit||'—') + (r.quantite ? ' <span class="svi-qte">×' + _sviEsc(r.quantite) + '</span>' : '') + '</div>'
-      + _sviStepper(r)
-      + alerte
-      + '<div class="svi-card-bot">'
-      +   '<div class="svi-bar"><i style="width:' + r.pct + '%"></i></div>'
-      +   '<span class="svi-pct">' + r.pct + '%</span>'
-      +   '<span class="svi-meta svi-meta--pos">' + pos + '</span>'
-      +   age + liv
-      + '</div></button>';
+      + corps
+      + '<button class="svi-acc-toggle" onclick="sviToggle(\'' + _sviEsc(r.id) + '\')">'
+      +   (ouvert ? 'Réduire ▲' : 'Déployer ▼') + '</button>'
+      + '</section>';
   }).join('');
 }
 
@@ -11050,20 +11225,18 @@ function renderSuiviPage(reload){
     + '</div>'
     + '<div class="svi-bar-tools">'
     +   '<div class="svi-seg" role="tablist">'
-    +     seg('late','⚠ En retard',late,'svi-seg-late') + seg('encours','En production',encours) + seg('todo','Pas démarrées',todo)
-    +     seg('done','Terminées',done) + seg('all','Toutes',total)
+    +     seg('late','⚠ En retard',late,'svi-seg-late') + seg('encours','En production',encours)
+    +     seg('todo','Pas démarrées',todo) + seg('done','Terminées',done) + seg('all','Toutes',total)
     +   '</div>'
     +   '<select class="svi-sel" onchange="setSviEtape(this.value)" aria-label="Filtrer par étape en cours">'
     +     '<option value="">Toutes les étapes</option>' + opts
     +   '</select>'
     +   '<input class="svi-search" type="search" placeholder="Rechercher (n° commande, client, article)…" value="' + _sviEsc(_sviSearch) + '" oninput="setSviSearch(this.value)">'
     + '</div>'
-    + '<div id="suiviBody" class="svi-list"></div>';
+    + '<div id="suiviBody" class="svi-acc"></div>';
   _sviRenderBody();
-  if (_sviOpenId) openSuiviDossier(_sviOpenId, true);
 }
 
-// ── Frise détaillée d'une commande ──────────────────────────
 // Rafraichissement auto pendant que la page est ouverte : le suivi doit refleter
 // les pointages des collegues sans que l'utilisateur ait a cliquer « Actualiser ».
 // Onglet cache -> on saute le tour (economie de quota Apps Script).
@@ -11077,78 +11250,6 @@ function _sviStartAuto(){
     if (!document.getElementById('page-suivi')?.classList.contains('active')) return _sviStopAuto();
     Promise.all([loadDossiers(), _loadTachesQuietly()]).then(() => renderSuiviPage()).catch(()=>{});
   }, 60000);
-}
-
-function closeSuiviDossier(){
-  _sviOpenId = null;
-  const ov = document.getElementById('sviOverlay'); if (ov) ov.remove();
-}
-
-function openSuiviDossier(id, keepScroll){
-  const d = (dossiers||[]).find(x => x.id === id); if (!d) return;
-  _sviInjectStyle();
-  const prev = document.getElementById('sviOverlay');
-  const scrollTop = (keepScroll && prev) ? ((prev.querySelector('.svi-scroll')||{}).scrollTop || 0) : 0;
-  if (prev) prev.remove();
-  _sviOpenId = id;
-
-  const r = _sviRow(d, _tachesParDossier());
-  const fmtTs = ms => ms ? new Date(ms).toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' }) : '—';
-  const frise = r.etapes.map((s, i) => {
-    const badge = s.state === 'done' ? '<span class="svi-t-badge svi-t-badge--done">Terminée</span>'
-      : s.state === 'wip'  ? '<span class="svi-t-badge svi-t-badge--wip">En cours</span>'
-      : s.state === 'todo' ? '<span class="svi-t-badge svi-t-badge--todo">Attribuée</span>'
-      : s.state === 'skip' ? '<span class="svi-t-badge svi-t-badge--none">Non tracée</span>'
-      : '<span class="svi-t-badge svi-t-badge--none">Non concernée</span>';
-    const dates = (s.state === 'none' || s.state === 'skip')
-      ? '<div class="svi-t-dates--empty">Aucun pointage sur cette étape</div>'
-      : '<div class="svi-t-dates">'
-        + '<span><em>Début</em> ' + fmtTs(s.startMs) + '</span>'
-        + '<span><em>Fin</em> ' + (s.state==='done' ? fmtTs(s.endMs) : (s.state==='wip' ? 'en cours…' : '—')) + '</span>'
-        + '<span class="svi-t-dur"><em>Durée</em> ' + (s.state==='todo' ? '—' : _sviDur(s.durMs)) + '</span>'
-        + '</div>';
-    const dot = s.state === 'done' ? 'background:' + s.color + ';border-color:' + s.color + ';color:#fff'
-              : s.state === 'wip'  ? 'border-color:' + s.color + ';color:' + s.color + ';box-shadow:0 0 0 4px ' + s.color + '26'
-              : '';
-    return '<li class="svi-t svi-t--' + s.state + '">'
-      + '<span class="svi-t-dot" style="' + dot + '">' + (s.state==='done' ? '✓' : (i+1)) + '</span>'
-      + '<div class="svi-t-body">'
-      +   '<div class="svi-t-head"><b>' + _sviEsc(s.label) + '</b>' + badge + '</div>'
-      +   dates
-      + '</div></li>';
-  }).join('');
-
-  const cur = r.cur ? ETAPES_CONFIG.find(e => e.code === r.cur) : null;
-  const resume = r.done
-    ? 'Commande terminée' + (r.totalMs ? ' · traitée en <b>' + _sviDur(r.totalMs) + '</b>' : '')
-    : cur
-    ? 'En cours à l\'étape <b style="color:' + cur.color + '">' + _sviEsc(cur.label) + '</b>'
-      + (r.totalMs ? ' · ouverte depuis <b>' + _sviDur(r.totalMs) + '</b>' : '')
-    : 'Aucune étape démarrée pour l\'instant';
-
-  const ov = document.createElement('div');
-  ov.className = 'sviov'; ov.id = 'sviOverlay';
-  ov.onclick = e => { if (e.target === ov) closeSuiviDossier(); };
-  ov.innerHTML =
-      '<div class="svi-modal" role="dialog" aria-modal="true" aria-label="Suivi de la commande ' + _sviEsc(r.numero) + '">'
-    +   '<div class="svi-mhead">'
-    +     '<div class="svi-mht"><b>' + _sviEsc(r.numero) + '</b>'
-    +       '<small>' + _sviEsc(r.client||'—') + (r.produit ? ' · ' + _sviEsc(r.produit) : '') + (r.quantite ? ' ×' + _sviEsc(r.quantite) : '') + '</small>'
-    +     '</div>'
-    +     '<button class="svi-x" onclick="closeSuiviDossier()" aria-label="Fermer">×</button>'
-    +   '</div>'
-    +   '<div class="svi-scroll">'
-    +     '<div class="svi-resume">'
-    +       '<div class="svi-bar svi-bar--big"><i style="width:' + r.pct + '%"></i></div>'
-    +       '<div class="svi-resume-t"><b>' + r.pct + '%</b> · ' + r.nbDone + '/' + r.nbAppl + ' étape' + (r.nbAppl>1?'s':'') + ' terminée' + (r.nbDone>1?'s':'') + '</div>'
-    +       '<div class="svi-resume-s">' + resume + '</div>'
-    +       (r.dateLiv ? '<div class="svi-resume-s">Livraison prévue : <b>' + _sviEsc(_dispDate(r.dateLiv) || r.dateLiv) + '</b></div>' : '')
-    +     '</div>'
-    +     '<ul class="svi-tl">' + frise + '</ul>'
-    +   '</div>'
-    + '</div>';
-  document.body.appendChild(ov);
-  if (scrollTop) { const sc = ov.querySelector('.svi-scroll'); if (sc) sc.scrollTop = scrollTop; }
 }
 
 function _sviInjectStyle(){
@@ -11170,85 +11271,101 @@ function _sviInjectStyle(){
   .svi-kpi--late.svi-kpi--ok .l{color:var(--color-text-muted,#78716c);opacity:1}
   .svi-seg button.svi-seg-late{color:#b91c1c}
   .svi-seg button.svi-seg-late[aria-selected="true"]{background:#dc2626;color:#fff}
-  .svi-bar-tools{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+  .svi-bar-tools{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
   .svi-seg{display:inline-flex;background:var(--color-bg,#f5f4f2);border:1px solid var(--color-border,#e5e3df);border-radius:10px;padding:3px;gap:3px;flex-wrap:wrap}
   .svi-seg button{border:0;background:transparent;color:var(--color-text-muted,#78716c);font-weight:700;font-size:12.5px;padding:7px 13px;border-radius:8px;cursor:pointer}
   .svi-seg button b{font-weight:800;opacity:.7}
   .svi-seg button[aria-selected="true"]{background:#b4661f;color:#fff}
   .svi-sel,.svi-search{font:inherit;font-size:13.5px;padding:8px 12px;border:1px solid var(--color-border,#e5e3df);border-radius:9px;background:var(--color-surface,#fff);color:var(--color-text,#1c1917)}
   .svi-search{flex:1;min-width:180px}
-  .svi-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px}
-  .svi-card{display:block;width:100%;text-align:left;font:inherit;cursor:pointer;
-    background:var(--color-surface,#fff);border:1px solid var(--color-border,#e5e3df);border-radius:13px;padding:13px 15px}
-  .svi-card:hover{border-color:#b4661f;box-shadow:0 2px 10px rgba(180,102,31,.13)}
-  .svi-card--done{opacity:.72}
-  /* Alerte retard : bord gauche rouge + bandeau. Volontairement PAS de fond rouge
-     sur toute la carte — avec plusieurs commandes en retard la liste deviendrait
-     illisible et l'alerte perdrait sa force. */
-  .svi-card--late{border-color:#f0b4b4;border-left:4px solid #dc2626;padding-left:12px}
-  .svi-card--late:hover{border-color:#dc2626;box-shadow:0 2px 10px rgba(220,38,38,.16)}
-  .svi-late{display:flex;align-items:center;gap:6px;margin:0 0 9px;padding:5px 9px;border-radius:8px;
-    background:#fdeaea;color:#b91c1c;font-size:11.5px;font-weight:700;line-height:1.3}
-  .svi-late svg{flex:none}
-  .svi-meta--late{color:#b91c1c;font-weight:700}
-  .svi-card-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
-  .svi-id{display:flex;flex-direction:column;min-width:0}
-  .svi-id b{font-family:monospace;font-size:13.5px;font-weight:700;color:var(--color-text,#1c1917)}
-  .svi-id span{font-size:13px;font-weight:600;color:var(--color-text,#1c1917);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .svi-badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap;flex:none}
+  .svi-empty{text-align:center;color:var(--color-text-muted,#78716c);padding:40px 20px;font-size:14px}
+
+  /* ── Accordéon : une bande par commande ── */
+  .svi-acc{display:flex;flex-direction:column;gap:14px}
+  .svi-acc-row{background:var(--color-surface,#fff);border:1px solid var(--color-border,#e5e3df);border-radius:14px;overflow:hidden}
+  .svi-acc-row--done{opacity:.74}
+  /* Retard : bord gauche rouge seulement. Un fond rouge sur toute la bande rendrait
+     la liste illisible dès que plusieurs commandes dérapent. */
+  .svi-acc-row--late{border-color:#f0b4b4;border-left:4px solid #dc2626}
+  .svi-acc-head{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(150px,1fr) minmax(140px,.9fr);
+    gap:18px;align-items:start;padding:16px 20px 14px;cursor:pointer}
+  .svi-acc-head:hover{background:var(--color-bg,#faf8f4)}
+  .svi-acc-t{display:flex;align-items:center;gap:8px;font-family:monospace;font-size:19px;font-weight:800;color:var(--color-text,#1c1917);line-height:1.2}
+  .svi-acc-s{font-size:12.5px;color:var(--color-text-muted,#78716c);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .svi-acc-s--late{color:#b91c1c;font-weight:700}
+  .svi-acc-lab{font-size:12px;font-weight:700;color:var(--color-text,#1c1917);margin-bottom:2px}
+  .svi-acc-big{font-size:30px;font-weight:800;line-height:1.05;color:var(--color-text,#1c1917);font-variant-numeric:tabular-nums}
+  .svi-acc-date{font-size:15px;font-weight:700;color:var(--color-text,#1c1917);white-space:nowrap}
+  .svi-acc-ech{text-align:right}
+  .svi-acc-ech .svi-acc-s{white-space:normal}
+  .svi-bar{height:7px;border-radius:99px;background:var(--color-bg,#eee9e1);overflow:hidden;margin:6px 0 5px;max-width:190px}
+  .svi-bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#e8834a,#b4661f)}
+  .svi-badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap}
   .svi-badge--done{background:#e3f1e8;color:#2e7d52}
   .svi-badge--todo{background:var(--color-bg,#f5f4f2);color:#78716c}
-  .svi-prod{font-size:12.5px;color:var(--color-text-muted,#78716c);margin:5px 0 9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .svi-qte{font-weight:700;color:var(--color-text,#1c1917)}
-  .svi-steps{display:flex;gap:4px;align-items:center;margin-bottom:9px}
-  .svi-dot{flex:1;height:7px;border-radius:99px;border:1px solid var(--color-border,#e5e3df);background:var(--color-bg,#f5f4f2)}
-  .svi-dot--none,.svi-dot--skip{opacity:.42}
-  .svi-card-bot{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-  .svi-bar{flex:1;min-width:70px;height:6px;border-radius:99px;background:var(--color-bg,#eee9e1);overflow:hidden}
-  .svi-bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#e8834a,#b4661f)}
-  .svi-pct{font-size:12px;font-weight:800;color:var(--color-text,#1c1917);font-variant-numeric:tabular-nums}
-  .svi-meta{font-size:11px;color:var(--color-text-muted,#78716c);white-space:nowrap}
-  .svi-meta--pos{font-weight:700}
-  .svi-empty{text-align:center;color:var(--color-text-muted,#78716c);padding:40px 20px;font-size:14px}
-  /* ── frise détaillée (modal) ── */
-  .sviov{position:fixed;inset:0;z-index:9999;background:rgba(20,16,11,.55);backdrop-filter:blur(3px);
-    display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:16px 10px}
-  .svi-modal{background:var(--color-surface,#fff);color:var(--color-text,#1c1917);width:100%;max-width:640px;
-    border-radius:16px;box-shadow:0 22px 60px rgba(0,0,0,.3);overflow:hidden;margin:auto}
-  .svi-mhead{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--color-border,#e5e3df);background:var(--color-bg,#faf8f4)}
-  .svi-mht{flex:1;min-width:0;display:flex;flex-direction:column}
-  .svi-mht b{font-family:monospace;font-size:15px;font-weight:800}
-  .svi-mht small{font-size:12.5px;color:var(--color-text-muted,#78716c);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .svi-x{border:0;background:transparent;font-size:26px;line-height:1;color:var(--color-text-muted,#78716c);cursor:pointer;padding:0 4px}
-  .svi-scroll{max-height:min(74vh,720px);overflow:auto;padding:16px 18px 20px}
-  .svi-resume{margin-bottom:16px}
-  .svi-bar--big{height:9px;margin-bottom:8px}
-  .svi-resume-t{font-size:13.5px;font-weight:700}
-  .svi-resume-s{font-size:12.5px;color:var(--color-text-muted,#78716c);margin-top:3px}
-  .svi-tl{list-style:none;margin:0;padding:0}
-  .svi-t{display:flex;gap:13px;position:relative;padding-bottom:14px}
-  .svi-t:not(:last-child)::before{content:'';position:absolute;left:13px;top:28px;bottom:0;width:2px;background:var(--color-border,#e5e3df)}
-  .svi-t--done:not(:last-child)::before{background:#c9e3d3}
-  .svi-t-dot{flex:none;width:28px;height:28px;border-radius:50%;border:2px solid var(--color-border,#e5e3df);
-    background:var(--color-surface,#fff);color:var(--color-text-muted,#78716c);
-    display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;position:relative;z-index:1}
-  .svi-t--none .svi-t-dot,.svi-t--skip .svi-t-dot{opacity:.45}
-  .svi-t-body{flex:1;min-width:0;padding-top:2px}
-  .svi-t-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-  .svi-t-head b{font-size:13.5px;font-weight:700}
-  .svi-t--none .svi-t-head b,.svi-t--skip .svi-t-head b{color:var(--color-text-muted,#78716c);font-weight:600}
-  .svi-t-badge{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap}
-  .svi-t-badge--done{background:#e3f1e8;color:#2e7d52}
-  .svi-t-badge--wip{background:#fef3c7;color:#b45309}
-  .svi-t-badge--todo{background:#e0f2fe;color:#0369a1}
-  .svi-t-badge--none{background:var(--color-bg,#f5f4f2);color:#a8a29e}
-  .svi-t-dates{display:flex;gap:16px;flex-wrap:wrap;margin-top:4px;font-size:12px;color:var(--color-text,#1c1917);font-variant-numeric:tabular-nums}
-  .svi-t-dates em{font-style:normal;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--color-text-muted,#78716c);margin-right:4px}
-  .svi-t-dur{font-weight:700}
-  .svi-t-dates--empty{margin-top:4px;font-size:12px;color:var(--color-text-muted,#a8a29e);font-style:italic}
+  .svi-chip-late{font-family:inherit;font-size:10.5px;font-weight:800;letter-spacing:.02em;padding:3px 9px;border-radius:999px;background:#fdeaea;color:#b91c1c;white-space:nowrap}
+  .svi-acc-toggle{display:block;width:100%;border:0;border-top:1px solid var(--color-border,#f0ece5);
+    background:transparent;color:var(--color-text-muted,#78716c);font:inherit;font-size:12.5px;font-weight:700;
+    padding:10px;cursor:pointer}
+  .svi-acc-toggle:hover{background:var(--color-bg,#faf8f4);color:var(--color-text,#1c1917)}
+  .svi-acc-body{padding:4px 20px 16px}
+
+  /* ── Frise horizontale ── */
+  .svi-frise{list-style:none;display:flex;margin:0 0 18px;padding:0 0 4px;overflow-x:auto;-webkit-overflow-scrolling:touch;
+    scrollbar-width:thin;scrollbar-color:#d6cfc5 transparent}
+  /* Barre fine mais TOUJOURS visible : sur écran étroit la frise déborde, et sans
+     cet indice rien ne dit qu'il reste des étapes à droite. */
+  .svi-frise::-webkit-scrollbar{height:5px}
+  .svi-frise::-webkit-scrollbar-track{background:var(--color-bg,#f1efea);border-radius:99px}
+  .svi-frise::-webkit-scrollbar-thumb{background:#d6cfc5;border-radius:99px}
+  .svi-fr-step{position:relative;flex:1 1 0;min-width:96px;display:flex;flex-direction:column;align-items:center;padding-top:20px}
+  /* Les deux demi-segments de la ligne : chaque étape dessine sa moitié gauche et sa
+     moitié droite, ce qui évite un trait qui déborde aux extrémités. */
+  .svi-fr-step::before,.svi-fr-step::after{content:'';position:absolute;top:29px;height:3px}
+  .svi-fr-step::before{left:0;right:50%;background:var(--lb)}
+  .svi-fr-step::after{left:50%;right:0;background:var(--la)}
+  .svi-fr-dot{position:relative;z-index:1;width:19px;height:19px;border-radius:50%;border:3px solid;
+    display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:900;color:#fff}
+  .svi-fr-lab{margin-top:9px;font-size:11.5px;font-weight:700;color:var(--color-text,#1c1917);text-align:center;line-height:1.25;padding:0 4px}
+  .svi-fr-sub{margin-top:2px;font-size:10px;color:var(--color-text-muted,#a8a29e);text-align:center;line-height:1.3;padding:0 4px}
+  .svi-fr-step--none .svi-fr-lab,.svi-fr-step--todo .svi-fr-lab{color:var(--color-text-muted,#78716c)}
+  .svi-fr-step--wip .svi-fr-lab{font-weight:800}
+  .svi-frise-empty{font-size:12.5px;color:var(--color-text-muted,#a8a29e);font-style:italic;padding:10px 0 16px}
+
+  /* ── Points d'attention ── */
+  .svi-h4{font-size:14px;font-weight:800;margin:0 0 9px;color:var(--color-text,#1c1917)}
+  .svi-pt{display:flex;align-items:center;gap:11px;padding:11px 14px;border-radius:9px;margin-bottom:8px;font-size:13px;line-height:1.4}
+  .svi-pt:last-child{margin-bottom:0}
+  .svi-pt-dot{flex:none;width:7px;height:7px;border-radius:50%;background:currentColor}
+  .svi-pt-txt{flex:1;min-width:0;color:var(--color-text,#1c1917)}
+  .svi-pt-act{flex:none;border:1px solid currentColor;background:transparent;color:inherit;
+    font:inherit;font-size:12px;font-weight:700;padding:6px 14px;border-radius:7px;cursor:pointer;white-space:nowrap}
+  /* Survol : un voile neutre. Un fond en currentColor s'annulerait avec une couleur
+     de texte blanche dans la même règle — currentColor se résout sur la couleur finale. */
+  .svi-pt-act:hover{background:rgba(0,0,0,.07)}
+  .svi-pt--rouge{background:#fdeaea;color:#b91c1c}
+  .svi-pt--ambre{background:#fdf4e3;color:#b45309}
+  .svi-pt--bleu{background:#eaf2fb;color:#1d4ed8}
+  .svi-pt--ok{background:var(--color-bg,#f6f5f2);color:#2e7d52}
+
   @media (max-width:1180px){ .svi-kpis{grid-template-columns:repeat(3,1fr);gap:10px} }
+  @media (max-width:900px){
+    .svi-acc-head{grid-template-columns:1fr 1fr;gap:12px}
+    .svi-acc-id{grid-column:1 / -1}
+    .svi-acc-ech{text-align:left}
+    .svi-bar{max-width:none}
+  }
   @media (max-width:760px){ .svi-kpis{grid-template-columns:repeat(2,1fr);gap:8px} .svi-kpi .v{font-size:21px} }
-  @media (max-width:560px){ .svi-list{grid-template-columns:1fr} .svi-search{min-width:0} .svi-t-dates{gap:11px} }
+  @media (max-width:560px){
+    .svi-search{min-width:0}
+    .svi-acc-head{padding:14px 15px 12px}
+    .svi-acc-body{padding:4px 15px 14px}
+    .svi-acc-t{font-size:17px}
+    .svi-acc-big{font-size:25px}
+    .svi-fr-step{min-width:88px}
+    .svi-pt{flex-wrap:wrap}
+    .svi-pt-act{width:100%}
+  }
   `;
   document.head.appendChild(st);
 }
