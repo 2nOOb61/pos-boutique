@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '201 · 2026-09-29';
+const APP_VERSION = '202 · 2026-10-01';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -664,8 +664,8 @@ function showPage(id, btn, bnavBtn) {
   // sans elles, le point d'attention « fiche non remplie » se déclencherait à tort.
   if (id==='suivi')        { _ensureDossierLinks(); renderSuiviPage(); _sviStartAuto();
     if (APPS_SCRIPT_URL) Promise.all([loadDossiers(), _loadTachesQuietly(), _loadFinitionsFromScript(),
-        loadCommandesFromScript(), loadReservationsFromScript()])
-      .then(() => { _sviFinLoaded = true; _ensureDossierLinks(); renderSuiviPage(); }).catch(()=>{}); }
+        loadCommandesFromScript(), loadReservationsFromScript(), loadBatsFromScript()])
+      .then(() => { _sviFinLoaded = true; _sviBatsLoaded = true; _ensureDossierLinks(); renderSuiviPage(); }).catch(()=>{}); }
   if (id==='messagerie')   { loadMessagerie(); _autoRefreshMessagerie(); }
   if (id==='patron')       { renderControlFinance(); renderPatronEncaissements(); renderPatronDashboard(); _autoRefreshPatron(); loadEncaissementsFromScript().then(renderPatronEncaissements).catch(()=>{}); }
   if (id==='journal')      { loadJournal(); }
@@ -10848,6 +10848,9 @@ let _sviFilter  = 'encours';   // all | todo | encours | done | late
 let _sviSearch  = '';
 let _sviEtape   = '';          // code d'étape (« stationne à ») ou '' = toutes
 let _sviFinLoaded = false;     // les fiches de finition ont-elles été chargées ?
+// Même garde pour les épreuves (Simulation / BAT) : tant que `bats` n'est pas chargé,
+// tout dossier paraîtrait sans épreuve et la page signalerait des BAT manquants à tort.
+let _sviBatsLoaded = false;
 let _sviCommercial = '';       // nom du commercial filtré, '' = tous
 
 
@@ -10997,6 +11000,50 @@ function _sviPrevenu(d){
 // n'est pas faite, la commande n'est pas finie. Quand l'étape courante porte déjà
 // une tâche — le cas de très loin le plus fréquent — les deux calculs coïncident,
 // donc la page ne diverge pas d'Attribution en fonctionnement normal.
+// ── Épreuves (Simulation / BAT) ──────────────────────────────
+// Le Suivi ne lisait QUE les tâches : une épreuve validée par le client n'apparaissait
+// nulle part, un BAT refusé laissait la commande « en cours » sans dire pourquoi, et
+// une tâche BAT pointée « terminée » affichait ✓ alors que le client n'avait rien
+// validé. La source de vérité de la validation est le module d'épreuves (`bats`), pas
+// le pointage — on la lit donc ici, SANS toucher au calcul d'avancement (qui reste
+// celui des tâches, partagé avec Attribution et Production).
+// Retourne null quand le dossier n'a AUCUNE épreuve : il n'y a alors rien à dire.
+function _sviEpreuve(d){
+  if (!Array.isArray(bats) || !bats.length) return null;
+  const info = _batPhaseInfo(d.id);
+  const nb = info.sims.length + info.bats.length;
+  if (!nb) return null;
+  const st = _batBallState(d.id);
+  const b  = st.bat;
+  const ms = st.since ? new Date(st.since).getTime() : NaN;
+  return {
+    code:st.code, phase:st.phase, noun:st.noun, color:st.color, label:st.label, nb:nb,
+    version: b ? (Number(b.version) || 1) : 0,
+    retours: (b && b.retours) || '',
+    since: st.since || '',
+    sinceMs: isNaN(ms) ? null : ms,
+    // `_batPhaseInfo` bascule sur le BAT dès qu'une simulation est validée : un état
+    // « validé » ne peut donc concerner que le BAT final, celui qui autorise la prod.
+    valide: st.code === 'valide'
+  };
+}
+
+// Phrase d'état d'une épreuve. `court` = version pastille (sans « depuis »), qui doit
+// tenir dans un en-tête de bande replié.
+function _sviEpSub(ep, court){
+  if (!ep) return '';
+  const v  = ep.version ? ' v' + ep.version : '';
+  const dp = (!court && ep.sinceMs) ? ' — depuis ' + _sviDur(Date.now() - ep.sinceMs) : '';
+  switch (ep.code){
+    case 'valide':     return ep.noun + v + ' validé par le client'
+                            + (court || !ep.since ? '' : ' le ' + _batWhen(ep.since));
+    case 'client':     return ep.noun + v + ' chez le client' + dp;
+    case 'commercial': return ep.noun + v + ' à envoyer au client' + dp;
+    case 'refaire':    return 'Retours client sur ' + ep.noun + v + dp;
+    default:           return ep.noun + ' à préparer (PAO)';
+  }
+}
+
 function _sviRow(d, idx){
   const dt     = idx.get(d.id) || [];
   const closed = _dossierClosed(d);
@@ -11044,6 +11091,7 @@ function _sviRow(d, idx){
     dateProd: d.dateLivraisonProd || '',
     prodLate: _sviProdLate(d, done),
     prevenu:  _sviPrevenu(d),
+    epreuve:  _sviEpreuve(d),
     statut: done ? 'done' : (started ? 'encours' : 'todo')
   };
 }
@@ -11203,11 +11251,17 @@ function _sviFrise(r){
       : s.state === 'todo'
         ? 'Attribuée, pas démarrée'
         : 'En attente d\'attribution';
+    // Étape BAT : le pointage de la tâche ne dit pas si le client a validé. On affiche
+    // donc l'état réel de l'épreuve, et le libellé prend le nom de la phase en cours
+    // (Simulation ou BAT) pour qu'on sache laquelle tourne.
+    const ep  = (s.code === 'BAT') ? r.epreuve : null;
+    const lab = ep ? ep.noun : s.short;
+    const sub = ep ? _sviEpSub(ep, false) : dates;
     return '<li class="svi-fr-step svi-fr-step--' + s.state + '" style="--lb:' + lb + ';--la:' + la + '" title="'
-      + _sviEsc(s.label + ' — ' + dates) + '">'
+      + _sviEsc(lab + ' — ' + sub) + '">'
       + '<span class="svi-fr-dot" style="' + dot + '">' + (s.state === 'done' ? '✓' : '') + '</span>'
-      + '<span class="svi-fr-lab">' + _sviEsc(s.short) + '</span>'
-      + '<span class="svi-fr-sub">' + _sviEsc(dates) + '</span>'
+      + '<span class="svi-fr-lab">' + _sviEsc(lab) + '</span>'
+      + '<span class="svi-fr-sub">' + _sviEsc(sub) + '</span>'
       + '</li>';
   }).join('');
   return '<ul class="svi-frise">' + items + '</ul>';
@@ -11274,6 +11328,63 @@ function _sviPoints(r){
         ? 'La balle est dans le camp du client depuis ' + _sviDur(Date.now() - depuis) + '.'
         : 'La balle est dans le camp du client — l\'atelier ne peut rien avancer ici.',
       action: voir });
+  }
+  // ── Épreuves (Simulation / BAT) ──────────────────────────
+  // « Le BAT est-il passé ? » est LA question qu'on vient poser sur cet écran, et la
+  // réponse ne vit pas dans les tâches : elle vit dans le module d'épreuves. Comme pour
+  // les fiches de finition, on ne parle qu'une fois `bats` chargé — sinon toute commande
+  // paraîtrait sans épreuve au premier affichage.
+  const ep = r.epreuve;
+  const batStep = r.etapes.find(s => s.code === 'BAT');
+  if (_sviBatsLoaded && !r.done){
+    const voirEp = { label:'Voir l\'épreuve', fn:voir.fn };
+    const depuis = ep && ep.sinceMs ? _sviDur(Date.now() - ep.sinceMs) : '';
+    if (!ep && r.cur === 'BAT'){
+      pts.push({ ton:'ambre', ico:'alerte',
+        titre:'Aucune épreuve n\'a été créée pour cette commande',
+        texte:'La commande attend à l\'étape BAT, mais ni simulation ni BAT n\'existe — la PAO doit en déposer une.',
+        action: voirEp });
+    // Les retours client se disent TOUJOURS, même si la commande est déjà passée en
+    // production : le client a refusé le fichier qu'on est en train de fabriquer.
+    } else if (ep && ep.code === 'refaire'){
+      pts.push({ ton:'rouge', ico:'retour',
+        titre:'Retours client sur ' + ep.noun + ' v' + ep.version + ' — épreuve à refaire',
+        texte:(ep.retours ? '« ' + ep.retours + ' » — ' : '')
+              + 'la PAO doit reprendre le fichier' + (depuis ? ' (retours reçus il y a ' + depuis + ')' : '') + '.',
+        action: voirEp });
+    } else if (ep && ep.code === 'client' && r.cur === 'BAT'){
+      pts.push({ ton:'bleu', ico:'info',
+        titre: ep.noun + ' v' + ep.version + ' en attente de réponse du client',
+        texte:(depuis ? 'Envoyée il y a ' + depuis + ' — ' : '')
+              + 'l\'atelier ne peut rien avancer tant que le client n\'a pas tranché.',
+        action: voirEp });
+    } else if (ep && ep.code === 'commercial' && r.cur === 'BAT'){
+      pts.push({ ton:'ambre', ico:'telephone',
+        titre: ep.noun + ' v' + ep.version + ' prête — pas encore envoyée au client',
+        texte:'Le commercial doit l\'envoyer, puis la marquer « envoyée » pour que l\'attente du client démarre.',
+        action: voirEp });
+    } else if (ep && ep.code === 'pao' && r.cur === 'BAT'){
+      pts.push({ ton:'ambre', ico:'user',
+        titre: (ep.phase === 'bat' && ep.nb) ? 'Simulation validée — le BAT reste à préparer'
+                                             : ep.noun + ' à préparer',
+        texte:'La PAO doit déposer la prochaine épreuve pour que la commande avance.',
+        action: voirEp });
+    } else if (ep && ep.valide && r.cur === 'BAT'){
+      pts.push({ ton:'ok', ico:'valide',
+        titre:'BAT validé par le client' + (ep.since ? ' le ' + _batWhen(ep.since) : ''),
+        texte:'La production peut démarrer — il reste à pointer l\'étape BAT comme terminée.',
+        action: voirEp });
+    }
+    // L'incohérence qui faisait mentir la page : la tâche est pointée faite, mais le
+    // client n'a rien validé. On ne change pas l'avancement (il reste celui du pointage,
+    // comme sur les autres écrans) — on le DIT, pour que la production ne part pas sur
+    // un fichier non approuvé.
+    if (batStep && batStep.state === 'done' && ep && !ep.valide){
+      pts.push({ ton:'rouge', ico:'alerte',
+        titre:'Étape BAT pointée terminée alors que le BAT n\'est pas validé',
+        texte:'État réel de l\'épreuve : ' + _sviEpSub(ep, true) + '. À vérifier avant de lancer la production.',
+        action: voirEp });
+    }
   }
   // Fiche de finition : on ne l'annonce QUE si les fiches ont été chargées, sinon
   // chaque dossier en finition serait signalé à tort au premier affichage.
@@ -11475,6 +11586,15 @@ function _sviBande(r){
   const chip = (r.retard && !ech.late)
     ? '<span class="svi-chip-late" title="' + _sviEsc(r.retard.title) + '">⚠ Retard</span>' : '';
 
+  // Pastille d'épreuve : « à qui la balle ? » sans avoir à déplier. Réservée aux
+  // commandes qui STATIONNENT à l'étape BAT — la poser sur toute la liste, y compris
+  // les commandes qui ont passé le BAT depuis des semaines, noierait l'information.
+  const chipEp = (r.cur === 'BAT' && r.epreuve)
+    ? '<span class="svi-chip-ep" style="background:' + r.epreuve.color + '1f;color:' + r.epreuve.color
+      + '" title="' + _sviEsc(r.epreuve.label) + '">'
+      + (r.epreuve.phase === 'simulation' ? '🎨' : '🧾') + ' ' + _sviEsc(_sviEpSub(r.epreuve, true)) + '</span>'
+    : '';
+
   // Étiquette « Prévenir le client » : elle ne parle QUE de la date de production
   // dépassée — le seul retard que le client subit vraiment. Cliquable, parce qu'un
   // constat sans porte de sortie oblige à aller acter ailleurs. Elle reste visible
@@ -11509,7 +11629,7 @@ function _sviBande(r){
     +   ' onclick="sviToggle(\'' + _sviEsc(r.id) + '\')"'
     +   ' onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();sviToggle(\'' + _sviEsc(r.id) + '\')}">'
     +   '<div class="svi-acc-id">'
-    +     '<div class="svi-acc-t">' + _sviEsc(r.numero) + etat + chip + etiq + '</div>'
+    +     '<div class="svi-acc-t">' + _sviEsc(r.numero) + etat + chip + chipEp + etiq + '</div>'
     +     ligne('user',    'Client',     _sviEsc(r.client || '—'))
     +     ligne('article', 'Article',    _sviEsc(r.produit || '—') + (r.quantite ? ' <b>×' + _sviEsc(r.quantite) + '</b>' : ''))
     +     (r.commercial ? ligne('user', 'Commercial', '<b>' + _sviEsc(r.commercial) + '</b>') : '')
@@ -11675,7 +11795,8 @@ function renderSuiviPage(reload){
   _sviInjectStyle();
   const host = document.getElementById('suiviContent'); if (!host) return;
   if (reload && APPS_SCRIPT_URL){
-    Promise.all([loadDossiers(), _loadTachesQuietly()]).then(() => renderSuiviPage(false)).catch(()=>{});
+    Promise.all([loadDossiers(), _loadTachesQuietly(), loadBatsFromScript()])
+      .then(() => { _sviBatsLoaded = true; renderSuiviPage(false); }).catch(()=>{});
   }
   const rows    = _sviRows();
   const total   = rows.length;
@@ -11780,7 +11901,8 @@ function _sviStartAuto(){
   _sviTimer = setInterval(() => {
     if (document.hidden) return;
     if (!document.getElementById('page-suivi')?.classList.contains('active')) return _sviStopAuto();
-    Promise.all([loadDossiers(), _loadTachesQuietly()]).then(() => renderSuiviPage()).catch(()=>{});
+    Promise.all([loadDossiers(), _loadTachesQuietly(), loadBatsFromScript()])
+      .then(() => { _sviBatsLoaded = true; renderSuiviPage(); }).catch(()=>{});
   }, 60000);
 }
 
@@ -11942,6 +12064,10 @@ function _sviInjectStyle(){
   .svi-badge--done{background:#e3f1e8;color:#2e7d52}
   .svi-badge--todo{background:var(--color-bg,#f5f4f2);color:#78716c}
   .svi-chip-late{font-family:'DM Sans',sans-serif;font-size:10.5px;font-weight:800;letter-spacing:.02em;padding:3px 9px;border-radius:999px;background:#fdeaea;color:#b91c1c;white-space:nowrap}
+  /* Pastille d'épreuve : couleur portée en style inline (celle de BAT_STATES), pour que
+     Suivi commande, Attribution et Suivi BAT parlent la même langue de couleurs. */
+  .svi-chip-ep{font-family:'DM Sans',sans-serif;font-size:10.5px;font-weight:800;letter-spacing:.02em;
+    padding:3px 9px;border-radius:999px;white-space:nowrap}
   /* Étiquette « prévenir le client » : même gabarit que la pastille de retard, mais
      CLIQUABLE — d'où le curseur et le relief au survol. Rouge plein tant que l'appel
      n'a pas été passé (elle doit accrocher l'oeil au milieu d'une liste), verte et
