@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '207 · 2026-10-05';
+const APP_VERSION = '208 · 2026-10-05';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -19737,6 +19737,251 @@ function _cockpitSortRows(rows) {
   return rows.sort((a,b) => (sign * cmp(a,b)) || (dkey(a) - dkey(b)));
 }
 
+// ── Cockpit Production : mêmes outils que le cockpit Commandes ──────────────
+// Filtres en cartes, liste en cartes dépliables, sections par étape / échéance /
+// opérateur. Les classes CSS `.cmdf-* .cmdc-* .cmdg-*` sont PARTAGÉES avec Commandes
+// (le préfixe est historique) : une seule grammaire visuelle pour les deux cockpits.
+let _cockpitVue = (function(){
+  try { return localStorage.getItem('pos-prod-vue') === 'table' ? 'table' : 'cartes'; }
+  catch(e) { return 'cartes'; }
+})();
+let _cockpitExpanded = new Set();
+// ÉTAPE par défaut : dans un atelier la première question est « qui est à quel poste »,
+// pas « quelle date ». Classement toujours EXCLUSIF (un dossier dans une seule section).
+let _cockpitGroupBy = (function(){
+  try { const v = localStorage.getItem('pos-prod-group');
+        return ['etape','echeance','operateur','aucun'].includes(v) ? v : 'etape'; }
+  catch(e) { return 'etape'; }
+})();
+let _cockpitGrpFermes = (function(){
+  try { return new Set(JSON.parse(localStorage.getItem('pos-prod-grp-fermes') || '[]')); }
+  catch(e) { return new Set(); }
+})();
+let _cockpitGrpLimites = {};
+
+function _cockpitSetVue(v){
+  _cockpitVue = (v === 'table') ? 'table' : 'cartes';
+  try { localStorage.setItem('pos-prod-vue', _cockpitVue); } catch(e) {}
+  renderProdCockpit();
+}
+function prodToggleCarte(id){
+  const k = String(id);
+  if (_cockpitExpanded.has(k)) _cockpitExpanded.delete(k); else _cockpitExpanded.add(k);
+  _cockpitRenderBody();
+}
+function prodToggleToutesCartes(){
+  const ids = _cockpitSortRows(_cockpitFilterRows(_buildDossierRows())).map(r => String(r.dossierId));
+  const vus = ids.slice(0, _cockpitLimit);
+  const toutOuvert = vus.length > 0 && vus.every(id => _cockpitExpanded.has(id));
+  if (toutOuvert) vus.forEach(id => _cockpitExpanded.delete(id));
+  else            vus.forEach(id => _cockpitExpanded.add(id));
+  _cockpitRenderBody();
+}
+function _cockpitSetGroupBy(v){
+  _cockpitGroupBy = ['etape','echeance','operateur','aucun'].includes(v) ? v : 'etape';
+  try { localStorage.setItem('pos-prod-group', _cockpitGroupBy); } catch(e) {}
+  _cockpitGrpLimites = {};
+  renderProdCockpit();
+}
+function prodToggleGroupe(cle){
+  const k = String(cle);
+  if (_cockpitGrpFermes.has(k)) _cockpitGrpFermes.delete(k); else _cockpitGrpFermes.add(k);
+  try { localStorage.setItem('pos-prod-grp-fermes', JSON.stringify([..._cockpitGrpFermes])); } catch(e) {}
+  _cockpitRenderBody();
+}
+function prodGroupePlus(cle){
+  const k = String(cle);
+  _cockpitGrpLimites[k] = (_cockpitGrpLimites[k] || _CMD_GRP_PAGE) + _CMD_GRP_PAGE;
+  _cockpitRenderBody();
+}
+
+// Filtres du cockpit Production : clé · libellé · couleur.
+const _CKP_FILTRES = [
+  ['TOUS',    'Tous',          '#78716c'],
+  ['RETARD',  'En retard',     '#dc2626'],
+  ['AUJ',     "Aujourd'hui",   '#e8834a'],
+  ['DEMAIN',  'Demain',        '#e8834a'],
+  ['SEMAINE', 'Cette semaine', '#d97706'],
+  ['TERMINE', 'Terminés',      '#16a34a'],
+];
+
+// Ce qui manque derrière un compteur d'atelier, ce n'est pas un montant mais le
+// TRAVAIL EN ATTENTE : d'abord ce que personne n'a pris, ensuite ce qui tourne.
+function _ckpSousLigne(rows){
+  const attr = rows.filter(r => !r.isDone && !r.responsables.length).length;
+  if (attr) return attr + ' à attribuer';
+  const run = rows.filter(r => r._hasRunning).length;
+  if (run) return run + ' en cours';
+  return '';
+}
+
+function _cockpitFilterCards(all) {
+  const cartes = _CKP_FILTRES.map(([k, lbl, color]) => {
+    const rows  = all.filter(r => _cockpitBucketMatch(r, k));
+    const n     = rows.length;
+    const actif = _cockpitFilter === k;
+    const sous  = n ? _ckpSousLigne(rows) : '';
+    return `<button type="button" class="cmdf-card${actif ? ' cmdf-card--active' : ''}${n ? '' : ' cmdf-card--0'}"
+      style="--c:${color};--cbg:${color}14" aria-pressed="${actif}" onclick="_cockpitSetFilter('${k}')">
+      <span class="cmdf-n">${n}</span>
+      <span class="cmdf-l">${lbl}</span>
+      <span class="cmdf-s">${sous || '&nbsp;'}</span>
+    </button>`;
+  }).join('');
+  return `<div class="cmdf-cards">${cartes}</div>`;
+}
+
+// Section d'un dossier — toujours UNE seule. Terminé passe avant tout le reste.
+function _cockpitSectionDe(r) {
+  // Terminé d'abord, quel que soit le critère : un dossier fini n'est ni « en retard »,
+  // ni « à attribuer » — il n'attend plus personne.
+  if (r.isDone) return 'TERMINE';
+  if (_cockpitGroupBy === 'operateur') return r.responsables[0] || 'À attribuer';
+  if (_cockpitGroupBy === 'echeance') {
+    if (!r.ymd) return r.taskRetard ? 'RETARD' : 'SANSDATE';
+    return r.bucket;
+  }
+  return r.curStep ? r.curStep.code : 'AATTRIBUER';   // étape
+}
+
+const _CKP_SECTIONS_ECH = [
+  ['RETARD',   'En retard',              '#dc2626'],
+  ['AUJ',      "Aujourd'hui",            '#e8834a'],
+  ['DEMAIN',   'Demain',                 '#e8834a'],
+  ['SEMAINE',  'Cette semaine',          '#d97706'],
+  ['FUTUR',    'Plus tard',              '#2563eb'],
+  ['SANSDATE', 'Sans date de production','#a8a29e'],
+  ['TERMINE',  'Terminés',               '#16a34a'],
+];
+
+function _cockpitGroupes(rows) {
+  if (_cockpitGroupBy === 'aucun') return null;
+  const par = new Map();
+  rows.forEach(r => {
+    const k = _cockpitSectionDe(r);
+    if (!par.has(k)) par.set(k, []);
+    par.get(k).push(r);
+  });
+  let ordre;
+  if (_cockpitGroupBy === 'operateur') {
+    // « À attribuer » en tête (c'est ce qui bloque), « Terminés » en queue.
+    const poids = k => k === 'À attribuer' ? 0 : k === 'TERMINE' ? 2 : 1;
+    ordre = [...par.keys()].sort((a, b) => (poids(a) - poids(b)) || a.localeCompare(b, 'fr'))
+      .map(k => [k, k === 'TERMINE' ? 'Terminés' : k,
+                 k === 'À attribuer' ? '#e8834a' : k === 'TERMINE' ? '#16a34a' : '#1a4a3a']);
+  } else if (_cockpitGroupBy === 'echeance') {
+    ordre = _CKP_SECTIONS_ECH;
+  } else {
+    // Étape : l'ordre du pipeline, « À attribuer » en tête (c'est ce qui bloque),
+    // « Terminés » en queue.
+    ordre = [['AATTRIBUER', 'À attribuer', '#e8834a']]
+      .concat(ETAPES_CONFIG.map(e => [e.code, e.label, e.color]))
+      .concat([['TERMINE', 'Terminés', '#16a34a']]);
+  }
+  return ordre.filter(([k]) => par.has(k)).map(([k, titre, color]) => {
+    const rs   = par.get(k);
+    const moy  = Math.round(rs.reduce((s, r) => s + (r.pct || 0), 0) / rs.length);
+    const late = rs.filter(r => !r.isDone && (r.deadlineLate || r.taskRetard)).length;
+    const sous = _ckpSousLigne(rs) || (late ? late + ' en retard' : 'Avancement moyen ' + moy + ' %');
+    return { cle:k, titre, color, rows:rs, argent:(late ? late + ' en retard · ' : '') + sous };
+  });
+}
+
+function _cockpitGroupeHtml(g, rendu) {
+  const ferme = _cockpitGrpFermes.has(g.cle);
+  const lim   = _cockpitGrpLimites[g.cle] || _CMD_GRP_PAGE;
+  const page  = g.rows.slice(0, lim);
+  const reste = g.rows.length - page.length;
+  const suite = reste > 0
+    ? `<div class="pcok-more"><button onclick="prodGroupePlus('${_pcokEsc(g.cle)}')">Afficher plus (${reste} restant${reste>1?'s':''})</button></div>`
+    : '';
+  return `<section class="cmdg${ferme?' cmdg--ferme':''}" style="--g:${g.color}">
+    <button type="button" class="cmdg-head" aria-expanded="${!ferme}" onclick="prodToggleGroupe('${_pcokEsc(g.cle)}')">
+      <span class="cmdg-dot"></span>
+      <span class="cmdg-t">${_pcokEsc(g.titre)}</span>
+      <span class="cmdg-n">${g.rows.length} dossier${g.rows.length>1?'s':''}</span>
+      <span class="cmdg-m">${_pcokEsc(g.argent)}</span>
+      <span class="cmdg-chev">${ferme?'⌄':'⌃'}</span>
+    </button>
+    ${ferme ? '' : `<div class="cmdg-body">${rendu(page)}${suite}</div>`}
+  </section>`;
+}
+
+// Liste en cartes dépliables — le détail (pipeline + actions) s'ouvre SOUS la carte.
+function _cockpitCards(rows) {
+  if (!rows.length) return `<div class="pcok-empty"><p>Aucun dossier ne correspond aux filtres.</p></div>`;
+  return `<div class="cmdc-list">${rows.map(_cockpitCarte).join('')}</div>`;
+}
+
+function _cockpitCarte(r) {
+  const id     = String(r.dossierId);
+  const ouvert = _cockpitExpanded.has(id);
+  const accent = r.isDone ? '#16a34a'
+    : (r.days != null && r.days < 0) ? '#dc2626'
+    : (r.days === 0 || r.days === 1) ? '#e8834a'
+    : r.taskRetard ? '#dc2626'
+    : r._hasRunning ? '#2563eb'
+    : !r.responsables.length ? '#e8834a' : '#d6d3d1';
+
+  const stMap = { RETARD:['#dc2626','#fee2e2','En retard'], EN_COURS:['#d97706','#fef3c7','En cours'],
+                  A_FAIRE:['#2563eb','#dbeafe','À faire'], TERMINE:['#16a34a','#dcfce7','Terminé'] };
+  const [sc, sb, sl] = stMap[r.statut] || ['#78716c','#f5f5f4','—'];
+  const statut = `<span class="cmdc-badge" style="color:${sc};background:${sb}">${sl}</span>`;
+  const stC    = r.curStep ? r.curStep.color : '#a8a29e';
+  const etape  = r.curStep
+    ? `<span class="cmdc-badge" style="color:${stC};background:${stC}18">${_pcokEsc(r.curStep.short || r.curStep.label)}</span>`
+    : (r.isDone ? '' : `<span class="cmdc-badge" style="color:#e8834a;background:#fff2e6">À attribuer</span>`);
+  const prio = (r.priorite === 'Urgente' || r.priorite === 'Haute')
+    ? `<span class="cmdc-badge" style="color:${r.priorite==='Urgente'?'#dc2626':'#d97706'};background:${r.priorite==='Urgente'?'#fee2e2':'#fef3c7'}">${_pcokEsc(r.priorite)}</span>`
+    : '';
+  const run = r._hasRunning ? `<span class="pcok-run-dot" title="Une tâche tourne en ce moment"></span>` : '';
+
+  const dateTxt = r.ymd ? new Date(r.ymd+'T00:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'}) : '—';
+  let pill = '', late = false;
+  if (r.isDone)            pill = 'Terminé';
+  else if (r.days == null) { pill = r.taskRetard ? 'Rythme dépassé' : 'Pas de date de production'; late = r.taskRetard; }
+  else if (r.days < 0)     { pill = 'En retard de ' + Math.abs(r.days) + ' jour' + (Math.abs(r.days)>1?'s':''); late = true; }
+  else if (r.days === 0)   pill = "C'est aujourd'hui";
+  else if (r.days === 1)   pill = 'Demain';
+  else                     pill = 'Dans ' + r.days + ' jours';
+
+  const pctC = r.pct === 100 ? '#16a34a' : r.pct > 0 ? '#e8834a' : '#a8a29e';
+  const resp = r.responsables.length
+    ? _pcokEsc(r.responsables[0]) + (r.responsables.length > 1 ? ` <span class="cmdc-lk">+${r.responsables.length-1}</span>` : '')
+    : '<b style="color:#c2410c">À attribuer</b>';
+  const ligne = (lab, val) => `<div class="cmdc-l"><span class="cmdc-lk">${lab} :</span> <span class="cmdc-lv">${val}</span></div>`;
+
+  return `<section class="cmdc${ouvert?' cmdc--open':''}${r.isDone?' cmdc--off':''}" style="--a:${accent}" data-id="${id}">
+    <div class="cmdc-head" role="button" tabindex="0" aria-expanded="${ouvert}"
+         onclick="prodToggleCarte('${id}')"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();prodToggleCarte('${id}')}">
+      <div class="cmdc-id">
+        <div class="cmdc-t">${run}${_pcokEsc(r.client)}${statut}${etape}${prio}</div>
+        <div class="cmdc-ref">${_pcokEsc(r.ref)}</div>
+        ${r.produit ? ligne('Article', _pcokEsc(r.produit)) : ''}
+        ${ligne('Responsable', resp)}
+      </div>
+      <div class="cmdc-mny">
+        <div class="cmdc-lab">Avancement</div>
+        <div class="cmdc-big" style="color:${pctC}">${r.pct}%</div>
+        <div class="cmdc-bar"><i style="width:${r.pct}%;background:${pctC}"></i></div>
+      </div>
+      <div class="cmdc-ech">
+        <div class="cmdc-lab">Date de production</div>
+        <div class="cmdc-date">${dateTxt}</div>
+        <div class="cmdc-pill${late?' cmdc-pill--late':''}">${pill}</div>
+      </div>
+      <div class="cmdc-go">
+        <button type="button" class="cmdc-btn" onclick="event.stopPropagation();prodToggleCarte('${id}')">
+          ${ouvert ? 'Masquer le détail' : 'Voir le détail'}<span class="cmdc-chev">${ouvert?'⌃':'⌄'}</span>
+        </button>
+        <button type="button" class="cmdc-btn2" title="Ouvrir la fiche dans le panneau latéral" onclick="event.stopPropagation();openProdDrawer('${id}')">Fiche</button>
+      </div>
+    </div>
+    ${ouvert ? `<div class="cmdc-body">${_cockpitDetailBody(r, false)}</div>` : ''}
+  </section>`;
+}
+
 function renderProdCockpit() {
   const container = document.getElementById('tachesContainer');
   if (!container) return;
@@ -19752,6 +19997,7 @@ function renderProdCockpit() {
 
   container.innerHTML =
     `<div class="pcok">
+      ${_cockpitFilterCards(all)}
       ${_cockpitToolbar(cnt, opsSet, etapesUsed, all)}
       ${_cockpitAlertCards(all)}
       ${_cockpitOpHeatmap()}
@@ -19768,19 +20014,25 @@ function _cockpitRenderBody() {
   const page = filtered.slice(0, _cockpitLimit);
   const filteredLbl = (_cockpitFilter!=='TOUS'||_cockpitOp!=='TOUS'||_cockpitShift!=='TOUS'||_cockpitEtape!=='TOUS'||_cockpitSearch) ? ' · filtré' : '';
   const count = `<div class="pcok-count">${filtered.length} dossier${filtered.length>1?'s':''}${filteredLbl}</div>`;
+  const rendu = _cockpitVue === 'cartes' ? _cockpitCards : _cockpitTable;
+  const groupes = _cockpitGroupes(filtered);   // sections bâties sur la liste COMPLÈTE
+  if (groupes) {
+    body.innerHTML = count + (groupes.length
+      ? `<div class="cmdg-list">${groupes.map(g => _cockpitGroupeHtml(g, rendu)).join('')}</div>`
+      : rendu([]));
+    _ensureChronoTick();
+    return;
+  }
   const more = filtered.length > _cockpitLimit
     ? `<div class="pcok-more"><button onclick="_cockpitShowMore()">Afficher plus (${filtered.length - _cockpitLimit} restants)</button></div>` : '';
-  body.innerHTML = count + _cockpitTable(page) + more;
+  body.innerHTML = count + rendu(page) + more;
   _ensureChronoTick();
 }
 
 function _cockpitToolbar(cnt, opsSet, etapesUsed, all) {
-  const chips = [
-    ['TOUS','Tous'], ['RETARD','En retard'], ['AUJ',"Aujourd'hui"], ['DEMAIN','Demain'], ['SEMAINE','Cette semaine'], ['TERMINE','Terminés']
-  ].map(([k,lbl]) => {
-    const active = _cockpitFilter === k;
-    return `<button class="pcok-chip ${active?'pcok-chip--active':''} ${k==='RETARD'?'pcok-chip--warn':''}" onclick="_cockpitSetFilter('${k}')">${lbl}<span class="pcok-chip-n">${cnt(k)}</span></button>`;
-  }).join('');
+  // Les filtres d'état sont passés en CARTES au-dessus (_cockpitFilterCards) ; il ne
+  // reste ici que l'équipe, qui est un filtre ORTHOGONAL (on peut vouloir « la nuit »
+  // ET « en retard ») — en faire des cartes laisserait croire à un même découpage.
   // Chips équipe (Jour/Nuit) — filtre indépendant, compte les dossiers ayant ≥1 tâche du shift.
   const shiftCnt = sh => sh === 'TOUS' ? all.length
     : all.filter(r => r.steps.some(s => s.te.some(t => (t.shift || '') === sh))).length;
@@ -19795,9 +20047,12 @@ function _cockpitToolbar(cnt, opsSet, etapesUsed, all) {
   const sortOpts = [
     ['echeance','Échéance'], ['retard','Retard'], ['operateur','Opérateur'], ['statut','Statut'], ['progression','Progression'], ['priorite','Priorité']
   ].map(([k,l]) => `<option value="${k}" ${_cockpitSort.key===k?'selected':''}>Trier : ${l}</option>`).join('');
+  const grpOpts = [
+    ['etape','Étape'], ['echeance','Échéance'], ['operateur','Opérateur'], ['aucun','Sans groupe']
+  ].map(([k,l]) => `<option value="${k}" ${_cockpitGroupBy===k?'selected':''}>Grouper : ${l}</option>`).join('');
   const dirIcon = _cockpitSort.dir === 'asc' ? '↑' : '↓';
   return `<div class="pcok-toolbar">
-    <div class="pcok-chips">${chips}<span class="pcok-chips-sep"></span>${shiftChips}</div>
+    <div class="pcok-chips">${shiftChips}</div>
     <div class="pcok-controls">
       <div class="pcok-search">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -19805,9 +20060,13 @@ function _cockpitToolbar(cnt, opsSet, etapesUsed, all) {
       </div>
       <select class="select-input" onchange="_cockpitSetOp(this.value)" title="Filtrer par opérateur">${opOpts}</select>
       <select class="select-input" onchange="_cockpitSetEtape(this.value)" title="Filtrer par étape">${etOpts}</select>
+      <select class="select-input" onchange="_cockpitSetGroupBy(this.value)" title="Regrouper les dossiers en sections">${grpOpts}</select>
       <select class="select-input" onchange="_cockpitSetSort(this.value)" title="Trier">${sortOpts}</select>
       <button class="pcok-iconbtn" title="Sens du tri" onclick="_cockpitToggleSortDir()">${dirIcon}</button>
-      <button class="pcok-iconbtn pcok-density" title="Vue compacte / détaillée" onclick="_cockpitToggleDensity()">${_cockpitDensity==='compact'?'Détaillé':'Compact'}</button>
+      <button class="pcok-iconbtn" title="Basculer entre les cartes dépliables et le tableau dense" onclick="_cockpitSetVue('${_cockpitVue==='cartes'?'table':'cartes'}')">${_cockpitVue==='cartes'?'☰ Tableau':'▤ Cartes'}</button>
+      ${_cockpitVue === 'cartes'
+        ? `<button class="pcok-iconbtn" title="Déplier ou replier toutes les cartes affichées" onclick="prodToggleToutesCartes()">Tout déplier</button>`
+        : `<button class="pcok-iconbtn pcok-density" title="Vue compacte / détaillée" onclick="_cockpitToggleDensity()">${_cockpitDensity==='compact'?'Détaillé':'Compact'}</button>`}
     </div>
   </div>`;
 }
@@ -19971,7 +20230,10 @@ function closeDrawers() {
 }
 function closeProdDrawer() { closeDrawers(); }
 
-function _cockpitDrawerContent(r) {
+// Détail d'un dossier de production, partagé par le drawer et la carte dépliée.
+function _cockpitDrawerContent(r) { return _cockpitDetailBody(r, true); }
+
+function _cockpitDetailBody(r, avecTete) {
   const canAttrib = PAGE_ACCESS.attribution.includes(currentUser?.role);
   const ech  = r.ymd ? new Date(r.ymd+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'2-digit',month:'long'}) : '—';
   const dtxt = r.days==null ? '' : r.days<0 ? `${Math.abs(r.days)}j de retard` : r.days===0 ? "Aujourd'hui" : r.days===1 ? 'Demain' : `${r.days}j restants`;
@@ -19979,13 +20241,14 @@ function _cockpitDrawerContent(r) {
   const prioC  = r.priorite==='Urgente'?'#dc2626':r.priorite==='Haute'?'#d97706':'#78716c';
   const prioBg = r.priorite==='Urgente'?'#fee2e2':r.priorite==='Haute'?'#fef3c7':'#f5f5f4';
   const stepsHtml = _pcokStepsHtml(r.steps);
-  return `<div class="pcok-drawer-head">
+  const tete = avecTete ? `<div class="pcok-drawer-head">
       <div style="min-width:0">
         <div class="pcok-drawer-ref">${_pcokEsc(r.ref)}</div>
         <div class="pcok-drawer-client">${_pcokEsc(r.client)}</div>
       </div>
       <button class="pcok-drawer-close" onclick="closeProdDrawer()" aria-label="Fermer">×</button>
-    </div>
+    </div>` : '';
+  return `${tete}
     <div class="pcok-drawer-meta">
       <span class="pcok-badge" style="color:${prioC};background:${prioBg}">${r.priorite}</span>
       <span class="pcok-drawer-ech" style="color:${dCol}">${ech}${dtxt?' · '+dtxt:''}</span>
