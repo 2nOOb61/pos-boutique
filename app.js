@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '205 · 2026-10-05';
+const APP_VERSION = '206 · 2026-10-05';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -7138,6 +7138,38 @@ let _cmdDensity  = 'compact';
 let _cmdLimit    = 60;
 const _CMD_PAGE  = 60;
 
+// Vue de la liste : CARTES dépliables (défaut) ou tableau dense. Même grammaire que
+// les bandes du Suivi commande : une carte par commande, un clic la déplie sur son
+// détail complet — sans quitter la liste ni ouvrir le panneau latéral.
+// Le choix est mémorisé PAR POSTE : la caisse et l'atelier ne lisent pas la même chose.
+let _cmdVue = (function(){
+  try { return localStorage.getItem('pos-cmd-vue') === 'table' ? 'table' : 'cartes'; }
+  catch(e) { return 'cartes'; }
+})();
+// Cartes ouvertes : volontairement EN MÉMOIRE (pas en localStorage, contrairement au
+// Suivi) — on revient sur Commandes pour traiter la suivante, pas pour retrouver
+// quinze cartes dépliées de la veille.
+let _cmdExpanded = new Set();
+
+function _cmdSetVue(v){
+  _cmdVue = (v === 'table') ? 'table' : 'cartes';
+  try { localStorage.setItem('pos-cmd-vue', _cmdVue); } catch(e) {}
+  _cmdLimit = _CMD_PAGE;
+  renderCmdCockpit();
+}
+function cmdToggleCarte(id){
+  const k = String(id);
+  if (_cmdExpanded.has(k)) _cmdExpanded.delete(k); else _cmdExpanded.add(k);
+  _cmdRenderBody();
+}
+function cmdToggleToutesCartes(){
+  const ids = _cmdSortRows(_cmdFilterRows(_buildCommandeRows())).slice(0, _cmdLimit).map(r => String(r.id));
+  const toutOuvert = ids.length > 0 && ids.every(id => _cmdExpanded.has(id));
+  if (toutOuvert) ids.forEach(id => _cmdExpanded.delete(id));
+  else            ids.forEach(id => _cmdExpanded.add(id));
+  _cmdRenderBody();
+}
+
 function _buildCommandeRows() {
   return (Array.isArray(commandes) ? commandes : []).map(c => {
     const dcmd = parseSaleDate(c.date);
@@ -7254,7 +7286,7 @@ function _cmdRenderBody() {
   const count = `<div class="pcok-count">${filtered.length} commande${filtered.length>1?'s':''}${filteredLbl} · Total ${fmt(totalSum)}${restSum>0?` · Restant ${fmt(restSum)}`:''}</div>`;
   const more = filtered.length > _cmdLimit
     ? `<div class="pcok-more"><button onclick="_cmdShowMore()">Afficher plus (${filtered.length - _cmdLimit} restants)</button></div>` : '';
-  body.innerHTML = count + _cmdTable(page) + more;
+  body.innerHTML = count + (_cmdVue === 'cartes' ? _cmdCards(page) : _cmdTable(page)) + more;
 }
 
 // Filtres de la page Commandes. Chaque entrée : clé · libellé · couleur d'accent ·
@@ -7318,7 +7350,10 @@ function _cmdToolbar(cnt, caisSet) {
       <select class="select-input" onchange="_cmdSetMode(this.value)" title="Filtrer par mode">${modeOpts}</select>
       <select class="select-input" onchange="_cmdSetSort(this.value)" title="Trier">${sortOpts}</select>
       <button class="pcok-iconbtn" title="Sens du tri" onclick="_cmdToggleSortDir()">${dirIcon}</button>
-      <button class="pcok-iconbtn pcok-density" title="Vue compacte / détaillée" onclick="_cmdToggleDensity()">${_cmdDensity==='compact'?'Détaillé':'Compact'}</button>
+      <button class="pcok-iconbtn" title="Basculer entre les cartes dépliables et le tableau dense" onclick="_cmdSetVue('${_cmdVue==='cartes'?'table':'cartes'}')">${_cmdVue==='cartes'?'☰ Tableau':'▤ Cartes'}</button>
+      ${_cmdVue === 'cartes'
+        ? `<button class="pcok-iconbtn" title="Déplier ou replier toutes les cartes affichées" onclick="cmdToggleToutesCartes()">Tout déplier</button>`
+        : `<button class="pcok-iconbtn pcok-density" title="Vue compacte / détaillée" onclick="_cmdToggleDensity()">${_cmdDensity==='compact'?'Détaillé':'Compact'}</button>`}
     </div>
   </div>`;
 }
@@ -7370,6 +7405,94 @@ function _cmdTable(rows) {
     <th class="pcok-th"></th>
   </tr>`;
   return `<div class="pcok-tablewrap"><table class="pcok-table"><thead>${head}</thead><tbody>${rows.map(_cmdRow).join('')}</tbody></table></div>`;
+}
+
+// ── Liste en CARTES dépliables ────────────────────────────────────────────
+// Même grammaire que les bandes du Suivi commande : identité à gauche, argent au
+// milieu, échéance à droite, action au bout ; un clic déplie le détail SOUS la carte
+// (articles, livraison, paiements, pôles, pipeline, actions) au lieu d'ouvrir le
+// panneau latéral, qui cache la liste et oblige à refermer entre deux commandes.
+function _cmdCards(rows) {
+  if (!rows.length) {
+    return `<div class="pcok-empty"><p>Aucune commande ne correspond aux filtres.</p></div>`;
+  }
+  return `<div class="cmdc-list">${rows.map(_cmdCarte).join('')}</div>`;
+}
+
+function _cmdCarte(r) {
+  const c        = r.c;
+  const id       = String(r.id);
+  const ouvert   = _cmdExpanded.has(id);
+  const prodDone = r.status === 'pending' && r.prodClos;
+
+  // Couleur du bord gauche = même lecture que le liseré des lignes du tableau.
+  const accent = r.status === 'cancelled' ? '#d6d3d1'
+    : r.status === 'completed' ? '#16a34a'
+    : prodDone ? (r.restant > 0 ? '#d97706' : '#16a34a')
+    : (r.days != null && r.days < 0) ? '#dc2626'
+    : (r.days === 0 || r.days === 1) ? '#e8834a'
+    : r.restant > 0 ? '#d97706' : '#2563eb';
+
+  const stMap = { pending:['#d97706','#fef3c7','En cours'], completed:['#16a34a','#dcfce7','Livrée'], cancelled:['#78716c','#f5f5f4','Annulée'] };
+  const [sc, sb, sl] = stMap[r.status] || ['#78716c','#f5f5f4','—'];
+  const statut   = `<span class="cmdc-badge" style="color:${sc};background:${sb}">${sl}</span>`;
+  const prodChip = prodDone
+    ? `<span class="cmdc-badge" style="color:#16a34a;background:#dcfce7" title="Production clôturée — en attente de règlement${r.restant>0?' ('+fmt(r.restant)+')':''} / de remise au client">✓ Produite</span>`
+    : '';
+  const _pmod   = _pendingModFor(r.id);
+  const modChip = _pmod
+    ? `<span class="cmdc-badge" style="color:#b45309;background:#fef3c7" title="Demande ${_pmod.type==='cancel'?"d'annulation":'de modification'} en attente — ouvrir pour valider">⏳ ${_pmod.type==='cancel'?'Annulation':'Modif'}</span>`
+    : '';
+  const modeChip = `<span class="cmdc-badge" style="color:${r.mode==='livraison'?'#c2410c':'#1a4a3a'};background:var(--color-bg,#f5f4f2)">${r.mode==='livraison'?'Livraison':'Retrait'}</span>`;
+
+  // Échéance : phrase entière plutôt que « +95j » — une carte a la place de le dire.
+  const dateTxt = r.ymd ? new Date(r.ymd+'T00:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'}) : '—';
+  let pill = '', late = false, pillTitle = '';
+  if (r.status === 'completed')      pill = 'Livrée';
+  else if (r.status === 'cancelled') pill = 'Annulée';
+  else if (r.days == null)           pill = 'Pas de date fixée';
+  else if (r.days < 0)  { pill = 'En retard de ' + Math.abs(r.days) + ' jour' + (Math.abs(r.days)>1?'s':''); late = !prodDone; }
+  else if (r.days === 0) pill = "C'est aujourd'hui";
+  else if (r.days === 1) pill = 'Demain';
+  else                   pill = 'Dans ' + r.days + ' jours';
+  if (prodDone) pillTitle = 'Production terminée — reste à régler / remettre au client';
+
+  const resteTxt = r.restant > 0
+    ? `<div class="cmdc-s" style="color:#dc2626">Restant ${fmt(r.restant)}</div>`
+    : `<div class="cmdc-s" style="color:#16a34a">${r.status==='pending' ? 'Soldé' : '—'}</div>`;
+
+  const ligne = (lab, val) => `<div class="cmdc-l"><span class="cmdc-lk">${lab} :</span> <span class="cmdc-lv">${val}</span></div>`;
+  const produits = (c.items||[]).map(i => i.name).filter(Boolean).join(', ');
+
+  return `<section class="cmdc${ouvert?' cmdc--open':''}${r.status==='cancelled'?' cmdc--off':''}" style="--a:${accent}" data-id="${id}">
+    <div class="cmdc-head" role="button" tabindex="0" aria-expanded="${ouvert}"
+         onclick="cmdToggleCarte('${id}')"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();cmdToggleCarte('${id}')}">
+      <div class="cmdc-id">
+        <div class="cmdc-t">${_pcokEsc(r.client)}${statut}${prodChip}${modChip}${modeChip}</div>
+        <div class="cmdc-ref">${_pcokEsc(r.ref)}${r.contact?' · '+_pcokEsc(r.contact):''} · ${_pcokEsc(r.dateStr)}</div>
+        ${ligne('Article' + (r.nItems>1?'s':''), _pcokEsc(produits || '—') + (r.nItems>1?` <b>×${r.nItems}</b>`:''))}
+        ${r.commercial ? ligne('Commercial', '<b>'+_pcokEsc(r.commercial)+'</b>') : ''}
+      </div>
+      <div class="cmdc-mny">
+        <div class="cmdc-lab">Montant</div>
+        <div class="cmdc-big">${fmt(r.total)}</div>
+        ${resteTxt}
+      </div>
+      <div class="cmdc-ech">
+        <div class="cmdc-lab">Livraison prévue</div>
+        <div class="cmdc-date">${dateTxt}</div>
+        <div class="cmdc-pill${late?' cmdc-pill--late':''}"${pillTitle?` title="${_pcokEsc(pillTitle)}"`:''}>${pill}</div>
+      </div>
+      <div class="cmdc-go">
+        <button type="button" class="cmdc-btn" onclick="event.stopPropagation();cmdToggleCarte('${id}')">
+          ${ouvert ? 'Masquer le détail' : 'Voir le détail'}<span class="cmdc-chev">${ouvert?'⌃':'⌄'}</span>
+        </button>
+        <button type="button" class="cmdc-btn2" title="Ouvrir la fiche dans le panneau latéral" onclick="event.stopPropagation();openCmdDrawer('${id}')">Fiche</button>
+      </div>
+    </div>
+    ${ouvert ? `<div class="cmdc-body">${_cmdDetailBody(c, false)}</div>` : ''}
+  </section>`;
 }
 
 function _cmdRow(r) {
@@ -7473,7 +7596,12 @@ function _cmdTogglePole(id, key){
   }
 }
 
-function _cmdDrawerContent(c) {
+// Détail d'une commande, partagé par le DRAWER du cockpit et la CARTE dépliée.
+// `avecTete` = bandeau titre + bouton de fermeture : il n'a de sens que dans le
+// drawer ; dans une carte, l'en-tête est juste au-dessus et on referme par la carte.
+function _cmdDrawerContent(c) { return _cmdDetailBody(c, true); }
+
+function _cmdDetailBody(c, avecTete) {
   const r = _buildCommandeRows().find(x => String(x.id) === String(c.id)) || {};
   const _pmod = _pendingModFor(c.id); // demande en attente → bandeau + boutons valider/refuser (admin)
   const dCmd = r.dcmd ? r.dcmd.toLocaleString('fr-FR') : '—';
@@ -7513,13 +7641,14 @@ function _cmdDrawerContent(c) {
   }).filter(Boolean).join('');
   const polesBlock = `<div class="pcok-drawer-pipe-title">Pôles atelier${_canEditPoles?' <span style="font-weight:400;color:var(--color-text-muted);font-size:11px">(cliquez pour classer)</span>':''}</div>
     <div class="cmd-poles" style="margin-bottom:12px">${polesChips || '<span class="pcok-muted" style="font-size:12px">Aucun pôle</span>'}</div>`;
-  return `<div class="pcok-drawer-head">
+  const tete = avecTete ? `<div class="pcok-drawer-head">
       <div style="min-width:0">
         <div class="pcok-drawer-ref">${_pcokEsc(r.ref||'')}${r.commercial?' · '+_pcokEsc(r.commercial):''}</div>
         <div class="pcok-drawer-client">${_pcokEsc(c.clientName||'Client')}</div>
       </div>
       <button class="pcok-drawer-close" onclick="closeDrawers()" aria-label="Fermer">×</button>
-    </div>
+    </div>` : '';
+  return `${tete}
     <div class="pcok-drawer-meta">
       <span class="pcok-badge" style="color:${sc};background:${sb}">${sl}</span>
       ${c.clientContact?`<span style="font-size:12.5px;color:var(--color-text-secondary)">${_pcokEsc(c.clientContact)}</span>`:''}

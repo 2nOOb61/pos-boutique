@@ -679,6 +679,58 @@
 .pcok-chip--warn.pcok-chip--active { background:#fee2e2; border-color:#fca5a5; color:#dc2626; }
 .pcok-chip-n { font-size:10px; font-weight:800; background:rgba(0,0,0,.07); border-radius:999px; padding:1px 7px; min-width:16px; text-align:center; }
 .pcok-chip--active .pcok-chip-n { background:rgba(255,255,255,.55); }
+/* Liste Commandes en CARTES depliables — meme grammaire que les bandes du Suivi
+   commande : identite a gauche, argent au milieu, echeance a droite, action au bout.
+   Les styles .svi-* ne sont PAS reutilisables ici : ils sont injectes par
+   _sviInjectStyle() a la premiere visite de Suivi commande, donc absents tant qu'on
+   n'y est pas alle. */
+.cmdc-list { display:flex; flex-direction:column; gap:10px; margin-top:4px; }
+.cmdc { background:var(--color-surface,#fff); border:1px solid var(--color-border,#eee9e1);
+  border-left:4px solid var(--a,#d6d3d1); border-radius:14px; overflow:hidden; }
+.cmdc--open { box-shadow:0 2px 12px rgba(0,0,0,.05); }
+.cmdc--off { opacity:.72; }
+.cmdc-head { display:grid; grid-template-columns:minmax(0,1.6fr) minmax(120px,.7fr) minmax(150px,.85fr) auto;
+  gap:18px; align-items:start; padding:14px 18px; cursor:pointer; }
+.cmdc-head:hover { background:var(--color-bg,#faf8f4); }
+.cmdc-t { display:flex; align-items:center; flex-wrap:wrap; gap:7px; font-size:15px; font-weight:800;
+  color:var(--color-text-primary); line-height:1.25; }
+.cmdc-ref { font-family:'SF Mono',Menlo,monospace; font-size:11px; color:var(--color-text-muted); margin-top:5px; }
+.cmdc-l { display:flex; gap:6px; font-size:12.5px; color:var(--color-text-muted); margin-top:5px;
+  overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.cmdc-lk { flex:none; }
+.cmdc-lv { min-width:0; overflow:hidden; text-overflow:ellipsis; color:var(--color-text-primary); }
+.cmdc-lab { font-size:11px; font-weight:700; color:var(--color-text-primary); margin-bottom:5px; }
+.cmdc-big { font-size:23px; font-weight:800; line-height:1.05; color:var(--color-text-primary);
+  font-variant-numeric:tabular-nums; white-space:nowrap; }
+.cmdc-s { font-size:12px; font-weight:700; margin-top:4px; white-space:nowrap; }
+.cmdc-date { font-size:15px; font-weight:700; color:var(--color-text-primary); white-space:nowrap; }
+.cmdc-pill { display:inline-flex; margin-top:6px; font-size:11.5px; font-weight:700; padding:4px 10px;
+  border-radius:999px; background:var(--color-bg,#f5f4f2); color:var(--color-text-secondary); }
+.cmdc-pill--late { background:#fdeaea; color:#b91c1c; }
+.cmdc-go { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.cmdc-btn { display:inline-flex; align-items:center; gap:8px; font:inherit; font-size:13px; font-weight:700;
+  color:#fff; background:#1a4a3a; border:0; border-radius:10px; padding:9px 15px; cursor:pointer; white-space:nowrap; }
+.cmdc-btn:hover { background:#153c2f; }
+.cmdc-btn2 { font:inherit; font-size:12.5px; font-weight:700; color:var(--color-text-secondary);
+  background:var(--color-surface,#fff); border:1px solid var(--color-border,#e5e3df); border-radius:10px;
+  padding:9px 13px; cursor:pointer; white-space:nowrap; }
+.cmdc-btn2:hover { border-color:var(--color-primary); color:var(--color-primary); }
+.cmdc-chev { font-size:12px; opacity:.85; }
+.cmdc-badge { display:inline-flex; align-items:center; gap:4px; font-size:10.5px; font-weight:700;
+  padding:2px 8px; border-radius:999px; white-space:nowrap; }
+.cmdc-body { padding:14px 18px 16px; border-top:1px solid var(--color-border,#f0ece5); background:var(--color-bg,#faf8f4); }
+.cmdc-body .pcok-drawer-meta { margin-bottom:10px; }
+@media(max-width:1100px){
+  .cmdc-head { grid-template-columns:minmax(0,1.4fr) minmax(110px,.7fr) minmax(130px,.8fr); gap:14px; }
+  .cmdc-go { grid-column:1 / -1; justify-content:flex-start; }
+}
+@media(max-width:700px){
+  .cmdc-head { grid-template-columns:1fr 1fr; gap:12px; padding:12px 14px; }
+  .cmdc-id { grid-column:1 / -1; }
+  .cmdc-big { font-size:20px; }
+  .cmdc-body { padding:12px 14px 14px; }
+  .cmdc-btn, .cmdc-btn2 { flex:1 1 auto; justify-content:center; }
+}
 /* Filtres en cartes (page Commandes) : compteur + montant derriere chaque file */
 .cmdf-cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(134px,1fr)); gap:8px; margin:0 0 12px; }
 .cmdf-card { display:flex; flex-direction:column; gap:3px; text-align:left; padding:10px 12px; cursor:pointer; font-family:inherit;
@@ -3642,7 +3694,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20261005-filtrescartes"></script>
+<script src="./app.js?v=20261005-cmdcartes"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
