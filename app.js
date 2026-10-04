@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '204 · 2026-10-05';
+const APP_VERSION = '205 · 2026-10-05';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -7235,6 +7235,7 @@ function renderCmdCockpit() {
   const caisSet = [...new Set(all.map(r => r.commercial).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'fr'));
   container.innerHTML =
     `<div class="pcok">
+      ${_cmdFilterCards(all)}
       ${_cmdToolbar(cnt, caisSet)}
       ${_cmdAlertCards(all)}
       <div id="cmdCockpitBody"></div>
@@ -7256,14 +7257,49 @@ function _cmdRenderBody() {
   body.innerHTML = count + _cmdTable(page) + more;
 }
 
-function _cmdToolbar(cnt, caisSet) {
-  const chips = [
-    ['TOUS','Toutes'], ['EN_COURS','En cours'], ['RETARD','En retard'], ['AUJ',"Aujourd'hui"], ['SEMAINE','Cette semaine'], ['IMPAYE','Impayés'], ['PRODUITE','Produites non soldées'], ['LIVREE','Livrées'], ['ANNULEE','Annulées']
-  ].map(([k,lbl]) => {
-    const active = _cmdFilter === k;
-    const warn = (k==='RETARD'||k==='IMPAYE'||k==='PRODUITE');
-    return `<button class="pcok-chip ${active?'pcok-chip--active':''} ${warn?'pcok-chip--warn':''}" onclick="_cmdSetFilter('${k}')">${lbl}<span class="pcok-chip-n">${cnt(k)}</span></button>`;
+// Filtres de la page Commandes. Chaque entrée : clé · libellé · couleur d'accent ·
+// nature du montant affiché sous le compteur ('reste' = ce qui est encore à percevoir,
+// 'total' = le chiffre engagé, '' = rien à dire).
+const _CMD_FILTRES = [
+  ['TOUS',     'Toutes',                '#78716c', 'total'],
+  ['EN_COURS', 'En cours',              '#d97706', 'reste'],
+  ['RETARD',   'En retard',             '#dc2626', 'reste'],
+  ['AUJ',      "Aujourd'hui",           '#e8834a', 'reste'],
+  ['SEMAINE',  'Cette semaine',         '#2563eb', 'reste'],
+  ['IMPAYE',   'Impayés',             '#dc2626', 'reste'],
+  ['PRODUITE', 'Produites non soldées', '#16a34a', 'reste'],
+  ['LIVREE',   'Livrées',              '#16a34a', 'total'],
+  ['ANNULEE',  'Annulées',             '#a8a29e', ''],
+];
+
+// Les filtres en CARTES, au-dessus de la barre d'outils (même principe que la page
+// Blocages) : on voit d'un coup d'œil COMBIEN de commandes et COMBIEN d'argent il y a
+// derrière chaque file, sans avoir à cliquer chaque onglet pour le découvrir. Les
+// cartes restent dans le flux (pas dans la toolbar sticky) : neuf cartes collées en
+// haut de l'écran mangeraient la moitié d'un téléphone pendant tout le défilement.
+function _cmdFilterCards(all) {
+  const cartes = _CMD_FILTRES.map(([k, lbl, color, argent]) => {
+    const rows = all.filter(r => _cmdBucketMatch(r, k));
+    const n    = rows.length;
+    const actif = _cmdFilter === k;
+    let sous = '';
+    if (n && argent === 'reste') {
+      const s = rows.reduce((t, r) => t + (r.restant || 0), 0);
+      if (s > 0) sous = 'Reste ' + fmt(s);
+    } else if (n && argent === 'total') {
+      sous = fmt(rows.reduce((t, r) => t + (r.total || 0), 0));
+    }
+    return `<button type="button" class="cmdf-card${actif ? ' cmdf-card--active' : ''}${n ? '' : ' cmdf-card--0'}"
+      style="--c:${color};--cbg:${color}14" aria-pressed="${actif}" onclick="_cmdSetFilter('${k}')">
+      <span class="cmdf-n">${n}</span>
+      <span class="cmdf-l">${lbl}</span>
+      <span class="cmdf-s">${sous || '&nbsp;'}</span>
+    </button>`;
   }).join('');
+  return `<div class="cmdf-cards">${cartes}</div>`;
+}
+
+function _cmdToolbar(cnt, caisSet) {
   const caisOpts = ['<option value="TOUS">Tous les commerciaux</option>']
     .concat(caisSet.map(o => `<option value="${_pcokEsc(o)}" ${_cmdCaissier===o?'selected':''}>${_pcokEsc(o)}</option>`)).join('');
   const modeOpts = [['TOUS','Tous les modes'],['livraison','Livraison'],['retrait','Retrait']]
@@ -7273,7 +7309,6 @@ function _cmdToolbar(cnt, caisSet) {
   ].map(([k,l]) => `<option value="${k}" ${_cmdSort.key===k?'selected':''}>Trier : ${l}</option>`).join('');
   const dirIcon = _cmdSort.dir === 'asc' ? '↑' : '↓';
   return `<div class="pcok-toolbar">
-    <div class="pcok-chips">${chips}</div>
     <div class="pcok-controls">
       <div class="pcok-search">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
