@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '202 · 2026-10-01';
+const APP_VERSION = '203 · 2026-10-05';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -1637,8 +1637,14 @@ function renderReservations() {
         const itemCount = (Array.isArray(r.items)?r.items:[]).length;
         const printBtn = `<button class="hist-print-btn" onclick="printReservationTicket(reservations.find(x=>String(x.id)==='${r.id}'))" title="Imprimer le ticket">${_pSvg}<span>Imprimer</span></button>`;
         const finalizeBtn = r.status === 'pending' ? `<button class="btn-finalize" onclick="openFinalizeModal('${r.id}')">Finaliser</button>` : '';
-        const kebab = r.status === 'pending'
-          ? `<div class="kebab-wrap"><button class="kebab-btn" aria-label="Plus d'actions" aria-haspopup="true" onclick="toggleKebab('res${r.id}',event)">${_dSvg}</button><div class="kebab-menu" id="kb-res${r.id}" role="menu"><button class="kebab-item danger" role="menuitem" onclick="closeAllKebabs();cancelReservation('${r.id}')">${_kebabIcon('trash')}<span>Annuler la réservation</span></button></div></div>`
+        // Même porte de sortie que sur les commandes : clôturer la production d'une
+        // réservation même si son dossier n'a jamais été attribué.
+        const _resItems = (r.status === 'pending'
+            ? `<button class="kebab-item danger" role="menuitem" onclick="closeAllKebabs();cancelReservation('${r.id}')">${_kebabIcon('trash')}<span>Annuler la réservation</span></button>`
+            : '')
+          + (r.dossierId ? _clotKebabItem(r.dossierId, 'Clôturer le dossier de production') : '');
+        const kebab = _resItems
+          ? `<div class="kebab-wrap"><button class="kebab-btn" aria-label="Plus d'actions" aria-haspopup="true" onclick="toggleKebab('res${r.id}',event)">${_dSvg}</button><div class="kebab-menu" id="kb-res${r.id}" role="menu">${_resItems}</div></div>`
           : '';
         return `
         <div class="res-card" data-rgrp="${gid}">
@@ -7060,6 +7066,10 @@ function _renderCommandesLegacy() {
           : '';
         kebabItems = _adminEditAll + _editFull + _cancelBtn + _restoreBtn;
       }
+      // Clôturer la production depuis la commande elle-même : c'est là qu'on constate
+      // qu'une commande n'avance pas, y compris quand aucune étape n'a jamais été
+      // attribuée (ce dossier n'apparaît alors pas du tout dans le cockpit Production).
+      if (c.dossierId) kebabItems += _clotKebabItem(c.dossierId, 'Clôturer le dossier de production');
       const kebab = kebabItems ? `<div class="kebab-wrap">
              <button class="kebab-btn" aria-label="Plus d'actions" aria-haspopup="true" onclick="toggleKebab('cmd${c.id}',event)">${_dSvg}</button>
              <div class="kebab-menu" id="kb-cmd${c.id}" role="menu">${kebabItems}</div>
@@ -7470,7 +7480,14 @@ function _cmdDrawerContent(c) {
 
 function _cmdPipelineHtml(dossierId) {
   const r = _buildDossierRows().find(x => x.dossierId === dossierId);
-  if (!r) return '';
+  if (!r) {
+    // _buildDossierRows est indexé sur les TÂCHES : un dossier jamais attribué n'y est
+    // pas. S'il a été clôturé administrativement, le dire plutôt que de n'afficher rien.
+    const d0 = _dossierParId(dossierId);
+    return _dossierClosed(d0)
+      ? `<div class="pcok-drawer-pipe-title">Production — 100 % (clôturé sans attribution)</div>`
+      : '';
+  }
   return `<div class="pcok-drawer-pipe-title">Production — ${r.pct}%</div>
     <div class="pcok-drawer-prog"><div class="pcok-prog-bar"><div style="width:${r.pct}%;background:${r.pct===100?'#16a34a':'#e8834a'}"></div></div><span>${r.pct}%</span></div>
     <div class="pcok-drawer-pipe">${_pcokStepsHtml(r.steps)}</div>`;
@@ -7491,6 +7508,8 @@ function _cmdDrawerActions(c) {
     btns.push(`<button class="pcok-btn" onclick="closeDrawers();printFicheTravailDossier('${c.dossierId}')">Fiche travail</button>`);
   if (c.dossierId && canAttrib)
     btns.push(`<button class="pcok-btn" onclick="closeDrawers();openAttribForDossier('${c.dossierId}')">Production →</button>`);
+  if (c.dossierId && _peutCloturer(_dossierParId(c.dossierId)))
+    btns.push(`<button class="pcok-btn" style="color:#16a34a;border-color:rgba(22,163,74,.4)" title="${_CLOT_TITRE}" onclick="closeDrawers();cloturerDossier('${c.dossierId}')">✓ Clôturer production</button>`);
   // Modifications de dates (toujours utiles)
   btns.push(`<button class="pcok-btn" onclick="closeDrawers();editCommandeDateClient('${c.id}')">Date livraison</button>`);
   btns.push(`<button class="pcok-btn" onclick="closeDrawers();editCommandeDateProd('${c.id}')">Date production</button>`);
@@ -9203,6 +9222,42 @@ function _dossierPct(dt, d) {
   return applicable ? Math.round(done / applicable * 100) : (Number(d && d.progression) || 0);
 }
 
+// ── « Clôturer le dossier » : UNE porte d'entrée, présente dans TOUTES les vues ──
+// Le bouton n'existait en pratique que dans le panneau Attribution (après avoir
+// sélectionné le dossier) et dans le drawer du cockpit Production — qui n'affiche QUE
+// les dossiers ayant des tâches (`_buildDossierRows` est indexé sur les tâches). La
+// troisième entrée, le kebab de ligne `_renderDossierRow`, est devenue morte le jour où
+// la liste d'Attribution est passée au cockpit (`_renderAttrCockpit`). Résultat : un
+// dossier JAMAIS attribué était inatteignable depuis les écrans réellement utilisés.
+// Ces helpers posent le même bouton partout (cockpit Attribution, vue cartes, Suivi
+// commande, Blocages, Commandes, Réservations, fiche lecture seule) avec les mêmes
+// règles : rôle admin / chef d'atelier ET dossier pas déjà clôturé.
+function _dossierParId(id) {
+  return (Array.isArray(dossiers) ? dossiers : []).find(x => x.id === id) || null;
+}
+function _peutCloturer(d) {
+  return ['admin','chef_atelier'].includes(currentUser?.role) && !!d && !_dossierClosed(d);
+}
+const _CLOT_ICO = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#16a34a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
+const _CLOT_TITRE = 'Clôturer le dossier (LIVRÉ, 100 %) même si aucune étape n’a été attribuée';
+
+// Entrée de menu kebab (Attribution, Commandes, Réservations…).
+function _clotKebabItem(dossierId, label) {
+  if (!dossierId || !_peutCloturer(_dossierParId(dossierId))) return '';
+  return `<button class="kebab-item" role="menuitem" title="${_CLOT_TITRE}" onclick="event.stopPropagation();closeAllKebabs();cloturerDossier('${dossierId}')">${_CLOT_ICO}<span>${label || 'Clôturer le dossier'}</span></button>`;
+}
+
+// Petit bouton inline (cartes, Suivi commande, Blocages, fiche lecture seule).
+// Style en ligne volontairement : la page Suivi injecte sa propre feuille et les
+// cartes d'Attribution n'ont pas de classe d'action commune — un bouton autonome
+// s'affiche correctement partout sans toucher à style.css (donc sans bump CSS).
+function _clotMiniBtn(dossierId, label) {
+  if (!dossierId || !_peutCloturer(_dossierParId(dossierId))) return '';
+  return `<button type="button" title="${_CLOT_TITRE}" onclick="event.stopPropagation();cloturerDossier('${dossierId}')"`
+    + ` style="display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border:1px solid rgba(22,163,74,.45);border-radius:8px;`
+    + `background:#eaf7ef;color:#16a34a;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">✓ ${label || 'Clôturer'}</button>`;
+}
+
 // Clôture administrative : passe le dossier à LIVRE / 100 % même sans attribution.
 // Réservé admin / chef d'atelier. Marque aussi ses éventuelles tâches en cours comme
 // terminées pour que le pipeline (calculé sur les tâches) reste cohérent partout.
@@ -9252,12 +9307,40 @@ async function cloturerDossier(dossierId) {
 
   showToast('Dossier clôturé (100 %)');
   closeAllKebabs();
-  // Rafraîchir la vue active (Attribution ou Production)
-  if (selectedDossier && selectedDossier.id === dossierId) {
-    renderAttrPanel(taches.filter(t => t.dossierId === dossierId), dossierComments.filter(c => c.dossierId === dossierId));
+  _refreshApresCloture(dossierId);
+}
+
+// La clôture peut maintenant être déclenchée depuis n'importe quelle page : on
+// redessine celle qui est À L'ÉCRAN (`.page.active`) au lieu de deviner Attribution ou
+// Production. Toutes les pages existent dans le DOM (SPA en display:none) : tester la
+// présence d'un conteneur, comme avant, redessinerait tout le système à chaque
+// clôture — inutile et coûteux à 400 commandes.
+function _refreshApresCloture(dossierId) {
+  if (selectedDossier && selectedDossier.id === dossierId && typeof renderAttrPanel === 'function') {
+    try {
+      renderAttrPanel(taches.filter(t => t.dossierId === dossierId),
+                      dossierComments.filter(c => c.dossierId === dossierId));
+    } catch(e) {}
   }
-  if (typeof renderDossiers === 'function' && document.getElementById('dossierListContainer')) renderDossiers();
-  if (typeof renderTaches === 'function' && document.getElementById('tachesContainer')) renderTaches();
+  const page = (document.querySelector('.page.active')?.id || '').replace(/^page-/, '');
+  const rendu = {
+    attribution:  () => renderDossiers(),
+    production:   () => renderTaches(),
+    blocages:     () => renderBlocages(),
+    suivi:        () => renderSuiviPage(),
+    commandes:    () => renderCommandes(),
+    reservations: () => renderReservations(),
+    tableau:      () => renderKanbanPage(),
+    finitions:    () => renderFinitionsPage(),
+    'suivi-bat':  () => renderSuiviBat(),
+    calendrier:   () => renderCalendrier(),
+    achats:       () => renderAchats(),
+    livraisons:   () => renderLivraisons(),
+  }[page];
+  try { if (typeof rendu === 'function') rendu(); } catch(e) {}
+  // La fiche en lecture seule n'a plus rien à montrer : son pipeline vient d'être figé.
+  const ro = document.getElementById('dossierReadOnlyModal');
+  if (ro && ro.style.display !== 'none') ro.style.display = 'none';
   if (typeof closeDrawers === 'function') closeDrawers();
 }
 
@@ -9354,6 +9437,7 @@ function showDossierReadOnly(d) {
   const applicable = steps.filter(s => s.te && s.te.length).length;
   const pct  = clos ? 100 : (applicable ? Math.round(done / applicable * 100) : 0);
   const col  = s => s==='TERMINE'?'#16a34a':s==='EN_COURS'?'#d97706':s==='A_FAIRE'?'#2563eb':'#d6d3d1';
+  const clotBtn = _clotMiniBtn(d.id, 'Clôturer le dossier');
 
   const stepsHtml = steps.map(s => `
     <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--color-border)">
@@ -9389,6 +9473,7 @@ function showDossierReadOnly(d) {
         </div>
         <p style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--color-text-muted);margin:0 0 6px">Étapes de production</p>
         ${stepsHtml}
+        ${clotBtn ? `<div style="margin-top:14px;display:flex;justify-content:flex-end">${clotBtn}</div>` : ''}
       </div>
     </div>`;
 }
@@ -11650,6 +11735,7 @@ function _sviBande(r){
         : '')
     +   '</div>'
     +   '<div class="svi-acc-go">'
+    +     _clotMiniBtn(r.id, 'Clôturer')
     +     '<button type="button" class="svi-go-btn" onclick="event.stopPropagation();sviToggle(\'' + _sviEsc(r.id) + '\')">'
     +       (ouvert ? 'Masquer les étapes' : 'Voir les étapes')
     +       '<span class="svi-go-chev">' + (ouvert ? '⌃' : '⌄') + '</span>'
@@ -12052,7 +12138,7 @@ function _sviInjectStyle(){
   .svi-acc-pill{display:inline-flex;align-items:center;gap:5px;margin-top:7px;font-size:11.5px;font-weight:700;
     padding:4px 10px;border-radius:999px;background:var(--color-bg,#f5f4f2);color:var(--color-text-muted,#78716c)}
   .svi-acc-pill--late{background:#fdeaea;color:#b91c1c}
-  .svi-acc-go{display:flex;align-items:center}
+  .svi-acc-go{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .svi-go-btn{display:inline-flex;align-items:center;gap:8px;font:inherit;font-size:13px;font-weight:700;
     color:#fff;background:#1a4a3a;border:0;border-radius:10px;padding:10px 16px;cursor:pointer;white-space:nowrap}
   .svi-go-btn:hover{background:#153c2f}
@@ -13379,7 +13465,7 @@ function _renderDossierRow(d) {
         <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();selectDossier('${d.id}')">${_kebabIcon('eye')}<span>Ouvrir / attribuer</span></button>
         <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printFicheTravailDossier('${d.id}')">${_kebabIcon('print')}<span>Fiche de travail (à remplir)</span></button>
         <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printDossier('${d.id}')">${_kebabIcon('print')}<span>Imprimer le dossier</span></button>
-        ${['admin','chef_atelier'].includes(currentUser?.role) && !_dossierClosed(d) ? `<button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();cloturerDossier('${d.id}')"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#16a34a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><span>Clôturer le dossier</span></button>` : ''}
+        ${_clotKebabItem(d.id)}
         ${['admin','chef_atelier'].includes(currentUser?.role) ? `<button class="kebab-item danger" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();resetTachesDossier('${d.id}')">${_kebabIcon('reset')}<span>Réinitialiser les tâches</span></button>` : ''}
       </div>
     </div>
@@ -13651,6 +13737,7 @@ function _attrKebabMenu(id) {
     <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();selectDossier('${id}')">${_kebabIcon('eye')}<span>Ouvrir / attribuer</span></button>
     <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printFicheTravailDossier('${id}')">${_kebabIcon('print')}<span>Fiche de travail (à remplir)</span></button>
     <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printDossier('${id}')">${_kebabIcon('print')}<span>Imprimer le dossier</span></button>
+    ${_clotKebabItem(id)}
     ${['admin','chef_atelier'].includes(currentUser?.role) ? `<button class="kebab-item danger" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();resetTachesDossier('${id}')">${_kebabIcon('reset')}<span>Réinitialiser les tâches</span></button>` : ''}
   </div>`;
 }
@@ -13892,7 +13979,7 @@ function renderBlocages() {
       <td class="pcok-td-step"><span class="pcok-step" style="color:${stC};background:${stC}15;border-color:${stC}55">${_pcokEsc(stLbl)}</span></td>
       <td class="bloc-td-cause">${_pcokEsc(r.cause)}</td>
       <td class="bloc-td-who">${_pcokEsc(r.who)}</td>
-      <td class="bloc-td-action"><span class="bloc-action" style="border-color:${sevC};color:${sevC}">${_pcokEsc(r.action)}</span></td>
+      <td class="bloc-td-action"><span class="bloc-action" style="border-color:${sevC};color:${sevC}">${_pcokEsc(r.action)}</span>${_clotMiniBtn(r.id, 'Clôturer')}</td>
     </tr>`;
   }).join('') : '';
 
@@ -14044,7 +14131,9 @@ function _renderDossierCardGrid(list) {
   const cards = list.map(d => {
     const isUrgent  = d.priorite === 'Urgente';
     const isHaute   = d.priorite === 'Haute';
-    const pct       = d.progression || 0;
+    // Clôture admin : 100 % et pipeline complet même sans la moindre tâche (_dossierClosed).
+    const closD     = _dossierClosed(d);
+    const pct       = closD ? 100 : (d.progression || 0);
     const pctColor  = pct === 100 ? '#16a34a' : pct > 0 ? '#e8834a' : '#d6d3d1';
     const topColor  = isUrgent ? '#dc2626' : isHaute ? '#d97706' : pct === 100 ? '#16a34a' : 'var(--color-border)';
     const isSelected = selectedDossier?.id === d.id;
@@ -14054,7 +14143,8 @@ function _renderDossierCardGrid(list) {
     const dTaches = taches.filter(t => t.dossierId === d.id);
     const steps = ETAPES_CONFIG.map((e, i) => {
       const te = dTaches.filter(t => t.etapeCode === e.code);
-      const s  = te.length === 0 ? 'vide'
+      const s  = closD ? 'done'
+        : te.length === 0 ? 'vide'
         : te.every(t => t.statut === 'TERMINE') ? 'done'
         : te.some(t => t.statut === 'EN_COURS')  ? 'encours'
         : 'todo';
@@ -14135,6 +14225,7 @@ function _renderDossierCardGrid(list) {
       </div>
       <div class="dossier-card-v2__footer">
         ${dateHtml}
+        ${_clotMiniBtn(d.id)}
         <button class="dossier-card-v2__action" onclick="event.stopPropagation();selectDossier('${d.id}')">
           <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
           Attribuer
@@ -15360,7 +15451,7 @@ function renderAttrPanel(tachesD, commentsD = []) {
           ${['admin','chef_atelier'].includes(currentUser?.role) ? `<div class="kebab-wrap">
             <button class="kebab-btn" aria-label="Plus d'actions" aria-haspopup="true" onclick="toggleKebab('attrh${d.id}',event)"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>
             <div class="kebab-menu" id="kb-attrh${d.id}" role="menu">
-              ${!_dossierClosed(d) ? `<button class="kebab-item" role="menuitem" onclick="closeAllKebabs();cloturerDossier('${d.id}')"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#16a34a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><span>Clôturer le dossier</span></button>` : ''}
+              ${_clotKebabItem(d.id)}
               <button class="kebab-item danger" role="menuitem" onclick="closeAllKebabs();resetTachesDossier('${d.id}')">${_kebabIcon('reset')}<span>Réinitialiser les tâches</span></button>
             </div>
           </div>` : ''}
@@ -19574,7 +19665,7 @@ function _cockpitDrawerContent(r) {
     <div class="pcok-drawer-pipe">${stepsHtml}</div>
     <div class="pcok-drawer-actions">
       ${canAttrib?`<button class="pcok-btn pcok-btn--primary" onclick="closeProdDrawer();openAttribForDossier('${r.dossierId}')">Gérer l'attribution →</button>`:''}
-      ${['admin','chef_atelier'].includes(currentUser?.role) && !r.isDone ? `<button class="pcok-btn" style="color:#16a34a;border-color:rgba(22,163,74,.4)" onclick="cloturerDossier('${r.dossierId}')">✓ Clôturer</button>` : ''}
+      ${_peutCloturer(_dossierParId(r.dossierId)) ? `<button class="pcok-btn" style="color:#16a34a;border-color:rgba(22,163,74,.4)" title="${_CLOT_TITRE}" onclick="cloturerDossier('${r.dossierId}')">✓ Clôturer</button>` : ''}
       <button class="pcok-btn" onclick="printFicheTravailDossier('${r.dossierId}')">Fiche travail</button>
       <button class="pcok-btn" onclick="printDossier('${r.dossierId}')">Imprimer</button>
     </div>`;

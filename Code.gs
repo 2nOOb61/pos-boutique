@@ -1938,12 +1938,42 @@ function handleCloturerDossier(data) {
     .createTextFinder(String(data.id)).matchEntireCell(true).findNext();
   if (!match) return { ok:false, error:'Dossier introuvable' };
   const rowNum = match.getRow();
+  // Les tâches encore ouvertes sont clôturées AVEC le dossier. Sans ça la clôture ne
+  // tenait pas : majProgressionDossier_ recalcule le statut d'après les tâches à chaque
+  // pointage (_computeDossierProgress_), donc le premier pointage venu rouvrait le
+  // dossier qu'on vient de passer à LIVRE. Un dossier sans aucune tâche n'est pas
+  // concerné : prog.statut === null et majProgressionDossier_ sort sans rien écrire.
+  const nbTaches = _cloreTachesDossier_(ss, data.id);
   sh.getRange(rowNum, 6, 1, 2).setValues([['LIVRE', 100]]); // col F = Statut, col G = Progression
   sh.getRange(rowNum, 9, 1, 1).setValue(new Date());        // col I = DateLivraison
   _logAction_('DOSSIER_CLOTURE', data.par || 'admin',
-    'Clôture dossier ' + data.id + (data.motif ? ' — ' + data.motif : ''));
+    'Clôture dossier ' + data.id + (data.motif ? ' — ' + data.motif : '')
+    + (nbTaches ? ' — ' + nbTaches + ' tâche(s) terminée(s)' : ' — aucune tâche attribuée'));
   CacheService.getScriptCache().remove('dashboard_v1');
-  return { ok:true };
+  return { ok:true, tachesCloturees:nbTaches };
+}
+
+// Passe à TERMINE toutes les tâches non terminées d'un dossier (feuille Taches :
+// col B = DossierID, col G = Statut, col J = DateFin). Écriture ligne par ligne et
+// seulement sur les lignes concernées (quelques unités par dossier) : réécrire la
+// colonne entière remplacerait aussi des cellules qu'on n'a pas touchées.
+function _cloreTachesDossier_(ss, dossierId) {
+  const sh = ss.getSheetByName(SHEET_TACHES);
+  if (!sh || sh.getLastRow() <= 1) return 0;
+  const n     = sh.getLastRow() - 1;
+  const ids   = sh.getRange(2, 2,  n, 1).getValues();
+  const stats = sh.getRange(2, 7,  n, 1).getValues();
+  const fins  = sh.getRange(2, 10, n, 1).getValues();
+  const now   = new Date();
+  let touched = 0;
+  for (let i = 0; i < n; i++) {
+    if (String(ids[i][0]) !== String(dossierId)) continue;
+    if (String(stats[i][0]) === 'TERMINE') { touched++; continue; }
+    sh.getRange(i + 2, 7).setValue('TERMINE');
+    if (!fins[i][0]) sh.getRange(i + 2, 10).setValue(now);
+    touched++;
+  }
+  return touched;
 }
 
 // ============================================================
