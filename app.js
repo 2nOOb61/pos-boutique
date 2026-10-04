@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '206 · 2026-10-05';
+const APP_VERSION = '207 · 2026-10-05';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -7146,6 +7146,44 @@ let _cmdVue = (function(){
   try { return localStorage.getItem('pos-cmd-vue') === 'table' ? 'table' : 'cartes'; }
   catch(e) { return 'cartes'; }
 })();
+// Groupement de la liste en sections-cartes. ÉCHÉANCE par défaut : c'est la question
+// qui revient le plus en boutique (« qu'est-ce qui sort cette semaine ? »). Chaque
+// classement est EXCLUSIF — une commande ne peut apparaître que dans une section, sinon
+// les compteurs mentent et on traite deux fois la même. D'où le choix d'un sélecteur
+// plutôt qu'un mélange « Cette semaine » + « Impayés », qui se chevauchent.
+let _cmdGroupBy = (function(){
+  try { const v = localStorage.getItem('pos-cmd-group');
+        return ['echeance','paiement','commercial','aucun'].includes(v) ? v : 'echeance'; }
+  catch(e) { return 'echeance'; }
+})();
+// Sections repliées : mémorisées (comme les groupes du Suivi) — un poste qui ne regarde
+// jamais les Livrées doit pouvoir les garder fermées d'un jour sur l'autre.
+let _cmdGrpFermes = (function(){
+  try { return new Set(JSON.parse(localStorage.getItem('pos-cmd-grp-fermes') || '[]')); }
+  catch(e) { return new Set(); }
+})();
+// Combien de commandes on affiche par section avant de proposer la suite.
+const _CMD_GRP_PAGE = 20;
+let _cmdGrpLimites = {};
+
+function _cmdSetGroupBy(v){
+  _cmdGroupBy = ['echeance','paiement','commercial','aucun'].includes(v) ? v : 'echeance';
+  try { localStorage.setItem('pos-cmd-group', _cmdGroupBy); } catch(e) {}
+  _cmdGrpLimites = {};
+  renderCmdCockpit();
+}
+function cmdToggleGroupe(cle){
+  const k = String(cle);
+  if (_cmdGrpFermes.has(k)) _cmdGrpFermes.delete(k); else _cmdGrpFermes.add(k);
+  try { localStorage.setItem('pos-cmd-grp-fermes', JSON.stringify([..._cmdGrpFermes])); } catch(e) {}
+  _cmdRenderBody();
+}
+function cmdGroupePlus(cle){
+  const k = String(cle);
+  _cmdGrpLimites[k] = (_cmdGrpLimites[k] || _CMD_GRP_PAGE) + _CMD_GRP_PAGE;
+  _cmdRenderBody();
+}
+
 // Cartes ouvertes : volontairement EN MÉMOIRE (pas en localStorage, contrairement au
 // Suivi) — on revient sur Commandes pour traiter la suivante, pas pour retrouver
 // quinze cartes dépliées de la veille.
@@ -7284,9 +7322,19 @@ function _cmdRenderBody() {
   const restSum  = filtered.reduce((s,r)=>s+r.restant,0);
   const filteredLbl = (_cmdFilter!=='TOUS'||_cmdCaissier!=='TOUS'||_cmdMode!=='TOUS'||_cmdSearch) ? ' · filtré' : '';
   const count = `<div class="pcok-count">${filtered.length} commande${filtered.length>1?'s':''}${filteredLbl} · Total ${fmt(totalSum)}${restSum>0?` · Restant ${fmt(restSum)}`:''}</div>`;
+  const rendu = _cmdVue === 'cartes' ? _cmdCards : _cmdTable;
+  // Groupé : chaque section pagine la sienne (l'en-tête annonce le vrai total) — la
+  // pagination globale n'aurait plus de sens, elle couperait au milieu des sections.
+  const groupes = _cmdGroupes(filtered);
+  if (groupes) {
+    body.innerHTML = count + (groupes.length
+      ? `<div class="cmdg-list">${groupes.map(g => _cmdGroupeHtml(g, rendu)).join('')}</div>`
+      : rendu([]));
+    return;
+  }
   const more = filtered.length > _cmdLimit
     ? `<div class="pcok-more"><button onclick="_cmdShowMore()">Afficher plus (${filtered.length - _cmdLimit} restants)</button></div>` : '';
-  body.innerHTML = count + (_cmdVue === 'cartes' ? _cmdCards(page) : _cmdTable(page)) + more;
+  body.innerHTML = count + rendu(page) + more;
 }
 
 // Filtres de la page Commandes. Chaque entrée : clé · libellé · couleur d'accent ·
@@ -7339,6 +7387,9 @@ function _cmdToolbar(cnt, caisSet) {
   const sortOpts = [
     ['date','Date'], ['echeance','Livraison'], ['total','Montant'], ['restant','Restant dû'], ['client','Client'], ['statut','Statut']
   ].map(([k,l]) => `<option value="${k}" ${_cmdSort.key===k?'selected':''}>Trier : ${l}</option>`).join('');
+  const grpOpts = [
+    ['echeance','Échéance'], ['paiement','Paiement'], ['commercial','Commercial'], ['aucun','Sans groupe']
+  ].map(([k,l]) => `<option value="${k}" ${_cmdGroupBy===k?'selected':''}>Grouper : ${l}</option>`).join('');
   const dirIcon = _cmdSort.dir === 'asc' ? '↑' : '↓';
   return `<div class="pcok-toolbar">
     <div class="pcok-controls">
@@ -7348,6 +7399,7 @@ function _cmdToolbar(cnt, caisSet) {
       </div>
       <select class="select-input" onchange="_cmdSetCaissier(this.value)" title="Filtrer par commercial">${caisOpts}</select>
       <select class="select-input" onchange="_cmdSetMode(this.value)" title="Filtrer par mode">${modeOpts}</select>
+      <select class="select-input" onchange="_cmdSetGroupBy(this.value)" title="Regrouper les commandes en sections">${grpOpts}</select>
       <select class="select-input" onchange="_cmdSetSort(this.value)" title="Trier">${sortOpts}</select>
       <button class="pcok-iconbtn" title="Sens du tri" onclick="_cmdToggleSortDir()">${dirIcon}</button>
       <button class="pcok-iconbtn" title="Basculer entre les cartes dépliables et le tableau dense" onclick="_cmdSetVue('${_cmdVue==='cartes'?'table':'cartes'}')">${_cmdVue==='cartes'?'☰ Tableau':'▤ Cartes'}</button>
@@ -7405,6 +7457,90 @@ function _cmdTable(rows) {
     <th class="pcok-th"></th>
   </tr>`;
   return `<div class="pcok-tablewrap"><table class="pcok-table"><thead>${head}</thead><tbody>${rows.map(_cmdRow).join('')}</tbody></table></div>`;
+}
+
+// Sections possibles, dans l'ordre d'affichage. La clé sert aussi de mémoire de repli.
+const _CMD_SECTIONS = {
+  echeance: [
+    ['RETARD',   'En retard',              '#dc2626'],
+    ['AUJ',      "Aujourd'hui",            '#e8834a'],
+    ['DEMAIN',   'Demain',                 '#e8834a'],
+    ['SEMAINE',  'Cette semaine',          '#d97706'],
+    ['FUTUR',    'Plus tard',              '#2563eb'],
+    ['SANSDATE', 'Sans date de livraison', '#a8a29e'],
+    ['LIVREE',   'Livrées',                '#16a34a'],
+    ['ANNULEE',  'Annulées',               '#a8a29e'],
+  ],
+  paiement: [
+    ['PRODNS',   'Produites non soldées',       '#16a34a'],
+    ['IMPAYEE',  'Impayées',                    '#dc2626'],
+    ['SOLDEE',   'Soldées, pas encore livrées', '#2563eb'],
+    ['LIVREE',   'Livrées',                     '#16a34a'],
+    ['ANNULEE',  'Annulées',                    '#a8a29e'],
+  ],
+};
+
+// Section d'une commande. Toujours UNE seule : annulée et livrée passent avant tout le
+// reste (une commande livrée n'est pas « en retard »), puis le critère choisi.
+function _cmdSectionDe(r) {
+  if (_cmdGroupBy === 'commercial') return r.commercial || 'Sans commercial';
+  if (r.status === 'cancelled') return 'ANNULEE';
+  if (r.status === 'completed') return 'LIVREE';
+  if (_cmdGroupBy === 'paiement') {
+    if (r.restant <= 0) return 'SOLDEE';
+    return r.prodClos ? 'PRODNS' : 'IMPAYEE';
+  }
+  return r.ymd ? r.bucket : 'SANSDATE';  // RETARD | AUJ | DEMAIN | SEMAINE | FUTUR
+}
+
+// Les sections NON VIDES, dans l'ordre, avec leur compteur et leur montant. Construites
+// sur la liste FILTRÉE COMPLÈTE (pas sur la page) : un en-tête qui annonce « 88 » alors
+// que la pagination n'en a gardé que 20 serait un compteur faux.
+function _cmdGroupes(rows) {
+  if (_cmdGroupBy === 'aucun') return null;
+  const par = new Map();
+  rows.forEach(r => {
+    const k = _cmdSectionDe(r);
+    if (!par.has(k)) par.set(k, []);
+    par.get(k).push(r);
+  });
+  let ordre;
+  if (_cmdGroupBy === 'commercial') {
+    ordre = [...par.keys()].sort((a, b) =>
+      a === 'Sans commercial' ? 1 : b === 'Sans commercial' ? -1 : a.localeCompare(b, 'fr'))
+      .map(k => [k, k, '#1a4a3a']);
+  } else {
+    ordre = _CMD_SECTIONS[_cmdGroupBy];
+  }
+  return ordre.filter(([k]) => par.has(k)).map(([k, titre, color]) => {
+    const rs    = par.get(k);
+    const reste = rs.reduce((s, r) => s + (r.restant || 0), 0);
+    const total = rs.reduce((s, r) => s + (r.total || 0), 0);
+    return { cle:k, titre, color, rows:rs,
+             argent: reste > 0 ? 'Reste ' + fmt(reste) : fmt(total) };
+  });
+}
+
+// Une section = une carte : en-tête cliquable (pastille, titre, compteur, montant) et
+// corps repliable qui contient la liste — cartes ou tableau, selon la vue choisie.
+function _cmdGroupeHtml(g, rendu) {
+  const ferme = _cmdGrpFermes.has(g.cle);
+  const lim   = _cmdGrpLimites[g.cle] || _CMD_GRP_PAGE;
+  const page  = g.rows.slice(0, lim);
+  const reste = g.rows.length - page.length;
+  const suite = reste > 0
+    ? `<div class="pcok-more"><button onclick="cmdGroupePlus('${_pcokEsc(g.cle)}')">Afficher plus (${reste} restante${reste>1?'s':''})</button></div>`
+    : '';
+  return `<section class="cmdg${ferme?' cmdg--ferme':''}" style="--g:${g.color}">
+    <button type="button" class="cmdg-head" aria-expanded="${!ferme}" onclick="cmdToggleGroupe('${_pcokEsc(g.cle)}')">
+      <span class="cmdg-dot"></span>
+      <span class="cmdg-t">${_pcokEsc(g.titre)}</span>
+      <span class="cmdg-n">${g.rows.length} commande${g.rows.length>1?'s':''}</span>
+      <span class="cmdg-m">${g.argent}</span>
+      <span class="cmdg-chev">${ferme?'⌄':'⌃'}</span>
+    </button>
+    ${ferme ? '' : `<div class="cmdg-body">${rendu(page)}${suite}</div>`}
+  </section>`;
 }
 
 // ── Liste en CARTES dépliables ────────────────────────────────────────────
