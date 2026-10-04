@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '203 · 2026-10-05';
+const APP_VERSION = '204 · 2026-10-05';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -7147,11 +7147,19 @@ function _buildCommandeRows() {
     const restant = _cmdReste(c);          // reste réel (journal d'encaissements)
     const paid    = restant <= 0;
     // Progression production (si dossier lié)
+    // `prodClos` = dossier de production clôturé (LIVRE / 100 %) : la commande est
+    // FABRIQUÉE. Elle reste `pending` tant qu'elle n'est ni soldée ni remise — c'est
+    // voulu, une créance doit rester visible — mais son retard n'est plus un retard
+    // d'ATELIER : il ne doit plus crier « Livraison urgente » (cf. _cmdAlertCards),
+    // et la ligne le dit (pastille « Produite ») + le filtre PRODUITE les regroupe.
     let prodPct = null;
+    const prodClos = !!c.dossierId && _dossierClosed(_dossierParId(c.dossierId));
     if (c.dossierId) {
       const dt = (Array.isArray(taches) ? taches : []).filter(t => t.dossierId === c.dossierId);
       if (dt.length) {
         prodPct = _dossierPct(dt, (Array.isArray(dossiers) ? dossiers : []).find(x => x.id === c.dossierId));
+      } else if (prodClos) {
+        prodPct = 100; // clôture administrative sans aucune tâche : 0 tâche ≠ 0 %
       }
     }
     let bucket = 'FUTUR';
@@ -7173,7 +7181,7 @@ function _buildCommandeRows() {
       items: c.items || [], nItems: (c.items||[]).length,
       produit: (c.items||[]).map(i => i.name).filter(Boolean).join(', '),
       total, accompte: _cmdEncaisse(c), restant, paid,
-      status: c.status, bucket, prodPct,
+      status: c.status, bucket, prodPct, prodClos,
       dossierId: c.dossierId || '',
     };
   });
@@ -7186,6 +7194,9 @@ function _cmdBucketMatch(r, k) {
   if (k === 'AUJ')      return r.status === 'pending' && r.days === 0;
   if (k === 'SEMAINE')  return r.status === 'pending' && r.days != null && r.days >= 0 && r.days <= 7;
   if (k === 'IMPAYE')   return r.status === 'pending' && r.restant > 0;
+  // Fabriqué mais pas encaissé : la file de RECOUVREMENT (et de retrait), à ne pas
+  // confondre avec « Impayés », qui mélange les commandes encore en atelier.
+  if (k === 'PRODUITE') return r.status === 'pending' && r.prodClos && r.restant > 0;
   if (k === 'LIVREE')   return r.status === 'completed';
   if (k === 'ANNULEE')  return r.status === 'cancelled';
   return true;
@@ -7247,10 +7258,10 @@ function _cmdRenderBody() {
 
 function _cmdToolbar(cnt, caisSet) {
   const chips = [
-    ['TOUS','Toutes'], ['EN_COURS','En cours'], ['RETARD','En retard'], ['AUJ',"Aujourd'hui"], ['SEMAINE','Cette semaine'], ['IMPAYE','Impayés'], ['LIVREE','Livrées'], ['ANNULEE','Annulées']
+    ['TOUS','Toutes'], ['EN_COURS','En cours'], ['RETARD','En retard'], ['AUJ',"Aujourd'hui"], ['SEMAINE','Cette semaine'], ['IMPAYE','Impayés'], ['PRODUITE','Produites non soldées'], ['LIVREE','Livrées'], ['ANNULEE','Annulées']
   ].map(([k,lbl]) => {
     const active = _cmdFilter === k;
-    const warn = (k==='RETARD'||k==='IMPAYE');
+    const warn = (k==='RETARD'||k==='IMPAYE'||k==='PRODUITE');
     return `<button class="pcok-chip ${active?'pcok-chip--active':''} ${warn?'pcok-chip--warn':''}" onclick="_cmdSetFilter('${k}')">${lbl}<span class="pcok-chip-n">${cnt(k)}</span></button>`;
   }).join('');
   const caisOpts = ['<option value="TOUS">Tous les commerciaux</option>']
@@ -7278,7 +7289,11 @@ function _cmdToolbar(cnt, caisSet) {
 }
 
 function _cmdAlertCards(rows) {
-  const alert = rows.filter(r => r.status==='pending' && (r.bucket==='RETARD'||r.bucket==='AUJ'||r.bucket==='DEMAIN'))
+  // Les commandes dont la PRODUCTION est clôturée sortent de ce bandeau : l'atelier
+  // n'a plus rien à rattraper, annoncer « 94 j de retard » en rouge noyait les vraies
+  // urgences de fabrication. Elles restent dans la liste, pastille « Produite », et
+  // ont leur propre file : le filtre « Produites non soldées ».
+  const alert = rows.filter(r => r.status==='pending' && !r.prodClos && (r.bucket==='RETARD'||r.bucket==='AUJ'||r.bucket==='DEMAIN'))
     .sort((a,b) => (a.days==null?1e9:a.days) - (b.days==null?1e9:b.days))
     .slice(0, 8);
   if (!alert.length) return '';
@@ -7324,13 +7339,17 @@ function _cmdTable(rows) {
 
 function _cmdRow(r) {
   const det = _cmdDensity === 'detaille';
-  const dotC = r.status==='cancelled'?'#a8a29e':r.status==='completed'?'#16a34a':(r.days!=null&&r.days<0)?'#dc2626':(r.days===0||r.days===1)?'#e8834a':'#2563eb';
+  // Commande fabriquée, pas encore soldée/remise : ni une urgence d'atelier, ni une
+  // commande terminée. On enlève le rouge de RETARD (le nombre de jours part dans
+  // l'infobulle, rien n'est caché) et on nomme l'état réel à côté du statut.
+  const prodDone = r.status === 'pending' && r.prodClos;
+  const dotC = r.status==='cancelled'?'#a8a29e':r.status==='completed'?'#16a34a':prodDone?'#16a34a':(r.days!=null&&r.days<0)?'#dc2626':(r.days===0||r.days===1)?'#e8834a':'#2563eb';
   const dot = `<span class="pcok-prio" style="background:${dotC}"></span>`;
   // Livraison échéance + retard
   let ech = '—', echC = 'var(--color-text-secondary)';
   if (r.ymd) {
     ech = new Date(r.ymd+'T00:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'});
-    if (r.status==='pending') {
+    if (r.status==='pending' && !prodDone) {
       if (r.days<0) echC='#dc2626'; else if (r.days===0||r.days===1) echC='#e8834a';
     }
   }
@@ -7343,7 +7362,14 @@ function _cmdRow(r) {
   else if (r.days===1) { retTxt='Demain'; retC='#e8834a'; }
   else if (r.days<=7) { retTxt=`${r.days}j`; retC='#d97706'; }
   else { retTxt=`${r.days}j`; retC='#78716c'; }
-  const echCell = `<div style="color:${echC};font-weight:600">${ech}</div><div class="pcok-ret" style="color:${retC};background:${retC}1a;margin-top:2px">${retTxt}</div>`;
+  let retTitle = '';
+  if (prodDone) {
+    retTitle = (r.days != null && r.days < 0)
+      ? `Échéance dépassée de ${Math.abs(r.days)} j — production terminée, reste à régler / remettre au client`
+      : 'Production terminée — reste à régler / remettre au client';
+    retC = '#78716c';
+  }
+  const echCell = `<div style="color:${echC};font-weight:600">${ech}</div><div class="pcok-ret"${retTitle?` title="${_pcokEsc(retTitle)}"`:''} style="color:${retC};background:${retC}1a;margin-top:2px">${retTxt}</div>`;
   const restC = r.status!=='pending' ? '#a8a29e' : r.restant>0 ? '#dc2626' : '#16a34a';
   const restTxt = r.restant>0 ? fmt(r.restant) : (r.status==='pending'?'Soldé':'—');
   const prodCell = r.prodPct==null ? '<span class="pcok-muted">—</span>'
@@ -7351,11 +7377,16 @@ function _cmdRow(r) {
   const stMap = { pending:['#d97706','#fef3c7','En cours'], completed:['#16a34a','#dcfce7','Livrée'], cancelled:['#78716c','#f5f5f4','Annulée'] };
   const [sc,sb,sl] = stMap[r.status] || ['#78716c','#f5f5f4','—'];
   const statut = `<span class="pcok-badge" style="color:${sc};background:${sb}">${sl}</span>`;
+  const prodChip = prodDone
+    ? `<span class="pcok-badge" style="color:#16a34a;background:#dcfce7;margin-left:4px" title="Production clôturée — en attente de règlement${r.restant>0?' ('+fmt(r.restant)+')':''} / de remise au client">✓ Produite</span>`
+    : '';
   // Demande de modification / annulation en attente → pastille visible (validation dans le drawer)
   const _pmod = _pendingModFor(r.id);
   const modChip = _pmod ? `<span class="pcok-badge" style="color:#b45309;background:#fef3c7;margin-left:4px" title="Demande ${_pmod.type==='cancel'?"d'annulation":'de modification'} en attente — ouvrir pour valider">⏳ ${_pmod.type==='cancel'?'Annul.':'Modif'}</span>` : '';
   const modeChip = `<span style="font-size:9px;font-weight:700;color:${r.mode==='livraison'?'#c2410c':'#1a4a3a'}">${r.mode==='livraison'?'LIV':'RET'}</span>`;
-  const accent = r.status==='cancelled' ? '' : r.status==='completed' ? '' : (r.days!=null&&r.days<0) ? 'inset 3px 0 0 #dc2626' : (r.days===0||r.days===1) ? 'inset 3px 0 0 #e8834a' : r.restant>0 ? 'inset 3px 0 0 #d97706' : '';
+  const accent = r.status==='cancelled' ? '' : r.status==='completed' ? ''
+    : prodDone ? (r.restant>0 ? 'inset 3px 0 0 #d97706' : 'inset 3px 0 0 #16a34a')
+    : (r.days!=null&&r.days<0) ? 'inset 3px 0 0 #dc2626' : (r.days===0||r.days===1) ? 'inset 3px 0 0 #e8834a' : r.restant>0 ? 'inset 3px 0 0 #d97706' : '';
   return `<tr class="pcok-row ${r.status==='cancelled'?'pcok-row--done':''}" ${accent?`style="box-shadow:${accent}"`:''} onclick="openCmdDrawer('${r.id}')">
     <td class="pcok-td-prio">${dot}</td>
     <td class="pcok-td-client"><div class="pcok-client">${_pcokEsc(r.client)} ${modeChip}</div><div class="pcok-ref">${_pcokEsc(r.ref)}${r.contact?' · '+_pcokEsc(r.contact):''}</div></td>
@@ -7365,7 +7396,7 @@ function _cmdRow(r) {
     <td class="pcok-num" style="font-weight:700">${fmt(r.total)}</td>
     <td class="pcok-num" style="color:${restC};font-weight:700">${restTxt}</td>
     ${det ? `<td class="pcok-td-prog">${prodCell}</td>` : ''}
-    <td class="pcok-td-statut">${statut}${modChip}</td>
+    <td class="pcok-td-statut">${statut}${prodChip}${modChip}</td>
     <td class="pcok-td-act"><svg class="pcok-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></td>
   </tr>`;
 }
