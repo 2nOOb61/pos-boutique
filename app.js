@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '210 · 2026-10-07';
+const APP_VERSION = '211 · 2026-10-07';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -18330,12 +18330,15 @@ function printDelivAddresses() {
 // FICHE COURSIER — cocher les courses, imprimer le carnet
 // ══════════════════════════════════════════════════════════════════════════
 // Reprend la fiche papier du carnet : Date · Livreur · Destination (Lieu) ·
-// Nom du demandeur · Motif de la course · Numéro CMD · Paiement · Remarques.
+// Nom du demandeur · Motif de la course · Numéro CMD · Paiement · Remarques, puis
+// Nom + Signature du réceptionnaire — celui qui reprend la marchandise sur un retour
+// (R) ou une annulation (A) : sans ces deux cases, personne n'est responsable du colis
+// revenu, et c'est précisément le trou que sanctionne la mention de pied de fiche.
 // L'opérateur coche ses courses dans le tableau, règle UNE fois les entêtes
 // (date + coursier), corrige au besoin ligne à ligne, et imprime.
-// « Remarques » et le bloc signature partent VIERGES à dessein : ce sont les
-// seules cases que le coursier remplit à la main au retour, et c'est ce qui
-// engage sa responsabilité (cf. la mention en pied de fiche).
+// « Remarques », « Nom / Signature du réceptionnaire » et le bloc signature du bas
+// partent VIERGES à dessein : ce sont les seules cases remplies à la main au retour,
+// et c'est ce qui engage les responsabilités (cf. la mention en pied de fiche).
 
 function _delivSelKey(r){ return r.kind + ':' + r.id; }
 
@@ -18417,8 +18420,9 @@ function _ficheRenderModal(){
     .map(u => u.label || u.username).filter(Boolean))];
   host.innerHTML = `
     <p class="fiche-note">
-      Les colonnes <b>Remarques</b> et le bloc <b>signature</b> restent vierges sur la fiche : c'est le coursier
-      qui les remplit au retour — <b>L</b> livrée · <b>R</b> retour / report · <b>A</b> annulée.
+      Restent vierges sur la fiche : <b>Remarques</b>, <b>Nom et signature du réceptionnaire</b> (celui qui reprend
+      la marchandise sur un retour ou une annulation) et le bloc <b>signature</b> du bas — ils se remplissent à la
+      main au retour : <b>L</b> livrée · <b>R</b> retour / report · <b>A</b> annulée.
     </p>
     <div class="fiche-head">
       <div class="form-group"><label>Date de la fiche</label>
@@ -18475,7 +18479,7 @@ function _ficheRenderRows(){
     }).join('');
 }
 
-// Impression A4 portrait, à l'identique du carnet papier.
+// Impression A4 paysage (10 colonnes : le carnet papier + la reprise des retours).
 function printFicheCoursier(){
   const rows = _delivSelRows();
   if (!rows.length) { showToast('Aucune course à imprimer', 'error'); return; }
@@ -18495,17 +18499,17 @@ function printFicheCoursier(){
       <td>${_pcokEsc(v.motif)}</td>
       <td class="c b">${_pcokEsc(r.ref)}</td>
       <td>${_pcokEsc(v.paiement)}</td>
-      <td></td>
+      <td></td><td></td><td></td>
     </tr>`;
   }).join('');
   const blanks = Array.from({ length: Math.max(0, Number(_ficheOpts.blanks) || 0) },
-    () => `<tr class="blank">${'<td></td>'.repeat(8)}</tr>`).join('');
+    () => `<tr class="blank">${'<td></td>'.repeat(10)}</tr>`).join('');
 
   const w = window.open('', '_blank', 'width=1000,height=1200');
   if (!w) { alert("Impression bloquée : autorisez les fenêtres pop-up pour ce site, puis réessayez."); return; }
   setTimeout(() => {
     w.document.write(`<html><head><meta charset="utf-8"><title>Fiche coursier — ${_pcokEsc(dTxt)}</title><style>
-      @page{size:A4 portrait;margin:9mm}
+      @page{size:A4 landscape;margin:8mm}
       *{box-sizing:border-box}
       body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;font-size:10px}
       h1{font-size:16px;margin:0;letter-spacing:.5px}
@@ -18513,9 +18517,11 @@ function printFicheCoursier(){
       .leg{border:1px solid #555;padding:4px 6px;font-size:9.5px;margin:0 0 6px}
       .leg b{font-size:11px}
       .leg .det{float:right;font-weight:bold;letter-spacing:.3px}
+      .leg2{clear:both;font-size:8.5px;color:#333;margin-top:3px}
       table{width:100%;border-collapse:collapse;table-layout:fixed}
       th,td{border:1px solid #555;padding:3px 4px;vertical-align:top;word-wrap:break-word}
       th{background:#e9e9e9;font-size:8.5px;text-transform:uppercase;text-align:center}
+      th .hint{display:block;font-size:7px;font-weight:normal;text-transform:none;color:#555;margin-top:1px}
       td{height:34px;font-size:9.5px}
       tr.blank td{height:34px}
       .c{text-align:center}.b{font-weight:bold}
@@ -18532,12 +18538,16 @@ function printFicheCoursier(){
       <h1>${_pcokEsc(shop)} — FICHE COURSIER</h1>
       <div class="sub">Fiche du ${_pcokEsc(dTxt)}${_ficheOpts.livreur ? ' · Coursier : ' + _pcokEsc(_ficheOpts.livreur) : ''} · ${rows.length} course(s) · éditée le ${now.toLocaleDateString('fr-FR')} ${now.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' })}</div>
       <div class="leg"><span class="det">DÉTAILS / REMARQUE = RETOUR, REPORT</span>
-        <b>(L)</b> Livrée &nbsp;&nbsp; <b>(R)</b> Retour &nbsp;&nbsp; <b>(A)</b> Annulée</div>
+        <b>(L)</b> Livrée &nbsp;&nbsp; <b>(R)</b> Retour &nbsp;&nbsp; <b>(A)</b> Annulée
+        <div class="leg2">Toute course <b>(R)</b> ou <b>(A)</b> doit être reprise en main : celui qui récupère
+          la marchandise au retour inscrit son <b>nom</b> et <b>signe</b> sur la ligne concernée.</div></div>
       <table>
-        <colgroup><col style="width:10%"><col style="width:11%"><col style="width:20%"><col style="width:11%"><col style="width:14%"><col style="width:10%"><col style="width:11%"><col style="width:13%"></colgroup>
+        <colgroup><col style="width:7%"><col style="width:8%"><col style="width:16%"><col style="width:9%"><col style="width:11%"><col style="width:8%"><col style="width:9%"><col style="width:12%"><col style="width:10%"><col style="width:10%"></colgroup>
         <thead><tr>
           <th>Date</th><th>Livreur</th><th>Destination (Lieu)</th><th>Nom du demandeur</th>
           <th>Motif de la course</th><th>Numéro CMD</th><th>Paiement</th><th>Remarques</th>
+          <th>Nom du réceptionnaire<span class="hint">retours (R) / annulations (A)</span></th>
+          <th>Signature<span class="hint">du réceptionnaire</span></th>
         </tr></thead>
         <tbody>${body}${blanks}</tbody>
       </table>
@@ -18546,8 +18556,9 @@ function printFicheCoursier(){
         <div class="sign-box"><div class="sign-lbl">Nom</div></div>
         <div class="sign-box sign-box--wide"><div class="sign-lbl">Signature du responsable / rapporteur</div></div>
       </div>
-      <div class="warn">Si les <b>remarques</b> ne sont pas remplies ou qu'<b>aucune signature</b> n'est apposée,
-        toutes les personnes intervenant dans le processus seront tenues pour responsables et devront rembourser le montant au client.</div>
+      <div class="warn">Si les <b>remarques</b> ne sont pas remplies, ou qu'un <b>retour</b> ou une <b>annulation</b>
+        n'est ni nominatif ni signé par son réceptionnaire, toutes les personnes intervenant dans le processus seront
+        tenues pour responsables et devront rembourser le montant au client.</div>
     </body></html>`);
     w.document.close();
   }, 200);
