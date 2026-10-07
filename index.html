@@ -939,9 +939,23 @@
 .fiche-row-grid label { display:flex; flex-direction:column; gap:3px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--color-text-muted,#a8a29e); }
 .fiche-row-grid input { width:100%; padding:6px 8px; font-size:12.5px; font-family:inherit; border:1px solid var(--color-border,#e5e3df); border-radius:7px; background:var(--color-surface,#fff); color:var(--color-text,#1c1917); }
 .fiche-row-grid input:focus { outline:none; border-color:#1a4a3a; }
+/* Fiche de remise : Détail large + 3 montants étroits. */
+.remise-row-grid { display:grid; grid-template-columns:2fr 1fr 1fr 1fr; gap:8px; }
+.remise-row-grid label { display:flex; flex-direction:column; gap:3px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--color-text-muted,#a8a29e); }
+.remise-row-grid input { width:100%; padding:6px 8px; font-size:12.5px; font-family:inherit; border:1px solid var(--color-border,#e5e3df); border-radius:7px; background:var(--color-surface,#fff); color:var(--color-text,#1c1917); }
+.remise-row-grid input[type=number] { text-align:right; font-weight:600; }
+.remise-row-grid input:focus { outline:none; border-color:#1a4a3a; }
+.remise-tot { border:1px solid var(--color-border,#e5e3df); border-radius:12px; background:var(--color-surface,#fff); padding:12px 14px; margin-top:4px; }
+.remise-tot-line { display:flex; align-items:center; justify-content:space-between; font-size:12.5px; color:var(--color-text-secondary,#78716c); padding:3px 0; }
+.remise-tot-line b { font-weight:700; color:#1c1917; }
+.remise-tot-line b.neg { color:#dc2626; }
+.remise-tot-sum { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:8px; padding-top:10px; border-top:1px solid var(--color-border,#e5e3df); font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--color-text-secondary,#78716c); }
+.remise-tot-sum b { font-size:22px; font-weight:800; letter-spacing:0; text-transform:none; color:#1a4a3a; }
 @media(max-width:760px){
   .fiche-head { grid-template-columns:repeat(2,1fr); }
   .fiche-row-grid { grid-template-columns:1fr; }
+  .remise-row-grid { grid-template-columns:1fr 1fr; }
+  .remise-tot-sum b { font-size:19px; }
   /* En cartes empilées, la case passe en haut à droite de la carte. Sélecteur
      renforcé : la règle responsive générique (`.pcok-table td { display:block;
      width:100% }`) est déclarée plus bas et l'emporterait autrement. */
@@ -3025,6 +3039,16 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
       <button class="modal-close" onclick="closeModal('ficheCoursierModal')"></button>
     </div>
     <div id="ficheCoursierBody"></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="ficheRemiseModal">
+  <div class="modal" style="max-width:860px;width:860px">
+    <div class="modal-title">
+      <span>Fiche de remise au comptable</span>
+      <button class="modal-close" onclick="closeModal('ficheRemiseModal')"></button>
+    </div>
+    <div id="ficheRemiseBody"></div>
   </div>
 </div>
 

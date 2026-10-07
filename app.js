@@ -18357,13 +18357,15 @@ function delivToggleSelAll(){
   _delivRenderBody();
 }
 
-function clearDelivSel(){ _delivSel.clear(); _ficheEdits = {}; _delivRenderBody(); }
+function clearDelivSel(){ _delivSel.clear(); _ficheEdits = {}; _remiseEdits = {}; _delivRenderBody(); }
 
 // Le compteur vit dans la barre d'outils, que `_delivRenderBody()` ne redessine
 // pas (cf. la note sur le focus de la recherche) : on le rafraîchit à la main.
 function _delivSyncSelBadge(){
-  const b = document.getElementById('delivSelCount');
-  if (b) { b.textContent = _delivSel.size; b.style.display = _delivSel.size ? '' : 'none'; }
+  ['delivSelCount', 'delivSelCount2'].forEach(id => {
+    const b = document.getElementById(id);
+    if (b) { b.textContent = _delivSel.size; b.style.display = _delivSel.size ? '' : 'none'; }
+  });
 }
 
 // Lignes cochées, dans l'ordre de la tournée (zone, puis échéance) : le coursier
@@ -18441,6 +18443,8 @@ function _ficheRenderModal(){
     <div id="ficheRows"></div>
     <div class="modal-footer" style="flex-wrap:wrap;gap:8px;margin-top:14px">
       <button class="btn-secondary" onclick="closeModal('ficheCoursierModal')">Annuler</button>
+      ${_DELIV_MONEY_ROLES.includes(currentUser?.role) ? `<button class="btn-secondary" title="Petite fiche A5 : détail des courses et somme à remettre au comptable"
+        onclick="closeModal('ficheCoursierModal');openFicheRemise()">Fiche de remise (A5)</button>` : ''}
       <button class="btn-primary" onclick="printFicheCoursier()">Imprimer la fiche</button>
     </div>`;
   _ficheRenderRows();
@@ -18564,6 +18568,240 @@ function printFicheCoursier(){
   }, 200);
 }
 
+
+// ══════════════════════════════════════════════════════════════════════════
+// FICHE DE REMISE (A5) — ce que le coursier rapporte au comptable
+// ══════════════════════════════════════════════════════════════════════════
+// Reprend la petite fiche du carnet : N° · Client · Détail · Total · RAD · Rabais,
+// puis la SOMME À REMETTRE. Même sélection que la fiche coursier (`_delivSel`) :
+// on coche les courses dans le tableau Livraisons, on imprime la grande fiche A4
+// pour la tournée ET cette petite A5 pour l'argent.
+//
+// Lecture des colonnes :
+//   Total   = somme à encaisser sur la course (le reste dû, pré-rempli)
+//   RAD     = reste à devoir APRÈS la course — le client n'a pas tout payé
+//   Rabais  = remise accordée sur place
+//   ⇒ Somme à remettre = Σ Total − Σ RAD − Σ Rabais
+// RAD et Rabais partent à 0 : ils se remplissent à la main au retour (ou à l'avance
+// dans le modal si c'est déjà convenu). Une colonne laissée à 0 s'imprime VIERGE.
+let _remiseOpts  = { date: '', coursier: '', lignes: 5 };
+let _remiseEdits = {};
+
+function _remiseNum(v){ const n = Number(String(v == null ? '' : v).replace(/[^\d.-]/g, '')); return Math.max(0, Math.round(isNaN(n) ? 0 : n)); }
+// Montant sans « Ar » : la fiche est étroite, l'unité est annoncée en entête de colonne.
+function _remiseFmt(n){ const v = Number(n) || 0; return v.toLocaleString('fr-MG'); }
+
+function _remiseDetail(r){
+  const items = (r.items || []).map(i => `${i.name || '?'} ×${i.qty || 1}`).join(', ');
+  const base  = items || (r.kind === 'reservation' ? 'Réservation' : 'Commande');
+  return base.length > 70 ? base.slice(0, 68) + '…' : base;
+}
+
+function _remiseDefaults(r){
+  return { detail: _remiseDetail(r), total: _ficheReste(r), rad: 0, rabais: 0 };
+}
+function _remiseRow(r){ return Object.assign(_remiseDefaults(r), _remiseEdits[_delivSelKey(r)] || {}); }
+function _remiseSetRow(key, field, v){
+  (_remiseEdits[key] = _remiseEdits[key] || {})[field] = (field === 'detail') ? v : _remiseNum(v);
+  _remiseSyncTotals();
+}
+
+function _remiseTotals(rows){
+  const t = (rows || _delivSelRows()).reduce((a, r) => {
+    const v = _remiseRow(r);
+    a.total  += Number(v.total)  || 0;
+    a.rad    += Number(v.rad)    || 0;
+    a.rabais += Number(v.rabais) || 0;
+    return a;
+  }, { total: 0, rad: 0, rabais: 0 });
+  t.remettre = Math.max(0, t.total - t.rad - t.rabais);
+  return t;
+}
+
+function openFicheRemise(){
+  if (!_DELIV_MONEY_ROLES.includes(currentUser?.role)) { showToast("Vous n'avez pas accès aux montants", 'error'); return; }
+  if (!_delivSel.size) { showToast('Cochez d\'abord les courses du coursier', 'error'); return; }
+  if (!_remiseOpts.date)     _remiseOpts.date = _todayISO();
+  if (!_remiseOpts.coursier) _remiseOpts.coursier = _ficheOpts.livreur || '';
+  _remiseRenderModal();
+  openModal('ficheRemiseModal');
+}
+
+function _remiseRenderModal(){
+  const host = document.getElementById('ficheRemiseBody');
+  if (!host) return;
+  const livreurs = [...new Set((typeof localUsers !== 'undefined' ? localUsers : [])
+    .filter(u => ['livreur','coursier'].includes(String(u.role || '').toLowerCase()))
+    .map(u => u.label || u.username).filter(Boolean))];
+  host.innerHTML = `
+    <p class="fiche-note">
+      Petite fiche <b>A5</b> : le détail des courses et la <b>somme à remettre au comptable</b>.
+      <b>Total</b> = à encaisser sur la course (pré-rempli avec le reste dû) ·
+      <b>RAD</b> = reste à devoir après la course · <b>Rabais</b> = remise accordée.
+      Une colonne laissée à <b>0</b> s'imprime vierge et se remplit à la main au retour.
+    </p>
+    <div class="fiche-head" style="grid-template-columns:repeat(3,1fr)">
+      <div class="form-group"><label>Date de la fiche</label>
+        <input type="date" value="${_remiseOpts.date}" onchange="_remiseOpts.date=this.value" /></div>
+      <div class="form-group"><label>Coursier</label>
+        <input list="remiseLivreurList" placeholder="Nom du coursier" value="${_pcokEsc(_remiseOpts.coursier)}"
+               oninput="_remiseOpts.coursier=this.value" />
+        <datalist id="remiseLivreurList">${livreurs.map(l => `<option value="${_pcokEsc(l)}"></option>`).join('')}</datalist></div>
+      <div class="form-group"><label>Lignes sur la fiche</label>
+        <input type="number" min="1" max="20" value="${_remiseOpts.lignes}"
+               onchange="_remiseOpts.lignes=Math.max(1,Math.min(20,Number(this.value)||5));_remiseRenderRows()" /></div>
+    </div>
+    <div id="remiseRows"></div>
+    <div id="remiseTotals"></div>
+    <div class="modal-footer" style="flex-wrap:wrap;gap:8px;margin-top:14px">
+      <button class="btn-secondary" onclick="closeModal('ficheRemiseModal')">Annuler</button>
+      <button class="btn-primary" onclick="printFicheRemise()">Imprimer la fiche A5</button>
+    </div>`;
+  _remiseRenderRows();
+}
+
+function _remiseRenderRows(){
+  const host = document.getElementById('remiseRows');
+  if (!host) return;
+  const rows = _delivSelRows();
+  if (!rows.length) {
+    host.innerHTML = `<div class="pcok-empty" style="padding:26px 0"><p>Aucune course sur la fiche</p></div>`;
+    _remiseSyncTotals();
+    return;
+  }
+  host.innerHTML = `<div class="fiche-rows-title">${rows.length} course${rows.length > 1 ? 's' : ''} · fiche de ${_remiseOpts.lignes} ligne${_remiseOpts.lignes > 1 ? 's' : ''}</div>` +
+    rows.map((r, i) => {
+      const v = _remiseRow(r), k = _delivSelKey(r);
+      const num = (lbl, f) => `<label>${lbl}<input type="number" min="0" step="1" value="${Number(v[f]) || 0}"
+          oninput="_remiseSetRow('${k}','${f}',this.value)" /></label>`;
+      return `<div class="fiche-row">
+        <div class="fiche-row-head">
+          <span class="fiche-row-n">${i + 1}</span>
+          <b>${_pcokEsc(r.ref)}</b>
+          <span class="fiche-row-cli">${_pcokEsc(r.client)}</span>
+          <span class="fiche-row-ech">commande ${fmt(r.total)}</span>
+          <button class="fiche-row-del" title="Retirer cette course de la fiche"
+                  onclick="delivToggleSel('${r.kind}','${r.id}');_remiseRenderRows()">×</button>
+        </div>
+        <div class="remise-row-grid">
+          <label>Détail<input value="${_pcokEsc(v.detail)}" oninput="_remiseSetRow('${k}','detail',this.value)" /></label>
+          ${num('Total à encaisser', 'total')}
+          ${num('RAD (reste à devoir)', 'rad')}
+          ${num('Rabais', 'rabais')}
+        </div>
+      </div>`;
+    }).join('');
+  _remiseSyncTotals();
+}
+
+function _remiseSyncTotals(){
+  const host = document.getElementById('remiseTotals');
+  if (!host) return;
+  const t = _remiseTotals();
+  host.innerHTML = `<div class="remise-tot">
+      <div class="remise-tot-line"><span>Total à encaisser</span><b>${fmt(t.total)}</b></div>
+      <div class="remise-tot-line"><span>− RAD (reste à devoir)</span><b class="neg">${t.rad ? '-' + fmt(t.rad) : '—'}</b></div>
+      <div class="remise-tot-line"><span>− Rabais</span><b class="neg">${t.rabais ? '-' + fmt(t.rabais) : '—'}</b></div>
+      <div class="remise-tot-sum"><span>Somme à remettre au comptable</span><b>${fmt(t.remettre)}</b></div>
+    </div>`;
+}
+
+// Impression A5 portrait — la petite fiche du carnet.
+function printFicheRemise(){
+  const rows = _delivSelRows();
+  if (!rows.length) { showToast('Aucune course à imprimer', 'error'); return; }
+  const shop = (typeof shopConfig !== 'undefined' && shopConfig && shopConfig.name) || 'FOREVER MG';
+  const dISO = _remiseOpts.date || _todayISO();
+  const d    = new Date(dISO + 'T00:00:00');
+  const dTxt = isNaN(d.getTime()) ? '' : d.toLocaleDateString('fr-FR');
+  const now  = new Date();
+  const t    = _remiseTotals(rows);
+
+  const body = rows.map((r, i) => {
+    const v = _remiseRow(r);
+    return `<tr>
+      <td class="c b">${i + 1}</td>
+      <td class="cli">${_pcokEsc(r.client)}<div class="ref">${_pcokEsc(r.ref)}</div></td>
+      <td class="det">${_pcokEsc(v.detail)}</td>
+      <td class="r b">${_remiseFmt(v.total)}</td>
+      <td class="r">${v.rad ? _remiseFmt(v.rad) : ''}</td>
+      <td class="r">${v.rabais ? _remiseFmt(v.rabais) : ''}</td>
+    </tr>`;
+  }).join('');
+  // La fiche garde toujours `lignes` lignes : les vierges servent aux courses
+  // ajoutées en route, inscrites à la main par le coursier.
+  const blanks = Array.from({ length: Math.max(0, (Number(_remiseOpts.lignes) || 0) - rows.length) },
+    (_, i) => `<tr class="blank"><td class="c b">${rows.length + i + 1}</td>${'<td></td>'.repeat(5)}</tr>`).join('');
+
+  const w = window.open('', '_blank', 'width=760,height=1000');
+  if (!w) { alert("Impression bloquée : autorisez les fenêtres pop-up pour ce site, puis réessayez."); return; }
+  setTimeout(() => {
+    w.document.write(`<html><head><meta charset="utf-8"><title>Fiche de remise — ${_pcokEsc(dTxt)}</title><style>
+      @page{size:A5 portrait;margin:7mm}
+      *{box-sizing:border-box}
+      body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;font-size:10px}
+      h1{font-size:13px;margin:0;letter-spacing:.4px}
+      .sub{color:#555;font-size:8.5px;margin:2px 0 6px}
+      .meta{display:flex;gap:6px;margin:0 0 6px}
+      .meta div{flex:1;border:1px solid #555;padding:3px 5px;font-size:9px}
+      .meta .k{font-size:7.5px;text-transform:uppercase;color:#555;display:block}
+      table{width:100%;border-collapse:collapse;table-layout:fixed}
+      th,td{border:1px solid #555;padding:3px 4px;vertical-align:top;word-wrap:break-word}
+      th{background:#e9e9e9;font-size:7.5px;text-transform:uppercase;text-align:center;line-height:1.2}
+      td{height:30px;font-size:9px}
+      tr.blank td{height:30px}
+      .c{text-align:center}.r{text-align:right}.b{font-weight:bold}
+      .cli{font-weight:bold}
+      .ref{font-weight:normal;font-size:7.5px;color:#666;margin-top:1px}
+      .det{font-size:8.5px}
+      tr.tot td{height:22px;background:#f0f0f0;font-weight:bold;font-size:9.5px}
+      .remise{border:2px solid #000;margin-top:7px;padding:5px 7px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+      .remise .lbl{font-size:9.5px;font-weight:bold;text-transform:uppercase;letter-spacing:.3px}
+      .remise .calc{font-size:7.5px;color:#444;font-weight:normal;text-transform:none;letter-spacing:0;margin-top:1px}
+      .remise .val{font-size:16px;font-weight:bold;white-space:nowrap}
+      .sign{display:flex;gap:6px;margin-top:7px}
+      .sign-box{flex:1;border:1px solid #555;height:52px;padding:3px 5px}
+      .sign-lbl{font-size:7.5px;text-transform:uppercase;font-weight:bold;color:#444}
+      .warn{border:1px solid #000;padding:4px 6px;margin-top:6px;font-size:7.5px;line-height:1.35}
+      @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+    </style></head><body onload="window.print()">
+      <h1>${_pcokEsc(shop)} — FICHE DE REMISE</h1>
+      <div class="sub">Argent rapporté par le coursier · éditée le ${now.toLocaleDateString('fr-FR')} ${now.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' })}</div>
+      <div class="meta">
+        <div><span class="k">Date</span>${_pcokEsc(dTxt)}</div>
+        <div><span class="k">Coursier</span>${_pcokEsc(_remiseOpts.coursier) || '&nbsp;'}</div>
+        <div><span class="k">Courses</span>${rows.length}</div>
+      </div>
+      <table>
+        <colgroup><col style="width:7%"><col style="width:23%"><col style="width:28%"><col style="width:15%"><col style="width:14%"><col style="width:13%"></colgroup>
+        <thead><tr>
+          <th>N°</th><th>Client</th><th>Détail</th><th>Total (Ar)</th><th>RAD (Ar)</th><th>Rabais (Ar)</th>
+        </tr></thead>
+        <tbody>
+          ${body}${blanks}
+          <tr class="tot">
+            <td colspan="3" class="r">TOTAL</td>
+            <td class="r">${_remiseFmt(t.total)}</td>
+            <td class="r">${t.rad ? _remiseFmt(t.rad) : ''}</td>
+            <td class="r">${t.rabais ? _remiseFmt(t.rabais) : ''}</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="remise">
+        <div><div class="lbl">Somme à remettre au comptable</div>
+          <div class="calc">Total − RAD − Rabais${(t.rad || t.rabais) ? '' : ' · déduire les RAD et rabais inscrits au retour'}</div></div>
+        <div class="val">${_remiseFmt(t.remettre)} Ar</div>
+      </div>
+      <div class="sign">
+        <div class="sign-box"><div class="sign-lbl">Coursier — nom et signature</div></div>
+        <div class="sign-box"><div class="sign-lbl">Comptable — reçu le ___/___ , signature</div></div>
+      </div>
+      <div class="warn">Le coursier remet cette fiche <b>avec l'argent</b>. Tout <b>RAD</b> ou <b>rabais</b> non inscrit
+        et non signé reste à la charge du coursier.</div>
+    </body></html>`);
+    w.document.close();
+  }, 200);
+}
 function _delivToolbar(cnt) {
   const chips = [
     ['ACTIVE', 'En cours'], ['RETARD', 'En retard'], ['AUJ', "Aujourd'hui"], ['SEMAINE', 'Cette semaine'], ['SANS_DATE', 'Sans date'], ['TERMINE', 'Livrées'], ['TOUS', 'Toutes']
@@ -18599,6 +18837,7 @@ function _delivToolbar(cnt) {
       <button class="pcok-iconbtn pcok-density" title="Vue compacte / détaillée" onclick="toggleDelivDensity()">${_delivState.density === 'compact' ? 'Détaillé' : 'Compact'}</button>
       <button class="pcok-iconbtn${_delivRecapOpen ? ' pcok-chip--active' : ''}" title="Récapitulatif des adresses de livraison" onclick="toggleDelivRecap()">Récap adresses</button>
       <button class="pcok-iconbtn" title="Fiche coursier — imprimer les courses cochées" onclick="openFicheCoursier()">Fiche coursier<span class="pcok-chip-n" id="delivSelCount" style="display:${_delivSel.size ? '' : 'none'}">${_delivSel.size}</span></button>
+      ${_DELIV_MONEY_ROLES.includes(currentUser?.role) ? `<button class="pcok-iconbtn" title="Fiche de remise A5 — détail des courses cochées et somme à remettre au comptable" onclick="openFicheRemise()">Fiche remise<span class="pcok-chip-n" id="delivSelCount2" style="display:${_delivSel.size ? '' : 'none'}">${_delivSel.size}</span></button>` : ''}
       <button class="pcok-iconbtn" title="Imprimer le planning de livraison" onclick="printLivraisons()">Imprimer</button>
     </div>
   </div>`;
