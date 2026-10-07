@@ -18406,8 +18406,85 @@ function _ficheDefaults(r){
 function _ficheRow(r){ return Object.assign(_ficheDefaults(r), _ficheEdits[_delivSelKey(r)] || {}); }
 function _ficheSetRow(key, field, v){ (_ficheEdits[key] = _ficheEdits[key] || {})[field] = v; }
 
+// ── COURSES LIBRES ────────────────────────────────────────────────────────
+// Le coursier ne fait pas que livrer des commandes : dépôt d'un dossier, achat de
+// fournitures, passage à la banque, récupération chez un fournisseur… Ces courses
+// n'existent nulle part dans le POS — on les saisit à la main ici et elles
+// s'ajoutent AUX DEUX fiches (A4 tournée + A5 remise), chacune réglable par sa
+// case à cocher. Elles ne sont pas liées à la sélection : « Tout décocher » ne
+// les efface pas, seule la croix de la ligne les supprime.
+let _coursesLibres = [];
+let _clibSeq = 1;
+
+function _clibMoney(){ return _DELIV_MONEY_ROLES.includes(currentUser?.role); }
+// Courses libres retenues pour une fiche donnée ('coursier' | 'remise').
+function _clibFor(fiche){
+  return _coursesLibres.filter(c => fiche === 'remise' ? (c.surRemise && _clibMoney()) : c.surCoursier);
+}
+
+function clibAdd(){
+  _coursesLibres.push({ id: 'L' + (_clibSeq++), libelle: '', destination: '', demandeur: '',
+                        motif: '', detail: '', montant: 0, surCoursier: true, surRemise: true });
+  _clibRenderAll();
+}
+function clibDel(id){ _coursesLibres = _coursesLibres.filter(c => c.id !== id); _clibRenderAll(); }
+
+// Les champs texte n'entraînent AUCUN rendu : réécrire la liste à chaque frappe
+// ferait perdre le focus. Seuls le montant et les cases rafraîchissent les totaux.
+function clibSet(id, field, v){
+  const c = _coursesLibres.find(x => x.id === id);
+  if (!c) return;
+  if (field === 'montant') { c.montant = _remiseNum(v); _remiseSyncTotals(); }
+  else if (field === 'surCoursier' || field === 'surRemise') { c[field] = !!v; _remiseSyncTotals(); }
+  else c[field] = v;
+}
+
+// Le bloc vit dans les deux modals : on redessine celui (ou ceux) qui est ouvert.
+function _clibRenderAll(){
+  ['clibRows_coursier', 'clibRows_remise'].forEach(_clibRender);
+  _remiseSyncTotals();
+}
+
+function _clibRender(hostId){
+  const host = document.getElementById(hostId);
+  if (!host) return;
+  const money = _clibMoney();
+  const fld = (c, lbl, f, ph) => `<label>${lbl}<input value="${_pcokEsc(c[f])}" placeholder="${_pcokEsc(ph || '')}"
+      oninput="clibSet('${c.id}','${f}',this.value)" /></label>`;
+  const rows = _coursesLibres.map((c, i) => `
+    <div class="fiche-row">
+      <div class="fiche-row-head">
+        <span class="fiche-row-n clib-n">L${i + 1}</span>
+        <b>Course libre</b>
+        <label class="clib-tog"><input type="checkbox" ${c.surCoursier ? 'checked' : ''}
+          onchange="clibSet('${c.id}','surCoursier',this.checked)" />Fiche coursier</label>
+        ${money ? `<label class="clib-tog"><input type="checkbox" ${c.surRemise ? 'checked' : ''}
+          onchange="clibSet('${c.id}','surRemise',this.checked)" />Fiche de remise</label>` : ''}
+        <button class="fiche-row-del" title="Supprimer cette course libre" onclick="clibDel('${c.id}')">×</button>
+      </div>
+      <div class="clib-grid">
+        ${fld(c, 'Bénéficiaire / libellé', 'libelle', 'Ex : Banque BNI')}
+        ${fld(c, 'Destination (lieu)', 'destination', 'Ex : Analakely')}
+        ${fld(c, 'Nom du demandeur', 'demandeur', 'Ex : Gestion')}
+        ${fld(c, 'Motif de la course', 'motif', 'Ex : Dépôt de chèque')}
+        ${fld(c, 'Détail (fiche de remise)', 'detail', 'À défaut, le motif est repris')}
+        ${money ? `<label>Montant à encaisser<input type="number" min="0" step="1" value="${Number(c.montant) || 0}"
+            oninput="clibSet('${c.id}','montant',this.value)" /></label>` : ''}
+      </div>
+    </div>`).join('');
+  host.innerHTML = `
+    <div class="clib-head">
+      <div class="fiche-rows-title" style="margin:0">Courses libres${_coursesLibres.length ? ' · ' + _coursesLibres.length : ''}</div>
+      <button class="clib-add" onclick="clibAdd()">+ Course libre</button>
+    </div>
+    ${rows || `<p class="clib-empty">Course hors commande — dépôt de dossier, achat de fournitures, banque…
+       Elle s'ajoute à la fiche coursier et à la fiche de remise.</p>`}`;
+}
+
+// Le modal s'ouvre même sans sélection : on peut n'avoir que des courses libres
+// à confier au coursier — il faut bien pouvoir les saisir quelque part.
 function openFicheCoursier(){
-  if (!_delivSel.size) { showToast('Cochez d\'abord les courses à confier au coursier', 'error'); return; }
+  if (!_delivSel.size && !_coursesLibres.length) showToast('Cochez des courses, ou ajoutez une course libre', 'info');
   if (!_ficheOpts.date) _ficheOpts.date = _todayISO();
   _ficheRenderModal();
   openModal('ficheCoursierModal');
@@ -18441,6 +18518,7 @@ function _ficheRenderModal(){
                onchange="_ficheOpts.blanks=Math.max(0,Math.min(15,Number(this.value)||0))" /></div>
     </div>
     <div id="ficheRows"></div>
+    <div id="clibRows_coursier"></div>
     <div class="modal-footer" style="flex-wrap:wrap;gap:8px;margin-top:14px">
       <button class="btn-secondary" onclick="closeModal('ficheCoursierModal')">Annuler</button>
       ${_DELIV_MONEY_ROLES.includes(currentUser?.role) ? `<button class="btn-secondary" title="Petite fiche A5 : détail des courses et somme à remettre au comptable"
@@ -18448,6 +18526,7 @@ function _ficheRenderModal(){
       <button class="btn-primary" onclick="printFicheCoursier()">Imprimer la fiche</button>
     </div>`;
   _ficheRenderRows();
+  _clibRender('clibRows_coursier');
 }
 
 function _ficheRenderRows(){
@@ -18485,8 +18564,9 @@ function _ficheRenderRows(){
 
 // Impression A4 paysage (10 colonnes : le carnet papier + la reprise des retours).
 function printFicheCoursier(){
-  const rows = _delivSelRows();
-  if (!rows.length) { showToast('Aucune course à imprimer', 'error'); return; }
+  const rows   = _delivSelRows();
+  const libres = _clibFor('coursier');
+  if (!rows.length && !libres.length) { showToast('Aucune course à imprimer', 'error'); return; }
   const shop  = (typeof shopConfig !== 'undefined' && shopConfig && shopConfig.name) || 'FOREVER MG';
   const dISO  = _ficheOpts.date || _todayISO();
   const d     = new Date(dISO + 'T00:00:00');
@@ -18506,6 +18586,18 @@ function printFicheCoursier(){
       <td></td><td></td><td></td>
     </tr>`;
   }).join('');
+  // Courses hors commandes : pas de numéro CMD, d'où le repère « LIBRE ».
+  const money = _clibMoney();
+  const bodyLibres = libres.map(c => `<tr>
+      <td class="c nw">${_pcokEsc(dTxt)}</td>
+      <td>${_pcokEsc(_ficheOpts.livreur)}</td>
+      <td class="dest">${_pcokEsc(c.destination)}${c.libelle ? `<div class="cli">${_pcokEsc(c.libelle)}</div>` : ''}</td>
+      <td>${_pcokEsc(c.demandeur)}</td>
+      <td>${_pcokEsc(c.motif)}</td>
+      <td class="c b">LIBRE</td>
+      <td>${money && c.montant ? 'Reste ' + fmt(c.montant) : ''}</td>
+      <td></td><td></td><td></td>
+    </tr>`).join('');
   const blanks = Array.from({ length: Math.max(0, Number(_ficheOpts.blanks) || 0) },
     () => `<tr class="blank">${'<td></td>'.repeat(10)}</tr>`).join('');
 
@@ -18540,7 +18632,7 @@ function printFicheCoursier(){
       @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
     </style></head><body onload="window.print()">
       <h1>${_pcokEsc(shop)} — FICHE COURSIER</h1>
-      <div class="sub">Fiche du ${_pcokEsc(dTxt)}${_ficheOpts.livreur ? ' · Coursier : ' + _pcokEsc(_ficheOpts.livreur) : ''} · ${rows.length} course(s) · éditée le ${now.toLocaleDateString('fr-FR')} ${now.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' })}</div>
+      <div class="sub">Fiche du ${_pcokEsc(dTxt)}${_ficheOpts.livreur ? ' · Coursier : ' + _pcokEsc(_ficheOpts.livreur) : ''} · ${rows.length + libres.length} course(s)${libres.length ? ` dont ${libres.length} libre(s)` : ''} · éditée le ${now.toLocaleDateString('fr-FR')} ${now.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' })}</div>
       <div class="leg"><span class="det">DÉTAILS / REMARQUE = RETOUR, REPORT</span>
         <b>(L)</b> Livrée &nbsp;&nbsp; <b>(R)</b> Retour &nbsp;&nbsp; <b>(A)</b> Annulée
         <div class="leg2">Toute course <b>(R)</b> ou <b>(A)</b> doit être reprise en main : celui qui récupère
@@ -18553,7 +18645,7 @@ function printFicheCoursier(){
           <th>Nom du réceptionnaire<span class="hint">retours (R) / annulations (A)</span></th>
           <th>Signature<span class="hint">du réceptionnaire</span></th>
         </tr></thead>
-        <tbody>${body}${blanks}</tbody>
+        <tbody>${body}${bodyLibres}${blanks}</tbody>
       </table>
       <div class="sign">
         <div class="sign-box"><div class="sign-lbl">Date</div></div>
@@ -18606,6 +18698,9 @@ function _remiseSetRow(key, field, v){
   _remiseSyncTotals();
 }
 
+// Les courses libres n'ont ni RAD ni rabais pré-remplis — ces deux cases
+// s'écrivent à la main au retour, comme pour les livraisons : on n'ajoute donc
+// que leur montant au total à encaisser.
 function _remiseTotals(rows){
   const t = (rows || _delivSelRows()).reduce((a, r) => {
     const v = _remiseRow(r);
@@ -18614,13 +18709,14 @@ function _remiseTotals(rows){
     a.rabais += Number(v.rabais) || 0;
     return a;
   }, { total: 0, rad: 0, rabais: 0 });
+  _clibFor('remise').forEach(c => { t.total += Number(c.montant) || 0; });
   t.remettre = Math.max(0, t.total - t.rad - t.rabais);
   return t;
 }
 
 function openFicheRemise(){
   if (!_DELIV_MONEY_ROLES.includes(currentUser?.role)) { showToast("Vous n'avez pas accès aux montants", 'error'); return; }
-  if (!_delivSel.size) { showToast('Cochez d\'abord les courses du coursier', 'error'); return; }
+  if (!_delivSel.size && !_coursesLibres.length) showToast('Cochez des courses, ou ajoutez une course libre', 'info');
   if (!_remiseOpts.date)     _remiseOpts.date = _todayISO();
   if (!_remiseOpts.coursier) _remiseOpts.coursier = _ficheOpts.livreur || '';
   _remiseRenderModal();
@@ -18652,12 +18748,14 @@ function _remiseRenderModal(){
                onchange="_remiseOpts.lignes=Math.max(1,Math.min(20,Number(this.value)||5));_remiseRenderRows()" /></div>
     </div>
     <div id="remiseRows"></div>
+    <div id="clibRows_remise"></div>
     <div id="remiseTotals"></div>
     <div class="modal-footer" style="flex-wrap:wrap;gap:8px;margin-top:14px">
       <button class="btn-secondary" onclick="closeModal('ficheRemiseModal')">Annuler</button>
       <button class="btn-primary" onclick="printFicheRemise()">Imprimer la fiche A5</button>
     </div>`;
   _remiseRenderRows();
+  _clibRender('clibRows_remise');
 }
 
 function _remiseRenderRows(){
@@ -18665,7 +18763,7 @@ function _remiseRenderRows(){
   if (!host) return;
   const rows = _delivSelRows();
   if (!rows.length) {
-    host.innerHTML = `<div class="pcok-empty" style="padding:26px 0"><p>Aucune course sur la fiche</p></div>`;
+    host.innerHTML = `<div class="pcok-empty" style="padding:20px 0"><p>Aucune livraison cochée${_coursesLibres.length ? ' — la fiche ne portera que les courses libres' : ''}</p></div>`;
     _remiseSyncTotals();
     return;
   }
@@ -18708,8 +18806,9 @@ function _remiseSyncTotals(){
 
 // Impression A5 portrait — la petite fiche du carnet.
 function printFicheRemise(){
-  const rows = _delivSelRows();
-  if (!rows.length) { showToast('Aucune course à imprimer', 'error'); return; }
+  const rows   = _delivSelRows();
+  const libres = _clibFor('remise');
+  if (!rows.length && !libres.length) { showToast('Aucune course à imprimer', 'error'); return; }
   const shop = (typeof shopConfig !== 'undefined' && shopConfig && shopConfig.name) || 'FOREVER MG';
   const dISO = _remiseOpts.date || _todayISO();
   const d    = new Date(dISO + 'T00:00:00');
@@ -18728,10 +18827,20 @@ function printFicheRemise(){
       <td class="r">${v.rabais ? _remiseFmt(v.rabais) : ''}</td>
     </tr>`;
   }).join('');
+  // Courses hors commandes : repère « LIBRE » à la place de la référence.
+  const bodyLibres = libres.map((c, i) => `<tr>
+      <td class="c b">${rows.length + i + 1}</td>
+      <td class="cli">${_pcokEsc(c.libelle) || 'Course libre'}<div class="ref">LIBRE</div></td>
+      <td class="det">${_pcokEsc(c.detail || c.motif)}</td>
+      <td class="r b">${c.montant ? _remiseFmt(c.montant) : ''}</td>
+      <td class="r"></td>
+      <td class="r"></td>
+    </tr>`).join('');
   // La fiche garde toujours `lignes` lignes : les vierges servent aux courses
   // ajoutées en route, inscrites à la main par le coursier.
-  const blanks = Array.from({ length: Math.max(0, (Number(_remiseOpts.lignes) || 0) - rows.length) },
-    (_, i) => `<tr class="blank"><td class="c b">${rows.length + i + 1}</td>${'<td></td>'.repeat(5)}</tr>`).join('');
+  const used   = rows.length + libres.length;
+  const blanks = Array.from({ length: Math.max(0, (Number(_remiseOpts.lignes) || 0) - used) },
+    (_, i) => `<tr class="blank"><td class="c b">${used + i + 1}</td>${'<td></td>'.repeat(5)}</tr>`).join('');
 
   const w = window.open('', '_blank', 'width=760,height=1000');
   if (!w) { alert("Impression bloquée : autorisez les fenêtres pop-up pour ce site, puis réessayez."); return; }
@@ -18770,7 +18879,7 @@ function printFicheRemise(){
       <div class="meta">
         <div><span class="k">Date</span>${_pcokEsc(dTxt)}</div>
         <div><span class="k">Coursier</span>${_pcokEsc(_remiseOpts.coursier) || '&nbsp;'}</div>
-        <div><span class="k">Courses</span>${rows.length}</div>
+        <div><span class="k">Courses</span>${used}${libres.length ? ' (dont ' + libres.length + ' libre)' : ''}</div>
       </div>
       <table>
         <colgroup><col style="width:7%"><col style="width:23%"><col style="width:28%"><col style="width:15%"><col style="width:14%"><col style="width:13%"></colgroup>
@@ -18778,7 +18887,7 @@ function printFicheRemise(){
           <th>N°</th><th>Client</th><th>Détail</th><th>Total (Ar)</th><th>RAD (Ar)</th><th>Rabais (Ar)</th>
         </tr></thead>
         <tbody>
-          ${body}${blanks}
+          ${body}${bodyLibres}${blanks}
           <tr class="tot">
             <td colspan="3" class="r">TOTAL</td>
             <td class="r">${_remiseFmt(t.total)}</td>

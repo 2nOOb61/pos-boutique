@@ -951,11 +951,25 @@
 .remise-tot-line b.neg { color:#dc2626; }
 .remise-tot-sum { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:8px; padding-top:10px; border-top:1px solid var(--color-border,#e5e3df); font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--color-text-secondary,#78716c); }
 .remise-tot-sum b { font-size:22px; font-weight:800; letter-spacing:0; text-transform:none; color:#1a4a3a; }
+/* Courses libres — saisies à la main, communes aux deux fiches. */
+.clib-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:18px 2px 8px; padding-top:14px; border-top:1px dashed var(--color-border,#e5e3df); }
+.clib-add { display:inline-flex; align-items:center; gap:6px; background:#e8834a; color:#fff; border:0; font-family:inherit; font-size:12px; font-weight:600; padding:6px 12px; border-radius:8px; cursor:pointer; transition:background .15s; }
+.clib-add:hover { background:#d4723b; }
+.clib-empty { font-size:12px; color:var(--color-text-muted,#a8a29e); margin:0 2px; line-height:1.5; }
+.clib-n { background:#e8834a !important; padding:0 5px; }
+.clib-tog { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600; color:var(--color-text-secondary,#78716c); cursor:pointer; }
+.clib-tog input { width:14px; height:14px; accent-color:#1a4a3a; margin:0; }
+.clib-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+.clib-grid label { display:flex; flex-direction:column; gap:3px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--color-text-muted,#a8a29e); }
+.clib-grid input { width:100%; padding:6px 8px; font-size:12.5px; font-family:inherit; border:1px solid var(--color-border,#e5e3df); border-radius:7px; background:var(--color-surface,#fff); color:var(--color-text,#1c1917); }
+.clib-grid input[type=number] { text-align:right; font-weight:600; }
+.clib-grid input:focus { outline:none; border-color:#1a4a3a; }
 @media(max-width:760px){
   .fiche-head { grid-template-columns:repeat(2,1fr); }
   .fiche-row-grid { grid-template-columns:1fr; }
   .remise-row-grid { grid-template-columns:1fr 1fr; }
   .remise-tot-sum b { font-size:19px; }
+  .clib-grid { grid-template-columns:1fr; }
   /* En cartes empilées, la case passe en haut à droite de la carte. Sélecteur
      renforcé : la règle responsive générique (`.pcok-table td { display:block;
      width:100% }`) est déclarée plus bas et l'emporterait autrement. */
