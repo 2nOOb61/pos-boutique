@@ -769,6 +769,18 @@
   .cmdc-body { padding:12px 14px 14px; }
   .cmdc-btn, .cmdc-btn2 { flex:1 1 auto; justify-content:center; }
 }
+/* Cartes de la page Dépenses : même grammaire .cmdc-*, mais la colonne de droite
+   porte du TEXTE (« Mobile Money - Orange Money », « Source : MVola perso ») la ou
+   les Commandes n'ont qu'une date courte. Les enfants d'une grille ont
+   min-width:auto : un contenu `nowrap` élargit alors la colonne et la carte
+   débordait sous 360 px (contenu coupé, .cmdc étant en overflow:hidden). */
+.dep-c .cmdc-head > * { min-width:0; }
+.dep-c .cmdc-date  { white-space:normal; overflow-wrap:anywhere; }
+.dep-c .cmdc-pill  { max-width:100%; white-space:normal; text-align:left; }
+.dep-c .cmdc-t     { overflow-wrap:anywhere; }
+.dep-c .cmdc-badge { white-space:normal; }
+.dep-c .cmdc-big   { white-space:normal; }
+
 /* Filtres en cartes (page Commandes) : compteur + montant derriere chaque file */
 .cmdf-cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(134px,1fr)); gap:8px; margin:0 0 12px; }
 .cmdf-card { display:flex; flex-direction:column; gap:3px; text-align:left; padding:10px 12px; cursor:pointer; font-family:inherit;
@@ -1036,6 +1048,9 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
     <button class="bnav-btn" id="bnav-achats" data-roles="admin,gestionnaire,chef_atelier" onclick="showPage('achats',null,this)">
       <span class="bnav-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg></span>Achats
     </button>
+    <button class="bnav-btn" id="bnav-depenses" data-roles="admin,comptable,gestionnaire" onclick="showPage('depenses',null,this)">
+      <span class="bnav-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/><path d="M7 15h4"/></svg></span>Dépenses
+    </button>
     <button class="bnav-btn" id="bnav-stats" data-roles="admin,comptable" onclick="showPage('stats',null,this)">
       <span class="bnav-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span>Stats
     </button>
@@ -1215,6 +1230,10 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
           <button class="nav-btn sidebar-btn" data-roles="admin,comptable" onclick="showPage('stats',this)" aria-label="Statistiques">
             <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span>
             <span class="sidebar-label">Statistiques</span>
+          </button>
+          <button class="nav-btn sidebar-btn" data-roles="admin,comptable,gestionnaire" onclick="showPage('depenses',this)" aria-label="Depenses">
+            <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/><path d="M7 15h4"/></svg></span>
+            <span class="sidebar-label">Dépenses</span>
           </button>
           <button class="nav-btn sidebar-btn" data-roles="admin,comptable,gestionnaire" onclick="showPage('finances',this)" aria-label="Finances">
             <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span>
@@ -2055,6 +2074,17 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
       <p style="font-size:13px;color:var(--muted);margin:3px 0 0">Articles à acheter pour les dossiers en production — démarrez puis validez chaque achat</p>
     </div>
     <div id="achatsContainer"></div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════
+       PAGE DÉPENSES (sorties d'argent : achats et depenses)
+       ═══════════════════════════════════════════ -->
+  <div class="page" id="page-depenses" data-roles="admin,comptable,gestionnaire">
+    <div style="margin-bottom:18px">
+      <h1 style="font-size:21px;font-weight:800;color:var(--text);margin:0">Dépenses</h1>
+      <p style="font-size:13px;color:var(--muted);margin:3px 0 0">Tout ce qui sort : achats et dépenses, avec le mode de paiement et la source de l'argent</p>
+    </div>
+    <div id="depensesContent"></div>
   </div>
 
   <!-- ═══════════════════════════════════════════
@@ -3733,7 +3763,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20261005-prodcartes"></script>
+<script src="./app.js?v=20261007-depenses"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

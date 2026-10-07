@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '208 · 2026-10-05';
+const APP_VERSION = '209 · 2026-10-07';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -222,6 +222,7 @@ const PAGE_LABELS = {
   livraisons:      'Livraisons',
   stock:           'Stock',
   achats:          'Achats',
+  depenses:        'Dépenses',
   stats:           'Statistiques',
   finances:        'Finances',
   'mon-dashboard': 'Mon tableau de bord',
@@ -241,6 +242,8 @@ const PAGE_ACCESS = {
   livraisons:     ['admin','caissier','commerciale','gestionnaire','comptable','livreur','chef_atelier','operateur_prod','machiniste','finition'],
   stock:          ['admin','gestionnaire'],
   achats:         ['admin','gestionnaire','chef_atelier'],
+  // Dépenses : même cercle que Finances — la page montre tout l'argent qui sort.
+  depenses:       ['admin','comptable','gestionnaire'],
   stats:          ['admin','comptable','gestionnaire'],
   finances:       ['admin','comptable','gestionnaire'],
   perf:           ['admin','chef_atelier','gestionnaire'],
@@ -673,6 +676,7 @@ function showPage(id, btn, bnavBtn) {
   if (id==='livraisons')   { renderLivraisons(); if (APPS_SCRIPT_URL) Promise.all([loadCommandesFromScript(), loadReservationsFromScript()]).then(() => { updateDeliveryBadge(); renderLivraisons(); }).catch(()=>{}); }
   if (id==='finances')     { _ensureDossierLinks(); renderFinances(); if (APPS_SCRIPT_URL) loadCommandesFromScript().then(() => { _ensureDossierLinks(); renderFinances(); }).catch(()=>{}); }
   if (id==='perf')         { _ensureDossierLinks(); renderPerf(); if (APPS_SCRIPT_URL) _loadTachesQuietly().then(() => { _ensureDossierLinks(); renderPerf(); }).catch(()=>{}); }
+  if (id==='depenses')     { renderDepenses(); if (APPS_SCRIPT_URL) Promise.all([loadDepensesFromScript(), loadDossiers()]).then(() => renderDepenses()).catch(()=>renderDepenses()); }
   if (id==='achats')       { _ensureDossierLinks(); renderAchats(); if (APPS_SCRIPT_URL) Promise.all([loadDossiers(), _loadTachesQuietly(), loadDemandesAchatFromScript()]).then(() => { _ensureDossierLinks(); renderAchats(); }).catch(()=>renderAchats()); }
   // Garde d'accès (rôle ou overrides personnalisés)
   if (currentUser) {
@@ -4629,7 +4633,7 @@ async function apiCall(payload) {
   if (!APPS_SCRIPT_URL) return null;
 
   // ── LECTURES & LOGIN : requête GET avec params individuels ─
-  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getEncaissements', 'getBats', 'getFinition', 'getArretsCaisse', 'getJournal', 'getDossiers', 'getTaches', 'getDashboard', 'getControlPatron', 'getComments', 'getNotifs', 'getModifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles', 'getMachineSessions'];
+  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getEncaissements', 'getDepenses', 'getBats', 'getFinition', 'getArretsCaisse', 'getJournal', 'getDossiers', 'getTaches', 'getDashboard', 'getControlPatron', 'getComments', 'getNotifs', 'getModifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles', 'getMachineSessions'];
   if (getActions.includes(payload.action)) {
     const buildUrl = () => {
       let url = APPS_SCRIPT_URL + '?action=' + payload.action;
@@ -20994,6 +20998,735 @@ function printAchatsParDate() {
     ${table}
   `);
 }
+
+// ============================================================
+// DÉPENSES — journal des SORTIES d'argent (achats et dépenses)
+// ============================================================
+// Pendant exact des Encaissements (entrées) : une ligne = une dépense, avec
+// COMMENT on a payé et SURTOUT D'OÙ sort l'argent.
+//   • mode      : espèces / mobile money / chèque / virement  (PAY_KEYS, table commune)
+//   • operateur : MVola, Airtel Money, Orange Money… ou la banque du chèque
+//   • source    : « MVola perso », « Caisse boutique »… — texte LIBRE et OBLIGATOIRE.
+//     C'est la provenance (l'émetteur) : chaque boutique a ses propres pots d'argent,
+//     aucune liste fermée ne tiendrait. Le champ se complète tout seul au fil des
+//     saisies (datalist alimentée par l'historique) sans jamais rien imposer.
+// Le mode dit « payé en Mobile Money », la source dit « c'est MON MVola qui a payé » —
+// deux questions différentes, d'où deux champs.
+// ============================================================
+let depenses = [];
+const DEP_CATEGORIES = ['Achat matière / fourniture','Consommable atelier','Carburant / transport',
+  'Salaire / avance','Loyer','Électricité / eau','Internet / téléphone','Entretien / réparation',
+  'Sous-traitance','Impôts / taxes','Frais bancaires','Publicité','Divers'];
+// Opérateurs Mobile Money (mêmes libellés que la caisse) — suggestions, champ libre.
+const DEP_OPERATEURS_MM = ['MVola','Airtel Money','Orange Money'];
+// Amorces de sources : la vraie liste vient de l'historique des saisies.
+const DEP_SOURCES_BASE  = ['Caisse boutique','MVola perso','Airtel Money perso','Orange Money perso','Compte bancaire'];
+
+let _depPeriode  = 'MOIS';   // AUJ | SEMAINE | MOIS | MOIS_1 | TOUT
+let _depMode     = 'TOUS';   // cash | mobile | cheque | virement
+let _depSource   = 'TOUS';   // libellé exact d'une source
+let _depSearch   = '';
+let _depGroupBy  = 'jour';   // jour | categorie | source | mode | aucun
+let _depTri      = 'date';   // date | montant
+let _depLimite   = 30;
+const _DEP_PAGE  = 30;
+const _DEP_GRP_PAGE = 20;
+// Dépliage en mémoire seulement (comme les cartes Commandes) : on revient sur la page
+// pour saisir la dépense suivante, pas pour retrouver dix fiches ouvertes de la veille.
+let _depExpanded   = new Set();
+let _depGrpFermes  = new Set();
+let _depGrpLimites = {};
+// Ce qui est a l'ecran a cet instant : les cartes de source et les sections passent
+// leur INDICE dans ces deux listes au clic. Leurs cles sont des textes LIBRES
+// (une source, une categorie) : les passer en clair dans un attribut onclick
+// casserait l'HTML a la premiere apostrophe (« MVola d'Hasina »).
+let _depSourcesVues = [];
+let _depGroupesVus  = [];
+let _depImages = [];
+let _depEditId = '';
+
+function saveDepensesLocal() { try { localStorage.setItem('pos-depenses', JSON.stringify(depenses)); } catch(e) {} }
+function loadDepensesLocal()  { try { const r = localStorage.getItem('pos-depenses'); if (r) depenses = JSON.parse(r); } catch(e) {} }
+async function loadDepensesFromScript() {
+  if (!APPS_SCRIPT_URL) return;
+  try {
+    const r = await apiCall({ action:'getDepenses' });
+    if (r && r.ok && Array.isArray(r.depenses)) { depenses = r.depenses; saveDepensesLocal(); }
+  } catch(e) { /* silencieux : on garde le cache local */ }
+}
+async function _syncDepense(d) {
+  saveDepensesLocal();
+  if (!APPS_SCRIPT_URL) return;
+  // Les écritures partent en GET ?payload=JSON : une photo restée en base64 (upload
+  // Drive échoue) ferait exploser la longueur d'URL et la LIGNE ENTIÈRE serait
+  // perdue côté Sheet. On n'envoie donc que les justificatifs déjà sur Drive —
+  // perdre la photo vaut mieux que perdre la dépense ; le base64 reste en local.
+  const aEnvoyer = { ...d, images: (d.images || []).filter(a => a.fileId) };
+  try { await apiCall({ action:'saveDepense', depense:aEnvoyer }); }
+  catch(e) { console.warn('[Dépense] sync échouée', d.id); }
+}
+
+// Lignes normalisées + triées. `_daDayKey` (module Achats) accepte aussi bien le
+// 'dd/MM/yyyy' renvoyé par le Sheet que l'ISO saisi en local → une seule clé de jour.
+function _depRows() {
+  const rows = (Array.isArray(depenses) ? depenses : []).map(d => ({
+    ...d,
+    montant: Number(d.montant) || 0,
+    mode:    payKey(d.mode),
+    ymd:     _daDayKey(d.date),
+    heure:   String(d.heure || ''),
+  }));
+  if (_depTri === 'montant') return rows.sort((a,b) => b.montant - a.montant);
+  return rows.sort((a,b) => (b.ymd||'').localeCompare(a.ymd||'') || b.heure.localeCompare(a.heure));
+}
+
+// Bornes de période, en clés 'YYYY-MM-DD' (comparaison de chaînes = aucun fuseau).
+function _depLundiISO() {
+  const t = new Date(); const j = (t.getDay() + 6) % 7;   // lundi = 0
+  t.setDate(t.getDate() - j);
+  return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+}
+function _depMoisPrec() {
+  const t = new Date(); t.setDate(1); t.setMonth(t.getMonth() - 1);
+  return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}`;
+}
+function _depMatchPeriode(d, p) {
+  if (p === 'TOUT') return true;
+  const k = d.ymd;
+  if (!k) return false;
+  const auj = _todayISO();
+  if (p === 'AUJ')     return k === auj;
+  if (p === 'SEMAINE') return k >= _depLundiISO();
+  if (p === 'MOIS')    return k.slice(0,7) === auj.slice(0,7);
+  if (p === 'MOIS_1')  return k.slice(0,7) === _depMoisPrec();
+  return true;
+}
+
+function _depMatchSearch(d) {
+  const q = _depSearch.trim().toLowerCase();
+  if (!q) return true;
+  return [d.libelle, d.categorie, d.beneficiaire, d.source, d.operateur, d.reference, d.dossierRef, d.notes]
+    .join(' ').toLowerCase().includes(q);
+}
+
+// Les sources CONNUES, de celle qui a le plus payé à la moins sollicitée.
+function _depSources(rows) {
+  const par = new Map();
+  rows.forEach(d => { const s = d.source || 'Source non précisée';
+    par.set(s, (par.get(s) || 0) + d.montant); });
+  return [...par.entries()].sort((a,b) => b[1] - a[1]);
+}
+
+const _DEP_PERIODES = [
+  ['AUJ',     "Aujourd'hui"],
+  ['SEMAINE', 'Cette semaine'],
+  ['MOIS',    'Ce mois'],
+  ['MOIS_1',  'Mois dernier'],
+  ['TOUT',    'Tout'],
+];
+// Couleur par mode de paiement : le canal se lit d'un coup d'œil dans la liste
+// (bord gauche des cartes) comme dans la ventilation.
+const _DEP_MODE_COLOR = { cash:'#16a34a', mobile:'#d97706', cheque:'#2563eb', virement:'#7c3aed' };
+
+// ── Page ──────────────────────────────────────────────────────────────────
+function renderDepenses() {
+  const c = document.getElementById('depensesContent');
+  if (!c) return;
+  const all = _depRows();
+  c.innerHTML =
+    `<div class="pcok">
+      ${_depPeriodeCards(all)}
+      ${_depVentilation(all)}
+      ${_depToolbar()}
+      <div id="depBody"></div>
+    </div>`;
+  _depRenderBody();
+}
+
+// Filtres de PÉRIODE en cartes : combien de dépenses et combien d'argent derrière
+// chaque fenêtre de temps, sans avoir à cliquer pour le découvrir.
+function _depPeriodeCards(all) {
+  const cartes = _DEP_PERIODES.map(([k, lbl]) => {
+    const rows  = all.filter(d => _depMatchPeriode(d, k));
+    const n     = rows.length;
+    const actif = _depPeriode === k;
+    const somme = rows.reduce((s,d) => s + d.montant, 0);
+    return `<button type="button" class="cmdf-card${actif?' cmdf-card--active':''}${n?'':' cmdf-card--0'}"
+      style="--c:#dc2626;--cbg:#dc262614" aria-pressed="${actif}" onclick="depSetPeriode('${k}')">
+      <span class="cmdf-n">${n}</span>
+      <span class="cmdf-l">${lbl}</span>
+      <span class="cmdf-s">${n ? fmt(somme) : '&nbsp;'}</span>
+    </button>`;
+  }).join('');
+  return `<div class="cmdf-cards">${cartes}</div>`;
+}
+
+// VENTILATION de la période : par mode de paiement et par SOURCE. C'est la raison
+// d'être du champ source — savoir combien est sorti de « MVola perso » ce mois-ci.
+// Les montants sont calculés sur la PÉRIODE (hors filtres mode/source) : sinon
+// cliquer une carte mettrait toutes les autres à zéro et la répartition
+// disparaîtrait. Repliable et mémorisé : sur téléphone, trois rangées de cartes
+// mangeraient l'écran pendant tout le défilement.
+function _depVentilation(all) {
+  const base = all.filter(d => _depMatchPeriode(d, _depPeriode) && _depMatchSearch(d));
+  if (!base.length) return '';
+  const ferme = localStorage.getItem('pos-dep-vent') === 'ferme';
+  const total = base.reduce((s,d) => s + d.montant, 0);
+
+  const carte = (actif, color, n, lbl, sous, onclick) =>
+    `<button type="button" class="cmdf-card${actif?' cmdf-card--active':''}${n?'':' cmdf-card--0'}"
+      style="--c:${color};--cbg:${color}14" aria-pressed="${actif}" onclick="${onclick}">
+      <span class="cmdf-n" style="font-size:15px">${sous}</span>
+      <span class="cmdf-l">${lbl}</span>
+      <span class="cmdf-s">${n} dépense${n>1?'s':''}</span>
+    </button>`;
+
+  const modes = ['TOUS'].concat(PAY_KEYS).map(k => {
+    const rows = k === 'TOUS' ? base : base.filter(d => d.mode === k);
+    const lbl  = k === 'TOUS' ? 'Tous les modes' : PAY_LABELS[k];
+    return carte(_depMode === k, k === 'TOUS' ? '#78716c' : _DEP_MODE_COLOR[k],
+      rows.length, lbl, fmt(rows.reduce((s,d)=>s+d.montant,0)), `depSetMode('${k}')`);
+  }).join('');
+
+  _depSourcesVues = [['TOUS', total]].concat(_depSources(base));
+  const sources = _depSourcesVues.map(([s, somme], i) => {
+    const n = s === 'TOUS' ? base.length : base.filter(d => (d.source||'Source non précisée') === s).length;
+    return carte(_depSource === s, s === 'TOUS' ? '#78716c' : '#1a4a3a', n,
+      s === 'TOUS' ? 'Toutes les sources' : _pcokEsc(s), fmt(somme), `depSetSource(${i})`);
+  }).join('');
+
+  return `<section class="cmdg${ferme?' cmdg--ferme':''}" style="--g:#dc2626;margin-bottom:12px">
+    <button type="button" class="cmdg-head" aria-expanded="${!ferme}" onclick="depToggleVentilation()">
+      <span class="cmdg-dot"></span>
+      <span class="cmdg-t">Ventilation</span>
+      <span class="cmdg-n">${base.length} dépense${base.length>1?'s':''}</span>
+      <span class="cmdg-m">${fmt(total)} sorti</span>
+      <span class="cmdg-chev">${ferme?'⌄':'⌃'}</span>
+    </button>
+    ${ferme ? '' : `<div class="cmdg-body">
+      <div class="pcok-count" style="margin-top:10px">Par mode de paiement</div>
+      <div class="cmdf-cards">${modes}</div>
+      <div class="pcok-count">Par source (provenance de l'argent)</div>
+      <div class="cmdf-cards">${sources}</div>
+    </div>`}
+  </section>`;
+}
+
+function _depToolbar() {
+  const triOpts = [['date','Date'],['montant','Montant']]
+    .map(([k,l]) => `<option value="${k}" ${_depTri===k?'selected':''}>Trier : ${l}</option>`).join('');
+  const grpOpts = [['jour','Jour'],['categorie','Catégorie'],['source','Source'],['mode','Mode de paiement'],['aucun','Sans groupe']]
+    .map(([k,l]) => `<option value="${k}" ${_depGroupBy===k?'selected':''}>Grouper : ${l}</option>`).join('');
+  return `<div class="pcok-toolbar">
+    <div class="pcok-controls">
+      <div class="pcok-search">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" placeholder="Rechercher libellé, source, fournisseur…" value="${_pcokEsc(_depSearch)}" oninput="depSetSearch(this.value)" />
+      </div>
+      <select class="select-input" onchange="depSetGroupBy(this.value)" title="Regrouper la liste">${grpOpts}</select>
+      <select class="select-input" onchange="depSetTri(this.value)" title="Trier">${triOpts}</select>
+      <button class="cmdc-btn" onclick="openDepense()">+ Nouvelle dépense</button>
+      <button class="cmdc-btn2" onclick="printDepenses()" title="Imprimer le journal de la sélection">Imprimer</button>
+    </div>
+  </div>`;
+}
+
+function _depFiltreRows(all) {
+  let out = all.filter(d => _depMatchPeriode(d, _depPeriode) && _depMatchSearch(d));
+  if (_depMode   !== 'TOUS') out = out.filter(d => d.mode === _depMode);
+  if (_depSource !== 'TOUS') out = out.filter(d => (d.source || 'Source non précisée') === _depSource);
+  return out;
+}
+
+function _depRenderBody() {
+  const body = document.getElementById('depBody');
+  if (!body) return;
+  const liste  = _depFiltreRows(_depRows());
+  const somme  = liste.reduce((s,d) => s + d.montant, 0);
+  const filtre = (_depMode!=='TOUS'||_depSource!=='TOUS'||_depSearch) ? ' · filtré' : '';
+  const count  = `<div class="pcok-count">${liste.length} dépense${liste.length>1?'s':''}${filtre} · ${fmt(somme)} sorti</div>`;
+
+  const groupes = _depGroupes(liste);
+  _depGroupesVus = groupes || [];
+  if (groupes) {
+    body.innerHTML = count + (groupes.length
+      ? `<div class="cmdg-list">${groupes.map((g, i) => _depGroupeHtml(g, i)).join('')}</div>`
+      : _depCards([]));
+    return;
+  }
+  const page  = liste.slice(0, _depLimite);
+  const reste = liste.length - page.length;
+  const more  = reste > 0
+    ? `<div class="pcok-more"><button onclick="depShowMore()">Afficher plus (${reste} restante${reste>1?'s':''})</button></div>` : '';
+  body.innerHTML = count + _depCards(page) + more;
+}
+
+// Sections construites sur la liste FILTRÉE COMPLÈTE (jamais sur la page affichée) :
+// un en-tête qui annonce « 88 » alors que la pagination n'en garde que 30 serait un
+// compteur faux. Chaque section pagine donc la sienne.
+function _depSectionDe(d) {
+  if (_depGroupBy === 'categorie') return d.categorie || 'Sans catégorie';
+  if (_depGroupBy === 'source')    return d.source    || 'Source non précisée';
+  if (_depGroupBy === 'mode')      return PAY_LABELS[d.mode] || 'Mode inconnu';
+  return d.ymd || 'Sans date';
+}
+function _depTitreSection(cle) {
+  if (_depGroupBy !== 'jour' || cle === 'Sans date') return cle;
+  const auj = _todayISO();
+  const h = new Date(); h.setDate(h.getDate() - 1);
+  const hier = `${h.getFullYear()}-${String(h.getMonth()+1).padStart(2,'0')}-${String(h.getDate()).padStart(2,'0')}`;
+  const libelle = new Date(cle + 'T00:00:00').toLocaleDateString('fr-FR', { weekday:'long', day:'2-digit', month:'long', year:'numeric' });
+  if (cle === auj)  return "Aujourd'hui · " + libelle;
+  if (cle === hier) return 'Hier · ' + libelle;
+  return libelle;
+}
+function _depGroupes(rows) {
+  if (_depGroupBy === 'aucun') return null;
+  const par = new Map();
+  rows.forEach(d => {
+    const k = _depSectionDe(d);
+    if (!par.has(k)) par.set(k, []);
+    par.get(k).push(d);
+  });
+  const total = k => par.get(k).reduce((s,d) => s + d.montant, 0);
+  let cles = [...par.keys()];
+  if (_depGroupBy === 'jour')      cles.sort((a,b) => b.localeCompare(a));            // du plus récent
+  else if (_depGroupBy === 'mode') cles.sort((a,b) => PAY_KEYS.indexOf(payKey(a)) - PAY_KEYS.indexOf(payKey(b)));
+  else                             cles.sort((a,b) => total(b) - total(a));           // le plus gros poste d'abord
+  return cles.map(k => ({
+    cle: k, titre: _depTitreSection(k), rows: par.get(k),
+    color: _depGroupBy === 'mode' ? (_DEP_MODE_COLOR[payKey(k)] || '#78716c') : '#dc2626',
+    argent: fmt(total(k)),
+  }));
+}
+
+function _depGroupeHtml(g, idx) {
+  const ferme = _depGrpFermes.has(g.cle);
+  const lim   = _depGrpLimites[g.cle] || _DEP_GRP_PAGE;
+  const page  = g.rows.slice(0, lim);
+  const reste = g.rows.length - page.length;
+  const suite = reste > 0
+    ? `<div class="pcok-more"><button onclick="depGroupePlus(${idx})">Afficher plus (${reste} restante${reste>1?'s':''})</button></div>`
+    : '';
+  return `<section class="cmdg${ferme?' cmdg--ferme':''}" style="--g:${g.color}">
+    <button type="button" class="cmdg-head" aria-expanded="${!ferme}" onclick="depToggleGroupe(${idx})">
+      <span class="cmdg-dot"></span>
+      <span class="cmdg-t">${_pcokEsc(g.titre)}</span>
+      <span class="cmdg-n">${g.rows.length} dépense${g.rows.length>1?'s':''}</span>
+      <span class="cmdg-m">${g.argent}</span>
+      <span class="cmdg-chev">${ferme?'⌄':'⌃'}</span>
+    </button>
+    ${ferme ? '' : `<div class="cmdg-body">${_depCards(page)}${suite}</div>`}
+  </section>`;
+}
+
+// ── Liste en cartes dépliables (même grammaire que Commandes / Production) ──
+// identité à gauche · montant au milieu · paiement et provenance à droite · actions
+function _depCards(rows) {
+  if (!rows.length) {
+    return `<div class="pcok-empty"><p>Aucune dépense ne correspond aux filtres.</p>
+      <button class="cmdc-btn" onclick="openDepense()">+ Enregistrer une dépense</button></div>`;
+  }
+  return `<div class="cmdc-list">${rows.map(_depCarte).join('')}</div>`;
+}
+
+function _depCarte(d) {
+  const id      = String(d.id);
+  const ouvert  = _depExpanded.has(id);
+  const accent  = _DEP_MODE_COLOR[d.mode] || '#78716c';
+  const dateTxt = d.ymd ? new Date(d.ymd+'T00:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'}) : '—';
+  const cat = d.categorie
+    ? `<span class="cmdc-badge" style="color:#44403c;background:var(--color-bg,#f5f4f2)">${_pcokEsc(d.categorie)}</span>` : '';
+  const justif = (d.images && d.images.length)
+    ? `<span class="cmdc-badge" style="color:#1a4a3a;background:#dcfce7" title="Justificatif joint">Justificatif</span>` : '';
+  const ligne = (lab, val) => `<div class="cmdc-l"><span class="cmdc-lk">${lab} :</span> <span class="cmdc-lv">${val}</span></div>`;
+
+  return `<section class="cmdc dep-c${ouvert?' cmdc--open':''}" style="--a:${accent}" data-id="${id}">
+    <div class="cmdc-head" role="button" tabindex="0" aria-expanded="${ouvert}"
+         onclick="depToggleCarte('${id}')"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();depToggleCarte('${id}')}">
+      <div class="cmdc-id">
+        <div class="cmdc-t">${_pcokEsc(d.libelle || 'Dépense')}${cat}${justif}</div>
+        <div class="cmdc-ref">${dateTxt}${d.heure?' · '+_pcokEsc(d.heure.slice(0,5)):''}${d.enregistrePar?' · '+_pcokEsc(d.enregistrePar):''}</div>
+        ${d.beneficiaire ? ligne('Payé à', '<b>'+_pcokEsc(d.beneficiaire)+'</b>') : ''}
+        ${d.dossierRef   ? ligne('Dossier', _pcokEsc(d.dossierRef)) : ''}
+      </div>
+      <div class="cmdc-mny">
+        <div class="cmdc-lab">Montant</div>
+        <div class="cmdc-big" style="color:#dc2626">− ${fmt(d.montant)}</div>
+      </div>
+      <div class="cmdc-ech">
+        <div class="cmdc-lab">Payé par</div>
+        <div class="cmdc-date" style="font-size:14px">${PAY_LABELS[d.mode]}${d.operateur?' · '+_pcokEsc(d.operateur):''}</div>
+        <div class="cmdc-pill" title="Provenance de l'argent">Source : ${_pcokEsc(d.source || 'non précisée')}</div>
+      </div>
+      <div class="cmdc-go">
+        <button class="cmdc-btn2" onclick="event.stopPropagation();openDepense('${id}')">Modifier</button>
+        <span class="cmdc-chev">${ouvert?'⌃':'⌄'}</span>
+      </div>
+    </div>
+    ${ouvert ? `<div class="cmdc-body">${_depDetailBody(d)}</div>` : ''}
+  </section>`;
+}
+
+function _depDetailBody(d) {
+  const r = (lab, val) => val ? `<div class="deliv-d-row"><span>${lab}</span><strong>${_pcokEsc(val)}</strong></div>` : '';
+  const dateTxt = d.ymd ? new Date(d.ymd+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'}) : '—';
+  return `
+    ${r('Catégorie', d.categorie)}
+    <div class="deliv-d-row"><span>Montant</span><strong style="color:#dc2626">− ${fmt(d.montant)}</strong></div>
+    ${r('Date', dateTxt + (d.heure ? ' à ' + d.heure.slice(0,5) : ''))}
+    ${r('Mode de paiement', PAY_LABELS[d.mode])}
+    ${r(isBankPay(d.mode) ? 'Banque' : 'Opérateur', d.operateur)}
+    ${r('Source (provenance)', d.source)}
+    ${r(isBankPay(d.mode) ? 'N° de pièce' : 'Référence', d.reference)}
+    ${r('Payé à', d.beneficiaire)}
+    ${r('Dossier / commande', d.dossierRef)}
+    ${r('Enregistré par', d.enregistrePar)}
+    ${d.notes ? `<div class="deliv-d-row" style="align-items:flex-start"><span>Notes</span><strong style="white-space:pre-wrap;text-align:right">${_pcokEsc(d.notes)}</strong></div>` : ''}
+    ${_achatImgThumbs(d.images)}
+    <div class="pcok-drawer-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+      <button class="cmdc-btn" onclick="openDepense('${String(d.id)}')">Modifier</button>
+      <button class="cmdc-btn2" onclick="printDepenseRecu('${String(d.id)}')">Imprimer le reçu</button>
+      <button class="cmdc-btn2" style="color:#dc2626;border-color:#fca5a5" onclick="deleteDepense('${String(d.id)}')">Supprimer</button>
+    </div>`;
+}
+
+// ── Interactions ──────────────────────────────────────────────────────────
+function depSetPeriode(k) { _depPeriode = k; _depLimite = _DEP_PAGE; renderDepenses(); }
+function depSetMode(k)    { _depMode   = (_depMode   === k && k !== 'TOUS') ? 'TOUS' : k; renderDepenses(); }
+function depSetSource(i)  {
+  const s = (_depSourcesVues[i] || ['TOUS'])[0];
+  _depSource = (_depSource === s && s !== 'TOUS') ? 'TOUS' : s;
+  renderDepenses();
+}
+function depSetSearch(v)  { _depSearch = v; _depRenderBody(); }
+function depSetTri(v)     { _depTri = v; _depRenderBody(); }
+function depSetGroupBy(v) { _depGroupBy = v; _depGrpLimites = {}; _depRenderBody(); }
+function depShowMore()    { _depLimite += _DEP_PAGE; _depRenderBody(); }
+function depGroupePlus(i) {
+  const k = (_depGroupesVus[i] || {}).cle; if (k == null) return;
+  _depGrpLimites[k] = (_depGrpLimites[k] || _DEP_GRP_PAGE) + _DEP_GRP_PAGE;
+  _depRenderBody();
+}
+function depToggleGroupe(i) {
+  const k = (_depGroupesVus[i] || {}).cle; if (k == null) return;
+  if (_depGrpFermes.has(k)) _depGrpFermes.delete(k); else _depGrpFermes.add(k);
+  _depRenderBody();
+}
+function depToggleVentilation() {
+  const ferme = localStorage.getItem('pos-dep-vent') === 'ferme';
+  try { localStorage.setItem('pos-dep-vent', ferme ? 'ouvert' : 'ferme'); } catch(e) {}
+  renderDepenses();
+}
+function depToggleCarte(id) {
+  if (_depExpanded.has(id)) _depExpanded.delete(id); else _depExpanded.add(id);
+  _depRenderBody();
+}
+
+// ── Formulaire (création / modification) ──────────────────────────────────
+// Les suggestions des champs libres viennent de ce qui a DÉJÀ été saisi : la liste
+// des sources, des catégories et des fournisseurs se construit à l'usage, sans que
+// personne n'ait à la configurer quelque part.
+function _depValeursConnues(champ) {
+  const vus = new Set();
+  (Array.isArray(depenses) ? depenses : []).forEach(d => { const v = (d[champ]||'').trim(); if (v) vus.add(v); });
+  return [...vus].sort((a,b) => a.localeCompare(b,'fr'));
+}
+
+function openDepense(id) {
+  _depEditId = id || '';
+  const ex = id ? (depenses || []).find(x => String(x.id) === String(id)) : null;
+  _depImages = ex && Array.isArray(ex.images) ? ex.images.slice() : [];
+  const pre = {
+    libelle:'', categorie:'', beneficiaire:'', montant:'', mode:'cash', operateur:'',
+    source:'', reference:'', dossierRef:'', notes:'', ...(ex || {})
+  };
+  const jour = (ex ? _daDayKey(pre.date) : '') || _todayISO();
+
+  const _inp = 'width:100%;padding:9px 11px;border:1.5px solid var(--color-border);border-radius:8px;font-size:13.5px;font-family:inherit;outline:none;color:var(--color-text-primary);background:var(--color-surface)';
+  const _lbl = 'font-size:11.5px;font-weight:600;color:var(--color-text-secondary);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.03em';
+  const cats    = [...new Set(DEP_CATEGORIES.concat(_depValeursConnues('categorie')))];
+  const sources = [...new Set(DEP_SOURCES_BASE.concat(_depValeursConnues('source')))];
+  const benefs  = _depValeursConnues('beneficiaire');
+  const dossOpts = (Array.isArray(dossiers) ? dossiers : []).slice()
+    .sort((a,b) => String(b.numeroDossier||'').localeCompare(String(a.numeroDossier||''),'fr',{numeric:true}))
+    .map(dd => { const ref = dd.numeroDossier || dd.id;
+      return `<option value="${_pcokEsc(ref)}" ${pre.dossierRef===ref?'selected':''}>${_pcokEsc(ref + ' · ' + (dd.client||'—'))}</option>`; }).join('');
+
+  let modal = document.getElementById('depenseModal');
+  if (!modal) { modal = document.createElement('div'); modal.id = 'depenseModal'; document.body.appendChild(modal); }
+  modal.style.cssText = 'display:flex;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;align-items:center;justify-content:center;padding:16px';
+  modal.onclick = e => { if (e.target === modal) closeDepense(); };
+  modal.innerHTML = `
+    <div style="background:var(--color-surface);border-radius:16px;width:100%;max-width:540px;max-height:92vh;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,.25)">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--color-border)">
+        <h3 style="margin:0;font-size:15px;font-weight:700;color:var(--color-text-primary)">${ex ? 'Modifier la dépense' : 'Nouvelle dépense'}</h3>
+        <button onclick="closeDepense()" style="background:none;border:none;cursor:pointer;font-size:22px;color:var(--color-text-muted);line-height:1">×</button>
+      </div>
+      <div style="padding:18px 20px;display:flex;flex-direction:column;gap:13px">
+        <div><label style="${_lbl}">Dépense / achat *</label>
+          <input id="depLibelle" type="text" value="${_pcokEsc(pre.libelle)}" placeholder="Ex : achat peinture" style="${_inp}"/></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:11px">
+          <div><label style="${_lbl}">Montant (Ar) *</label>
+            <input id="depMontant" type="number" min="0" step="any" value="${pre.montant!==''&&pre.montant!=null?Number(pre.montant):''}" placeholder="0" style="${_inp}"/></div>
+          <div><label style="${_lbl}">Date *</label>
+            <input id="depDate" type="date" value="${jour}" style="${_inp}"/></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:11px">
+          <div><label style="${_lbl}">Catégorie</label>
+            <input id="depCategorie" type="text" list="depCatList" value="${_pcokEsc(pre.categorie)}" placeholder="Ex : Achat matière" style="${_inp}"/>
+            <datalist id="depCatList">${cats.map(x=>`<option value="${_pcokEsc(x)}"></option>`).join('')}</datalist></div>
+          <div><label style="${_lbl}">Payé à (fournisseur)</label>
+            <input id="depBeneficiaire" type="text" list="depBenList" value="${_pcokEsc(pre.beneficiaire)}" placeholder="Ex : Quincaillerie" style="${_inp}"/>
+            <datalist id="depBenList">${benefs.map(x=>`<option value="${_pcokEsc(x)}"></option>`).join('')}</datalist></div>
+        </div>
+
+        <div style="background:var(--color-bg,#faf8f4);border:1px solid var(--color-border);border-radius:12px;padding:12px 13px;display:flex;flex-direction:column;gap:12px">
+          <div style="font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:var(--color-text-secondary)">Paiement</div>
+          <div><label style="${_lbl}">Mode de paiement *</label>
+            <select id="depMode" onchange="_depOnModeChange()" style="${_inp}">
+              ${PAY_KEYS.map(k=>`<option value="${k}" ${payKey(pre.mode)===k?'selected':''}>${PAY_LABELS[k]}</option>`).join('')}
+            </select></div>
+          <div id="depOperBloc"></div>
+          <div><label style="${_lbl}">Source — provenance de l'argent *</label>
+            <input id="depSource" type="text" list="depSrcList" value="${_pcokEsc(pre.source)}" placeholder="Ex : MVola perso" style="${_inp}"/>
+            <datalist id="depSrcList">${sources.map(x=>`<option value="${_pcokEsc(x)}"></option>`).join('')}</datalist>
+            <div style="font-size:11px;color:var(--color-text-muted);margin-top:5px">D'où sort l'argent : « MVola perso », « Caisse boutique »… Texte libre — les saisies précédentes sont proposées.</div></div>
+        </div>
+
+        <div><label style="${_lbl}">Lier à un dossier / une commande</label>
+          <select id="depDossier" style="${_inp}">
+            <option value="">— Aucun —</option>
+            ${dossOpts}
+          </select></div>
+        <div><label style="${_lbl}">Notes</label>
+          <textarea id="depNotes" rows="2" placeholder="Détail, quantité, motif…" style="${_inp};resize:vertical">${_pcokEsc(pre.notes)}</textarea></div>
+        <div>
+          <label style="${_lbl}">Justificatif (photo du reçu)</label>
+          <div id="depImgGrid" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"></div>
+          <label style="display:inline-flex;align-items:center;gap:7px;cursor:pointer;font-size:12.5px;font-weight:600;color:var(--color-primary);background:var(--color-primary-light);padding:8px 13px;border-radius:8px">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Ajouter une photo
+            <input type="file" accept="image/*" multiple style="display:none" onchange="_depAddImages(this.files)"/>
+          </label>
+        </div>
+      </div>
+      <div style="padding:14px 20px;border-top:1px solid var(--color-border);display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
+        ${ex ? `<button onclick="deleteDepense('${String(ex.id)}')" style="padding:9px 16px;border:1.5px solid #fca5a5;background:none;border-radius:8px;font-size:13.5px;font-weight:600;color:#dc2626;cursor:pointer;margin-right:auto">Supprimer</button>` : ''}
+        <button onclick="closeDepense()" style="padding:9px 16px;border:1.5px solid var(--color-border);background:none;border-radius:8px;font-size:13.5px;font-weight:500;color:var(--color-text-secondary);cursor:pointer">Annuler</button>
+        <button onclick="saveDepenseForm()" style="padding:9px 18px;background:var(--color-primary);color:#fff;border:none;border-radius:8px;font-size:13.5px;font-weight:700;cursor:pointer">Enregistrer</button>
+      </div>
+    </div>`;
+  _depOnModeChange(pre.operateur, pre.reference);
+  _depRenderImgGrid();
+  setTimeout(() => document.getElementById('depLibelle')?.focus(), 80);
+}
+function closeDepense() { const m = document.getElementById('depenseModal'); if (m) m.style.display = 'none'; }
+
+// Les champs qui dépendent du mode : opérateur Mobile Money ou banque du chèque, et
+// la référence (n° de transaction, n° de chèque). En espèces aucun des deux n'a de
+// sens — on ne laisse pas traîner deux cases qui ne seront jamais remplies.
+function _depOnModeChange(operateurInit, refInit) {
+  const bloc = document.getElementById('depOperBloc');
+  if (!bloc) return;
+  const mode = document.getElementById('depMode')?.value || 'cash';
+  const oper = operateurInit != null ? operateurInit : (document.getElementById('depOperateur')?.value || '');
+  const ref  = refInit       != null ? refInit       : (document.getElementById('depReference')?.value || '');
+  const _inp = 'width:100%;padding:9px 11px;border:1.5px solid var(--color-border);border-radius:8px;font-size:13.5px;font-family:inherit;outline:none;color:var(--color-text-primary);background:var(--color-surface)';
+  const _lbl = 'font-size:11.5px;font-weight:600;color:var(--color-text-secondary);display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.03em';
+  if (mode === 'cash') { bloc.innerHTML = ''; return; }
+  const banque = isBankPay(mode);
+  const sugg = banque ? _depValeursConnues('operateur') : DEP_OPERATEURS_MM.concat(_depValeursConnues('operateur'));
+  bloc.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:11px">
+    <div><label style="${_lbl}">${banque ? 'Banque' : 'Opérateur *'}</label>
+      <input id="depOperateur" type="text" list="depOperList" value="${_pcokEsc(oper)}" placeholder="${banque?'Ex : BNI':'MVola'}" style="${_inp}"/>
+      <datalist id="depOperList">${[...new Set(sugg)].map(x=>`<option value="${_pcokEsc(x)}"></option>`).join('')}</datalist></div>
+    <div><label style="${_lbl}">${banque ? 'N° de chèque / pièce' : 'Référence transaction'}</label>
+      <input id="depReference" type="text" value="${_pcokEsc(ref)}" placeholder="${banque?'N° 0012345':'Réf. MVola'}" style="${_inp}"/></div>
+  </div>`;
+}
+
+function _depRenderImgGrid() {
+  const grid = document.getElementById('depImgGrid');
+  if (!grid) return;
+  grid.innerHTML = _depImages.map((a, i) => `
+    <div style="position:relative;width:56px;height:56px">
+      <img src="${_driveImgSrc(a)}" ${_driveImgFallback(a)?`onerror="this.onerror=null;this.src='${_driveImgFallback(a)}'"`:''} style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid var(--color-border)"/>
+      <button onclick="_depRemoveImage(${i})" title="Retirer" style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;background:#dc2626;color:#fff;border:none;font-size:11px;line-height:1;cursor:pointer">×</button>
+    </div>`).join('');
+}
+function _depRemoveImage(i) { _depImages.splice(i, 1); _depRenderImgGrid(); }
+function _depAddImages(files) {
+  [...(files||[])].forEach(file => {
+    if (!file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = e => { _depImages.push({ name:file.name, type:file.type, data:e.target.result }); _depRenderImgGrid(); };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function saveDepenseForm() {
+  const libelle = document.getElementById('depLibelle')?.value.trim() || '';
+  const montant = parseFloat(document.getElementById('depMontant')?.value) || 0;
+  const jour    = document.getElementById('depDate')?.value || _todayISO();
+  const mode    = document.getElementById('depMode')?.value || 'cash';
+  const source  = document.getElementById('depSource')?.value.trim() || '';
+  const oper    = document.getElementById('depOperateur')?.value.trim() || '';
+  if (!libelle)     { showToast('Indique ce qui a été acheté ou payé', 'error'); return; }
+  if (montant <= 0) { showToast('Montant invalide', 'error'); return; }
+  if (!source)      { showToast("Indique la source : d'où sort l'argent", 'error'); return; }
+  if (mode === 'mobile' && !oper) { showToast("Indique l'opérateur (MVola, Airtel Money, Orange Money…)", 'error'); return; }
+
+  showToast('Enregistrement…', 'info');
+  // Justificatifs : les nouvelles photos partent sur Drive (visibles depuis tous les
+  // postes) ; si l'upload échoue on garde le base64 pour ne jamais perdre le reçu.
+  const images = [];
+  for (const a of _depImages) {
+    if (a.fileId) { images.push(a); continue; }
+    if (!a.data)  continue;
+    try {
+      const r = await apiCall({ action:'uploadFile', fileName:a.name || `depense-${Date.now()}.jpg`, mimeType:a.type || 'image/jpeg', base64Data:a.data });
+      images.push(r && r.ok ? { name:r.fileName||a.name, type:a.type||'image/jpeg', fileId:r.fileId, viewUrl:r.viewUrl, dlUrl:r.dlUrl } : { name:a.name, type:a.type, data:a.data });
+    } catch(e) { images.push({ name:a.name, type:a.type, data:a.data }); }
+  }
+
+  const ex = _depEditId ? (depenses || []).find(x => String(x.id) === String(_depEditId)) : null;
+  // Heure : l'heure réelle quand la dépense est saisie le jour même, midi sinon — une
+  // saisie rétroactive ne doit pas prétendre à une heure qu'on ne connaît pas.
+  const now2 = new Date();
+  const heure = (ex && _daDayKey(ex.date) === jour && ex.heure) ? ex.heure
+    : (jour === _todayISO()
+        ? `${String(now2.getHours()).padStart(2,'0')}:${String(now2.getMinutes()).padStart(2,'0')}:${String(now2.getSeconds()).padStart(2,'0')}`
+        : '12:00:00');
+
+  const d = {
+    id: ex ? ex.id : _genUid('DEP'),
+    // Sans 'Z' : le script la lit comme une heure LOCALE → aucun décalage de fuseau
+    // (le piège qui avait faussé le minuteur des opérateurs).
+    date: `${jour}T${heure}`,
+    heure,
+    libelle,
+    categorie:     document.getElementById('depCategorie')?.value.trim() || '',
+    beneficiaire:  document.getElementById('depBeneficiaire')?.value.trim() || '',
+    montant,
+    mode,
+    operateur:     mode === 'cash' ? '' : oper,
+    source,
+    reference:     mode === 'cash' ? '' : (document.getElementById('depReference')?.value.trim() || ''),
+    dossierRef:    document.getElementById('depDossier')?.value || '',
+    notes:         document.getElementById('depNotes')?.value.trim() || '',
+    enregistrePar: (ex && ex.enregistrePar) || currentUser?.label || currentUser?.username || '',
+    timestamp:     (ex && ex.timestamp) || new Date().toISOString(),
+    images,
+  };
+  if (ex) Object.assign(ex, d); else depenses.unshift(d);
+
+  await _syncDepense(d);
+  closeDepense();
+  renderDepenses();
+  showToast(ex ? 'Dépense modifiée' : `Dépense enregistrée · ${fmt(montant)}`);
+}
+
+async function deleteDepense(id) {
+  const d = (depenses || []).find(x => String(x.id) === String(id));
+  if (!d) return;
+  if (!confirm(`Supprimer définitivement cette dépense ?\n\n${d.libelle} — ${fmt(d.montant)}\nSource : ${d.source || 'non précisée'}`)) return;
+  depenses = depenses.filter(x => String(x.id) !== String(id));
+  _depExpanded.delete(String(id));
+  saveDepensesLocal();
+  closeDepense();
+  renderDepenses();
+  if (APPS_SCRIPT_URL) {
+    try {
+      const r = await apiCall({ action:'deleteDepense', id:String(id), user:currentUser?.label || currentUser?.username || '' });
+      if (!r || !r.ok) {
+        showToast('Suppression non confirmée par le serveur — rechargement', 'error');
+        await loadDepensesFromScript(); renderDepenses(); return;
+      }
+    } catch(e) { showToast('Suppression hors ligne — à resynchroniser', 'error'); }
+  }
+  showToast('Dépense supprimée');
+}
+
+// ── Impression ────────────────────────────────────────────────────────────
+// Le journal de la sélection courante (période + filtres), avec les deux totaux
+// qui comptent pour le patron : par mode de paiement et par SOURCE.
+function printDepenses() {
+  const liste = _depFiltreRows(_depRows());
+  if (!liste.length) { showToast('Aucune dépense à imprimer pour cette sélection', 'info'); return; }
+  const total   = liste.reduce((s,d) => s + d.montant, 0);
+  const perLbl  = (_DEP_PERIODES.find(([k]) => k === _depPeriode) || ['','']) [1];
+  const parMode = PAY_KEYS.map(k => [PAY_LABELS[k], liste.filter(d=>d.mode===k).reduce((s,d)=>s+d.montant,0)])
+                          .filter(([,v]) => v > 0);
+  const parSrc  = _depSources(liste);
+
+  const kpis = `<div class="kpi-row">
+    <div class="kpi-box"><div class="kl">Dépenses</div><div class="kv">${liste.length}</div></div>
+    <div class="kpi-box"><div class="kl">Total sorti</div><div class="kv">${fmt(total)}</div></div>
+    ${parMode.map(([l,v]) => `<div class="kpi-box"><div class="kl">${l}</div><div class="kv">${fmt(v)}</div></div>`).join('')}
+  </div>`;
+  const rows = liste.map(d => `<tr>
+    <td>${d.ymd ? new Date(d.ymd+'T00:00:00').toLocaleDateString('fr-FR') : '—'}</td>
+    <td>${_pcokEsc(d.libelle)}</td>
+    <td>${_pcokEsc(d.categorie||'')}</td>
+    <td>${_pcokEsc(d.beneficiaire||'')}</td>
+    <td>${PAY_LABELS[d.mode]}${d.operateur?' · '+_pcokEsc(d.operateur):''}</td>
+    <td>${_pcokEsc(d.source||'')}</td>
+    <td style="text-align:right">${fmt(d.montant)}</td>
+  </tr>`).join('');
+  const srcRows = parSrc.map(([s,v]) =>
+    `<tr><td>${_pcokEsc(s)}</td><td style="text-align:right">${fmt(v)}</td></tr>`).join('');
+
+  _printWindow('Journal des dépenses', `
+    <div class="rpt-title">Journal des dépenses</div>
+    <div class="rpt-period">${perLbl}${_depMode!=='TOUS'?' · '+PAY_LABELS[_depMode]:''}${_depSource!=='TOUS'?' · source : '+_pcokEsc(_depSource):''}</div>
+    ${kpis}
+    <table>
+      <thead><tr><th>Date</th><th>Dépense</th><th>Catégorie</th><th>Payé à</th><th>Mode</th><th>Source</th><th style="text-align:right">Montant</th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><td colspan="6" style="text-align:right;font-weight:700;border-top:2px solid #e5e3df">TOTAL</td><td style="text-align:right;font-weight:700;border-top:2px solid #e5e3df">${fmt(total)}</td></tr></tfoot>
+    </table>
+    <div class="section-title">Par source (provenance de l'argent)</div>
+    <table>
+      <thead><tr><th>Source</th><th style="text-align:right">Total sorti</th></tr></thead>
+      <tbody>${srcRows}</tbody>
+    </table>
+  `);
+}
+
+// Reçu d'une dépense : la pièce à classer quand le fournisseur n'en donne aucune.
+function printDepenseRecu(id) {
+  const d = _depRows().find(x => String(x.id) === String(id));
+  if (!d) return;
+  const l = (lab, val) => val ? `<tr><td>${lab}</td><td style="font-weight:700">${_pcokEsc(val)}</td></tr>` : '';
+  _printWindow('Reçu de dépense', `
+    <div class="rpt-title">Reçu de dépense</div>
+    <div class="rpt-period">${d.ymd ? new Date(d.ymd+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'}) : ''}${d.heure?' · '+d.heure.slice(0,5):''}</div>
+    <table>
+      ${l('Dépense', d.libelle)}
+      ${l('Catégorie', d.categorie)}
+      <tr><td>Montant</td><td style="font-weight:800;font-size:15px">${fmt(d.montant)}</td></tr>
+      ${l('Mode de paiement', PAY_LABELS[d.mode])}
+      ${l(isBankPay(d.mode) ? 'Banque' : 'Opérateur', d.operateur)}
+      ${l('Source (provenance)', d.source)}
+      ${l(isBankPay(d.mode) ? 'N° de pièce' : 'Référence', d.reference)}
+      ${l('Payé à', d.beneficiaire)}
+      ${l('Dossier / commande', d.dossierRef)}
+      ${l('Enregistré par', d.enregistrePar)}
+      ${l('Notes', d.notes)}
+    </table>
+    <div style="margin-top:38px;display:flex;justify-content:space-between;font-size:11px">
+      <div>Visa du bénéficiaire<br/><br/><br/>_______________________</div>
+      <div>Visa responsable<br/><br/><br/>_______________________</div>
+    </div>
+  `);
+}
+
+// Cache local chargé ICI, après la déclaration de `depenses` et non dans le bloc
+// INIT (plus haut dans le fichier) : la lecture y tomberait dans la zone morte du
+// `let` et le try/catch avalerait l'erreur — la liste resterait vide hors ligne.
+loadDepensesLocal();
 
 // ============================================================
 // STATS — KPI production (appelé depuis showPage via _loadProdStats)

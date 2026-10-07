@@ -14,6 +14,8 @@ const SHEET_RESERVATIONS = 'Réservations';
 const SHEET_COMMANDES    = 'Commandes';
 const SHEET_ENCAISSEMENTS = 'Encaissements'; // journal centralisé des entrées d'argent (patron)
 const SHEET_ARRETS        = 'ArretsCaisse';   // clôtures de caisse centralisées (multi-appareils + vue patron)
+const SHEET_DEPENSES      = 'Depenses';     // sorties d'argent : achats et dépenses (mode de paiement + source)
+const DEPENSE_HEADERS_    = ['ID','Date','Heure','Libelle','Categorie','Beneficiaire','Montant','Mode','Operateur','Source','Reference','Dossier_Ref','Notes','Enregistre_Par','Timestamp','Images_JSON'];
 const SHEET_BATS          = 'BATs';           // suivi des BAT (épreuves) : versions, envoi client, retours, validation
 const BAT_HEADERS_        = ['ID','DossierId','NumeroDossier','Version','Statut','Retours','FileName','FileUrl','FileDlUrl','FileType','CreatedBy','CreatedAt','SentBy','SentAt','DecidedBy','DecidedAt','Files','Kind'];
 
@@ -130,6 +132,9 @@ function doPost(e) {
     else if (action === 'getCommandes')      result = handleGetCommandes(data);
     else if (action === 'addEncaissement')   result = handleAddEncaissement(data);
     else if (action === 'getEncaissements')  result = handleGetEncaissements(data);
+    else if (action === 'saveDepense')       result = handleSaveDepense(data);
+    else if (action === 'getDepenses')       result = handleGetDepenses(data);
+    else if (action === 'deleteDepense')     result = handleDeleteDepense(data);
     else if (action === 'addBat')            result = handleAddBat(data);
     else if (action === 'getBats')           result = handleGetBats(data);
     else if (action === 'saveFinition')      result = handleSaveFinition(data);
@@ -205,6 +210,8 @@ function doGet(e) {
       else if (action === 'addCommande')       result = handleAddCommande(data);
       else if (action === 'updateCommande')    result = handleUpdateCommande(data);
       else if (action === 'addEncaissement')   result = handleAddEncaissement(data);
+      else if (action === 'saveDepense')       result = handleSaveDepense(data);
+      else if (action === 'deleteDepense')     result = handleDeleteDepense(data);
       else if (action === 'addBat')            result = handleAddBat(data);
       else if (action === 'saveFinition')      result = handleSaveFinition(data);
       else if (action === 'getFinition')       result = handleGetFinition(data);
@@ -255,6 +262,7 @@ function doGet(e) {
     if (action === 'getReservations') return jsonResp(handleGetReservations());
     if (action === 'getCommandes')    return jsonResp(handleGetCommandes(e.parameter));
     if (action === 'getEncaissements') return jsonResp(handleGetEncaissements(e.parameter));
+    if (action === 'getDepenses')     return jsonResp(handleGetDepenses(e.parameter));
     if (action === 'getBats')          return jsonResp(handleGetBats(e.parameter));
     if (action === 'getFinition')      return jsonResp(handleGetFinition(e.parameter));
     if (action === 'getArretsCaisse')  return jsonResp(handleGetArretsCaisse(e.parameter));
@@ -357,6 +365,9 @@ function initSheets() {
     arrSh.getRange(1, 17).setValue('Total_Virement')
       .setBackground('#1a4a3a').setFontColor('#ffffff').setFontWeight('bold');
   }
+
+  // Journal des dépenses / achats (sorties d'argent)
+  ensureSheet(ss, SHEET_DEPENSES, DEPENSE_HEADERS_);
 
   // Nouvelles feuilles production
   ensureSheet(ss, SHEET_DOSSIERS, DOSSIER_HEADERS);
@@ -750,6 +761,95 @@ function handleGetEncaissements(data) {
   })).filter(x => String(x.id) !== '');
   if (data && data.caissier) list = list.filter(x => String(x.caissier) === String(data.caissier));
   return { ok:true, encaissements:list };
+}
+
+// ── DÉPENSES / ACHATS (sorties d'argent) ───────────────────
+// Une ligne = une dépense. UPSERT par ID (la fiche est modifiable après coup).
+// Deux champs distincts, souvent confondus :
+//   • Mode      = COMMENT on a payé (Espèces / Mobile Money / Chèque / Virement)
+//   • Operateur = avec QUEL opérateur ou banque (MVola, Airtel Money, BNI…)
+//   • Source    = D'OÙ sort l'argent (« MVola perso », « Caisse boutique »…) —
+//     texte LIBRE : chaque boutique a ses propres pots, aucune liste fermée ne
+//     tiendrait. C'est ce champ qui permet de dire combien est sorti de quoi.
+function handleSaveDepense(data) {
+  const d = data.depense;
+  if (!d || !d.id) return { ok:false, error:'Dépense invalide' };
+  if (!(Number(d.montant) > 0)) return { ok:false, error:'Montant invalide' };
+  const ss = getSS();
+  const sh = ss.getSheetByName(SHEET_DEPENSES) || ensureSheet(ss, SHEET_DEPENSES, DEPENSE_HEADERS_);
+
+  const dt    = new Date(d.date);
+  const tz    = Session.getScriptTimeZone();
+  const dateS = isNaN(dt.getTime()) ? String(d.date || '') : Utilities.formatDate(dt, tz, 'dd/MM/yyyy');
+  const timeS = isNaN(dt.getTime()) ? String(d.heure || '') : Utilities.formatDate(dt, tz, 'HH:mm:ss');
+  let imgJson = '[]';
+  try { imgJson = JSON.stringify(Array.isArray(d.images) ? d.images : []); } catch (_) {}
+
+  const row = [
+    String(d.id), dateS, timeS,
+    String(d.libelle || ''), String(d.categorie || ''), String(d.beneficiaire || ''),
+    Number(d.montant) || 0, _payLabel_(d.mode), String(d.operateur || ''),
+    String(d.source || ''), String(d.reference || ''), String(d.dossierRef || ''),
+    String(d.notes || ''), String(d.enregistrePar || ''),
+    String(d.timestamp || new Date().toISOString()), imgJson
+  ];
+
+  const last = sh.getLastRow();
+  if (last > 1) {
+    const ids = sh.getRange(2, 1, last - 1, 1).getValues();
+    for (let i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]) === String(d.id)) {
+        sh.getRange(i + 2, 1, 1, row.length).setValues([row]);
+        _logAction_('DEPENSE_MAJ', d.enregistrePar || 'utilisateur', 'ID:' + d.id + ' ' + (Number(d.montant)||0));
+        return { ok:true, id:d.id, updated:true };
+      }
+    }
+  }
+  sh.appendRow(row);
+  _logAction_('DEPENSE', d.enregistrePar || 'utilisateur',
+    'ID:' + d.id + ' ' + (Number(d.montant)||0) + ' ' + String(d.libelle||'') + ' (' + String(d.source||'') + ')');
+  return { ok:true, id:d.id };
+}
+
+function handleGetDepenses(data) {
+  const sh = getSS().getSheetByName(SHEET_DEPENSES);
+  if (!sh) return { ok:true, depenses:[] };
+  const last = sh.getLastRow();
+  if (last <= 1) return { ok:true, depenses:[] };
+  const PAGE  = Number(data && data.limit) || 3000;
+  const start = Math.max(2, last - PAGE + 1);
+  const width = Math.min(DEPENSE_HEADERS_.length, sh.getLastColumn());
+  const rows  = sh.getRange(start, 1, last - start + 1, width).getValues();
+  const list  = rows.map(r => {
+    let images = [];
+    if (r[15]) { try { const p = JSON.parse(r[15]); if (Array.isArray(p)) images = p; } catch (_) {} }
+    return {
+      id: String(r[0]), date: String(r[1]), heure: String(r[2]),
+      libelle: String(r[3]), categorie: String(r[4]), beneficiaire: String(r[5]),
+      montant: Number(r[6]) || 0, mode: _payKeyFromLabel_(r[7]), operateur: String(r[8]),
+      source: String(r[9]), reference: String(r[10]), dossierRef: String(r[11]),
+      notes: String(r[12]), enregistrePar: String(r[13]), timestamp: String(r[14]), images
+    };
+  }).filter(x => x.id);
+  return { ok:true, depenses:list };
+}
+
+function handleDeleteDepense(data) {
+  const id = String((data && data.id) || '');
+  if (!id) return { ok:false, error:'ID manquant' };
+  const sh = getSS().getSheetByName(SHEET_DEPENSES);
+  if (!sh) return { ok:false, error:'Feuille Depenses introuvable' };
+  const last = sh.getLastRow();
+  if (last <= 1) return { ok:false, error:'Dépense introuvable' };
+  const ids = sh.getRange(2, 1, last - 1, 1).getValues();
+  for (let i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]) === id) {
+      sh.deleteRow(i + 2);
+      _logAction_('DEPENSE_SUPPR', (data && data.user) || 'utilisateur', 'ID:' + id);
+      return { ok:true, id:id };
+    }
+  }
+  return { ok:false, error:'Dépense introuvable' };
 }
 
 // ── Suivi BAT (épreuves) ───────────────────────────────────
