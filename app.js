@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '209 · 2026-10-07';
+const APP_VERSION = '210 · 2026-10-07';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -17378,6 +17378,19 @@ let _delivLimit = _DELIV_PAGE;
 let _delivRecapOpen = false;   // panneau « Récapitulatif des adresses de livraison » (replié par défaut)
 let _delivZoneFilter = '';     // filtre par zone dans le récap ('' = toutes)
 
+// ── FICHE COURSIER ─────────────────────────────────────────────────────────
+// L'opérateur coche les courses à confier au coursier dans le tableau des
+// livraisons : la fiche papier (celle du carnet : Date / Livreur / Destination /
+// Demandeur / Motif / N° CMD / Paiement / Remarques) se remplit toute seule et
+// part à l'imprimante. La sélection vit en mémoire (clés « kind:id ») : elle
+// survit aux re-rendus du cockpit mais pas au rechargement — une fiche se
+// prépare et s'imprime dans la foulée, on ne la stocke pas.
+let _delivSel = new Set();
+// Entêtes de la fiche (communs à toutes les lignes) + corrections ligne à ligne
+// saisies dans la fenêtre de préparation (clé « kind:id » → champs).
+let _ficheOpts  = { date: '', livreur: '', motif: '', blanks: 3 };
+let _ficheEdits = {};
+
 // Zones / quartiers d'Antananarivo pour regrouper les livraisons et planifier la
 // tournée. `aliases` = mots-clés (minuscule sans accent) cherchés dans le texte
 // de l'adresse pour deviner la zone automatiquement. Ordre = ordre de tournée par
@@ -18100,7 +18113,23 @@ function _delivRenderBody() {
   const count = `<div class="pcok-count">${filtered.length} livraison${filtered.length > 1 ? 's' : ''}${filteredLbl}${dateLbl}${lateN ? ` · <span style="color:#dc2626;font-weight:700">${lateN} en retard</span>` : ''}${showMoney ? ` · Total ${fmt(totalSum)}` : ''}</div>`;
   const more = filtered.length > _delivLimit
     ? `<div class="pcok-more"><button onclick="delivShowMore()">Afficher plus (${filtered.length - _delivLimit} restants)</button></div>` : '';
-  body.innerHTML = count + _delivTable(page, showMoney) + more;
+  body.innerHTML = count + _delivSelBar() + _delivTable(page, showMoney) + more;
+  _delivSyncSelBadge();
+}
+
+// Barre d'action de la sélection — n'apparaît que lorsqu'au moins une course est
+// cochée, pour ne pas encombrer le cockpit le reste du temps.
+function _delivSelBar(){
+  if (!_delivSel.size) return '';
+  return `<div class="deliv-selbar">
+      <span class="deliv-selbar-n">${_delivSel.size} course${_delivSel.size > 1 ? 's' : ''} cochée${_delivSel.size > 1 ? 's' : ''}</span>
+      <div class="deliv-selbar-act">
+        <button class="pcok-iconbtn" onclick="clearDelivSel()">Tout décocher</button>
+        <button class="deliv-fiche-btn" onclick="openFicheCoursier()">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+          Fiche coursier</button>
+      </div>
+    </div>`;
 }
 
 // ── Récapitulatif des adresses de livraison ────────────────────────────────
@@ -18297,6 +18326,233 @@ function printDelivAddresses() {
   }, 200);
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// FICHE COURSIER — cocher les courses, imprimer le carnet
+// ══════════════════════════════════════════════════════════════════════════
+// Reprend la fiche papier du carnet : Date · Livreur · Destination (Lieu) ·
+// Nom du demandeur · Motif de la course · Numéro CMD · Paiement · Remarques.
+// L'opérateur coche ses courses dans le tableau, règle UNE fois les entêtes
+// (date + coursier), corrige au besoin ligne à ligne, et imprime.
+// « Remarques » et le bloc signature partent VIERGES à dessein : ce sont les
+// seules cases que le coursier remplit à la main au retour, et c'est ce qui
+// engage sa responsabilité (cf. la mention en pied de fiche).
+
+function _delivSelKey(r){ return r.kind + ':' + r.id; }
+
+function delivToggleSel(kind, id){
+  const k = kind + ':' + id;
+  if (_delivSel.has(k)) _delivSel.delete(k); else _delivSel.add(k);
+  _delivRenderBody();
+}
+
+// Coche / décoche d'un coup tout ce qui est affiché (filtre + page en cours).
+function delivToggleSelAll(){
+  const page = _delivSortRows(_delivFilterRows(_delivBuildRows())).slice(0, _delivLimit);
+  const keys = page.map(_delivSelKey);
+  const allOn = keys.length > 0 && keys.every(k => _delivSel.has(k));
+  keys.forEach(k => { if (allOn) _delivSel.delete(k); else _delivSel.add(k); });
+  _delivRenderBody();
+}
+
+function clearDelivSel(){ _delivSel.clear(); _ficheEdits = {}; _delivRenderBody(); }
+
+// Le compteur vit dans la barre d'outils, que `_delivRenderBody()` ne redessine
+// pas (cf. la note sur le focus de la recherche) : on le rafraîchit à la main.
+function _delivSyncSelBadge(){
+  const b = document.getElementById('delivSelCount');
+  if (b) { b.textContent = _delivSel.size; b.style.display = _delivSel.size ? '' : 'none'; }
+}
+
+// Lignes cochées, dans l'ordre de la tournée (zone, puis échéance) : le coursier
+// lit sa fiche de haut en bas sans zigzaguer dans la ville.
+function _delivSelRows(){
+  return _delivBuildRows().filter(r => _delivSel.has(_delivSelKey(r))).sort((a, b) => {
+    const za = _delivZoneIndex(_delivZoneOf(a)), zb = _delivZoneIndex(_delivZoneOf(b));
+    if (za !== zb) return za - zb;
+    return (a.days == null ? 1e9 : a.days) - (b.days == null ? 1e9 : b.days);
+  });
+}
+
+// Reste à encaisser sur la course (0 = déjà soldée). Les commandes passent par
+// le journal d'encaissements, les réservations par leur `restant`.
+function _ficheReste(r){
+  if (r.kind === 'commande') {
+    const c = (typeof commandes !== 'undefined' ? commandes : []).find(x => String(x.id) === String(r.id));
+    return c ? _cmdReste(c) : 0;
+  }
+  const res = (typeof reservations !== 'undefined' ? reservations : []).find(x => String(x.id) === String(r.id));
+  return res ? Math.max(0, Number(res.restant) || 0) : 0;
+}
+
+// Valeurs par défaut d'une ligne, avant corrections manuelles. Le montant n'est
+// pré-rempli que pour les rôles autorisés à voir l'argent.
+function _ficheDefaults(r){
+  const reste = _DELIV_MONEY_ROLES.includes(currentUser?.role) ? _ficheReste(r) : 0;
+  return {
+    livreur:     _ficheOpts.livreur || '',
+    destination: r.mode === 'livraison' ? (r.address || '') : 'Retrait boutique',
+    demandeur:   r.commercial || '',
+    motif:       _ficheOpts.motif || ('Livraison ' + (r.kind === 'reservation' ? 'réservation' : 'commande')),
+    paiement:    !_DELIV_MONEY_ROLES.includes(currentUser?.role) ? ''
+                 : (reste > 0 ? 'Reste ' + fmt(reste) : 'Payé')
+  };
+}
+// Ligne finale = valeurs par défaut écrasées par les corrections de l'opérateur.
+function _ficheRow(r){ return Object.assign(_ficheDefaults(r), _ficheEdits[_delivSelKey(r)] || {}); }
+function _ficheSetRow(key, field, v){ (_ficheEdits[key] = _ficheEdits[key] || {})[field] = v; }
+
+function openFicheCoursier(){
+  if (!_delivSel.size) { showToast('Cochez d\'abord les courses à confier au coursier', 'error'); return; }
+  if (!_ficheOpts.date) _ficheOpts.date = _todayISO();
+  _ficheRenderModal();
+  openModal('ficheCoursierModal');
+}
+
+function _ficheRenderModal(){
+  const host = document.getElementById('ficheCoursierBody');
+  if (!host) return;
+  // Suggestions de coursiers : les opérateurs déclarés livreurs.
+  const livreurs = [...new Set((typeof localUsers !== 'undefined' ? localUsers : [])
+    .filter(u => ['livreur','coursier'].includes(String(u.role || '').toLowerCase()))
+    .map(u => u.label || u.username).filter(Boolean))];
+  host.innerHTML = `
+    <p class="fiche-note">
+      Les colonnes <b>Remarques</b> et le bloc <b>signature</b> restent vierges sur la fiche : c'est le coursier
+      qui les remplit au retour — <b>L</b> livrée · <b>R</b> retour / report · <b>A</b> annulée.
+    </p>
+    <div class="fiche-head">
+      <div class="form-group"><label>Date de la fiche</label>
+        <input type="date" value="${_ficheOpts.date}" onchange="_ficheOpts.date=this.value" /></div>
+      <div class="form-group"><label>Coursier / livreur</label>
+        <input list="ficheLivreurList" placeholder="Nom du coursier" value="${_pcokEsc(_ficheOpts.livreur)}"
+               oninput="_ficheOpts.livreur=this.value" onchange="_ficheRenderRows()" />
+        <datalist id="ficheLivreurList">${livreurs.map(l => `<option value="${_pcokEsc(l)}"></option>`).join('')}</datalist></div>
+      <div class="form-group"><label>Motif par défaut</label>
+        <input placeholder="Livraison commande" value="${_pcokEsc(_ficheOpts.motif)}"
+               oninput="_ficheOpts.motif=this.value" onchange="_ficheRenderRows()" /></div>
+      <div class="form-group"><label>Lignes vierges</label>
+        <input type="number" min="0" max="15" value="${_ficheOpts.blanks}"
+               onchange="_ficheOpts.blanks=Math.max(0,Math.min(15,Number(this.value)||0))" /></div>
+    </div>
+    <div id="ficheRows"></div>
+    <div class="modal-footer" style="flex-wrap:wrap;gap:8px;margin-top:14px">
+      <button class="btn-secondary" onclick="closeModal('ficheCoursierModal')">Annuler</button>
+      <button class="btn-primary" onclick="printFicheCoursier()">Imprimer la fiche</button>
+    </div>`;
+  _ficheRenderRows();
+}
+
+function _ficheRenderRows(){
+  const host = document.getElementById('ficheRows');
+  if (!host) return;
+  const rows = _delivSelRows();
+  if (!rows.length) {
+    host.innerHTML = `<div class="pcok-empty" style="padding:26px 0"><p>Aucune course sur la fiche</p></div>`;
+    return;
+  }
+  host.innerHTML = `<div class="fiche-rows-title">${rows.length} course${rows.length > 1 ? 's' : ''} sur la fiche</div>` +
+    rows.map((r, i) => {
+      const v = _ficheRow(r), k = _delivSelKey(r);
+      const ech = r.ymd ? new Date(r.ymd + 'T00:00:00').toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit' }) : 'sans date';
+      const fld = (lbl, f) => `<label>${lbl}<input value="${_pcokEsc(v[f])}" oninput="_ficheSetRow('${k}','${f}',this.value)" /></label>`;
+      return `<div class="fiche-row">
+        <div class="fiche-row-head">
+          <span class="fiche-row-n">${i + 1}</span>
+          <b>${_pcokEsc(r.ref)}</b>
+          <span class="fiche-row-cli">${_pcokEsc(r.client)}</span>
+          <span class="fiche-row-ech">échéance ${ech}</span>
+          <button class="fiche-row-del" title="Retirer cette course de la fiche"
+                  onclick="delivToggleSel('${r.kind}','${r.id}');_ficheRenderRows()">×</button>
+        </div>
+        <div class="fiche-row-grid">
+          ${fld('Livreur', 'livreur')}
+          ${fld('Destination (lieu)', 'destination')}
+          ${fld('Nom du demandeur', 'demandeur')}
+          ${fld('Motif de la course', 'motif')}
+          ${fld('Paiement', 'paiement')}
+        </div>
+      </div>`;
+    }).join('');
+}
+
+// Impression A4 portrait, à l'identique du carnet papier.
+function printFicheCoursier(){
+  const rows = _delivSelRows();
+  if (!rows.length) { showToast('Aucune course à imprimer', 'error'); return; }
+  const shop  = (typeof shopConfig !== 'undefined' && shopConfig && shopConfig.name) || 'FOREVER MG';
+  const dISO  = _ficheOpts.date || _todayISO();
+  const d     = new Date(dISO + 'T00:00:00');
+  const dTxt  = isNaN(d.getTime()) ? '' : d.toLocaleDateString('fr-FR');
+  const now   = new Date();
+
+  const body = rows.map(r => {
+    const v = _ficheRow(r);
+    return `<tr>
+      <td class="c nw">${_pcokEsc(dTxt)}</td>
+      <td>${_pcokEsc(v.livreur)}</td>
+      <td class="dest">${_pcokEsc(v.destination)}<div class="cli">${_pcokEsc(r.client)}${r.contact ? ' · ' + _pcokEsc(r.contact) : ''}</div></td>
+      <td>${_pcokEsc(v.demandeur)}</td>
+      <td>${_pcokEsc(v.motif)}</td>
+      <td class="c b">${_pcokEsc(r.ref)}</td>
+      <td>${_pcokEsc(v.paiement)}</td>
+      <td></td>
+    </tr>`;
+  }).join('');
+  const blanks = Array.from({ length: Math.max(0, Number(_ficheOpts.blanks) || 0) },
+    () => `<tr class="blank">${'<td></td>'.repeat(8)}</tr>`).join('');
+
+  const w = window.open('', '_blank', 'width=1000,height=1200');
+  if (!w) { alert("Impression bloquée : autorisez les fenêtres pop-up pour ce site, puis réessayez."); return; }
+  setTimeout(() => {
+    w.document.write(`<html><head><meta charset="utf-8"><title>Fiche coursier — ${_pcokEsc(dTxt)}</title><style>
+      @page{size:A4 portrait;margin:9mm}
+      *{box-sizing:border-box}
+      body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;font-size:10px}
+      h1{font-size:16px;margin:0;letter-spacing:.5px}
+      .sub{color:#555;font-size:10px;margin:2px 0 6px}
+      .leg{border:1px solid #555;padding:4px 6px;font-size:9.5px;margin:0 0 6px}
+      .leg b{font-size:11px}
+      .leg .det{float:right;font-weight:bold;letter-spacing:.3px}
+      table{width:100%;border-collapse:collapse;table-layout:fixed}
+      th,td{border:1px solid #555;padding:3px 4px;vertical-align:top;word-wrap:break-word}
+      th{background:#e9e9e9;font-size:8.5px;text-transform:uppercase;text-align:center}
+      td{height:34px;font-size:9.5px}
+      tr.blank td{height:34px}
+      .c{text-align:center}.b{font-weight:bold}
+      .nw{white-space:nowrap}
+      .dest{font-weight:bold}
+      .cli{font-weight:normal;font-size:8px;color:#666;margin-top:1px}
+      .sign{display:flex;gap:8px;margin-top:10px}
+      .sign-box{flex:1;border:1px solid #555;height:62px;padding:3px 5px}
+      .sign-box--wide{flex:2}
+      .sign-lbl{font-size:8.5px;text-transform:uppercase;font-weight:bold;color:#444}
+      .warn{border:1px solid #000;padding:5px 7px;margin-top:8px;font-size:9px;line-height:1.35}
+      @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+    </style></head><body onload="window.print()">
+      <h1>${_pcokEsc(shop)} — FICHE COURSIER</h1>
+      <div class="sub">Fiche du ${_pcokEsc(dTxt)}${_ficheOpts.livreur ? ' · Coursier : ' + _pcokEsc(_ficheOpts.livreur) : ''} · ${rows.length} course(s) · éditée le ${now.toLocaleDateString('fr-FR')} ${now.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' })}</div>
+      <div class="leg"><span class="det">DÉTAILS / REMARQUE = RETOUR, REPORT</span>
+        <b>(L)</b> Livrée &nbsp;&nbsp; <b>(R)</b> Retour &nbsp;&nbsp; <b>(A)</b> Annulée</div>
+      <table>
+        <colgroup><col style="width:10%"><col style="width:11%"><col style="width:20%"><col style="width:11%"><col style="width:14%"><col style="width:10%"><col style="width:11%"><col style="width:13%"></colgroup>
+        <thead><tr>
+          <th>Date</th><th>Livreur</th><th>Destination (Lieu)</th><th>Nom du demandeur</th>
+          <th>Motif de la course</th><th>Numéro CMD</th><th>Paiement</th><th>Remarques</th>
+        </tr></thead>
+        <tbody>${body}${blanks}</tbody>
+      </table>
+      <div class="sign">
+        <div class="sign-box"><div class="sign-lbl">Date</div></div>
+        <div class="sign-box"><div class="sign-lbl">Nom</div></div>
+        <div class="sign-box sign-box--wide"><div class="sign-lbl">Signature du responsable / rapporteur</div></div>
+      </div>
+      <div class="warn">Si les <b>remarques</b> ne sont pas remplies ou qu'<b>aucune signature</b> n'est apposée,
+        toutes les personnes intervenant dans le processus seront tenues pour responsables et devront rembourser le montant au client.</div>
+    </body></html>`);
+    w.document.close();
+  }, 200);
+}
+
 function _delivToolbar(cnt) {
   const chips = [
     ['ACTIVE', 'En cours'], ['RETARD', 'En retard'], ['AUJ', "Aujourd'hui"], ['SEMAINE', 'Cette semaine'], ['SANS_DATE', 'Sans date'], ['TERMINE', 'Livrées'], ['TOUS', 'Toutes']
@@ -18331,6 +18587,7 @@ function _delivToolbar(cnt) {
       <button class="pcok-iconbtn" title="Sens du tri" onclick="toggleDelivSortDir()">${dirIcon}</button>
       <button class="pcok-iconbtn pcok-density" title="Vue compacte / détaillée" onclick="toggleDelivDensity()">${_delivState.density === 'compact' ? 'Détaillé' : 'Compact'}</button>
       <button class="pcok-iconbtn${_delivRecapOpen ? ' pcok-chip--active' : ''}" title="Récapitulatif des adresses de livraison" onclick="toggleDelivRecap()">Récap adresses</button>
+      <button class="pcok-iconbtn" title="Fiche coursier — imprimer les courses cochées" onclick="openFicheCoursier()">Fiche coursier<span class="pcok-chip-n" id="delivSelCount" style="display:${_delivSel.size ? '' : 'none'}">${_delivSel.size}</span></button>
       <button class="pcok-iconbtn" title="Imprimer le planning de livraison" onclick="printLivraisons()">Imprimer</button>
     </div>
   </div>`;
@@ -18366,7 +18623,9 @@ function _delivTable(rows, showMoney) {
     const arrow = active ? (_delivState.dir === 'asc' ? ' ↑' : ' ↓') : '';
     return `<th class="pcok-th ${cls} ${active ? 'pcok-th--active' : ''}" ${key ? `onclick="setDelivSort('${key}')" style="cursor:pointer"` : ''}>${label}${arrow}</th>`;
   };
+  const allOn = rows.length > 0 && rows.every(r => _delivSel.has(_delivSelKey(r)));
   const head = `<tr>
+    <th class="pcok-th deliv-selcell"><input type="checkbox" ${allOn ? 'checked' : ''} onclick="delivToggleSelAll()" title="Cocher / décocher tout l'écran" aria-label="Tout cocher pour la fiche coursier" /></th>
     ${th('', '')}
     ${th('client', 'Réf / Client')}
     ${th('echeance', 'Échéance')}
@@ -18398,6 +18657,7 @@ function _delivRow(r, showMoney, det) {
   const accent = r.status === 'pending' && r.days != null && r.days < 0 ? 'inset 3px 0 0 #dc2626'
     : (r.status === 'pending' && (r.days === 0 || r.days === 1)) ? 'inset 3px 0 0 #e8834a' : '';
   return `<tr class="pcok-row ${r.status !== 'pending' ? 'pcok-row--done' : ''}" ${accent ? `style="box-shadow:${accent}"` : ''} onclick="openDelivDrawer('${r.kind}','${r.id}')">
+    <td class="deliv-selcell" onclick="event.stopPropagation()"><input type="checkbox" ${_delivSel.has(_delivSelKey(r)) ? 'checked' : ''} onchange="delivToggleSel('${r.kind}','${r.id}')" aria-label="Ajouter à la fiche coursier" /></td>
     <td class="pcok-td-prio">${dot}</td>
     <td class="pcok-td-client"><div class="pcok-client">${_pcokEsc(r.client)}</div><div class="pcok-ref">${_pcokEsc(r.ref)} · ${typeLabel}</div></td>
     <td class="pcok-td-ech">${echCell}</td>

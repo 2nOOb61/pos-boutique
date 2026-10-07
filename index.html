@@ -916,6 +916,37 @@
 .deliv-seq-btns button:hover:not([disabled]) { background:#f0efec; color:#1a4a3a; }
 .deliv-seq-btns button[disabled] { opacity:.3; cursor:default; }
 .deliv-zone-td { white-space:nowrap; }
+/* Fiche coursier — sélection des courses dans le tableau */
+.deliv-selcell { width:26px; padding-right:0 !important; }
+.deliv-selcell input { width:16px; height:16px; accent-color:#1a4a3a; cursor:pointer; margin:0; }
+.deliv-selbar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; background:var(--color-primary-light,#e8f4f0); border:1px solid #bcdcd0; border-radius:10px; padding:8px 12px; margin:0 0 10px; }
+.deliv-selbar-n { font-size:12.5px; font-weight:800; color:#1a4a3a; }
+.deliv-selbar-act { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.deliv-fiche-btn { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; font-weight:700; color:#fff; background:#1a4a3a; border:1px solid #1a4a3a; border-radius:8px; padding:7px 13px; cursor:pointer; font-family:inherit; }
+.deliv-fiche-btn:hover { background:#153d30; }
+/* Fiche coursier — fenêtre de préparation */
+.fiche-note { font-size:12.5px; color:var(--color-text-secondary,#78716c); background:#fff8f3; border:1px solid #fed7aa; border-radius:10px; padding:9px 12px; margin:0 0 14px; line-height:1.45; }
+.fiche-head { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:14px; }
+.fiche-rows-title { font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.04em; color:var(--color-text-muted,#a8a29e); margin:0 2px 8px; }
+.fiche-row { border:1px solid var(--color-border,#e5e3df); border-radius:10px; padding:10px 12px; margin-bottom:8px; background:var(--color-surface,#fff); }
+.fiche-row-head { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:8px; font-size:12.5px; }
+.fiche-row-n { display:inline-flex; align-items:center; justify-content:center; min-width:20px; height:20px; border-radius:6px; background:#1a4a3a; color:#fff; font-size:11px; font-weight:800; }
+.fiche-row-cli { font-weight:600; color:var(--color-text-secondary,#78716c); }
+.fiche-row-ech { font-size:11px; color:var(--color-text-muted,#a8a29e); }
+.fiche-row-del { margin-left:auto; width:24px; height:24px; border:1px solid var(--color-border,#e5e3df); border-radius:6px; background:transparent; color:var(--color-text-muted,#a8a29e); font-size:15px; line-height:1; cursor:pointer; }
+.fiche-row-del:hover { border-color:#dc2626; color:#dc2626; }
+.fiche-row-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; }
+.fiche-row-grid label { display:flex; flex-direction:column; gap:3px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--color-text-muted,#a8a29e); }
+.fiche-row-grid input { width:100%; padding:6px 8px; font-size:12.5px; font-family:inherit; border:1px solid var(--color-border,#e5e3df); border-radius:7px; background:var(--color-surface,#fff); color:var(--color-text,#1c1917); }
+.fiche-row-grid input:focus { outline:none; border-color:#1a4a3a; }
+@media(max-width:760px){
+  .fiche-head { grid-template-columns:repeat(2,1fr); }
+  .fiche-row-grid { grid-template-columns:1fr; }
+  /* En cartes empilées, la case passe en haut à droite de la carte. Sélecteur
+     renforcé : la règle responsive générique (`.pcok-table td { display:block;
+     width:100% }`) est déclarée plus bas et l'emporterait autrement. */
+  .pcok-table td.deliv-selcell { position:absolute; right:10px; top:9px; left:auto; width:auto; padding:0; }
+}
 /* Blocages — cartes de synthèse + colonnes cause/action */
 .bloc-cards { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:14px; }
 .bloc-card { background:var(--color-surface,#fff); border:1px solid var(--color-border,#e5e3df); border-radius:12px; padding:12px 14px; }
@@ -2986,6 +3017,17 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 </div>
 
 <!-- MODAL AUTORISATIONS OPÉRATEUR -->
+<!-- MODAL FICHE COURSIER — préparation + impression du carnet de courses -->
+<div class="modal-overlay" id="ficheCoursierModal">
+  <div class="modal" style="max-width:920px;width:920px">
+    <div class="modal-title">
+      <span>Fiche coursier</span>
+      <button class="modal-close" onclick="closeModal('ficheCoursierModal')"></button>
+    </div>
+    <div id="ficheCoursierBody"></div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="permissionsModal">
   <div class="modal" style="max-width:460px">
     <div class="modal-title">
@@ -3763,7 +3805,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20261007-depenses"></script>
+<script src="./app.js?v=20261007-fiche-coursier"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
