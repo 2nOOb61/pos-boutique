@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '212 · 2026-10-08';
+const APP_VERSION = '214 · 2026-10-08';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -555,7 +555,10 @@ async function doLogin() {
         loadReservationsFromScript().catch(() => {}),
         loadCommandesFromScript().catch(() => {}),
         loadModifsFromScript().catch(() => {}),
+        loadLivEtatsFromScript().catch(() => {}),
       ]).then(() => syncPendingOfflineSales().catch(() => {}))
+        .then(() => _flushClibQueue().catch(() => {}))
+        .then(() => _flushLivQueue().catch(() => {}))
         .then(() => {
           saveData(); // Persister l'état fusionné
           // Re-rendu avec les données fraîches (l'app était déjà affichée)
@@ -3851,6 +3854,8 @@ function initPWA() {
     try { _flushCmdPhotoQueue(); } catch(e) {}
     try { _flushCmdAttQueue();   } catch(e) {}
     try { _flushBatFilesQueue(); } catch(e) {} // reprise montée Drive des fichiers Simulation/BAT
+    try { _flushClibQueue();     } catch(e) {} // courses libres saisies hors ligne
+    try { _flushLivQueue();      } catch(e) {} // départs / retours marqués hors ligne
   });
   if (!navigator.onLine) document.getElementById('offlineBadge').classList.add('show');
 }
@@ -4633,7 +4638,7 @@ async function apiCall(payload) {
   if (!APPS_SCRIPT_URL) return null;
 
   // ── LECTURES & LOGIN : requête GET avec params individuels ─
-  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getEncaissements', 'getDepenses', 'getBats', 'getFinition', 'getArretsCaisse', 'getJournal', 'getDossiers', 'getTaches', 'getDashboard', 'getControlPatron', 'getComments', 'getNotifs', 'getModifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles', 'getMachineSessions'];
+  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getEncaissements', 'getDepenses', 'getCoursesLibres', 'getLivraisonsEtats', 'getBats', 'getFinition', 'getArretsCaisse', 'getJournal', 'getDossiers', 'getTaches', 'getDashboard', 'getControlPatron', 'getComments', 'getNotifs', 'getModifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles', 'getMachineSessions'];
   if (getActions.includes(payload.action)) {
     const buildUrl = () => {
       let url = APPS_SCRIPT_URL + '?action=' + payload.action;
@@ -7682,6 +7687,10 @@ function _cmdRow(r) {
   const _pmod = _pendingModFor(r.id);
   const modChip = _pmod ? `<span class="pcok-badge" style="color:#b45309;background:#fef3c7;margin-left:4px" title="Demande ${_pmod.type==='cancel'?"d'annulation":'de modification'} en attente — ouvrir pour valider">⏳ ${_pmod.type==='cancel'?'Annul.':'Modif'}</span>` : '';
   const modeChip = `<span style="font-size:9px;font-weight:700;color:${r.mode==='livraison'?'#c2410c':'#1a4a3a'}">${r.mode==='livraison'?'LIV':'RET'}</span>`;
+  // Même pastille que la page Livraisons : la commande partie avec le coursier
+  // le dit ici aussi, sans qu'on ait à changer d'écran.
+  const _livE = _livEtat('commande', r.id);
+  const livChip = _livE ? `<span style="margin-left:4px">${_livBadge(_livE.statut, _livInfo(_livE))}</span>` : '';
   const accent = r.status==='cancelled' ? '' : r.status==='completed' ? ''
     : prodDone ? (r.restant>0 ? 'inset 3px 0 0 #d97706' : 'inset 3px 0 0 #16a34a')
     : (r.days!=null&&r.days<0) ? 'inset 3px 0 0 #dc2626' : (r.days===0||r.days===1) ? 'inset 3px 0 0 #e8834a' : r.restant>0 ? 'inset 3px 0 0 #d97706' : '';
@@ -7694,9 +7703,17 @@ function _cmdRow(r) {
     <td class="pcok-num" style="font-weight:700">${fmt(r.total)}</td>
     <td class="pcok-num" style="color:${restC};font-weight:700">${restTxt}</td>
     ${det ? `<td class="pcok-td-prog">${prodCell}</td>` : ''}
-    <td class="pcok-td-statut">${statut}${prodChip}${modChip}</td>
+    <td class="pcok-td-statut">${statut}${livChip}${prodChip}${modChip}</td>
     <td class="pcok-td-act"><svg class="pcok-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></td>
   </tr>`;
+}
+
+// Ligne « Suivi coursier » réutilisée par le tiroir Commandes.
+function _cmdLivLigne(id){
+  const e = _livEtat('commande', id);
+  if (!e) return '';
+  return `<div class="pcok-drawer-item"><span>Suivi coursier</span>
+      <b style="text-align:right;white-space:normal">${_livBadge(e.statut)} ${_pcokEsc(_livInfo(e))}</b></div>`;
 }
 
 // ── Drawer détail commande ─────────────────────────────────────────────────
@@ -7760,7 +7777,7 @@ function _cmdDetailBody(c, avecTete) {
     _dispDate(c.dateBAT) ? `<div class="pcok-drawer-item"><span style="color:#2563eb">BAT</span><b>${_dispDate(c.dateBAT)}</b></div>` : '',
     _dispDate(c.dateLivraisonProd) ? `<div class="pcok-drawer-item"><span style="color:#e8834a">Production</span><b>${_dispDate(c.dateLivraisonProd)}</b></div>` : '',
   ].join('');
-  const modeHtml = `<div class="pcok-drawer-item"><span>Mode</span><b>${r.mode==='livraison'?'Livraison':'Retrait boutique'}</b></div>${c.adresseLivraison?`<div class="pcok-drawer-item"><span>Adresse</span><b style="text-align:right;white-space:normal">${_pcokEsc(c.adresseLivraison)}</b></div>`:''}`;
+  const modeHtml = `<div class="pcok-drawer-item"><span>Mode</span><b>${r.mode==='livraison'?'Livraison':'Retrait boutique'}</b></div>${c.adresseLivraison?`<div class="pcok-drawer-item"><span>Adresse</span><b style="text-align:right;white-space:normal">${_pcokEsc(c.adresseLivraison)}</b></div>`:''}${_cmdLivLigne(c.id)}`;
   // Pièces jointes (photos locales + Drive)
   const atts = [
     ...(c.photos||[]).map(src => typeof src==='string' ? { img:src, href:src, name:'Photo' } : { img:(src.type||'').startsWith('image/')?(src.data||''):'', href:src.data||'', name:src.name||'fichier' }),
@@ -17536,6 +17553,135 @@ function openDelivRoute(url){ if (url) window.open(url, '_blank'); }
 const _DELIV_MONEY_ROLES = ['admin','caissier','commerciale','comptable','gestionnaire'];
 
 // Liste normalisée des livraisons depuis commandes + réservations (hors annulées).
+// ══════════════════════════════════════════════════════════════════════════
+// ÉTAT TERRAIN DES LIVRAISONS — « partie en livraison », « livrée », « retour »
+// ══════════════════════════════════════════════════════════════════════════
+// Une commande qui part avec le coursier n'est ni « en cours » ni « livrée » :
+// elle est EN ROUTE, et tout le système doit le dire (page Livraisons, cockpit
+// Commandes, calendrier, fiche coursier). On garde cet état DANS SA PROPRE
+// feuille, à côté de la commande : le statut commercial (pending/completed) ne
+// bouge pas — une commande livrée mais impayée reste une créance à l'écran.
+// Clé = 'kind:id' (commande ou réservation), état courant uniquement.
+let livEtats = {};
+
+const _LIV_LABELS = {
+  EN_LIVRAISON: ['#c2410c', '#ffedd5', 'En livraison'],
+  LIVREE:       ['#16a34a', '#dcfce7', 'Livrée'],
+  RETOUR:       ['#b45309', '#fef3c7', 'Retour'],
+  ANNULEE:      ['#78716c', '#f5f5f4', 'Annulée en route'],
+};
+
+function _livKey(kind, id){ return String(kind) + ':' + String(id); }
+function _livEtat(kind, id){ return livEtats[_livKey(kind, id)] || null; }
+function _livStatut(kind, id){ return (_livEtat(kind, id) || {}).statut || ''; }
+
+// Pastille commune à tous les écrans — un seul endroit à changer.
+function _livBadge(statut, extra){
+  const def = _LIV_LABELS[statut];
+  if (!def) return '';
+  const [c, bg, lbl] = def;
+  return `<span class="pcok-badge" style="color:${c};background:${bg}"${extra ? ` title="${_pcokEsc(extra)}"` : ''}>${lbl}</span>`;
+}
+// Texte d'infobulle : qui l'emporte et depuis quand.
+function _livInfo(e){
+  if (!e) return '';
+  const h = t => { const d = new Date(t); return isNaN(d.getTime()) ? '' : d.toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }); };
+  const p = [];
+  if (e.coursier) p.push('Coursier : ' + e.coursier);
+  if (e.depart)   p.push('Parti le ' + h(e.depart));
+  if (e.retour)   p.push((e.statut === 'LIVREE' ? 'Livrée le ' : 'Rentrée le ') + h(e.retour));
+  if (e.par)      p.push('Par ' + e.par);
+  return p.join(' · ');
+}
+
+function _livSaveLocal(){ try { localStorage.setItem('pos-liv-etats', JSON.stringify(livEtats)); } catch(e) {} }
+function _livLoadLocal(){ try { const r = localStorage.getItem('pos-liv-etats'); if (r) livEtats = JSON.parse(r) || {}; } catch(e) { livEtats = {}; } }
+
+async function loadLivEtatsFromScript(){
+  if (!APPS_SCRIPT_URL) return;
+  try {
+    const r = await apiCall({ action:'getLivraisonsEtats' });
+    if (r && r.ok && Array.isArray(r.etats)) {
+      const m = {};
+      r.etats.forEach(e => { if (e && e.kind && e.id) m[_livKey(e.kind, e.id)] = e; });
+      livEtats = m;
+      _livSaveLocal();
+    }
+  } catch(e) { /* silencieux : on garde le cache local */ }
+}
+
+// File hors ligne : le changement est appliqué tout de suite à l'écran, et
+// rejoué vers le Sheet dès le retour du réseau — même principe que les ventes.
+const _LIV_QUEUE_KEY = 'pos-pending-liv-etats';
+function _livQueueRead(){ try { return JSON.parse(localStorage.getItem(_LIV_QUEUE_KEY) || '[]'); } catch(e) { return []; } }
+function _livQueueWrite(q){ try { localStorage.setItem(_LIV_QUEUE_KEY, JSON.stringify(q)); } catch(e) {} }
+
+// `apiCall` renvoie { ok:true } SANS autre champ quand la réponse n'est pas du
+// JSON — ce qui arrive pour de bon : l'URL /macros/echo à usage unique de Google
+// répond parfois une page HTML. On exigerait alors « enregistré » pour une
+// écriture perdue. On réclame donc `cle`, que seul le vrai handler renvoie ;
+// sinon la ligne part en file et sera rejouée (l'UPSERT rend le rejeu inoffensif).
+function _livEcritOk(r){ return !!(r && r.ok && r.cle); }
+
+async function _livSync(etat){
+  if (!APPS_SCRIPT_URL) return false;
+  try {
+    const r = await apiCall({ action:'saveLivraisonEtat', etat });
+    if (_livEcritOk(r)) return true;
+  } catch(e) {}
+  const q = _livQueueRead().filter(x => _livKey(x.kind, x.id) !== _livKey(etat.kind, etat.id));
+  q.push(etat); _livQueueWrite(q);
+  return false;
+}
+
+async function _flushLivQueue(){
+  if (!APPS_SCRIPT_URL) return;
+  const q = _livQueueRead();
+  if (!q.length) return;
+  const restants = [];
+  for (const etat of q) {
+    try {
+      const r = await apiCall({ action:'saveLivraisonEtat', etat });
+      if (!_livEcritOk(r)) restants.push(etat);
+    } catch(e) { restants.push(etat); }
+  }
+  _livQueueWrite(restants);
+  const n = q.length - restants.length;
+  if (n > 0) showToast(n + ' changement(s) de livraison synchronisé(s)', 'success');
+}
+
+// Point d'entrée unique de tout changement d'état. `statut` vide = annuler le
+// départ (la course redevient une livraison en attente ordinaire).
+function _livSetEtat(kind, id, statut, opts){
+  const o   = opts || {};
+  const key = _livKey(kind, id);
+  const now = new Date().toISOString();
+  const prec = livEtats[key] || {};
+  if (!statut) {
+    delete livEtats[key];
+  } else {
+    livEtats[key] = {
+      cle: key, kind: String(kind), id: String(id),
+      ref: o.ref || prec.ref || '', client: o.client || prec.client || '',
+      statut,
+      coursier: o.coursier != null ? o.coursier : (prec.coursier || ''),
+      depart:   statut === 'EN_LIVRAISON' ? (prec.depart || now) : (prec.depart || ''),
+      retour:   statut === 'EN_LIVRAISON' ? '' : now,
+      note: o.note || '', par: currentUser?.username || currentUser?.name || '',
+      timestamp: now
+    };
+  }
+  _livSaveLocal();
+  _livSync({ kind: String(kind), id: String(id), statut,
+             ref: o.ref || prec.ref || '', client: o.client || prec.client || '',
+             coursier: (livEtats[key] || {}).coursier || '',
+             depart: (livEtats[key] || {}).depart || '',
+             retour: (livEtats[key] || {}).retour || '',
+             note: o.note || '', par: currentUser?.username || currentUser?.name || '',
+             timestamp: now });
+  return livEtats[key] || null;
+}
+
 function _collectDeliveries() {
   const out = [];
   const _seq = _buildSeqMaps();
@@ -17556,7 +17702,9 @@ function _collectDeliveries() {
       dateClient: _toIsoDate(c.dateLivraison || ''),
       dateProd:   _toIsoDate(c.dateLivraisonProd || ''),
       poles:      _normPoles(c.poles),
-      dossierId:  c.dossierId || ''
+      dossierId:  c.dossierId || '',
+      livEtat:    _livEtat('commande', c.id),
+      livStatut:  _livStatut('commande', c.id)
     });
   });
   (Array.isArray(reservations) ? reservations : []).forEach(r => {
@@ -17576,7 +17724,9 @@ function _collectDeliveries() {
       dateClient: _toIsoDate(r.deliveryDate || ''),
       dateProd:   '',
       poles:      _normPoles(r.poles),
-      dossierId:  r.dossierId || ''
+      dossierId:  r.dossierId || '',
+      livEtat:    _livEtat('reservation', r.id),
+      livStatut:  _livStatut('reservation', r.id)
     });
   });
   return out;
@@ -17876,11 +18026,13 @@ function _calRenderMonth(kind){
       const art   = items.map(i=>`${i.name} ×${i.qty||1}`).join(', ');
       const poleDots = (e.poles||[]).map(pk=>`<span class="cal-pole-dot" style="background:${_poleColor(pk)}" title="${escapeHtml(_poleLabel(pk))}"></span>`).join('');
       const poleTip  = (e.poles||[]).length ? ' — Pôles : '+e.poles.map(_poleLabel).join(', ') : '';
-      const tip   = `${e.client}${art?' — '+art:''}${poleTip}${short?' — délai court (production proche de la livraison)':''}`;
+      const _livS = _livStatut(e.kind, e.id);
+      const _livT = _livS ? ' — ' + (_LIV_LABELS[_livS]||[])[2] + (_livInfo(_livEtat(e.kind, e.id)) ? ' (' + _livInfo(_livEtat(e.kind, e.id)) + ')' : '') : '';
+      const tip   = `${e.client}${art?' — '+art:''}${poleTip}${_livT}${short?' — délai court (production proche de la livraison)':''}`;
       return `<button type="button" class="cal-chip cal-chip--${cls}${linked?' cal-chip-linked':''}${short?' cal-chip-urgent':''}" onclick="_calOpenDetail('${e.kind}','${e.id}','${e.dossierId}')" title="${escapeHtml(tip)}">
         <span class="cal-chip-head"><span class="cal-chip-client">${escapeHtml(e.client)}</span><span class="cal-chip-badges">${poleDots}${linked?_CAL_LINK_SVG:''}${qty?`<span class="cal-chip-qty">×${qty}</span>`:''}</span></span>
         ${first?`<span class="cal-chip-items">${escapeHtml(first)}</span>`:''}
-        <span class="cal-chip-foot"><span class="cal-dot" style="background:${dot}"></span>${short?'<span class="cal-chip-warn">Délai court</span>':''}</span></button>`;
+        <span class="cal-chip-foot"><span class="cal-dot" style="background:${dot}"></span>${_livS?`<span class="cal-chip-warn" style="color:${(_LIV_LABELS[_livS]||[])[0]}">${(_LIV_LABELS[_livS]||[])[2]}</span>`:''}${short?'<span class="cal-chip-warn">Délai court</span>':''}</span></button>`;
     }).join('');
     let more = '';
     if(evs.length>4){
@@ -18041,14 +18193,20 @@ function printCalendrier(){
   w.document.close();
 }
 
+// « En route » = partie avec le coursier et pas encore rentrée. Elle sort des
+// filtres d'échéance (elle n'est plus à préparer, elle est dans la rue) mais
+// reste dans « En cours » : tant qu'elle n'est pas livrée, elle nous occupe.
+function _delivEnRoute(r){ return r.livStatut === 'EN_LIVRAISON'; }
+
 function _delivBucketMatch(r, k) {
   if (k === 'TOUS')     return r.status !== 'cancelled';
-  if (k === 'ACTIVE')   return r.status === 'pending';
-  if (k === 'RETARD')   return r.status === 'pending' && r.days != null && r.days < 0;
-  if (k === 'AUJ')      return r.status === 'pending' && r.days === 0;
-  if (k === 'SEMAINE')  return r.status === 'pending' && r.days != null && r.days >= 0 && r.days <= 7;
-  if (k === 'SANS_DATE')return r.status === 'pending' && !r.ymd;
-  if (k === 'TERMINE')  return r.status === 'completed';
+  if (k === 'ACTIVE')   return r.status === 'pending' && r.livStatut !== 'LIVREE';
+  if (k === 'EN_ROUTE') return _delivEnRoute(r);
+  if (k === 'RETARD')   return r.status === 'pending' && !_delivEnRoute(r) && r.days != null && r.days < 0;
+  if (k === 'AUJ')      return r.status === 'pending' && !_delivEnRoute(r) && r.days === 0;
+  if (k === 'SEMAINE')  return r.status === 'pending' && !_delivEnRoute(r) && r.days != null && r.days >= 0 && r.days <= 7;
+  if (k === 'SANS_DATE')return r.status === 'pending' && !_delivEnRoute(r) && !r.ymd;
+  if (k === 'TERMINE')  return r.status === 'completed' || r.livStatut === 'LIVREE';
   return true;
 }
 
@@ -18117,6 +18275,59 @@ function _delivRenderBody() {
   _delivSyncSelBadge();
 }
 
+// ── Départ / retour des courses ───────────────────────────────────────────
+// Marquer le départ des courses cochées. Appelé par le bouton de la barre de
+// sélection ET par l'impression de la fiche coursier (silent = pas de toast ni
+// de re-rendu : l'impression s'en charge).
+function delivMarkDepart(coursier, silent){
+  const rows = _delivSelRows();
+  if (!rows.length) { if (!silent) showToast("Cochez d'abord les courses parties", 'error'); return 0; }
+  let n = 0;
+  rows.forEach(r => {
+    if (r.livStatut === 'EN_LIVRAISON') return;            // déjà en route
+    _livSetEtat(r.kind, r.id, 'EN_LIVRAISON',
+      { ref:r.ref, client:r.client, coursier: coursier || _ficheOpts.livreur || '' });
+    n++;
+  });
+  if (!silent) {
+    showToast(n ? n + ' course(s) parties en livraison' : 'Ces courses sont déjà en livraison', n ? 'success' : 'info');
+    renderLivraisons(); _cmdRenderBodySafe();
+  }
+  return n;
+}
+
+// Erreur de manipulation : la course n'était pas partie. On efface l'état,
+// elle redevient une livraison en attente ordinaire.
+function delivCancelDepart(){
+  const rows = _delivSelRows().filter(r => r.livStatut === 'EN_LIVRAISON');
+  if (!rows.length) { showToast('Aucune course en livraison dans la sélection', 'info'); return; }
+  rows.forEach(r => _livSetEtat(r.kind, r.id, ''));
+  showToast(rows.length + ' départ(s) annulé(s)', 'info');
+  renderLivraisons(); _cmdRenderBodySafe();
+}
+
+// Retour du coursier : (L) livrée, (R) retour, (A) annulée — les codes de la
+// fiche papier. Le statut commercial de la commande n'est pas touché.
+function delivMarkRetour(kind, id, statut){
+  const r = _delivBuildRows().find(x => x.kind === kind && String(x.id) === String(id));
+  if (!r) return;
+  if (statut === 'RETOUR' || statut === 'ANNULEE') {
+    const motif = prompt(statut === 'RETOUR'
+      ? 'Motif du retour (client absent, refus…) :'
+      : "Motif de l'annulation en route :", '');
+    if (motif === null) return;                 // Échap = on ne touche à rien
+    _livSetEtat(kind, id, statut, { ref:r.ref, client:r.client, note:motif });
+  } else {
+    _livSetEtat(kind, id, 'LIVREE', { ref:r.ref, client:r.client });
+  }
+  const lbl = (_LIV_LABELS[statut] || [])[2] || statut;
+  showToast(r.client + ' — ' + lbl, statut === 'LIVREE' ? 'success' : 'info');
+  closeDrawers(); renderLivraisons(); _cmdRenderBodySafe();
+}
+
+// Le cockpit Commandes n'est pas forcément monté (autre page ouverte).
+function _cmdRenderBodySafe(){ try { if (document.getElementById('cmdCockpitBody')) _cmdRenderBody(); } catch(e) {} }
+
 // Barre d'action de la sélection — n'apparaît que lorsqu'au moins une course est
 // cochée, pour ne pas encombrer le cockpit le reste du temps.
 function _delivSelBar(){
@@ -18125,6 +18336,9 @@ function _delivSelBar(){
       <span class="deliv-selbar-n">${_delivSel.size} course${_delivSel.size > 1 ? 's' : ''} cochée${_delivSel.size > 1 ? 's' : ''}</span>
       <div class="deliv-selbar-act">
         <button class="pcok-iconbtn" onclick="clearDelivSel()">Tout décocher</button>
+        ${_delivSelRows().some(r => r.livStatut === 'EN_LIVRAISON')
+          ? `<button class="pcok-iconbtn" title="La course n'est finalement pas partie — annuler le départ" onclick="delivCancelDepart()">Annuler le départ</button>` : ''}
+        <button class="pcok-iconbtn" title="Marquer les courses cochées comme parties avec le coursier" onclick="delivMarkDepart()">Parties en livraison</button>
         <button class="deliv-fiche-btn" onclick="openFicheCoursier()">
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
           Fiche coursier</button>
@@ -18268,7 +18482,7 @@ function printDelivAddresses() {
   if (!stops.length) { showToast('Aucune adresse de livraison à imprimer', 'error'); return; }
   const shop = (typeof shopConfig !== 'undefined' && shopConfig && shopConfig.name) || 'FOREVER MG';
   const origin = ((typeof shopConfig !== 'undefined' && shopConfig && shopConfig.address) || '').trim();
-  const filterLbl = { ACTIVE: 'En cours', RETARD: 'En retard', AUJ: "Aujourd'hui", SEMAINE: 'Cette semaine', SANS_DATE: 'Sans date', TERMINE: 'Livrées', TOUS: 'Toutes' }[_delivState.filter] || '';
+  const filterLbl = { ACTIVE: 'En cours', EN_ROUTE: 'En livraison', RETARD: 'En retard', AUJ: "Aujourd'hui", SEMAINE: 'Cette semaine', SANS_DATE: 'Sans date', TERMINE: 'Livrées', TOUS: 'Toutes' }[_delivState.filter] || '';
   const zoneLbl = _delivZoneFilter ? ' · zone ' + _delivZoneLabel(_delivZoneFilter) : '';
   const late = stops.filter(r => r.status === 'pending' && r.days != null && r.days < 0).length;
 
@@ -18414,7 +18628,10 @@ function _ficheSetRow(key, field, v){ (_ficheEdits[key] = _ficheEdits[key] || {}
 // case à cocher. Elles ne sont pas liées à la sélection : « Tout décocher » ne
 // les efface pas, seule la croix de la ligne les supprime.
 let _coursesLibres = [];
-let _clibSeq = 1;
+// L'ID part dans le Sheet et sert de clé d'UPSERT : il doit rester unique d'un
+// poste et d'une journée à l'autre, donc horodaté — un compteur remis à 1 à
+// chaque rechargement écraserait la course de la veille.
+function _clibNewId(){ return 'CL' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
 function _clibMoney(){ return _DELIV_MONEY_ROLES.includes(currentUser?.role); }
 // Courses libres retenues pour une fiche donnée ('coursier' | 'remise').
@@ -18423,7 +18640,7 @@ function _clibFor(fiche){
 }
 
 function clibAdd(){
-  _coursesLibres.push({ id: 'L' + (_clibSeq++), libelle: '', destination: '', demandeur: '',
+  _coursesLibres.push({ id: _clibNewId(), libelle: '', destination: '', demandeur: '',
                         motif: '', detail: '', montant: 0, surCoursier: true, surRemise: true });
   _clibTrash = [];   // on repart sur une nouvelle tournée : plus rien à restaurer
   _clibRenderAll();
@@ -18438,12 +18655,74 @@ function clibDel(id){ _coursesLibres = _coursesLibres.filter(c => c.id !== id); 
 // bourrage papier.
 let _clibTrash = [];
 
+// ── Enregistrement dans Google Sheets ─────────────────────────────────────
+// La course libre n'existe que sur le papier tant qu'elle n'est pas écrite :
+// on l'envoie dans la feuille CoursesLibres au moment de l'impression, c'est-à-
+// dire quand elle est réellement confiée au coursier. Hors ligne (data mobile
+// qui lâche), elle part dans une file locale rejouée à la reconnexion — comme
+// les ventes. L'UPSERT par ID côté GAS rend le rejeu et la réimpression sûrs.
+const _CLIB_QUEUE_KEY = 'pos-pending-courses-libres';
+
+function _clibQueueRead(){ try { return JSON.parse(localStorage.getItem(_CLIB_QUEUE_KEY) || '[]'); } catch(e) { return []; } }
+function _clibQueueWrite(q){ try { localStorage.setItem(_CLIB_QUEUE_KEY, JSON.stringify(q)); } catch(e) {} }
+function _clibQueuePush(rec){ const q = _clibQueueRead(); q.push(rec); _clibQueueWrite(q); }
+
+// Ce qui part dans la feuille : la course + le contexte de la fiche imprimée.
+function _clibRecord(c, fiche){
+  const surFiche = [c.surCoursier ? 'Coursier' : '', (c.surRemise && _clibMoney()) ? 'Remise' : '']
+    .filter(Boolean).join('+');
+  return {
+    id: c.id, date: (fiche === 'remise' ? _remiseOpts.date : _ficheOpts.date) || _todayISO(),
+    coursier: (fiche === 'remise' ? _remiseOpts.coursier : _ficheOpts.livreur) || '',
+    libelle: c.libelle || '', destination: c.destination || '', demandeur: c.demandeur || '',
+    motif: c.motif || '', detail: c.detail || c.motif || '',
+    montant: _clibMoney() ? (Number(c.montant) || 0) : 0,
+    fiche: surFiche, imprimePar: currentUser?.username || currentUser?.name || '',
+    timestamp: new Date().toISOString()
+  };
+}
+
+// Même piège que pour l'état des livraisons : { ok:true } nu = réponse non-JSON,
+// donc écriture non confirmée. Le handler renvoie `id` quand la ligne est écrite.
+function _clibEcritOk(r){ return !!(r && r.ok && r.id); }
+
+async function _clibSave(rec){
+  if (!APPS_SCRIPT_URL) { _clibQueuePush(rec); return false; }
+  try {
+    const r = await apiCall({ action:'saveCourseLibre', course:rec });
+    if (_clibEcritOk(r)) return true;
+  } catch(e) {}
+  _clibQueuePush(rec);
+  return false;
+}
+
+// Rejeu de la file : appelé au retour de connexion, avec les autres queues.
+async function _flushClibQueue(){
+  if (!APPS_SCRIPT_URL) return;
+  const q = _clibQueueRead();
+  if (!q.length) return;
+  const restants = [];
+  for (const rec of q) {
+    try {
+      const r = await apiCall({ action:'saveCourseLibre', course:rec });
+      if (!_clibEcritOk(r)) restants.push(rec);
+    } catch(e) { restants.push(rec); }
+  }
+  _clibQueueWrite(restants);
+  const envoyees = q.length - restants.length;
+  if (envoyees > 0) showToast(envoyees + ' course(s) libre(s) enregistrée(s) dans Google Sheets', 'success');
+}
+
 function _clibPrinted(c){
   return (!c.surCoursier || c.pCoursier) && (!(c.surRemise && _clibMoney()) || c.pRemise);
 }
 function _clibAfterPrint(fiche){
   const f = fiche === 'remise' ? 'pRemise' : 'pCoursier';
-  _clibFor(fiche).forEach(c => { c[f] = true; });
+  const imprimees = _clibFor(fiche);
+  imprimees.forEach(c => { c[f] = true; });
+  // Une course portée sur les deux fiches est enregistrée à la première
+  // impression puis mise à jour à la seconde (même ID → UPSERT).
+  imprimees.forEach(c => { _clibSave(_clibRecord(c, fiche)); });
   const out = _coursesLibres.filter(_clibPrinted);
   if (!out.length) return;
   _coursesLibres = _coursesLibres.filter(c => !_clibPrinted(c));
@@ -18696,6 +18975,13 @@ function printFicheCoursier(){
     w.document.close();
   }, 200);
   _clibAfterPrint('coursier');
+  // La fiche part avec le coursier : les courses sont en route. Tout le système
+  // le sait aussitôt (cockpit Commandes, calendrier, filtre « En livraison »).
+  const partis = delivMarkDepart(_ficheOpts.livreur, true);
+  if (partis) {
+    showToast(partis + ' course(s) passée(s) en livraison', 'success');
+    renderLivraisons(); _cmdRenderBodySafe();
+  }
 }
 
 
@@ -18952,7 +19238,7 @@ function printFicheRemise(){
 }
 function _delivToolbar(cnt) {
   const chips = [
-    ['ACTIVE', 'En cours'], ['RETARD', 'En retard'], ['AUJ', "Aujourd'hui"], ['SEMAINE', 'Cette semaine'], ['SANS_DATE', 'Sans date'], ['TERMINE', 'Livrées'], ['TOUS', 'Toutes']
+    ['ACTIVE', 'En cours'], ['EN_ROUTE', 'En livraison'], ['RETARD', 'En retard'], ['AUJ', "Aujourd'hui"], ['SEMAINE', 'Cette semaine'], ['SANS_DATE', 'Sans date'], ['TERMINE', 'Livrées'], ['TOUS', 'Toutes']
   ].map(([k, lbl]) => {
     const active = _delivState.filter === k;
     const warn = (k === 'RETARD');
@@ -18992,7 +19278,7 @@ function _delivToolbar(cnt) {
 }
 
 function _delivAlertCards(rows) {
-  const alert = rows.filter(r => r.status === 'pending' && (r.bucket === 'RETARD' || r.bucket === 'AUJ' || r.bucket === 'DEMAIN'))
+  const alert = rows.filter(r => r.status === 'pending' && !r.livStatut && (r.bucket === 'RETARD' || r.bucket === 'AUJ' || r.bucket === 'DEMAIN'))
     .sort((a, b) => (a.days == null ? 1e9 : a.days) - (b.days == null ? 1e9 : b.days))
     .slice(0, 8);
   if (!alert.length) return '';
@@ -19052,12 +19338,16 @@ function _delivRow(r, showMoney, det) {
   const first = (r.items || [])[0];
   const shortItems = !(r.items || []).length ? '—' : (r.items.length === 1 ? `${first.name} ×${first.qty || 1}` : `${first.name} +${r.items.length - 1}`);
   const typeLabel = r.kind === 'reservation' ? 'Réservation' : 'Commande';
-  const accent = r.status === 'pending' && r.days != null && r.days < 0 ? 'inset 3px 0 0 #dc2626'
+  // Une course en route n'est plus en retard : elle est dans la rue. L'accent
+  // rouge laisserait croire qu'elle attend encore en boutique.
+  const livChip = r.livStatut ? `<div style="margin-top:3px">${_livBadge(r.livStatut, _livInfo(r.livEtat))}</div>` : '';
+  const accent = _delivEnRoute(r) ? 'inset 3px 0 0 #c2410c'
+    : r.status === 'pending' && r.days != null && r.days < 0 ? 'inset 3px 0 0 #dc2626'
     : (r.status === 'pending' && (r.days === 0 || r.days === 1)) ? 'inset 3px 0 0 #e8834a' : '';
   return `<tr class="pcok-row ${r.status !== 'pending' ? 'pcok-row--done' : ''}" ${accent ? `style="box-shadow:${accent}"` : ''} onclick="openDelivDrawer('${r.kind}','${r.id}')">
     <td class="deliv-selcell" onclick="event.stopPropagation()"><input type="checkbox" ${_delivSel.has(_delivSelKey(r)) ? 'checked' : ''} onchange="delivToggleSel('${r.kind}','${r.id}')" aria-label="Ajouter à la fiche coursier" /></td>
     <td class="pcok-td-prio">${dot}</td>
-    <td class="pcok-td-client"><div class="pcok-client">${_pcokEsc(r.client)}</div><div class="pcok-ref">${_pcokEsc(r.ref)} · ${typeLabel}</div></td>
+    <td class="pcok-td-client"><div class="pcok-client">${_pcokEsc(r.client)}</div><div class="pcok-ref">${_pcokEsc(r.ref)} · ${typeLabel}</div>${livChip}</td>
     <td class="pcok-td-ech">${echCell}</td>
     ${det ? `<td class="pcok-muted">${_pcokEsc(shortItems)}</td>` : ''}
     <td>${modeChip}</td>
@@ -19103,10 +19393,15 @@ function _delivDrawerContent(r) {
     </div>
     <div class="pcok-drawer-meta">
       <span class="pcok-badge" style="color:${sc};background:${sb}">${sl}</span>
+      ${_livBadge(r.livStatut)}
       <span class="pcok-badge" style="color:${r.mode === 'livraison' ? '#c2410c' : '#1a4a3a'};background:${r.mode === 'livraison' ? '#ffedd5' : '#dcfce7'}">${r.mode === 'livraison' ? 'Livraison' : 'Retrait'}</span>
       ${r.contact ? `<span style="font-size:12.5px;color:var(--color-text-secondary)">${_pcokEsc(r.contact)}</span>` : ''}
     </div>
     <div class="pcok-drawer-ech" style="color:${dCol};margin-bottom:12px">Échéance : ${livTxt}${dtxt ? ' · ' + dtxt : ''}</div>
+    ${r.livEtat ? `<div class="pcok-drawer-items" style="margin-bottom:12px">
+        <div class="pcok-drawer-item"><span>Suivi coursier</span><b style="text-align:right;white-space:normal">${_pcokEsc(_livInfo(r.livEtat)) || '—'}</b></div>
+        ${r.livEtat.note ? `<div class="pcok-drawer-item"><span>Motif</span><b style="text-align:right;white-space:normal">${_pcokEsc(r.livEtat.note)}</b></div>` : ''}
+      </div>` : ''}
     <div class="pcok-drawer-pipe-title">Articles (${(r.items || []).length})</div>
     <div class="pcok-drawer-items">${itemsHtml}</div>
     <div class="pcok-drawer-pipe-title">Livraison</div>
@@ -19126,7 +19421,13 @@ function _delivDrawerActions(r) {
     btns.push(`<button class="pcok-btn" onclick="closeDrawers();editCommandeDateProd('${r.id}')">Date production</button>`);
   }
   btns.push(`<button class="pcok-btn" onclick="_livCopy('${r.kind}','${r.id}')">Copier le récap</button>`);
-  return `<div class="pcok-drawer-actions pcok-drawer-actions--wrap">${btns.join('')}</div>`;
+  // Retour du coursier : les trois issues de la fiche papier (L) (R) (A).
+  const retour = r.livStatut === 'EN_LIVRAISON' ? `<div class="pcok-drawer-actions pcok-drawer-actions--wrap" style="margin-top:8px">
+      <button class="pcok-btn pcok-btn--primary" style="background:#16a34a" onclick="delivMarkRetour('${r.kind}','${r.id}','LIVREE')">Livrée (L)</button>
+      <button class="pcok-btn" onclick="delivMarkRetour('${r.kind}','${r.id}','RETOUR')">Retour (R)</button>
+      <button class="pcok-btn" onclick="delivMarkRetour('${r.kind}','${r.id}','ANNULEE')">Annulée (A)</button>
+    </div>` : '';
+  return `<div class="pcok-drawer-actions pcok-drawer-actions--wrap">${btns.join('')}</div>${retour}`;
 }
 
 // ── Impression : planning de livraison (A4 paysage, groupé par date d'échéance,
@@ -19136,7 +19437,7 @@ function printLivraisons() {
   if (!rows.length) { showToast('Aucune livraison à imprimer', 'error'); return; }
   const showMoney = _DELIV_MONEY_ROLES.includes(currentUser?.role);
   const shop = (typeof shopConfig !== 'undefined' && shopConfig && shopConfig.name) || 'FOREVER MG';
-  const filterLbl = { ACTIVE: 'En cours', RETARD: 'En retard', AUJ: "Aujourd'hui", SEMAINE: 'Cette semaine', SANS_DATE: 'Sans date', TERMINE: 'Livrées', TOUS: 'Toutes' }[_delivState.filter] || '';
+  const filterLbl = { ACTIVE: 'En cours', EN_ROUTE: 'En livraison', RETARD: 'En retard', AUJ: "Aujourd'hui", SEMAINE: 'Cette semaine', SANS_DATE: 'Sans date', TERMINE: 'Livrées', TOUS: 'Toutes' }[_delivState.filter] || '';
   const modeLbl = _delivState.mode === 'all' ? 'tous modes' : (_delivState.mode === 'livraison' ? 'livraison' : 'retrait');
   const late = rows.filter(r => r.status === 'pending' && r.days != null && r.days < 0).length;
 
@@ -22385,6 +22686,9 @@ function printDepenseRecu(id) {
 // INIT (plus haut dans le fichier) : la lecture y tomberait dans la zone morte du
 // `let` et le try/catch avalerait l'erreur — la liste resterait vide hors ligne.
 loadDepensesLocal();
+// Même raison : `livEtats` est déclaré plus haut en `let`, on le remplit ici.
+// Sans ça, hors ligne, les courses parties réapparaîtraient « à préparer ».
+_livLoadLocal();
 
 // ============================================================
 // STATS — KPI production (appelé depuis showPage via _loadProdStats)

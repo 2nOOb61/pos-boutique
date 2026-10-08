@@ -16,6 +16,17 @@ const SHEET_ENCAISSEMENTS = 'Encaissements'; // journal centralisé des entrées
 const SHEET_ARRETS        = 'ArretsCaisse';   // clôtures de caisse centralisées (multi-appareils + vue patron)
 const SHEET_DEPENSES      = 'Depenses';     // sorties d'argent : achats et dépenses (mode de paiement + source)
 const DEPENSE_HEADERS_    = ['ID','Date','Heure','Libelle','Categorie','Beneficiaire','Montant','Mode','Operateur','Source','Reference','Dossier_Ref','Notes','Enregistre_Par','Timestamp','Images_JSON'];
+const SHEET_LIVRAISONS = 'Livraisons';  // état terrain d'une course : partie avec le coursier, livrée, retour
+// Une ligne par course (clé = Kind:ID), mise à jour sur place : c'est l'état
+// courant, pas un journal. Statut : EN_LIVRAISON | LIVREE | RETOUR | ANNULEE.
+// Le statut commercial de la commande (pending/completed) n'est PAS touché : une
+// commande livrée peut rester impayée, c'est une créance et elle doit le rester.
+const LIVRAISON_HEADERS_ = ['Cle','Kind','ID','Ref','Client','Statut','Coursier','Depart','Retour','Note','Par','Timestamp'];
+const SHEET_COURSES_LIBRES = 'CoursesLibres'; // courses du coursier hors commandes (banque, dépôt de dossier, fournitures)
+// Une ligne = une course libre portée sur une fiche imprimée. Fiche = sur quelle(s)
+// fiche(s) elle est partie (Coursier / Remise / Coursier+Remise), Montant = somme à
+// encaisser annoncée au départ (vide si aucune).
+const COURSE_LIBRE_HEADERS_ = ['ID','Date','Heure','Coursier','Beneficiaire','Destination','Demandeur','Motif','Detail','Montant','Fiche','Imprime_Par','Timestamp'];
 const SHEET_BATS          = 'BATs';           // suivi des BAT (épreuves) : versions, envoi client, retours, validation
 const BAT_HEADERS_        = ['ID','DossierId','NumeroDossier','Version','Statut','Retours','FileName','FileUrl','FileDlUrl','FileType','CreatedBy','CreatedAt','SentBy','SentAt','DecidedBy','DecidedAt','Files','Kind'];
 
@@ -135,6 +146,11 @@ function doPost(e) {
     else if (action === 'saveDepense')       result = handleSaveDepense(data);
     else if (action === 'getDepenses')       result = handleGetDepenses(data);
     else if (action === 'deleteDepense')     result = handleDeleteDepense(data);
+    else if (action === 'saveCourseLibre')   result = handleSaveCourseLibre(data);
+    else if (action === 'getCoursesLibres')  result = handleGetCoursesLibres(data);
+    else if (action === 'deleteCourseLibre') result = handleDeleteCourseLibre(data);
+    else if (action === 'saveLivraisonEtat')  result = handleSaveLivraisonEtat(data);
+    else if (action === 'getLivraisonsEtats') result = handleGetLivraisonsEtats(data);
     else if (action === 'addBat')            result = handleAddBat(data);
     else if (action === 'getBats')           result = handleGetBats(data);
     else if (action === 'saveFinition')      result = handleSaveFinition(data);
@@ -212,6 +228,9 @@ function doGet(e) {
       else if (action === 'addEncaissement')   result = handleAddEncaissement(data);
       else if (action === 'saveDepense')       result = handleSaveDepense(data);
       else if (action === 'deleteDepense')     result = handleDeleteDepense(data);
+      else if (action === 'saveCourseLibre')   result = handleSaveCourseLibre(data);
+      else if (action === 'deleteCourseLibre') result = handleDeleteCourseLibre(data);
+      else if (action === 'saveLivraisonEtat') result = handleSaveLivraisonEtat(data);
       else if (action === 'addBat')            result = handleAddBat(data);
       else if (action === 'saveFinition')      result = handleSaveFinition(data);
       else if (action === 'getFinition')       result = handleGetFinition(data);
@@ -263,6 +282,8 @@ function doGet(e) {
     if (action === 'getCommandes')    return jsonResp(handleGetCommandes(e.parameter));
     if (action === 'getEncaissements') return jsonResp(handleGetEncaissements(e.parameter));
     if (action === 'getDepenses')     return jsonResp(handleGetDepenses(e.parameter));
+    if (action === 'getCoursesLibres') return jsonResp(handleGetCoursesLibres(e.parameter));
+    if (action === 'getLivraisonsEtats') return jsonResp(handleGetLivraisonsEtats(e.parameter));
     if (action === 'getBats')          return jsonResp(handleGetBats(e.parameter));
     if (action === 'getFinition')      return jsonResp(handleGetFinition(e.parameter));
     if (action === 'getArretsCaisse')  return jsonResp(handleGetArretsCaisse(e.parameter));
@@ -368,6 +389,12 @@ function initSheets() {
 
   // Journal des dépenses / achats (sorties d'argent)
   ensureSheet(ss, SHEET_DEPENSES, DEPENSE_HEADERS_);
+
+  // Courses libres du coursier (hors commandes)
+  ensureSheet(ss, SHEET_COURSES_LIBRES, COURSE_LIBRE_HEADERS_);
+
+  // État terrain des livraisons (départ coursier / livrée / retour)
+  ensureSheet(ss, SHEET_LIVRAISONS, LIVRAISON_HEADERS_);
 
   // Nouvelles feuilles production
   ensureSheet(ss, SHEET_DOSSIERS, DOSSIER_HEADERS);
@@ -850,6 +877,145 @@ function handleDeleteDepense(data) {
     }
   }
   return { ok:false, error:'Dépense introuvable' };
+}
+
+// ── Courses libres du coursier ─────────────────────────────
+// Le coursier ne fait pas que livrer des commandes : passage à la banque, dépôt
+// d'un dossier, achat de fournitures. Ces courses n'existent nulle part ailleurs
+// dans le POS — elles sont saisies à la main sur la fiche coursier et écrites ici
+// au moment de l'impression, pour que le comptable les retrouve.
+// UPSERT par ID : réimprimer la même course (bourrage papier) ne crée pas de doublon.
+function handleSaveCourseLibre(data) {
+  const c = data.course;
+  if (!c || !c.id) return { ok:false, error:'Course libre invalide' };
+  const ss = getSS();
+  const sh = ss.getSheetByName(SHEET_COURSES_LIBRES) || ensureSheet(ss, SHEET_COURSES_LIBRES, COURSE_LIBRE_HEADERS_);
+
+  const dt    = new Date(c.date);
+  const tz    = Session.getScriptTimeZone();
+  const dateS = isNaN(dt.getTime()) ? String(c.date || '') : Utilities.formatDate(dt, tz, 'dd/MM/yyyy');
+  const now   = new Date();
+
+  const row = [
+    String(c.id), dateS, String(c.heure || Utilities.formatDate(now, tz, 'HH:mm:ss')),
+    String(c.coursier || ''), String(c.libelle || ''), String(c.destination || ''),
+    String(c.demandeur || ''), String(c.motif || ''), String(c.detail || ''),
+    Number(c.montant) || 0, String(c.fiche || ''), String(c.imprimePar || ''),
+    String(c.timestamp || now.toISOString())
+  ];
+
+  const last = sh.getLastRow();
+  if (last > 1) {
+    const ids = sh.getRange(2, 1, last - 1, 1).getValues();
+    for (let i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]) === String(c.id)) {
+        sh.getRange(i + 2, 1, 1, row.length).setValues([row]);
+        return { ok:true, id:c.id, updated:true };
+      }
+    }
+  }
+  sh.appendRow(row);
+  _logAction_('COURSE_LIBRE', c.imprimePar || 'utilisateur',
+    'ID:' + c.id + ' ' + String(c.libelle || '') + ' ' + (Number(c.montant) || 0) +
+    ' (' + String(c.fiche || '') + ')');
+  return { ok:true, id:c.id };
+}
+
+// Sheets reconvertit « 08/10/2026 » et « 12:15:07 » en vraies dates : relus tels
+// quels on renverrait « Thu Oct 08 2026… » et une heure datée de 1899. On reformate
+// donc toute cellule Date avant de la rendre.
+function _cellTxt_(v, pattern) {
+  if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), pattern);
+  return String(v == null ? '' : v);
+}
+
+function handleGetCoursesLibres(data) {
+  const sh = getSS().getSheetByName(SHEET_COURSES_LIBRES);
+  if (!sh) return { ok:true, coursesLibres:[] };
+  const last = sh.getLastRow();
+  if (last <= 1) return { ok:true, coursesLibres:[] };
+  const PAGE  = Number(data && data.limit) || 3000;
+  const start = Math.max(2, last - PAGE + 1);
+  const width = Math.min(COURSE_LIBRE_HEADERS_.length, sh.getLastColumn());
+  const list  = sh.getRange(start, 1, last - start + 1, width).getValues().map(r => ({
+    id: String(r[0]), date: _cellTxt_(r[1], 'dd/MM/yyyy'), heure: _cellTxt_(r[2], 'HH:mm:ss'), coursier: String(r[3]),
+    libelle: String(r[4]), destination: String(r[5]), demandeur: String(r[6]),
+    motif: String(r[7]), detail: String(r[8]), montant: Number(r[9]) || 0,
+    fiche: String(r[10]), imprimePar: String(r[11]), timestamp: String(r[12])
+  })).filter(x => x.id);
+  return { ok:true, coursesLibres:list };
+}
+
+function handleDeleteCourseLibre(data) {
+  const id = String((data && data.id) || '');
+  if (!id) return { ok:false, error:'ID manquant' };
+  const sh = getSS().getSheetByName(SHEET_COURSES_LIBRES);
+  if (!sh) return { ok:false, error:'Feuille CoursesLibres introuvable' };
+  const last = sh.getLastRow();
+  if (last <= 1) return { ok:false, error:'Course libre introuvable' };
+  const ids = sh.getRange(2, 1, last - 1, 1).getValues();
+  for (let i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]) === id) {
+      sh.deleteRow(i + 2);
+      _logAction_('COURSE_LIBRE_SUPPR', (data && data.user) || 'utilisateur', 'ID:' + id);
+      return { ok:true, id:id };
+    }
+  }
+  return { ok:false, error:'Course libre introuvable' };
+}
+
+// ── État terrain des livraisons ────────────────────────────
+// UPSERT par Cle (Kind:ID) : une course n'a qu'une ligne, réécrite à chaque
+// changement d'état. Statut vide = le départ est annulé → la ligne disparaît,
+// la course redevient une livraison en attente comme les autres.
+function handleSaveLivraisonEtat(data) {
+  const e = data.etat;
+  if (!e || !e.kind || !e.id) return { ok:false, error:'État de livraison invalide' };
+  const ss  = getSS();
+  const sh  = ss.getSheetByName(SHEET_LIVRAISONS) || ensureSheet(ss, SHEET_LIVRAISONS, LIVRAISON_HEADERS_);
+  const cle = String(e.kind) + ':' + String(e.id);
+  const now = new Date();
+
+  const row = [
+    cle, String(e.kind), String(e.id), String(e.ref || ''), String(e.client || ''),
+    String(e.statut || ''), String(e.coursier || ''), String(e.depart || ''),
+    String(e.retour || ''), String(e.note || ''), String(e.par || ''),
+    String(e.timestamp || now.toISOString())
+  ];
+
+  const last = sh.getLastRow();
+  let ligne = 0;
+  if (last > 1) {
+    const cles = sh.getRange(2, 1, last - 1, 1).getValues();
+    for (let i = 0; i < cles.length; i++) {
+      if (String(cles[i][0]) === cle) { ligne = i + 2; break; }
+    }
+  }
+  if (!e.statut) {                         // départ annulé : on retire la ligne
+    if (ligne) sh.deleteRow(ligne);
+    _logAction_('LIVRAISON_ANNUL_DEPART', e.par || 'utilisateur', cle);
+    return { ok:true, cle:cle, supprime:true };
+  }
+  if (ligne) sh.getRange(ligne, 1, 1, row.length).setValues([row]);
+  else       sh.appendRow(row);
+  _logAction_('LIVRAISON_' + String(e.statut), e.par || 'utilisateur',
+    cle + ' ' + String(e.client || '') + (e.coursier ? ' — ' + e.coursier : ''));
+  return { ok:true, cle:cle };
+}
+
+function handleGetLivraisonsEtats(data) {
+  const sh = getSS().getSheetByName(SHEET_LIVRAISONS);
+  if (!sh) return { ok:true, etats:[] };
+  const last = sh.getLastRow();
+  if (last <= 1) return { ok:true, etats:[] };
+  const width = Math.min(LIVRAISON_HEADERS_.length, sh.getLastColumn());
+  const etats = sh.getRange(2, 1, last - 1, width).getValues().map(r => ({
+    cle: String(r[0]), kind: String(r[1]), id: String(r[2]), ref: String(r[3]),
+    client: String(r[4]), statut: String(r[5]), coursier: String(r[6]),
+    depart: _cellTxt_(r[7], "yyyy-MM-dd'T'HH:mm:ss"), retour: _cellTxt_(r[8], "yyyy-MM-dd'T'HH:mm:ss"),
+    note: String(r[9]), par: String(r[10]), timestamp: _cellTxt_(r[11], "yyyy-MM-dd'T'HH:mm:ss")
+  })).filter(x => x.cle && x.statut);
+  return { ok:true, etats:etats };
 }
 
 // ── Suivi BAT (épreuves) ───────────────────────────────────
