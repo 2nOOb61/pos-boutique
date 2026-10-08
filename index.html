@@ -955,6 +955,10 @@
 .clib-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:18px 2px 8px; padding-top:14px; border-top:1px dashed var(--color-border,#e5e3df); }
 .clib-add { display:inline-flex; align-items:center; gap:6px; background:#e8834a; color:#fff; border:0; font-family:inherit; font-size:12px; font-weight:600; padding:6px 12px; border-radius:8px; cursor:pointer; transition:background .15s; }
 .clib-add:hover { background:#d4723b; }
+.clib-acts { display:flex; align-items:center; gap:8px; }
+/* Retour en arrière après une impression : remet le dernier lot de courses libres. */
+.clib-undo { display:inline-flex; align-items:center; gap:5px; background:transparent; color:var(--color-text-secondary,#78716c); border:1px solid var(--color-border,#e5e3df); font-family:inherit; font-size:11.5px; font-weight:600; padding:5px 10px; border-radius:8px; cursor:pointer; transition:background .15s,color .15s; }
+.clib-undo:hover { background:#f5f4f1; color:var(--color-text-primary,#1c1917); }
 .clib-empty { font-size:12px; color:var(--color-text-muted,#a8a29e); margin:0 2px; line-height:1.5; }
 .clib-n { background:#e8834a !important; padding:0 5px; }
 .clib-tog { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600; color:var(--color-text-secondary,#78716c); cursor:pointer; }
@@ -3843,7 +3847,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20261007-fiche-coursier-2"></script>
+<script src="./app.js?v=20261008-courses-libres"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

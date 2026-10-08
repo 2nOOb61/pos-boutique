@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '211 · 2026-10-07';
+const APP_VERSION = '212 · 2026-10-08';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -18425,9 +18425,42 @@ function _clibFor(fiche){
 function clibAdd(){
   _coursesLibres.push({ id: 'L' + (_clibSeq++), libelle: '', destination: '', demandeur: '',
                         motif: '', detail: '', montant: 0, surCoursier: true, surRemise: true });
+  _clibTrash = [];   // on repart sur une nouvelle tournée : plus rien à restaurer
   _clibRenderAll();
 }
 function clibDel(id){ _coursesLibres = _coursesLibres.filter(c => c.id !== id); _clibRenderAll(); }
+
+// Une course libre quitte la liste dès qu'elle a été imprimée sur TOUTES les
+// fiches qu'elle vise : la tournée suivante repart d'un bloc vierge, sans
+// risque de réimprimer la course de la veille. Celle qui vise les deux fiches
+// attend donc les deux impressions. Rien n'est perdu : « Restaurer » remet les
+// courses retirées depuis la dernière saisie, pour la réimpression après un
+// bourrage papier.
+let _clibTrash = [];
+
+function _clibPrinted(c){
+  return (!c.surCoursier || c.pCoursier) && (!(c.surRemise && _clibMoney()) || c.pRemise);
+}
+function _clibAfterPrint(fiche){
+  const f = fiche === 'remise' ? 'pRemise' : 'pCoursier';
+  _clibFor(fiche).forEach(c => { c[f] = true; });
+  const out = _coursesLibres.filter(_clibPrinted);
+  if (!out.length) return;
+  _coursesLibres = _coursesLibres.filter(c => !_clibPrinted(c));
+  // Cumul : imprimer l'A4 puis l'A5 retire deux lots, « Restaurer » doit rendre
+  // les deux (le bourrage papier se découvre souvent après la seconde fiche).
+  _clibTrash = _clibTrash.concat(out);
+  _clibRenderAll();
+  showToast(out.length + (out.length > 1 ? ' courses libres imprimées — retirées de la liste'
+                                         : ' course libre imprimée — retirée de la liste'), 'info');
+}
+function clibRestore(){
+  if (!_clibTrash.length) return;
+  _clibTrash.forEach(c => { c.pCoursier = false; c.pRemise = false; });
+  _coursesLibres = _coursesLibres.concat(_clibTrash);
+  _clibTrash = [];
+  _clibRenderAll();
+}
 
 // Les champs texte n'entraînent AUCUN rendu : réécrire la liste à chaque frappe
 // ferait perdre le focus. Seuls le montant et les cases rafraîchissent les totaux.
@@ -18475,7 +18508,11 @@ function _clibRender(hostId){
   host.innerHTML = `
     <div class="clib-head">
       <div class="fiche-rows-title" style="margin:0">Courses libres${_coursesLibres.length ? ' · ' + _coursesLibres.length : ''}</div>
-      <button class="clib-add" onclick="clibAdd()">+ Course libre</button>
+      <div class="clib-acts">
+        ${_clibTrash.length ? `<button class="clib-undo" title="Remettre les courses libres retirées après la dernière impression"
+          onclick="clibRestore()">Restaurer ${_clibTrash.length}</button>` : ''}
+        <button class="clib-add" onclick="clibAdd()">+ Course libre</button>
+      </div>
     </div>
     ${rows || `<p class="clib-empty">Course hors commande — dépôt de dossier, achat de fournitures, banque…
        Elle s'ajoute à la fiche coursier et à la fiche de remise.</p>`}`;
@@ -18658,6 +18695,7 @@ function printFicheCoursier(){
     </body></html>`);
     w.document.close();
   }, 200);
+  _clibAfterPrint('coursier');
 }
 
 
@@ -18910,6 +18948,7 @@ function printFicheRemise(){
     </body></html>`);
     w.document.close();
   }, 200);
+  _clibAfterPrint('remise');
 }
 function _delivToolbar(cnt) {
   const chips = [
