@@ -951,6 +951,37 @@
 .remise-tot-line b.neg { color:#dc2626; }
 .remise-tot-sum { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:8px; padding-top:10px; border-top:1px solid var(--color-border,#e5e3df); font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--color-text-secondary,#78716c); }
 .remise-tot-sum b { font-size:22px; font-weight:800; letter-spacing:0; text-transform:none; color:#1a4a3a; }
+/* Trajets des livreurs — un bloc par coursier, les courses de sa journée. */
+.trajet-datelbl { display:inline-flex; align-items:center; gap:6px; font-size:11.5px; font-weight:600; color:var(--color-text-secondary,#78716c); }
+.trajet-datelbl input { padding:4px 8px; font-size:12px; font-family:inherit; border:1px solid var(--color-border,#e5e3df); border-radius:7px; background:var(--color-surface,#fff); color:var(--color-text,#1c1917); }
+.trajet-sum { font-size:11.5px; color:var(--color-text-muted,#a8a29e); font-weight:600; }
+.trajet-bloc { border-top:1px solid var(--color-border,#e5e3df); padding:10px 0 4px; }
+.trajet-bloc:first-of-type { border-top:0; }
+.trajet-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; cursor:pointer; padding:2px 2px 6px; }
+.trajet-nom { font-size:13.5px; font-weight:700; color:var(--color-text-primary,#1c1917); }
+.trajet-stats { display:inline-flex; align-items:center; gap:5px; flex-wrap:wrap; }
+.trajet-st { font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:999px; }
+.trajet-table { width:100%; border-collapse:collapse; }
+.trajet-table tr { cursor:pointer; }
+.trajet-table tr:hover { background:#faf9f7; }
+.trajet-table td { padding:6px 6px; border-top:1px solid #f5f4f1; font-size:12.5px; vertical-align:top; }
+.trajet-n { width:26px; color:var(--color-text-muted,#a8a29e); font-weight:700; font-size:11px; }
+.trajet-h { width:104px; font-variant-numeric:tabular-nums; font-weight:600; color:var(--color-text-secondary,#78716c); font-size:11.5px; }
+.trajet-fin { display:block; color:var(--color-text-muted,#a8a29e); font-weight:500; }
+.trajet-cli b { display:block; font-weight:600; color:var(--color-text-primary,#1c1917); }
+.trajet-ref { font-size:10.5px; color:var(--color-text-muted,#a8a29e); }
+.trajet-iss { width:40%; text-align:right; }
+.trajet-note { display:block; font-size:10.5px; color:var(--color-text-muted,#a8a29e); margin-top:2px; }
+/* Historique des mouvements d'une course, dans le panneau de détail. */
+.liv-histo { display:flex; flex-direction:column; gap:7px; margin-bottom:12px; }
+.liv-histo-l { display:flex; align-items:center; gap:7px; flex-wrap:wrap; padding:6px 9px; border-radius:9px; background:#faf9f7; }
+.liv-histo-h { font-size:11px; font-weight:700; color:var(--color-text-secondary,#78716c); font-variant-numeric:tabular-nums; }
+.liv-histo-q { font-size:11px; color:var(--color-text-muted,#a8a29e); }
+.liv-histo-n { flex-basis:100%; font-size:11.5px; color:var(--color-text-secondary,#78716c); }
+@media(max-width:760px){
+  .trajet-iss { width:auto; }
+  .trajet-h { width:84px; }
+}
 /* Courses libres — saisies à la main, communes aux deux fiches. */
 .clib-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:18px 2px 8px; padding-top:14px; border-top:1px dashed var(--color-border,#e5e3df); }
 .clib-add { display:inline-flex; align-items:center; gap:6px; background:#e8834a; color:#fff; border:0; font-family:inherit; font-size:12px; font-weight:600; padding:6px 12px; border-radius:8px; cursor:pointer; transition:background .15s; }
@@ -1389,6 +1420,10 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
             <button class="btn-pay btn-commande" onclick="openCommandeModal(true)">Commander</button>
           </div>
           <button class="btn-clear" onclick="clearCart()" aria-label="Vider le panier">Vider le panier</button>
+          <button class="btn-reprint-last" onclick="reprintLastSale()" data-roles="admin,caissier,commerciale,utilisateur,gestionnaire,comptable" aria-label="Réimprimer la dernière facture" title="Rééditer la dernière facture encaissée à votre nom — même numéro que l'original">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+            Réimprimer la dernière facture
+          </button>
           <button class="btn-arret-caisse" onclick="openArretCaisse()" data-roles="admin,caissier,commerciale,gestionnaire" aria-label="Arrêt de caisse" title="Clôturer la session de caisse du jour">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
             Arrêt de caisse
@@ -1674,6 +1709,14 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
     </div>
     <!-- Contenu dynamique KPIs -->
     <div id="dashCaissierContent"></div>
+    <!-- Mes opérations du jour — réimpression des factures (filtré sur le caissier) -->
+    <div id="mesVentesJourSection" style="margin-top:20px;background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden">
+      <div style="padding:13px 16px;border-bottom:1px solid var(--border)">
+        <span style="font-size:13px;font-weight:700;color:var(--text)">Mes opérations du jour</span>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">Réimprimer une facture — le duplicata porte le même numéro que l'original</div>
+      </div>
+      <div id="mesVentesJourContent"></div>
+    </div>
     <!-- Historique des arrêts de caisse -->
     <div id="historiqueArretsSection" style="margin-top:20px;background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden">
       <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-bottom:1px solid var(--border)">
@@ -3847,7 +3890,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20261008-etat-livraison"></script>
+<script src="./app.js?v=20261008-trajets-historique"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

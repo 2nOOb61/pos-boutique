@@ -22,6 +22,11 @@ const SHEET_LIVRAISONS = 'Livraisons';  // état terrain d'une course : partie a
 // Le statut commercial de la commande (pending/completed) n'est PAS touché : une
 // commande livrée peut rester impayée, c'est une créance et elle doit le rester.
 const LIVRAISON_HEADERS_ = ['Cle','Kind','ID','Ref','Client','Statut','Coursier','Depart','Retour','Note','Par','Timestamp'];
+const SHEET_LIV_JOURNAL = 'LivraisonsJournal'; // historique : une ligne par mouvement, jamais réécrite
+// La feuille Livraisons ne garde que l'état courant — elle répond à « où en est
+// cette course ? ». Le journal répond à « que s'est-il passé, quand, par qui ? » :
+// il s'ajoute, ne se corrige pas, et sert de base aux trajets des livreurs.
+const LIV_JOURNAL_HEADERS_ = ['Horodatage','Date','Heure','Cle','Kind','ID','Ref','Client','Mouvement','Coursier','Note','Par'];
 const SHEET_COURSES_LIBRES = 'CoursesLibres'; // courses du coursier hors commandes (banque, dépôt de dossier, fournitures)
 // Une ligne = une course libre portée sur une fiche imprimée. Fiche = sur quelle(s)
 // fiche(s) elle est partie (Coursier / Remise / Coursier+Remise), Montant = somme à
@@ -151,6 +156,7 @@ function doPost(e) {
     else if (action === 'deleteCourseLibre') result = handleDeleteCourseLibre(data);
     else if (action === 'saveLivraisonEtat')  result = handleSaveLivraisonEtat(data);
     else if (action === 'getLivraisonsEtats') result = handleGetLivraisonsEtats(data);
+    else if (action === 'getLivraisonsJournal') result = handleGetLivraisonsJournal(data);
     else if (action === 'addBat')            result = handleAddBat(data);
     else if (action === 'getBats')           result = handleGetBats(data);
     else if (action === 'saveFinition')      result = handleSaveFinition(data);
@@ -284,6 +290,7 @@ function doGet(e) {
     if (action === 'getDepenses')     return jsonResp(handleGetDepenses(e.parameter));
     if (action === 'getCoursesLibres') return jsonResp(handleGetCoursesLibres(e.parameter));
     if (action === 'getLivraisonsEtats') return jsonResp(handleGetLivraisonsEtats(e.parameter));
+    if (action === 'getLivraisonsJournal') return jsonResp(handleGetLivraisonsJournal(e.parameter));
     if (action === 'getBats')          return jsonResp(handleGetBats(e.parameter));
     if (action === 'getFinition')      return jsonResp(handleGetFinition(e.parameter));
     if (action === 'getArretsCaisse')  return jsonResp(handleGetArretsCaisse(e.parameter));
@@ -356,7 +363,7 @@ function initSheets() {
 
   // Feuilles existantes POS (préservées telles quelles)
   ensureSheet(ss, SHEET_PRODUCTS,   ['ID','Nom','Categorie','Emoji','Code','Prix_Vente','Prix_Achat','Stock','Stock_Min','Date_MAJ']);
-  ensureSheet(ss, SHEET_SALES,      ['ID','Date','Heure','Article','Quantite','Prix_Unitaire','Sous_Total','Total_Vente','Paiement','Fournisseur','Reference','Caissier','Titulaire_Paiement','Date_Piece']);
+  ensureSheet(ss, SHEET_SALES,      ['ID','Date','Heure','Article','Quantite','Prix_Unitaire','Sous_Total','Total_Vente','Paiement','Fournisseur','Reference','Caissier','Titulaire_Paiement','Date_Piece','Client','Contact','Remise','Accompte']);
   // Colonnes 13-14 renommées : elles servent maintenant aux chèques ET aux virements
   const salesSh = ss.getSheetByName(SHEET_SALES);
   if (salesSh && salesSh.getLastColumn() >= 14 &&
@@ -395,6 +402,9 @@ function initSheets() {
 
   // État terrain des livraisons (départ coursier / livrée / retour)
   ensureSheet(ss, SHEET_LIVRAISONS, LIVRAISON_HEADERS_);
+
+  // Historique des mouvements de livraison
+  ensureSheet(ss, SHEET_LIV_JOURNAL, LIV_JOURNAL_HEADERS_);
 
   // Nouvelles feuilles production
   ensureSheet(ss, SHEET_DOSSIERS, DOSSIER_HEADERS);
@@ -550,17 +560,29 @@ function handleAddSale(data) {
     sh.getRange(1, 13, 1, 2).setValues([['Titulaire_Paiement','Date_Piece']])
       .setBackground('#1a4a3a').setFontColor('#ffffff').setFontWeight('bold');
   }
+  // Colonnes 15-18 (Client / Contact / Remise / Accompte) : ajoutées après coup.
+  // Sans elles une vente rechargée depuis Sheets se réimprime sans nom de
+  // client, sans remise et sans acompte. Posées à chaud comme les colonnes
+  // 13-14 : les colonnes 1-14 ne bougent pas, donc aucun lecteur existant
+  // (qui lit 8, 12 ou 14 colonnes par position) n'est décalé.
+  if (sh.getMaxColumns() < 18) sh.insertColumnsAfter(sh.getMaxColumns(), 18 - sh.getMaxColumns());
+  if (sh.getLastColumn() < 18) {
+    sh.getRange(1, 15, 1, 4).setValues([['Client','Contact','Remise','Accompte']])
+      .setBackground('#1a4a3a').setFontColor('#ffffff').setFontWeight('bold');
+  }
 
   // Écriture batch : une seule requête Sheets pour tous les articles (x5-10 plus rapide)
   const batchRows = sale.items.map(item => [
     sale.id, dateS, timeS, item.name, item.qty, item.price,
     item.price * item.qty, sale.total,
     modePaiement, sale.provider||'', sale.ref||'', sale.caissier||'',
-    titulaire, pieceDateS
+    titulaire, pieceDateS,
+    sale.clientName||'', sale.clientContact||'',
+    Number(sale.remise)||0, Number(sale.accompte)||0
   ]);
   if (batchRows.length > 0) {
     const lastRow = sh.getLastRow();
-    sh.getRange(lastRow + 1, 1, batchRows.length, 14).setValues(batchRows);
+    sh.getRange(lastRow + 1, 1, batchRows.length, 18).setValues(batchRows);
   }
 
   // Stock + log (gardés séquentiels pour le LockService)
@@ -700,7 +722,11 @@ function handleGetSales(data) {
   // Lire les N*3 dernières lignes (3x pour grouper les articles par ID de vente)
   const start  = Math.max(2, lastRow - PAGE * 3 + 1);
   const nRows  = lastRow - start + 1;
-  const rows   = sh.getRange(start, 1, nRows, 12).getValues();
+  // 18 colonnes quand elles existent (Client/Contact/Remise/Accompte ont été
+  // ajoutées après coup) ; on se limite au dernier en-tête réellement posé pour
+  // ne pas sortir de la grille sur une feuille ancienne.
+  const nCols  = Math.max(12, Math.min(18, sh.getLastColumn()));
+  const rows   = sh.getRange(start, 1, nRows, nCols).getValues();
 
   const map   = {};
   const order = [];
@@ -711,8 +737,28 @@ function handleGetSales(data) {
     if (!map[id]) {
       // method = clé interne (cash|mobile|cheque|virement), pas le libellé de la
       // colonne Paiement : c'est ce que le front attend pour ventiler les totaux.
-      map[id] = { id, date:r[1], time:r[2], total:Number(r[7]),
-                  method:_payKeyFromLabel_(r[8]), caissier:r[11], items:[] };
+      // _cellTxt_ : Sheets reconvertit « 13/10/2026 » et « 14:35:02 » en vraies
+      // dates → relus tels quels on renverrait « Mon Oct 13 2026… » et une heure
+      // datée de 1899. Le front en a besoin en texte pour recomposer l'horodatage
+      // (numéro de facture dérivé de la date → réimpression à l'identique).
+      const total    = Number(r[7]) || 0;
+      const remise   = nCols >= 17 ? (Number(r[16]) || 0) : 0;
+      const accompte = nCols >= 18 ? (Number(r[17]) || 0) : 0;
+      map[id] = { id, date:_cellTxt_(r[1], 'dd/MM/yyyy'), time:_cellTxt_(r[2], 'HH:mm:ss'),
+                  total,
+                  method:_payKeyFromLabel_(r[8]),
+                  provider: String(r[9] || ''), ref: String(r[10] || ''),
+                  caissier:r[11],
+                  // Colonnes 15-18 : absentes des ventes antérieures à leur ajout
+                  // → la réimpression sort alors sans client/remise/acompte.
+                  clientName:    nCols >= 15 ? String(r[14] || '') : '',
+                  clientContact: nCols >= 16 ? String(r[15] || '') : '',
+                  remise, accompte,
+                  subtotal: total + remise,
+                  // Pas de `due` déduit ici : une vente issue d'une commande
+                  // finalisée est soldée tout en gardant son acompte, donc
+                  // total - accompte gonflerait les créances à tort.
+                  items:[] };
       order.push(id);
     }
     map[id].items.push({ name:r[3], qty:Number(r[4]), price:Number(r[5]) });
@@ -993,14 +1039,62 @@ function handleSaveLivraisonEtat(data) {
   }
   if (!e.statut) {                         // départ annulé : on retire la ligne
     if (ligne) sh.deleteRow(ligne);
+    _journalLivraison_(ss, e, 'DEPART_ANNULE');
     _logAction_('LIVRAISON_ANNUL_DEPART', e.par || 'utilisateur', cle);
     return { ok:true, cle:cle, supprime:true };
   }
   if (ligne) sh.getRange(ligne, 1, 1, row.length).setValues([row]);
   else       sh.appendRow(row);
+  _journalLivraison_(ss, e, String(e.statut));
   _logAction_('LIVRAISON_' + String(e.statut), e.par || 'utilisateur',
     cle + ' ' + String(e.client || '') + (e.coursier ? ' — ' + e.coursier : ''));
   return { ok:true, cle:cle };
+}
+
+// Ajout au journal. Le rejeu d'une file hors ligne renvoie le MÊME mouvement
+// (même horodatage client) : on ne le réécrit pas, sinon un réseau capricieux
+// gonflerait l'historique de doublons. On ne compare que la fin de la feuille,
+// un mouvement rejoué arrivant forcément peu après l'original.
+function _journalLivraison_(ss, e, mouvement) {
+  try {
+    const sh  = ss.getSheetByName(SHEET_LIV_JOURNAL) || ensureSheet(ss, SHEET_LIV_JOURNAL, LIV_JOURNAL_HEADERS_);
+    const cle = String(e.kind) + ':' + String(e.id);
+    const ts  = String(e.timestamp || new Date().toISOString());
+    const last = sh.getLastRow();
+    if (last > 1) {
+      const depuis = Math.max(2, last - 49);
+      const recent = sh.getRange(depuis, 1, last - depuis + 1, 9).getValues();
+      for (let i = 0; i < recent.length; i++) {
+        if (String(recent[i][0]) === ts && String(recent[i][3]) === cle && String(recent[i][8]) === mouvement) return;
+      }
+    }
+    const tz = Session.getScriptTimeZone();
+    const dt = new Date(ts);
+    const d  = isNaN(dt.getTime()) ? new Date() : dt;
+    sh.appendRow([ts, Utilities.formatDate(d, tz, 'dd/MM/yyyy'), Utilities.formatDate(d, tz, 'HH:mm:ss'),
+      cle, String(e.kind), String(e.id), String(e.ref || ''), String(e.client || ''),
+      mouvement, String(e.coursier || ''), String(e.note || ''), String(e.par || '')]);
+    // Garde-fou de taille, comme le journal d'accès : 20 000 mouvements suffisent
+    // largement et la feuille reste manipulable.
+    const n = sh.getLastRow();
+    if (n > 20001) sh.deleteRows(2, n - 20001);
+  } catch (err) {} // un historique manquant ne doit jamais bloquer une livraison
+}
+
+function handleGetLivraisonsJournal(data) {
+  const sh = getSS().getSheetByName(SHEET_LIV_JOURNAL);
+  if (!sh) return { ok:true, mouvements:[] };
+  const last = sh.getLastRow();
+  if (last <= 1) return { ok:true, mouvements:[] };
+  const PAGE  = Number(data && data.limit) || 2000;
+  const start = Math.max(2, last - PAGE + 1);
+  const width = Math.min(LIV_JOURNAL_HEADERS_.length, sh.getLastColumn());
+  const list  = sh.getRange(start, 1, last - start + 1, width).getValues().map(r => ({
+    ts: _cellTxt_(r[0], "yyyy-MM-dd'T'HH:mm:ss"), date: _cellTxt_(r[1], 'dd/MM/yyyy'), heure: _cellTxt_(r[2], 'HH:mm:ss'),
+    cle: String(r[3]), kind: String(r[4]), id: String(r[5]), ref: String(r[6]), client: String(r[7]),
+    mouvement: String(r[8]), coursier: String(r[9]), note: String(r[10]), par: String(r[11])
+  })).filter(x => x.cle && x.mouvement);
+  return { ok:true, mouvements:list };
 }
 
 function handleGetLivraisonsEtats(data) {

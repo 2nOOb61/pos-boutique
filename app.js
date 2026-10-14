@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '214 · 2026-10-08';
+const APP_VERSION = '215 · 2026-10-08';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -556,6 +556,7 @@ async function doLogin() {
         loadCommandesFromScript().catch(() => {}),
         loadModifsFromScript().catch(() => {}),
         loadLivEtatsFromScript().catch(() => {}),
+        loadLivJournalFromScript().catch(() => {}),
       ]).then(() => syncPendingOfflineSales().catch(() => {}))
         .then(() => _flushClibQueue().catch(() => {}))
         .then(() => _flushLivQueue().catch(() => {}))
@@ -1881,7 +1882,12 @@ function _ticketShopHeader(tc, st) {
 // n'affiche PAS l'uid. Dérivé de la date de création → stable à la réimpression,
 // cohérent entre le ticket et la carte. Format AAMMJJ-HHMMSS.
 function _factureNum(obj){
-  const d = (obj && parseSaleDate(obj.date)) || new Date();
+  // On passe l'OBJET (pas seulement obj.date) : une vente rechargée depuis la
+  // feuille Ventes a sa date en « dd/MM/yyyy » et son heure dans un champ
+  // `time` distinct. Sans l'heure le duplicata sortirait en « …-000000 » au
+  // lieu du numéro d'origine. (Commandes et réservations n'ont pas de `time`
+  // → comportement inchangé pour elles.)
+  const d = (obj && parseSaleDate(obj)) || new Date();
   const p = n => String(n).padStart(2, '0');
   return p(d.getFullYear() % 100) + p(d.getMonth() + 1) + p(d.getDate())
        + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
@@ -1915,7 +1921,9 @@ function _openTicketWindow(htmlBody, title='Ticket') {
 function printTicket(sale) {
   const tc  = shopConfig;
   const st  = _ticketStyles(tc);
-  const dateStr = new Date(sale.date).toLocaleString('fr-MG');
+  // parseSaleDate (et pas new Date) : une vente rechargée depuis Sheets arrive
+  // en « dd/MM/yyyy » + heure séparée → new Date() donnerait « Invalid Date ».
+  const dateStr = (parseSaleDate(sale) || new Date()).toLocaleString('fr-MG');
 
   // Mise à jour du DOM ticket caché (pour compatibilité)
   document.getElementById('tDate').textContent        = dateStr;
@@ -2468,23 +2476,84 @@ function saveMouvement() {
   syncStockMove(p.name, type, qty, document.getElementById('mouvReason').value || 'Manuel');
 }
 
-// Gère les dates malformées venant de Sheets : "2026-04-23TSat Dec 30 1899 08:52:31..."
-function parseSaleDate(str) {
+// Lit une date de vente/commande/réservation. Formats acceptés :
+//  • ISO « 2026-10-13T11:35:02.000Z » → stockage local (localStorage)
+//  • « dd/MM/yyyy » + colonne « Heure » séparée → ce que renvoie handleGetSales
+//    depuis la feuille Ventes (Code.gs y écrit la date et l'heure dans 2 colonnes)
+//  • un objet vente/commande : les champs .date et .time sont recombinés
+//  • les dates malformées venant de Sheets : « 2026-04-23TSat Dec 30 1899 08:52:31… »
+// Passer l'objet plutôt que la seule chaîne quand l'heure compte (numéro de
+// facture, heure affichée) : sans elle une vente rechargée depuis Sheets
+// retombe à minuit.
+function parseSaleDate(v, timeStr) {
+  if (!v) return null;
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
+  if (typeof v === 'object') {
+    return parseSaleDate(v.date, timeStr != null ? timeStr : v.time);
+  }
+  const str = String(v).trim();
   if (!str) return null;
+
+  // Heure : collée à la date, sinon prise dans la colonne « Heure »
+  const _hms = s => {
+    if (s == null || s === '') return null;
+    if (s instanceof Date) return isNaN(s.getTime()) ? null : [s.getHours(), s.getMinutes(), s.getSeconds()];
+    const h = String(s);
+    // Une cellule « Heure » que Sheets a convertie en valeur horaire revient
+    // comme un Date du 30/12/1899 sérialisé en UTC → relire l'heure LOCALE,
+    // pas les chiffres de la chaîne (sinon décalage du fuseau).
+    if (/^\d{4}-\d{2}-\d{2}T/.test(h)) {
+      const hd = new Date(h);
+      if (!isNaN(hd.getTime())) return [hd.getHours(), hd.getMinutes(), hd.getSeconds()];
+    }
+    const m = h.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+    return m ? [+m[1], +m[2], +(m[3] || 0)] : null;
+  };
+
+  // « dd/MM/yyyy » — testé AVANT new Date(), qui lirait « 01/10/2026 » en MM/dd
+  // (10 janvier au lieu du 1er octobre) et renverrait Invalid Date pour 13/10.
+  const fr = str.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/);
+  if (fr) {
+    const t = _hms(str.slice(fr[0].length)) || _hms(timeStr) || [0, 0, 0];
+    const d = new Date(+fr[3], +fr[2] - 1, +fr[1], t[0], t[1], t[2]);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  // ISO complet : on laisse new Date() convertir le fuseau — c'est le format du
+  // stockage local, dont le numéro de facture dépend.
   const d = new Date(str);
-  if (!isNaN(d)) return d;
-  // Extraire YYYY-MM-DD + HH:MM:SS s'ils existent
+  if (!isNaN(d.getTime())) {
+    // « 2026-10-13 » nu : new Date() le lit en UTC (le jour peut glisser d'un
+    // cran) → on le reconstruit en local et on y accroche la colonne « Heure ».
+    const dOnly = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (dOnly) {
+      const t = _hms(timeStr) || [0, 0, 0];
+      return new Date(+dOnly[1], +dOnly[2] - 1, +dOnly[3], t[0], t[1], t[2]);
+    }
+    return d;
+  }
+
+  // Dernier recours : extraire YYYY-MM-DD + HH:MM:SS d'une chaîne libre
   const dateM = str.match(/(\d{4}-\d{2}-\d{2})/);
   const timeM = str.match(/(\d{2}:\d{2}:\d{2})/);
   if (!dateM) return null;
-  return new Date(dateM[1] + (timeM ? 'T' + timeM[1] : 'T00:00:00'));
+  return new Date(dateM[1] + 'T' + (timeM ? timeM[1] : '00:00:00'));
+}
+
+// Clé mois « YYYY-MM » en heure LOCALE, à comparer avec saleDateKey().
+// (Avant : new Date().toISOString().slice(0,7), qui est en UTC — le 1er du mois
+// entre 00h et 03h à Madagascar il renvoyait encore le mois précédent.)
+function monthKey(d) {
+  const x = d || new Date();
+  return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0');
 }
 
 // Retourne la portion YYYY-MM-DD pour les comparaisons startsWith
-function saleDateKey(str) {
-  if (!str) return '';
-  const m = String(str).match(/^(\d{4}-\d{2}-\d{2})/);
-  return m ? m[1] : '';
+function saleDateKey(v, timeStr) {
+  const d = parseSaleDate(v, timeStr);
+  if (!d) return '';
+  const p = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
 }
 
 // ============================================================
@@ -2599,7 +2668,7 @@ function _detailDay() {
 
 /* ── Ventes du mois ── */
 function _detailMonth() {
-  const key  = new Date().toISOString().slice(0, 7);
+  const key  = monthKey();
   const list = sales.filter(s => saleDateKey(s.date).startsWith(key));
   const ca   = list.reduce((s,v) => s + (Number(v.total)||0), 0);
   const due  = list.reduce((s,v) => s + (Number(v.due)||0),   0);
@@ -2804,7 +2873,7 @@ function renderStats() {
 }
 function _renderStatsInner() {
   const today = new Date().toDateString();
-  const thisMonth = new Date().toISOString().slice(0,7);
+  const thisMonth = monthKey();
   const todaySales = sales.filter(s => { const d = parseSaleDate(s.date); return d && d.toDateString()===today; });
   const monthSales = sales.filter(s => saleDateKey(s.date).startsWith(thisMonth));
   const todayTotal = todaySales.reduce((s,i)=>s+(Number(i.total)||0),0);
@@ -2867,7 +2936,7 @@ function _renderStatsInner() {
       const d = new Date();
       d.setDate(1);
       d.setMonth(d.getMonth() - i);
-      const key = d.toISOString().slice(0, 7);
+      const key = monthKey(d);
       const label = d.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
       const mSales = sales.filter(s => saleDateKey(s.date).startsWith(key));
       const total = mSales.reduce((s, v) => s + (Number(v.total) || 0), 0);
@@ -2908,10 +2977,138 @@ function _renderStatsInner() {
   // Tableau ventes par caissier (admin/comptable uniquement)
   renderCaissierStats();
 } // end _renderStatsInner
+// ============================================================
+// RÉIMPRESSION DES FACTURES
+// Filet de sécurité métier : si l'imprimante était éteinte au moment de
+// l'encaissement, le caissier doit pouvoir rééditer SA facture sans passer par
+// un admin (l'historique complet reste sur Statistiques, réservé admin/comptable).
+// Le numéro de facture est dérivé de la date de la vente (_factureNum) → le
+// duplicata porte le même numéro que l'original.
+// ============================================================
+
+// `caissier` contient tantôt le username (finalisation d'une commande ou d'une
+// réservation), tantôt le label affiché (vente comptant) → on accepte les deux.
+function _isMineByCaissier(obj) {
+  if (!currentUser || !obj) return false;
+  const norm = v => String(v == null ? '' : v).trim().toLowerCase();
+  const me   = [currentUser.username, currentUser.label].filter(Boolean).map(norm);
+  const who  = norm(obj.caissier);
+  return who !== '' && me.indexOf(who) !== -1;
+}
+
+// Mes ventes, de la plus récente à la plus ancienne. Jamais celles d'un collègue,
+// quel que soit le rôle.
+function _mySalesSorted() {
+  return (sales || [])
+    .filter(s => _isMineByCaissier(s))
+    .sort((a, b) => (parseSaleDate(b)?.getTime() || 0) - (parseSaleDate(a)?.getTime() || 0));
+}
+
 function reprintTicket(id) {
-  const s = sales.find(s=>String(s.id)===String(id));
-  if(s) printTicket(s);
-  else alert("Vente introuvable pour réimpression (recharge la page).");
+  const s = (sales || []).find(x => String(x.id) === String(id));
+  if (s) printTicket(s);
+  else showToast('Vente introuvable — rechargez les ventes depuis Sheets', 'error');
+}
+
+// Bouton « Réimprimer la dernière facture » de la page Caisse.
+function reprintLastSale() {
+  if (!currentUser) { showToast('Connectez-vous pour réimprimer', 'error'); return; }
+  const mine = _mySalesSorted();
+  if (!mine.length) {
+    showToast('Aucune vente à votre nom — rien à réimprimer', 'error');
+    return;
+  }
+  const s = mine[0];
+  const d = parseSaleDate(s);
+  // « Ticket n° <id> » = exactement ce qu'imprime printTicket, pour que le
+  // caissier puisse rapprocher l'écran et le papier.
+  showToast('Réimpression du ticket n° ' + s.id
+    + (d ? ' — ' + d.toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : ''));
+  printTicket(s);
+}
+
+// « Mes opérations du jour » (page Mon Tableau de Bord) : réimpression ligne par
+// ligne, filtrée sur le caissier. Chaque type garde sa propre fonction
+// d'impression — aucune logique de ticket n'est dupliquée ici.
+function renderMesVentesJour() {
+  const box = document.getElementById('mesVentesJourContent');
+  if (!box) return;
+  if (!currentUser) { box.innerHTML = ''; return; }
+
+  const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g,
+    c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+  // Id injecté dans un onclick entre apostrophes → échapper \ et '
+  const q = v => "'" + String(v).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
+  const today   = new Date().toDateString();
+  const isToday = o => { const d = parseSaleDate(o); return !!d && d.toDateString() === today; };
+  const mine    = o => _isMineByCaissier(o) && isToday(o);
+
+  const rows = [];
+  (sales || []).filter(mine).forEach(s => rows.push({
+    o: s, type: 'Vente', tcol: '#1a4a3a', tbg: '#e8f4f0',
+    client: s.clientName || 'Vente comptant',
+    items: Array.isArray(s.items) ? s.items : [],
+    total: Number(s.total) || 0, due: Number(s.due) || 0,
+    // Une vente s'imprime avec « Ticket N° <id> » ; commandes et réservations
+    // avec « N° <_factureNum> » (leur id interne est un uid C…/R…).
+    num: 'Ticket n° ' + s.id,
+    print: 'reprintTicket(' + q(s.id) + ')'
+  }));
+  (commandes || []).filter(c => c.status === 'pending' && mine(c)).forEach(c => rows.push({
+    o: c, type: 'Commande', tcol: '#0891b2', tbg: '#e0f2fe',
+    client: c.clientName || '—',
+    items: Array.isArray(c.items) ? c.items : [],
+    total: Number(c.total) || 0, due: Number(c.restant) || 0,
+    num: 'Facture n° ' + _factureNum(c),
+    print: 'printCommandeTicket(commandes.find(x=>String(x.id)===' + q(c.id) + '))'
+  }));
+  (reservations || []).filter(r => r.status === 'pending' && mine(r)).forEach(r => rows.push({
+    o: r, type: 'Réservation', tcol: '#7c3aed', tbg: '#f3e8ff',
+    client: r.clientName || '—',
+    items: Array.isArray(r.items) ? r.items : [],
+    total: Number(r.total) || 0, due: Number(r.restant) || 0,
+    num: 'Réservation n° ' + _factureNum(r),
+    print: 'printReservationTicket(reservations.find(x=>String(x.id)===' + q(r.id) + '))'
+  }));
+
+  rows.sort((a, b) => (parseSaleDate(b.o)?.getTime() || 0) - (parseSaleDate(a.o)?.getTime() || 0));
+
+  if (!rows.length) {
+    box.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:28px 16px;text-align:center">'
+      + '<div style="width:44px;height:44px;background:var(--surface2);border-radius:12px;display:flex;align-items:center;justify-content:center;margin-bottom:10px">'
+      + '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted)"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>'
+      + '</div>'
+      + '<div style="font-size:13px;font-weight:600;color:var(--muted)">Aucune opération aujourd&#39;hui</div>'
+      + '<div style="font-size:11px;color:var(--muted);opacity:.75;margin-top:2px">Vos factures du jour apparaîtront ici.</div>'
+      + '</div>';
+    return;
+  }
+
+  const printSvg = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>';
+
+  box.innerHTML = rows.map(r => {
+    const d       = parseSaleDate(r.o);
+    const timeStr = d ? d.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' }) : '—';
+    const items   = r.items.map(i => esc(i.name || '?') + ' ×' + (Number(i.qty) || 1)).join(', ') || '—';
+    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap">'
+      + '<div style="flex:1;min-width:170px">'
+      +   '<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px;flex-wrap:wrap">'
+      +     '<span style="background:' + r.tbg + ';color:' + r.tcol + ';font-size:9px;font-weight:800;padding:1px 7px;border-radius:999px;text-transform:uppercase;letter-spacing:.03em">' + r.type + '</span>'
+      +     '<span style="font-size:13px;font-weight:600;color:var(--text)">' + esc(r.client) + '</span>'
+      +     '<span style="font-size:11px;color:var(--muted)">' + timeStr + '</span>'
+      +   '</div>'
+      +   '<div style="font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:420px">' + items + '</div>'
+      +   '<div style="font-size:10px;color:var(--muted);opacity:.8;margin-top:2px">' + esc(r.num) + '</div>'
+      + '</div>'
+      + '<div style="display:flex;align-items:center;gap:12px">'
+      +   '<div style="text-align:right">'
+      +     '<div style="font-size:14px;font-weight:700;color:var(--accent);white-space:nowrap">' + fmt(r.total) + '</div>'
+      +     (r.due > 0 ? '<div style="font-size:10px;color:var(--red);white-space:nowrap">Reste ' + fmt(r.due) + '</div>' : '')
+      +   '</div>'
+      +   '<button class="hist-print-btn" onclick="' + r.print + '" title="Réimprimer ce ticket">' + printSvg + '<span>Imprimer</span></button>'
+      + '</div>'
+      + '</div>';
+  }).join('');
 }
 
 // ===== Historique fusionné : kebab (overflow menu) + progressive disclosure =====
@@ -3095,7 +3292,7 @@ function renderHistoryList(){
   }
 
   const all=[];
-  (sales||[]).forEach(s=>all.push({date:s.date,type:'Vente',tcol:'#1a4a3a',client:s.clientName||'',contact:s.clientContact||'',itemsArr:(Array.isArray(s.items)?s.items:[]),pay:_payLabel(s),total:Number(s.total)||0,due:Number(s.due)||0,print:`reprintTicket('${s.id}')`,kebab:isAdmin?[{label:'Modifier',icon:'edit',act:`openEditSaleModal('${s.id}')`},{label:'Supprimer',icon:'trash',danger:true,act:`openDeleteSaleModal('${s.id}')`}]:[]}));
+  (sales||[]).forEach(s=>all.push({date:s.date,time:s.time,type:'Vente',tcol:'#1a4a3a',client:s.clientName||'',contact:s.clientContact||'',itemsArr:(Array.isArray(s.items)?s.items:[]),pay:_payLabel(s),total:Number(s.total)||0,due:Number(s.due)||0,print:`reprintTicket('${s.id}')`,kebab:isAdmin?[{label:'Modifier',icon:'edit',act:`openEditSaleModal('${s.id}')`},{label:'Supprimer',icon:'trash',danger:true,act:`openDeleteSaleModal('${s.id}')`}]:[]}));
   (commandes||[]).filter(c=>c.status!=='cancelled').forEach(c=>all.push({date:c.date,type:'Cmd rapide',tcol:'#0891b2',client:c.clientName||'',contact:c.clientContact||'',itemsArr:(Array.isArray(c.items)?c.items:[]),pay:'Commande',total:Number(c.total)||0,due:Number(c.restant)||0,print:`printCommandeTicket(commandes.find(x=>String(x.id)==='${c.id}'))`,kebab:[{label:'Ouvrir dans Commandes',icon:'open',act:`showPage('commandes')`}]}));
   (reservations||[]).filter(r=>r.status!=='cancelled').forEach(r=>all.push({date:r.date,type:'Réserv.',tcol:'#7c3aed',client:r.clientName||'',contact:r.clientContact||'',itemsArr:(Array.isArray(r.items)?r.items:[]),pay:'Réservation',total:Number(r.total)||0,due:Number(r.restant)||0,print:`printReservationTicket(reservations.find(x=>String(x.id)==='${r.id}'))`,kebab:[{label:'Ouvrir dans Réservations',icon:'open',act:`showPage('reservations')`}]}));
 
@@ -3104,7 +3301,7 @@ function renderHistoryList(){
     if(q){ const hay=(r.client+' '+r.itemsArr.map(it=>it.name||'').join(' ')+' '+r.pay).toLowerCase(); if(!hay.includes(q)) return false; }
     return true;
   });
-  list.sort((a,b)=>{const da=parseSaleDate(a.date),db=parseSaleDate(b.date);if(!da&&!db)return 0;if(!da)return 1;if(!db)return -1;return db-da;});
+  list.sort((a,b)=>{const da=parseSaleDate(a),db=parseSaleDate(b);if(!da&&!db)return 0;if(!da)return 1;if(!db)return -1;return db-da;});
   list=list.slice(0,300);
 
   if(!list.length){
@@ -3116,14 +3313,14 @@ function renderHistoryList(){
   const _dotsSvg='<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>';
 
   const groups=[]; const gmap={};
-  list.forEach(r=>{ const k=_histDayKey(r.date); if(!gmap[k]){gmap[k]={key:k,date:r.date,rows:[],total:0};groups.push(gmap[k]);} gmap[k].rows.push(r); gmap[k].total+=r.total; });
+  list.forEach(r=>{ const k=_histDayKey(r); if(!gmap[k]){gmap[k]={key:k,date:r.date,rows:[],total:0};groups.push(gmap[k]);} gmap[k].rows.push(r); gmap[k].total+=r.total; });
 
   tbody.innerHTML = groups.map((g,gi)=>{
     const gid='g'+gi;
     const header=`<tr class="hist-group" id="grp-${gid}" onclick="toggleHistGroup('${gid}')"><td colspan="5"><svg class="gchev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>${_histDayLabel(g.date)}<span class="gcount">${g.rows.length}</span><span class="gtotal">${fmt(g.total)}</span></td></tr>`;
     const rowsHtml=g.rows.map((row,ri)=>{
       const uid=gid+'_'+ri;
-      const d=parseSaleDate(row.date);
+      const d=parseSaleDate(row);
       const timeStr=d?d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}):'—';
       const itemsSummary=row.itemsArr.map(it=>`${_esc(it.name||'?')}×${Number(it.qty)||1}`).join(', ')||'—';
       const primary=row.client?_esc(row.client):(row.type==='Vente'?'Vente comptant':'—');
@@ -3385,7 +3582,7 @@ function switchBestSalesPeriod(period) {
 
 function _filterSalesByPeriod(period) {
   const today      = new Date().toDateString();
-  const thisMonth  = new Date().toISOString().slice(0, 7);
+  const thisMonth  = monthKey();
   const thisYear   = new Date().getFullYear().toString();
   return sales.filter(s => {
     const d = parseSaleDate(s.date);
@@ -4638,7 +4835,7 @@ async function apiCall(payload) {
   if (!APPS_SCRIPT_URL) return null;
 
   // ── LECTURES & LOGIN : requête GET avec params individuels ─
-  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getEncaissements', 'getDepenses', 'getCoursesLibres', 'getLivraisonsEtats', 'getBats', 'getFinition', 'getArretsCaisse', 'getJournal', 'getDossiers', 'getTaches', 'getDashboard', 'getControlPatron', 'getComments', 'getNotifs', 'getModifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles', 'getMachineSessions'];
+  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getEncaissements', 'getDepenses', 'getCoursesLibres', 'getLivraisonsEtats', 'getLivraisonsJournal', 'getBats', 'getFinition', 'getArretsCaisse', 'getJournal', 'getDossiers', 'getTaches', 'getDashboard', 'getControlPatron', 'getComments', 'getNotifs', 'getModifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles', 'getMachineSessions'];
   if (getActions.includes(payload.action)) {
     const buildUrl = () => {
       let url = APPS_SCRIPT_URL + '?action=' + payload.action;
@@ -7708,6 +7905,24 @@ function _cmdRow(r) {
   </tr>`;
 }
 
+// Historique d'une course : tous ses mouvements, du plus récent au plus ancien.
+// C'est la réponse à « qui l'a emportée, quand est-elle revenue, pourquoi ».
+function _livHistoHtml(kind, id){
+  const mv = _livMouvements(kind, id);
+  if (!mv.length) return '';
+  const lignes = mv.map(m => {
+    const def = _LIV_LABELS[m.mouvement] || ['#78716c', '#f5f5f4', _livMouvLabel(m.mouvement)];
+    return `<div class="liv-histo-l">
+        <span class="liv-histo-h">${_pcokEsc(m.date)} ${_pcokEsc(m.heure)}</span>
+        <span class="pcok-badge" style="color:${def[0]};background:${def[1]}">${_livMouvLabel(m.mouvement)}</span>
+        <span class="liv-histo-q">${_pcokEsc([m.coursier, m.par ? 'saisi par ' + m.par : ''].filter(Boolean).join(' · '))}</span>
+        ${m.note ? `<span class="liv-histo-n">${_pcokEsc(m.note)}</span>` : ''}
+      </div>`;
+  }).join('');
+  return `<div class="pcok-drawer-pipe-title">Historique des mouvements (${mv.length})</div>
+    <div class="liv-histo">${lignes}</div>`;
+}
+
 // Ligne « Suivi coursier » réutilisée par le tiroir Commandes.
 function _cmdLivLigne(id){
   const e = _livEtat('commande', id);
@@ -7778,6 +7993,7 @@ function _cmdDetailBody(c, avecTete) {
     _dispDate(c.dateLivraisonProd) ? `<div class="pcok-drawer-item"><span style="color:#e8834a">Production</span><b>${_dispDate(c.dateLivraisonProd)}</b></div>` : '',
   ].join('');
   const modeHtml = `<div class="pcok-drawer-item"><span>Mode</span><b>${r.mode==='livraison'?'Livraison':'Retrait boutique'}</b></div>${c.adresseLivraison?`<div class="pcok-drawer-item"><span>Adresse</span><b style="text-align:right;white-space:normal">${_pcokEsc(c.adresseLivraison)}</b></div>`:''}${_cmdLivLigne(c.id)}`;
+  const livHisto = _livHistoHtml('commande', c.id);
   // Pièces jointes (photos locales + Drive)
   const atts = [
     ...(c.photos||[]).map(src => typeof src==='string' ? { img:src, href:src, name:'Photo' } : { img:(src.type||'').startsWith('image/')?(src.data||''):'', href:src.data||'', name:src.name||'fichier' }),
@@ -7822,6 +8038,7 @@ function _cmdDetailBody(c, avecTete) {
     <div class="pcok-drawer-items">${itemsHtml}</div>
     <div class="pcok-drawer-pipe-title">Livraison</div>
     <div class="pcok-drawer-items">${modeHtml}${datesHtml}</div>
+    ${livHisto}
     ${c.notes?`<div class="pcok-drawer-note">${_pcokEsc(c.notes)}</div>`:''}
     ${c.remarque?`<div class="pcok-drawer-note" style="background:#eef6ff;border-left-color:#2563eb;color:#1c1917"><b style="color:#1d4ed8">Remarque finance :</b> ${_pcokEsc(c.remarque)}</div>`:''}
     ${polesBlock}
@@ -17594,6 +17811,38 @@ function _livInfo(e){
   return p.join(' · ');
 }
 
+// Historique des mouvements. Le Sheet le tient (le GAS journalise à chaque
+// écriture d'état) ; ici on garde la même liste pour l'afficher sans aller-retour
+// et pour la voir se remplir immédiatement après un clic, même hors ligne.
+let livJournal = [];
+const _LIV_MOUV_LABELS = {
+  EN_LIVRAISON:  'Partie en livraison',
+  LIVREE:        'Livrée',
+  RETOUR:        'Retour',
+  ANNULEE:       'Annulée en route',
+  DEPART_ANNULE: 'Départ annulé',
+};
+function _livMouvLabel(m){ return _LIV_MOUV_LABELS[m] || m; }
+// Mouvements d'une course, du plus récent au plus ancien.
+function _livMouvements(kind, id){
+  const cle = _livKey(kind, id);
+  return livJournal.filter(m => m.cle === cle).sort((a,b) => String(b.ts).localeCompare(String(a.ts)));
+}
+function _livJournalSaveLocal(){
+  // On ne garde en local que la queue récente : inutile d'alourdir le stockage
+  // du poste avec six mois de tournées, le Sheet fait foi.
+  try { localStorage.setItem('pos-liv-journal', JSON.stringify(livJournal.slice(-800))); } catch(e) {}
+}
+function _livJournalLoadLocal(){ try { const r = localStorage.getItem('pos-liv-journal'); if (r) livJournal = JSON.parse(r) || []; } catch(e) { livJournal = []; } }
+
+async function loadLivJournalFromScript(){
+  if (!APPS_SCRIPT_URL) return;
+  try {
+    const r = await apiCall({ action:'getLivraisonsJournal' });
+    if (r && r.ok && Array.isArray(r.mouvements)) { livJournal = r.mouvements; _livJournalSaveLocal(); }
+  } catch(e) { /* silencieux : cache local */ }
+}
+
 function _livSaveLocal(){ try { localStorage.setItem('pos-liv-etats', JSON.stringify(livEtats)); } catch(e) {} }
 function _livLoadLocal(){ try { const r = localStorage.getItem('pos-liv-etats'); if (r) livEtats = JSON.parse(r) || {}; } catch(e) { livEtats = {}; } }
 
@@ -17672,6 +17921,16 @@ function _livSetEtat(kind, id, statut, opts){
     };
   }
   _livSaveLocal();
+  // Trace locale immédiate — le GAS écrira la même ligne (même horodatage, donc
+  // pas de doublon au rechargement ni au rejeu de la file hors ligne).
+  const d = new Date(now);
+  livJournal.push({ ts: now, date: d.toLocaleDateString('fr-FR'), heure: d.toLocaleTimeString('fr-FR', { hour12:false }),
+    cle: key, kind: String(kind), id: String(id),
+    ref: o.ref || prec.ref || '', client: o.client || prec.client || '',
+    mouvement: statut || 'DEPART_ANNULE',
+    coursier: (livEtats[key] || prec || {}).coursier || '', note: o.note || '',
+    par: currentUser?.username || currentUser?.name || '' });
+  _livJournalSaveLocal();
   _livSync({ kind: String(kind), id: String(id), statut,
              ref: o.ref || prec.ref || '', client: o.client || prec.client || '',
              coursier: (livEtats[key] || {}).coursier || '',
@@ -18251,9 +18510,11 @@ function renderLivraisons() {
   root.innerHTML = `<div class="pcok">
       ${_delivToolbar(cnt)}
       ${_delivAlertCards(all)}
+      <div id="delivTrajets"></div>
       <div id="delivAddrRecap"></div>
       <div id="delivCockpitBody"></div>
     </div>`;
+  _delivRenderTrajets();
   _delivRenderAddrRecap();
   _delivRenderBody();
 }
@@ -18344,6 +18605,170 @@ function _delivSelBar(){
           Fiche coursier</button>
       </div>
     </div>`;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// TRAJETS DES LIVREURS — qui a emporté quoi, quand, et ce qui en est revenu
+// ══════════════════════════════════════════════════════════════════════════
+// Lu depuis le journal des mouvements : un trajet = un coursier sur une journée.
+// Chaque course y figure une fois, avec son heure de départ, son issue et
+// l'heure de celle-ci. Les courses encore dehors passent en tête : ce sont les
+// seules sur lesquelles on peut encore agir.
+let _delivTrajetsOpen = false;
+let _delivTrajetsDate = '';        // '' = aujourd'hui
+let _delivTrajetCoursier = '';     // filtre par livreur ('' = tous)
+
+function toggleDelivTrajets(){
+  _delivTrajetsOpen = !_delivTrajetsOpen;
+  _delivRenderTrajets();
+  const tb = document.querySelector('.pcok-toolbar [onclick="toggleDelivTrajets()"]');
+  if (tb) tb.classList.toggle('pcok-chip--active', _delivTrajetsOpen);
+}
+function setDelivTrajetsDate(v){ _delivTrajetsDate = v || ''; _delivRenderTrajets(); }
+function setDelivTrajetCoursier(v){ _delivTrajetCoursier = (_delivTrajetCoursier === v ? '' : v); _delivRenderTrajets(); }
+
+// Jour d'un mouvement, en ISO, quel que soit le format rendu par le Sheet.
+function _livMouvISO(m){
+  const fr = String(m.date || '').match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (fr) return fr[3] + '-' + fr[2] + '-' + fr[1];
+  return String(m.ts || '').slice(0, 10);
+}
+
+// Regroupe les mouvements d'une journée par coursier, puis par course.
+function _delivTrajets(iso){
+  const jour = iso || _todayISO();
+  const parCoursier = {};
+  livJournal.filter(m => _livMouvISO(m) === jour).forEach(m => {
+    const nom = (m.coursier || '').trim() || 'Sans coursier';
+    const g = parCoursier[nom] || (parCoursier[nom] = { coursier: nom, courses: {} });
+    const c = g.courses[m.cle] || (g.courses[m.cle] = {
+      cle: m.cle, kind: m.kind, id: m.id, ref: m.ref, client: m.client,
+      depart: '', fin: '', issue: '', note: '', mouvements: []
+    });
+    c.mouvements.push(m);
+    if (m.mouvement === 'EN_LIVRAISON')        { c.depart = m.heure; c.issue = 'EN_LIVRAISON'; c.fin = ''; }
+    else if (m.mouvement === 'DEPART_ANNULE')  { c.issue = 'DEPART_ANNULE'; c.fin = m.heure; }
+    else                                       { c.issue = m.mouvement; c.fin = m.heure; if (m.note) c.note = m.note; }
+  });
+  return Object.values(parCoursier).map(g => {
+    const courses = Object.values(g.courses).sort((a, b) =>
+      (a.issue === 'EN_LIVRAISON' ? 0 : 1) - (b.issue === 'EN_LIVRAISON' ? 0 : 1) ||
+      String(a.depart).localeCompare(String(b.depart)));
+    const cnt = k => courses.filter(c => c.issue === k).length;
+    return { coursier: g.coursier, courses,
+             enRoute: cnt('EN_LIVRAISON'), livrees: cnt('LIVREE'),
+             retours: cnt('RETOUR') + cnt('ANNULEE'), total: courses.length };
+  }).sort((a, b) => b.total - a.total || a.coursier.localeCompare(b.coursier, 'fr'));
+}
+
+function _delivRenderTrajets(){
+  const host = document.getElementById('delivTrajets');
+  if (!host) return;
+  const jour     = _delivTrajetsDate || _todayISO();
+  const groupes  = _delivTrajets(jour);
+  const nCourses = groupes.reduce((s, g) => s + g.total, 0);
+  const nDehors  = groupes.reduce((s, g) => s + g.enRoute, 0);
+  const head = `<div class="deliv-recap-head" onclick="toggleDelivTrajets()">
+      <div class="deliv-recap-title">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+        Trajets des livreurs
+        <span class="deliv-recap-n">${groupes.length}</span>
+        ${nDehors ? `<span class="deliv-recap-warn" title="Courses encore dehors">${nDehors} en route</span>` : ''}
+      </div>
+      <svg class="deliv-recap-caret${_delivTrajetsOpen ? ' open' : ''}" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>`;
+  if (!_delivTrajetsOpen) { host.innerHTML = `<div class="deliv-recap">${head}</div>`; return; }
+
+  const barre = `<div class="deliv-route-bar">
+      <div class="deliv-route-actions">
+        <label class="trajet-datelbl">Journée
+          <input type="date" value="${jour}" onclick="event.stopPropagation()" onchange="setDelivTrajetsDate(this.value)" /></label>
+        <span class="trajet-sum">${nCourses} course${nCourses > 1 ? 's' : ''} · ${groupes.length} livreur${groupes.length > 1 ? 's' : ''}</span>
+        ${_delivTrajetCoursier ? `<button class="pcok-iconbtn" onclick="event.stopPropagation();setDelivTrajetCoursier('')">Tous les livreurs</button>` : ''}
+      </div>
+      <div class="deliv-route-tools">
+        <button class="pcok-iconbtn" onclick="event.stopPropagation();setDelivTrajetsDate('')">Aujourd'hui</button>
+        <button class="pcok-iconbtn" onclick="event.stopPropagation();printDelivTrajets()">Imprimer</button>
+      </div>
+    </div>`;
+
+  const visibles = groupes.filter(g => !_delivTrajetCoursier || g.coursier === _delivTrajetCoursier);
+  const corps = !visibles.length
+    ? `<div class="pcok-empty" style="padding:26px 0"><p>Aucun trajet ce jour-là</p></div>`
+    : visibles.map(g => `
+      <div class="trajet-bloc">
+        <div class="trajet-head" onclick="event.stopPropagation();setDelivTrajetCoursier(this.dataset.nom)" data-nom="${_pcokEsc(g.coursier)}">
+          <span class="trajet-nom">${_pcokEsc(g.coursier)}</span>
+          <span class="trajet-stats">
+            ${g.enRoute ? `<span class="trajet-st" style="color:#c2410c;background:#ffedd5">${g.enRoute} en route</span>` : ''}
+            ${g.livrees ? `<span class="trajet-st" style="color:#16a34a;background:#dcfce7">${g.livrees} livrée${g.livrees > 1 ? 's' : ''}</span>` : ''}
+            ${g.retours ? `<span class="trajet-st" style="color:#b45309;background:#fef3c7">${g.retours} retour${g.retours > 1 ? 's' : ''}</span>` : ''}
+            <span class="trajet-st" style="color:#78716c;background:#f5f5f4">${g.total} au total</span>
+          </span>
+        </div>
+        <table class="trajet-table"><tbody>
+          ${g.courses.map((c, i) => {
+            const def = _LIV_LABELS[c.issue] || ['#78716c', '#f5f5f4', _livMouvLabel(c.issue)];
+            return `<tr onclick="openDelivDrawer('${c.kind}','${c.id}')">
+              <td class="trajet-n">${i + 1}</td>
+              <td class="trajet-h">${_pcokEsc(c.depart || '—')}${c.fin ? `<span class="trajet-fin">→ ${_pcokEsc(c.fin)}</span>` : ''}</td>
+              <td class="trajet-cli"><b>${_pcokEsc(c.client || '—')}</b><span class="trajet-ref">${_pcokEsc(c.ref || '')}</span></td>
+              <td class="trajet-iss"><span class="pcok-badge" style="color:${def[0]};background:${def[1]}">${def[2]}</span>${c.note ? `<span class="trajet-note">${_pcokEsc(c.note)}</span>` : ''}</td>
+            </tr>`;
+          }).join('')}
+        </tbody></table>
+      </div>`).join('');
+
+  host.innerHTML = `<div class="deliv-recap deliv-recap--open">
+      ${head}
+      <div class="deliv-recap-body">${barre}${corps}</div>
+    </div>`;
+}
+
+// Feuille A4 des trajets d'une journée — ce que le responsable classe ou archive.
+function printDelivTrajets(){
+  const jour    = _delivTrajetsDate || _todayISO();
+  const groupes = _delivTrajets(jour);
+  if (!groupes.length) { showToast('Aucun trajet à imprimer pour cette journée', 'error'); return; }
+  const shop = (typeof shopConfig !== 'undefined' && shopConfig && shopConfig.name) || 'FOREVER MG';
+  const d    = new Date(jour + 'T00:00:00');
+  const dTxt = isNaN(d.getTime()) ? jour : d.toLocaleDateString('fr-FR', { weekday:'long', day:'2-digit', month:'long', year:'numeric' });
+  const now  = new Date();
+  const corps = groupes.map(g => `
+    <h2>${_pcokEsc(g.coursier)} <span>${g.total} course(s)${g.enRoute ? ' · ' + g.enRoute + ' encore dehors' : ''}${g.livrees ? ' · ' + g.livrees + ' livrée(s)' : ''}${g.retours ? ' · ' + g.retours + ' retour(s)' : ''}</span></h2>
+    <table>
+      <colgroup><col style="width:5%"><col style="width:9%"><col style="width:9%"><col style="width:13%"><col style="width:24%"><col style="width:15%"><col style="width:25%"></colgroup>
+      <thead><tr><th>N°</th><th>Départ</th><th>Retour</th><th>Réf</th><th>Client</th><th>Issue</th><th>Motif / remarque</th></tr></thead>
+      <tbody>${g.courses.map((c, i) => `<tr>
+        <td class="c">${i + 1}</td><td class="c">${_pcokEsc(c.depart || '')}</td><td class="c">${_pcokEsc(c.fin || '')}</td>
+        <td>${_pcokEsc(c.ref || '')}</td><td>${_pcokEsc(c.client || '')}</td>
+        <td class="b">${_pcokEsc(_livMouvLabel(c.issue))}</td><td>${_pcokEsc(c.note || '')}</td>
+      </tr>`).join('')}</tbody>
+    </table>`).join('');
+  const w = window.open('', '_blank', 'width=1000,height=760');
+  if (!w) { alert("Impression bloquée : autorisez les fenêtres pop-up pour ce site, puis réessayez."); return; }
+  setTimeout(() => {
+    w.document.write(`<html><head><meta charset="utf-8"><title>Trajets des livreurs — ${_pcokEsc(dTxt)}</title><style>
+      @page{size:A4 portrait;margin:10mm}
+      *{box-sizing:border-box}
+      body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;font-size:10px}
+      h1{font-size:15px;margin:0}
+      .sub{color:#555;font-size:9.5px;margin:2px 0 10px}
+      h2{font-size:11.5px;margin:12px 0 4px;border-bottom:1px solid #555;padding-bottom:2px}
+      h2 span{font-weight:normal;font-size:9px;color:#555}
+      table{width:100%;border-collapse:collapse;table-layout:fixed;page-break-inside:avoid}
+      th,td{border:1px solid #777;padding:3px 4px;vertical-align:top;word-wrap:break-word}
+      th{background:#eee;font-size:8px;text-transform:uppercase}
+      td{font-size:9px}
+      .c{text-align:center}.b{font-weight:bold}
+      @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+    </style></head><body onload="window.print()">
+      <h1>${_pcokEsc(shop)} — TRAJETS DES LIVREURS</h1>
+      <div class="sub">${_pcokEsc(dTxt)} · édité le ${now.toLocaleDateString('fr-FR')} ${now.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' })}</div>
+      ${corps}
+    </body></html>`);
+    w.document.close();
+  }, 200);
 }
 
 // ── Récapitulatif des adresses de livraison ────────────────────────────────
@@ -19269,6 +19694,7 @@ function _delivToolbar(cnt) {
       <select class="select-input" onchange="setDelivSort(this.value)" title="Trier">${sortOpts}</select>
       <button class="pcok-iconbtn" title="Sens du tri" onclick="toggleDelivSortDir()">${dirIcon}</button>
       <button class="pcok-iconbtn pcok-density" title="Vue compacte / détaillée" onclick="toggleDelivDensity()">${_delivState.density === 'compact' ? 'Détaillé' : 'Compact'}</button>
+      <button class="pcok-iconbtn${_delivTrajetsOpen ? ' pcok-chip--active' : ''}" title="Trajets des livreurs — ce que chaque coursier a emporté et ce qui en est revenu" onclick="toggleDelivTrajets()">Trajets livreurs</button>
       <button class="pcok-iconbtn${_delivRecapOpen ? ' pcok-chip--active' : ''}" title="Récapitulatif des adresses de livraison" onclick="toggleDelivRecap()">Récap adresses</button>
       <button class="pcok-iconbtn" title="Fiche coursier — imprimer les courses cochées" onclick="openFicheCoursier()">Fiche coursier<span class="pcok-chip-n" id="delivSelCount" style="display:${_delivSel.size ? '' : 'none'}">${_delivSel.size}</span></button>
       ${_DELIV_MONEY_ROLES.includes(currentUser?.role) ? `<button class="pcok-iconbtn" title="Fiche de remise A5 — détail des courses cochées et somme à remettre au comptable" onclick="openFicheRemise()">Fiche remise<span class="pcok-chip-n" id="delivSelCount2" style="display:${_delivSel.size ? '' : 'none'}">${_delivSel.size}</span></button>` : ''}
@@ -19402,6 +19828,7 @@ function _delivDrawerContent(r) {
         <div class="pcok-drawer-item"><span>Suivi coursier</span><b style="text-align:right;white-space:normal">${_pcokEsc(_livInfo(r.livEtat)) || '—'}</b></div>
         ${r.livEtat.note ? `<div class="pcok-drawer-item"><span>Motif</span><b style="text-align:right;white-space:normal">${_pcokEsc(r.livEtat.note)}</b></div>` : ''}
       </div>` : ''}
+    ${_livHistoHtml(r.kind, r.id)}
     <div class="pcok-drawer-pipe-title">Articles (${(r.items || []).length})</div>
     <div class="pcok-drawer-items">${itemsHtml}</div>
     <div class="pcok-drawer-pipe-title">Livraison</div>
@@ -22689,6 +23116,7 @@ loadDepensesLocal();
 // Même raison : `livEtats` est déclaré plus haut en `let`, on le remplit ici.
 // Sans ça, hors ligne, les courses parties réapparaîtraient « à préparer ».
 _livLoadLocal();
+_livJournalLoadLocal();
 
 // ============================================================
 // STATS — KPI production (appelé depuis showPage via _loadProdStats)
@@ -23405,11 +23833,11 @@ function renderPatronDashboard() {
   // ── Données de base ──
   const now       = new Date();
   const todayStr  = now.toDateString();
-  const monthKey  = now.toISOString().slice(0, 7);
+  const moisCourant = monthKey(now);
   const weekAgo   = new Date(now - 7 * 864e5);
 
   const todaySales  = sales.filter(s => { const d = parseSaleDate(s.date); return d && d.toDateString() === todayStr; });
-  const monthSales  = sales.filter(s => saleDateKey(s.date).startsWith(monthKey));
+  const monthSales  = sales.filter(s => saleDateKey(s.date).startsWith(moisCourant));
   const totalToday  = todaySales.reduce((a, s) => a + (Number(s.total) || 0), 0);
   const totalMonth  = monthSales.reduce((a, s) => a + (Number(s.total) || 0), 0);
   const totalCreances = sales.reduce((a, s) => a + (Number(s.due) || 0), 0);
@@ -23879,7 +24307,7 @@ function renderObjectifsConfig() {
 function renderCaissierStats() {
   const container = document.getElementById('statsCaissierContent');
   if (!container) return;
-  const thisMonth = new Date().toISOString().slice(0, 7);
+  const thisMonth = monthKey();
   const today     = new Date().toDateString();
   const caissierMap = {};
 
@@ -23953,7 +24381,7 @@ function renderMonDashboard() {
   const label    = currentUser.label || username;
   const now      = new Date();
   const today    = now.toDateString();
-  const thisMonth= now.toISOString().slice(0, 7);
+  const thisMonth= monthKey(now);
   const thisYear = String(now.getFullYear());
 
   // Mon activité = ventes comptant + commandes + réservations qui me sont
@@ -23961,12 +24389,14 @@ function renderMonDashboard() {
   // zéro pour ceux qui travaillent surtout en commandes/réservations.)
   // Anti double-compte : on ne prend que les commandes/réservations « en cours »
   // (status pending) ; une fois finalisées elles deviennent une Vente (déjà comptée).
-  const _norm   = v => String(v == null ? '' : v).trim().toLowerCase();
-  const _meSet  = [username, label].filter(Boolean).map(_norm);
-  const _isMine = name => _meSet.indexOf(_norm(name)) !== -1;
+  // _isMineByCaissier : même règle d'appartenance que la réimpression
+  // (username OU label, selon la façon dont la vente a été créée).
+  const _isMine = name => _isMineByCaissier({ caissier: name });
   const mySales = [
+    // `time` est conservé : pour une vente rechargée depuis Sheets l'heure vit
+    // dans un champ distinct, sans lui tout retomberait à minuit.
     ...sales.filter(s => _isMine(s.caissier)).map(s => ({
-      date: s.date, total: Number(s.total) || 0, due: Number(s.due) || 0,
+      date: s.date, time: s.time, total: Number(s.total) || 0, due: Number(s.due) || 0,
       items: s.items || [], clientName: s.clientName || '', method: s.method, type: 'Vente'
     })),
     ...commandes.filter(c => _isMine(c.caissier) && c.status === 'pending').map(c => ({
@@ -23982,14 +24412,14 @@ function renderMonDashboard() {
   // Période sélectionnée
   let periodSales, periodLabel;
   if (period === 'day') {
-    periodSales  = mySales.filter(s => { const d = parseSaleDate(s.date); return d && d.toDateString() === today; });
+    periodSales  = mySales.filter(s => { const d = parseSaleDate(s); return d && d.toDateString() === today; });
     periodLabel  = "Aujourd'hui";
   } else if (period === 'month') {
-    periodSales  = mySales.filter(s => saleDateKey(s.date).startsWith(thisMonth));
+    periodSales  = mySales.filter(s => saleDateKey(s).startsWith(thisMonth));
     const ml     = now.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
     periodLabel  = ml.charAt(0).toUpperCase() + ml.slice(1);
   } else {
-    periodSales  = mySales.filter(s => saleDateKey(s.date).startsWith(thisYear));
+    periodSales  = mySales.filter(s => saleDateKey(s).startsWith(thisYear));
     periodLabel  = `Année ${thisYear}`;
   }
 
@@ -23998,8 +24428,8 @@ function renderMonDashboard() {
   const avgBasket   = countPeriod > 0 ? Math.round(totalPeriod / countPeriod) : 0;
 
   // Stats du jour et du mois (toujours calculées pour l'objectif)
-  const todaySales  = mySales.filter(s => { const d = parseSaleDate(s.date); return d && d.toDateString() === today; });
-  const monthSales  = mySales.filter(s => saleDateKey(s.date).startsWith(thisMonth));
+  const todaySales  = mySales.filter(s => { const d = parseSaleDate(s); return d && d.toDateString() === today; });
+  const monthSales  = mySales.filter(s => saleDateKey(s).startsWith(thisMonth));
   const totalToday  = todaySales.reduce((s, i) => s + (Number(i.total) || 0), 0);
   const totalMonth  = monthSales.reduce((s, i) => s + (Number(i.total) || 0), 0);
   const countMonth  = monthSales.length;
@@ -24015,7 +24445,7 @@ function renderMonDashboard() {
   for (let i = 6; i >= 0; i--) {
     const d = new Date(); d.setDate(d.getDate() - i);
     const ds = d.toDateString();
-    const t  = mySales.filter(s => { const sd = parseSaleDate(s.date); return sd && sd.toDateString() === ds; })
+    const t  = mySales.filter(s => { const sd = parseSaleDate(s); return sd && sd.toDateString() === ds; })
                        .reduce((a, b) => a + (Number(b.total) || 0), 0);
     days7.push({ label: d.toLocaleDateString('fr-FR', { weekday: 'short' }), total: t });
   }
@@ -24086,7 +24516,7 @@ function renderMonDashboard() {
       ${last5.length===0
         ? `<div style="text-align:center;padding:28px;color:var(--muted);font-size:13px">Aucune opération enregistrée</div>`
         : last5.map(s => {
-            const d = parseSaleDate(s.date);
+            const d = parseSaleDate(s);
             const dateStr = d ? d.toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
             const items = (s.items||[]).map(i=>`${i.name} ×${i.qty}`).join(', ') || '—';
             const ty   = s.type || 'Vente';
@@ -24110,6 +24540,8 @@ function renderMonDashboard() {
           }).join('')}
     </div>`;
 
+  // Mes opérations du jour + réimpression (section séparée dans le HTML)
+  renderMesVentesJour();
   // Historique arrêts de caisse (section séparée dans le HTML)
   renderHistoriqueArrets();
   // Récupère les arrêts du serveur (multi-appareils) puis rafraîchit la liste
