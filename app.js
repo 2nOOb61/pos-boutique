@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '215 · 2026-10-08';
+const APP_VERSION = '216 · 2026-10-14';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -7514,6 +7514,7 @@ function renderCmdCockpit() {
       ${_cmdFilterCards(all)}
       ${_cmdToolbar(cnt, caisSet)}
       ${_cmdAlertCards(all)}
+      ${_cmdRecouvCards(all)}
       <div id="cmdCockpitBody"></div>
     </div>`;
   _cmdRenderBody();
@@ -7637,6 +7638,47 @@ function _cmdAlertCards(rows) {
     </button>`;
   }).join('');
   return `<div class="pcok-alerts"><div class="pcok-alerts-title">Livraisons urgentes <span>${alert.length}</span></div><div class="pcok-alerts-row">${cards}</div></div>`;
+}
+
+// ── Bandeau « À recouvrer » : produites non soldées ───────────────────────
+// Le pendant argent du bandeau d'urgences. Une commande dont la production est
+// clôturée quitte « Livraisons urgentes » (l'atelier n'a plus rien à rattraper) :
+// sans ce second bandeau, une créance déjà fabriquée ne s'affichait plus NULLE PART
+// en haut de page — il fallait penser à ouvrir le filtre « Produites non soldées ».
+// C'est la file la plus rentable de la page : la marchandise est prête, il ne manque
+// que l'encaissement et la remise au client. Ambre (et pas rouge) : rien n'est en
+// faute côté atelier, c'est une relance commerciale.
+function _cmdRecouvCards(rows) {
+  const tous = rows.filter(r => r.status === 'pending' && r.prodClos && r.restant > 0)
+    // Les plus anciennes d'abord (échéance la plus dépassée) ; à échéance égale, le
+    // plus gros reste dû en tête. Sans date (`days` null) : en fin de file.
+    .sort((a, b) => (a.days == null ? 1e9 : a.days) - (b.days == null ? 1e9 : b.days)
+                 || b.restant - a.restant);
+  if (!tous.length) return '';
+  const total = tous.reduce((s, r) => s + r.restant, 0);
+  const vues  = tous.slice(0, 8);
+  const cards = vues.map(r => {
+    const late = r.days != null && r.days < 0;
+    // L'échéance reste une information de contexte (depuis quand le client l'attend),
+    // jamais une alarme : la production est faite, le rouge serait un faux signal.
+    const ech = r.days == null ? 'Sans échéance'
+      : late ? `Prête, échéance +${Math.abs(r.days)}j`
+      : r.days === 0 ? "Prête, pour aujourd'hui"
+      : r.days === 1 ? 'Prête, pour demain'
+      : `Prête, dans ${r.days}j`;
+    return `<button class="pcok-alert" style="border-left:3px solid #d97706;background:#fffbeb" title="Production clôturée — reste à encaisser puis remettre au client" onclick="openCmdDrawer('${r.id}')">
+      <div class="pcok-alert-top"><span style="color:#b45309;font-weight:800">Reste ${fmt(r.restant)}</span><span class="pcok-alert-pct" style="color:#16a34a">✓ Produite</span></div>
+      <div class="pcok-alert-client">${_pcokEsc(r.client)}</div>
+      <div class="pcok-alert-step">${r.mode === 'livraison' ? 'Livraison' : 'Retrait'} · ${_pcokEsc(ech)}</div>
+    </button>`;
+  }).join('');
+  // Le bouton bascule sur la file complète (filtre PRODUITE) : le bandeau s'arrête à
+  // 8 cartes, il ne doit pas devenir le seul chemin vers les suivantes.
+  const lien = `<button class="pcok-alerts-link" onclick="_cmdSetFilter('PRODUITE')" title="Afficher la file complète des commandes produites non soldées">Voir la file${tous.length > vues.length ? ` (${tous.length})` : ''}</button>`;
+  return `<div class="pcok-alerts pcok-alerts--recouv">
+    <div class="pcok-alerts-title">À recouvrer — produites non soldées <span>${tous.length}</span><span>${fmt(total)}</span>${lien}</div>
+    <div class="pcok-alerts-row">${cards}</div>
+  </div>`;
 }
 
 function _cmdTable(rows) {
