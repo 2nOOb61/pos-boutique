@@ -661,7 +661,10 @@ function showPage(id, btn, bnavBtn) {
     if (APPS_SCRIPT_URL) loadBatsFromScript().then(() => { if (selectedDossier) _refreshBatUi(selectedDossier.id); }).catch(()=>{});
   }
   if (id==='blocages')     { renderBlocages(); if (APPS_SCRIPT_URL) Promise.all([loadDossiers(), _loadTachesQuietly()]).then(renderBlocages).catch(()=>renderBlocages()); }
-  if (id==='production')   { _setupProdViewToggle(); loadTaches(); _autoRefreshProduction(); initModulesProduction(); }
+  // Commandes + réservations : le planning de production en tire client, contact,
+  // articles et mode de retrait — sans elles la fiche sortirait vide.
+  if (id==='production')   { _setupProdViewToggle(); loadTaches(); _autoRefreshProduction(); initModulesProduction();
+    if (APPS_SCRIPT_URL) Promise.all([loadCommandesFromScript(), loadReservationsFromScript()]).then(() => _ensureDossierLinks()).catch(()=>{}); }
   if (id==='machines')     { _enterMachinesPage(); }
   if (id==='calendrier')   { _ensureDossierLinks(); renderCalendrier(); if (APPS_SCRIPT_URL) Promise.all([loadCommandesFromScript(), loadReservationsFromScript()]).then(() => { _ensureDossierLinks(); renderCalendrier(); }).catch(()=>{}); }
   if (id==='suivi-bat')    { renderSuiviBat(); if (APPS_SCRIPT_URL) Promise.all([loadBatsFromScript(), loadDossiers(), loadCommandesFromScript()]).then(() => renderSuiviBat()).catch(()=>{}); }
@@ -9388,6 +9391,96 @@ const ETAPES_CONFIG = [
   { code:'LIVRE',         label:'Livraison',                         short:'Livré',      color:'#16a34a', icon:'10' },
 ];
 
+// ════════════════════════════════════════════════════════════
+// ÉTAPES PILOTÉES À LA MAIN — production & finition
+// L'atelier n'a pas d'ordinateur aux machines : ces étapes ne se pointent pas,
+// l'admin ou le responsable de production pose l'état directement sur le dossier
+// (feuille Dossiers, col. EtatsManuels). Les étapes amont — validation commande,
+// conception/simulation (PAO), validations client — restent en pointage.
+// ⚠️ ETAPES_MANUELLES doit rester IDENTIQUE à celle de Code.gs.
+// ════════════════════════════════════════════════════════════
+const ETAPES_MANUELLES = ['PRODUCTION','FINITION'];
+const ETATS_MANUELS = [
+  { code:'A_FAIRE',  label:'À faire',  color:'#2563eb', bg:'#dbeafe' },
+  { code:'EN_COURS', label:'En cours', color:'#d97706', bg:'#fef3c7' },
+  { code:'TERMINE',  label:'Terminé',  color:'#16a34a', bg:'#dcfce7' },
+];
+function _estEtapeManuelle(code){ return ETAPES_MANUELLES.includes(code); }
+// Seuls l'admin et le responsable de production (chef d'atelier) posent ces états.
+function _peutPiloterEtapes(){ return ['admin','chef_atelier'].includes(currentUser?.role); }
+
+function _etatsManuels(d){
+  const raw = d && d.etatsManuels;
+  if (!raw) return {};
+  if (typeof raw === 'string') { try { return JSON.parse(raw) || {}; } catch(e) { return {}; } }
+  return (typeof raw === 'object') ? raw : {};
+}
+function _etatManuel(d, code){ return String((_etatsManuels(d)[code] || {}).st || ''); }
+function _etatManuelMeta(d, code){ return _etatsManuels(d)[code] || null; }
+function _aEtatsManuels(d){ return Object.keys(_etatsManuels(d)).length > 0; }
+function _etatManuelConf(st){ return ETATS_MANUELS.find(x => x.code === st) || null; }
+
+// Tâches « effectives » d'un dossier : les pointages réels, sauf sur les étapes
+// pilotées à la main où l'état posé par le responsable REMPLACE les pointages, sous
+// la forme d'une tâche virtuelle. Tous les affichages de pipeline (cockpit, cartes,
+// suivi commande, impressions) et le calcul de progression lisent ainsi le même
+// avancement, exactement comme le serveur (_overlayEtatsManuels_ dans Code.gs).
+// Dès qu'un état manuel existe sur le dossier, les étapes manuelles sans état
+// comptent « à faire » : sinon « Production terminée » ferait sauter le dossier à
+// 100 % en sautant la finition, qui n'a par construction aucune tâche.
+function _tachesEff(d, dtBase){
+  const dt = Array.isArray(dtBase)
+    ? dtBase
+    : (Array.isArray(taches) ? taches : []).filter(t => t.dossierId === (d && d.id));
+  if (!d || !_aEtatsManuels(d)) return dt;
+  const em  = _etatsManuels(d);
+  const out = dt.filter(t => !_estEtapeManuelle(t.etapeCode));
+  ETAPES_MANUELLES.forEach(code => {
+    const st = String((em[code] || {}).st || '');
+    if (st) { out.push(_tacheManuelle(d, code, st, em[code])); return; }
+    const reelles = dt.filter(t => t.etapeCode === code);
+    out.push(...(reelles.length ? reelles : [_tacheManuelle(d, code, 'A_FAIRE', null)]));
+  });
+  return out;
+}
+// Tâches effectives d'un dossier retrouvé par son id (raccourci des appelants qui
+// n'ont que l'id sous la main).
+function _tachesEffId(dossierId){
+  return _tachesEff(_dossierParId(dossierId) || { id:dossierId },
+    (Array.isArray(taches) ? taches : []).filter(t => t.dossierId === dossierId));
+}
+
+// Tâches effectives d'une étape d'un dossier — états manuels inclus. Sert aux gardes
+// « étape précédente terminée » : une production ou une finition que le responsable
+// n'a pas encore passée à Terminé bloque la suite, comme un pointage en attente.
+function _tachesEtape(dossierId, code){
+  return _tachesEffId(dossierId).filter(t => t.etapeCode === code);
+}
+
+// Tâche virtuelle portant un état manuel : même forme qu'une tâche pointée pour que
+// tous les calculs existants (every/some/opérateurs/chrono) marchent sans changement.
+function _tacheManuelle(d, code, statut, meta){
+  const e  = ETAPES_CONFIG.find(x => x.code === code) || { label:code };
+  const dte = meta && meta.le ? new Date(meta.le) : null;
+  const ok  = dte && !isNaN(dte.getTime());
+  const str = ok ? dte.toLocaleString('fr-FR') : '';
+  return {
+    id:            'MAN-' + (d.id || '') + '-' + code,
+    dossierId:     d.id,
+    numeroDossier: d.numeroDossier || '',
+    etapeCode:     code,
+    etapeLabel:    e.label,
+    operateur:     (meta && meta.par) || '',
+    statut:        statut,
+    dateAssignation: str,
+    dateDebut:     statut === 'A_FAIRE' ? '' : str,
+    dateFin:       statut === 'TERMINE' ? str : '',
+    startTs:       statut === 'A_FAIRE' ? undefined : (ok ? dte.getTime() : undefined),
+    endTs:         statut === 'TERMINE' ? (ok ? dte.getTime() : undefined) : undefined,
+    manuel:        true,
+  };
+}
+
 // ============================================================
 // RYTHME DE PRODUCTION — DÉLAIS CIBLES PAR ÉTAPE
 // ============================================================
@@ -9823,9 +9916,11 @@ function _dossierClosed(d) {
 // étape tardive terminée gonflait le % pour des étapes jamais travaillées).
 function _dossierPct(dt, d) {
   if (_dossierClosed(d)) return 100;
+  // États manuels (production / finition) inclus : même modèle que le serveur.
+  const dte = _tachesEff(d, dt);
   let done = 0, applicable = 0;
   for (const e of ETAPES_CONFIG) {
-    const te = dt.filter(t => t.etapeCode === e.code);
+    const te = dte.filter(t => t.etapeCode === e.code);
     if (!te.length) continue;
     applicable++;
     if (te.every(t => t.statut === 'TERMINE')) done++;
@@ -10033,7 +10128,7 @@ async function openAttribForDossier(dossierId) {
 
 // Vue lecture seule d'un dossier (pour les rôles sans accès Attribution)
 function showDossierReadOnly(d) {
-  const dt = taches.filter(t => t.dossierId === d.id);
+  const dt = _tachesEff(d);
   const clos = _dossierClosed(d);
   const steps = ETAPES_CONFIG.map(e => {
     const te = dt.filter(t => t.etapeCode === e.code);
@@ -10090,7 +10185,7 @@ function showDossierReadOnly(d) {
 }
 
 function _buildCardProductionSection(dossierId) {
-  const dt = taches.filter(t => t.dossierId === dossierId);
+  const dt = _tachesEffId(dossierId);
   const clos = _dossierClosed((Array.isArray(dossiers) ? dossiers : []).find(x => x.id === dossierId));
   let doneCount = 0;
   const steps = ETAPES_CONFIG.map(e => {
@@ -11741,7 +11836,7 @@ function _sviEpSub(ep, court){
 }
 
 function _sviRow(d, idx){
-  const dt     = idx.get(d.id) || [];
+  const dt     = _tachesEff(d, idx.get(d.id) || []);
   const closed = _dossierClosed(d);
   const etapes = ETAPES_CONFIG.map(e => {
     const st = _sviEtapeState(dt.filter(t => t.etapeCode === e.code), closed);
@@ -12906,7 +13001,7 @@ function printAttributionReport() {
       ? `<span class="badge badge-amber">${pct}%</span>`
       : `<span class="badge badge-blue">${pct}%</span>`;
     // Tâches du dossier
-    const dTaches = taches.filter(t => t.dossierId === d.id);
+    const dTaches = _tachesEff(d);
     const _opsSrc = _canSeeAllOps() ? dTaches : dTaches.filter(t => _sameOp(t.operateur, _myOpLabel()));
     const ops = [...new Set(_opsSrc.map(t => t.operateur).filter(Boolean))].join(', ') || '—';
     return `<tr>
@@ -14017,7 +14112,7 @@ function _renderDossierRow(d) {
   const etapeColor = etape?.color || 'var(--color-primary)';
   const etapeShort = etape?.short || 'Créé';
 
-  const dTaches  = taches.filter(t => t.dossierId === d.id);
+  const dTaches  = _tachesEff(d);
   const _clos    = _dossierClosed(d);
   const pipeDots = ETAPES_CONFIG.map(e => {
     const te = dTaches.filter(t => t.etapeCode === e.code);
@@ -14141,9 +14236,9 @@ function _tachesParDossier() {
 function _buildAttrRow(d, idx) {
   // `idx` optionnel : Map(dossierId -> taches). Absent (ou appele via .map qui
   // passe un entier) : on retombe sur le filtre complet, comportement d'origine.
-  const dt = (idx && typeof idx.get === 'function')
+  const dt = _tachesEff(d, (idx && typeof idx.get === 'function')
     ? (idx.get(d.id) || [])
-    : (Array.isArray(taches) ? taches : []).filter(t => t.dossierId === d.id);
+    : (Array.isArray(taches) ? taches : []).filter(t => t.dossierId === d.id));
   const clos = _dossierClosed(d); // clôture admin → 100 % même sans (ou avec partielle) attribution
   const pct = _dossierPct(dt, d);
   const isDone = clos || pct === 100;
@@ -14751,7 +14846,7 @@ function _renderDossierCardGrid(list) {
     const etape     = ETAPES_CONFIG.find(e => e.code === d.statut);
 
     // Pipeline complet avec opérateurs
-    const dTaches = taches.filter(t => t.dossierId === d.id);
+    const dTaches = _tachesEff(d);
     const steps = ETAPES_CONFIG.map((e, i) => {
       const te = dTaches.filter(t => t.etapeCode === e.code);
       const s  = closD ? 'done'
@@ -15913,6 +16008,9 @@ function renderAttrPanel(tachesD, commentsD = []) {
   const panel = document.getElementById('attrPanel');
   if (!panel || !selectedDossier) return;
   const d = selectedDossier;
+  // Les états posés à la main par le responsable (production / finition) remplacent
+  // les pointages de leur étape — ici comme sur tous les autres écrans.
+  tachesD = _tachesEff(d, tachesD);
 
   // Récupérer la source (réservation ou commande) pour afficher les vrais détails
   let sourceHtml = '';
@@ -16107,6 +16205,7 @@ function renderAttrPanel(tachesD, commentsD = []) {
     </div>
     <div class="attr-panel-body">
       ${sourceHtml}
+      ${_etapesManuellesHtml(d.id)}
       <div class="attr-etapes-list">
     ${ETAPES_CONFIG.map(e => {
       const tachesEtape = tachesD.filter(t => t.etapeCode === e.code);
@@ -16160,6 +16259,7 @@ function renderAttrPanel(tachesD, commentsD = []) {
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">
             <span style="font-size:12px;font-weight:600;color:var(--color-text-primary)">${e.label}</span>
+            ${_estEtapeManuelle(e.code) ? '<span class="pcok-dstep-manu">responsable</span>' : ''}
             ${etapeIcon}
           </div>
           <div style="font-size:11px;color:var(--color-text-secondary);margin-top:1px;display:flex;flex-wrap:wrap;gap:2px">
@@ -16252,7 +16352,7 @@ function printFicheTravailDossier(dossierId) {
   const delai = (gap != null && gap >= 0) ? (gap + ' jour' + (gap > 1 ? 's' : '')) : '';
 
   // Collaborateurs distincts ayant une tâche sur le dossier (+ leurs étapes)
-  const tachesD = taches.filter(t => t.dossierId === d.id && t.operateur);
+  const tachesD = _tachesEff(d).filter(t => t.operateur);
   const opsMap = {};
   tachesD.forEach(t => {
     const lbl = t.operateur;
@@ -16329,7 +16429,7 @@ function printDossier(dossierId) {
       : commandes.find(c => String(c.id) === String(d.sourceId));
   }
 
-  const tachesD = taches.filter(t => t.dossierId === d.id);
+  const tachesD = _tachesEff(d);
   const tc = shopConfig || {};
   const shopName = tc.name || 'FOREVER MG';
   const shopPhone = tc.phone || '';
@@ -16755,7 +16855,7 @@ async function attrValiderEtape(etapeCode, etapeLabel) {
   const si = ETAPES_CONFIG.findIndex(e => e.code === etapeCode);
   for (let i = 0; i < si; i++) {
     const prev = ETAPES_CONFIG[i];
-    const pt = taches.filter(x => x.dossierId === selectedDossier.id && x.etapeCode === prev.code);
+    const pt = _tachesEtape(selectedDossier.id, prev.code);
     if (pt.length && !pt.every(x => x.statut === 'TERMINE')) {
       showToast(`Impossible de valider : "${prev.label}" n'est pas encore terminée.`, 'error');
       return;
@@ -16991,7 +17091,7 @@ function setProdPhaseFilter(f) {
 }
 
 function _buildProgressBar(dossierId) {
-  const dt = taches.filter(t => t.dossierId === dossierId);
+  const dt = _tachesEffId(dossierId);
   // Cloisonnement : un opérateur ne voit que SON nom sous les étapes du pipeline.
   // admin / chef d'atelier / commercial (suivi global) voient tous les opérateurs.
   const _canSeeAllOps = ['admin','chef_atelier','commerciale'].includes(currentUser?.role);
@@ -17051,7 +17151,7 @@ function _buildMonDashboard() {
     const si = ETAPES_CONFIG.findIndex(e => e.code === t.etapeCode);
     for (let i = 0; i < si; i++) {
       const prev = ETAPES_CONFIG[i];
-      const pt = taches.filter(x => x.dossierId === t.dossierId && x.etapeCode === prev.code);
+      const pt = _tachesEtape(t.dossierId, prev.code);
       if (pt.length && !pt.every(x => x.statut === 'TERMINE')) return false;
     }
     return true;
@@ -17075,7 +17175,7 @@ function _buildMonDashboard() {
       const si = ETAPES_CONFIG.findIndex(e => e.code === t.etapeCode);
       for (let i = 0; i < si; i++) {
         const prev = ETAPES_CONFIG[i];
-        const pt = taches.filter(x => x.dossierId === t.dossierId && x.etapeCode === prev.code);
+        const pt = _tachesEtape(t.dossierId, prev.code);
         if (pt.length && !pt.every(x => x.statut === 'TERMINE')) { isBlocked = true; blockedBy = prev.short || prev.label; break; }
       }
     }
@@ -17238,7 +17338,7 @@ function _tacheRow(t) {
     const si = ETAPES_CONFIG.findIndex(e => e.code === t.etapeCode);
     for (let i = 0; i < si; i++) {
       const prev = ETAPES_CONFIG[i];
-      const pt   = taches.filter(x => x.dossierId === t.dossierId && x.etapeCode === prev.code);
+      const pt   = _tachesEtape(t.dossierId, prev.code);
       if (pt.length && !pt.every(x => x.statut === 'TERMINE')) { isStepBlocked = true; blockedByStep = prev.short||prev.label; break; }
     }
   }
@@ -19899,23 +19999,61 @@ function _delivDrawerActions(r) {
   return `<div class="pcok-drawer-actions pcok-drawer-actions--wrap">${btns.join('')}</div>${retour}`;
 }
 
+// Libellés d'étape pour le papier : la frise écran abrège PRODUCTION en
+// « Machine », trop interne pour un planning qui circule dans la boutique.
+const _ETAPE_PRINT = {
+  VALID_CMD:'Validation cmd', PAO:'PAO', RETOUR_CLIENT:'Validation client',
+  MODIFICATIONS:'Modifications', VALID_CLIENT2:'Validation client 2', BAT:'BAT',
+  ACHAT:'Achat', PRODUCTION:'Production', FINITION:'Finition', LIVRE:'Livraison',
+};
+
+// Où en est la production d'une livraison, et qui en a la charge. Même source que
+// le cockpit Production (_buildDossierRows) : pointages ET états posés à la main
+// par le responsable. `idx` = Map(dossierId -> ligne) pour ne construire les lignes
+// qu'une fois par impression.
+function _delivProdInfo(dossierId, idx) {
+  if (!dossierId) return { etape:'—', resp:'', pct:null };
+  const r = idx ? idx.get(dossierId) : _buildDossierRows().find(x => x.dossierId === dossierId);
+  const d = _dossierParId(dossierId);
+  if (!r) {
+    // Dossier sans aucune tâche : on retombe sur son statut serveur.
+    if (_dossierClosed(d)) return { etape:'Livré', resp:'', pct:100 };
+    const e = d && ETAPES_CONFIG.find(x => x.code === d.statut);
+    return {
+      etape: e ? (_ETAPE_PRINT[e.code] || e.label) : (d ? 'Non attribué' : '—'),
+      resp:  '',
+      pct:   d ? (Number(d.progression) || 0) : null,
+    };
+  }
+  const resp = (r.responsables || []).join(', ');
+  if (r.isDone) return { etape:'Livré', resp:resp, pct:r.pct };
+  return {
+    etape: r.curStep ? (_ETAPE_PRINT[r.curStep.code] || r.curStep.label) : 'Non attribué',
+    resp:  resp,
+    pct:   r.pct,
+  };
+}
+
 // ── Impression : planning de livraison (A4 paysage, groupé par date d'échéance,
 // retards visibles, colonnes vides à remplir à la main pour le suivi terrain).
-function printLivraisons() {
-  const rows = _delivSortRows(_delivFilterRows(_delivBuildRows()));
-  if (!rows.length) { showToast('Aucune livraison à imprimer', 'error'); return; }
-  const showMoney = _DELIV_MONEY_ROLES.includes(currentUser?.role);
+// Fiche planning A4 paysage, partagée par le planning de LIVRAISON et le planning
+// de PRODUCTION : mêmes colonnes, groupes par date d'échéance, retards en rouge et
+// colonnes vides à remplir à la main sur le terrain.
+//   showProd  : ajoute « Production » (étape en cours + %) et « Responsable ».
+//   showMoney : ajoute le total — jamais sur la fiche d'atelier, qui circule.
+//   unite     : le mot compté dans l'en-tête de chaque groupe de date.
+function _planningImprime({ rows, titre, sousTitre, showMoney, showProd, unite }) {
   const shop = (typeof shopConfig !== 'undefined' && shopConfig && shopConfig.name) || 'FOREVER MG';
-  const filterLbl = { ACTIVE: 'En cours', EN_ROUTE: 'En livraison', RETARD: 'En retard', AUJ: "Aujourd'hui", SEMAINE: 'Cette semaine', SANS_DATE: 'Sans date', TERMINE: 'Livrées', TOUS: 'Toutes' }[_delivState.filter] || '';
-  const modeLbl = _delivState.mode === 'all' ? 'tous modes' : (_delivState.mode === 'livraison' ? 'livraison' : 'retrait');
-  const late = rows.filter(r => r.status === 'pending' && r.days != null && r.days < 0).length;
+  const mot  = unite || 'livraison';
 
   const groups = {}; const order = [];
   rows.forEach(r => { const k = r.ymd || '~'; if (!groups[k]) { groups[k] = { ymd: r.ymd, rows: [] }; order.push(k); } groups[k].rows.push(r); });
   order.sort((a, b) => { const ga = groups[a].ymd, gb = groups[b].ymd; if (!ga) return 1; if (!gb) return -1; return ga < gb ? -1 : ga > gb ? 1 : 0; });
 
   let seq = 0;
-  const cols = showMoney ? 13 : 12;
+  // Une seule construction des lignes de production pour toute la fiche.
+  const prodIdx = showProd ? new Map(_buildDossierRows().map(x => [x.dossierId, x])) : null;
+  const cols = 12 + (showProd ? 2 : 0) + (showMoney ? 1 : 0);
   const body = order.map(k => {
     const g = groups[k];
     const meta = _delivDateLabel(g.ymd);
@@ -19924,6 +20062,7 @@ function printLivraisons() {
       const items = (r.items || []).map(i => `${i.name} ×${i.qty || 1}`).join(', ') || '—';
       const modeAddr = r.mode === 'livraison' ? ('Livraison' + (r.address ? ' — ' + r.address : '')) : 'Retrait boutique';
       const ret = _delivRetInfo(r);
+      const prod = showProd ? _delivProdInfo(r.dossierId, prodIdx) : null;
       const lateCls = (r.status === 'pending' && r.days != null && r.days < 0) ? ' class="late b"' : (r.status === 'pending' && (r.days === 0 || r.days === 1)) ? ' class="soon b"' : '';
       return `<tr>
         <td class="c b">${seq}</td>
@@ -19933,17 +20072,18 @@ function printLivraisons() {
         <td>${items}</td>
         <td>${modeAddr}</td>
         <td>${r.commercial || ''}</td>
+        ${prod ? `<td>${prod.etape}${prod.pct != null ? `<div class="ref">${prod.pct}%</div>` : ''}</td><td>${prod.resp || '—'}</td>` : ''}
         ${showMoney ? `<td class="r b">${fmt(r.total)}</td>` : ''}
         <td></td><td></td><td></td><td class="c"></td>
       </tr>`;
     }).join('');
-    return `<tr class="grp"><td colspan="${cols}">${meta.label}${meta.tag ? ` — ${meta.tag}` : ''} · ${g.rows.length} livraison(s)</td></tr>${rws}`;
+    return `<tr class="grp"><td colspan="${cols}">${meta.label}${meta.tag ? ` — ${meta.tag}` : ''} · ${g.rows.length} ${mot}(s)</td></tr>${rws}`;
   }).join('');
 
   const w = window.open('', '_blank', 'width=1200,height=900');
   if (!w) { alert("Impression bloquée : autorisez les fenêtres pop-up pour ce site, puis réessayez."); return; }
   setTimeout(() => {
-    w.document.write(`<html><head><meta charset="utf-8"><title>Planning de livraison</title><style>
+    w.document.write(`<html><head><meta charset="utf-8"><title>${titre}</title><style>
       @page{size:A4 landscape;margin:8mm}
       *{box-sizing:border-box}
       body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;font-size:10px}
@@ -19959,12 +20099,20 @@ function printLivraisons() {
       .late{color:#c00}.soon{color:#c2410c}
       @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
     </style></head><body onload="window.print()">
-      <h1>${shop} — PLANNING DE LIVRAISON</h1>
-      <div class="sub">${filterLbl} · ${modeLbl} · échéance ${_delivState.groupBy === 'prod' ? 'production' : 'client'}${_delivState.date ? ' · date ' + _dispDate(_delivState.date) : ''} · ${rows.length} livraison(s)${late ? ` · ${late} en retard` : ''} · édité le ${new Date().toLocaleDateString('fr-FR')} ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</div>
+      <h1>${shop} — ${titre.toUpperCase()}</h1>
+      <div class="sub">${sousTitre} · édité le ${new Date().toLocaleDateString('fr-FR')} ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</div>
       <table>
-        <colgroup><col style="width:3%"><col style="width:7%"><col style="width:15%"><col style="width:9%"><col style="width:17%"><col style="width:15%"><col style="width:9%">${showMoney ? '<col style="width:7%">' : ''}<col style="width:8%"><col style="width:6%"><col style="width:9%"><col style="width:4%"></colgroup>
+        <colgroup>
+          <col style="width:3%"><col style="width:6%"><col style="width:13%"><col style="width:8%">
+          <col style="width:${showProd ? 14 : 17}%"><col style="width:${showProd ? 12 : 15}%"><col style="width:7%">
+          ${showProd ? '<col style="width:9%"><col style="width:9%">' : ''}
+          ${showMoney ? '<col style="width:6%">' : ''}
+          <col style="width:7%"><col style="width:5%"><col style="width:7%"><col style="width:3%">
+        </colgroup>
         <thead><tr>
-          <th>N°</th><th>Retard</th><th>Client / Réf</th><th>Contact</th><th>Articles</th><th>Mode / Adresse</th><th>Commercial</th>${showMoney ? '<th>Total</th>' : ''}
+          <th>N°</th><th>Retard</th><th>Client / Réf</th><th>Contact</th><th>Articles</th><th>Mode / Adresse</th><th>Commercial</th>
+          ${showProd ? '<th>Production</th><th>Responsable</th>' : ''}
+          ${showMoney ? '<th>Total</th>' : ''}
           <th>Livreur</th><th>Heure sortie</th><th>Reçu par</th><th>✓</th>
         </tr></thead>
         <tbody>${body}</tbody>
@@ -19972,6 +20120,45 @@ function printLivraisons() {
     </body></html>`);
     w.document.close();
   }, 200);
+}
+
+function printLivraisons() {
+  const rows = _delivSortRows(_delivFilterRows(_delivBuildRows()));
+  if (!rows.length) { showToast('Aucune livraison à imprimer', 'error'); return; }
+  const filterLbl = { ACTIVE: 'En cours', EN_ROUTE: 'En livraison', RETARD: 'En retard', AUJ: "Aujourd'hui", SEMAINE: 'Cette semaine', SANS_DATE: 'Sans date', TERMINE: 'Livrées', TOUS: 'Toutes' }[_delivState.filter] || '';
+  const modeLbl = _delivState.mode === 'all' ? 'tous modes' : (_delivState.mode === 'livraison' ? 'livraison' : 'retrait');
+  const late = rows.filter(r => r.status === 'pending' && r.days != null && r.days < 0).length;
+  _planningImprime({
+    rows,
+    titre: 'Planning de livraison',
+    sousTitre: `${filterLbl} · ${modeLbl} · échéance ${_delivState.groupBy === 'prod' ? 'production' : 'client'}${_delivState.date ? ' · date ' + _dispDate(_delivState.date) : ''} · ${rows.length} livraison(s)${late ? ` · ${late} en retard` : ''}`,
+    showMoney: _DELIV_MONEY_ROLES.includes(currentUser?.role),
+    showProd: false,
+    unite: 'livraison',
+  });
+}
+
+// Planning de production : la même fiche, mais pour l'atelier — échéance = date de
+// production, étape en cours et responsable en clair, et AUCUN montant (la feuille
+// circule entre les postes). Imprimé depuis la page Production.
+function printPlanningProduction() {
+  const rows = _delivBuildRows()
+    .filter(r => r.status === 'pending')
+    .map(r => {
+      const ymd = _toIsoDate(r.dateProd || r.dateClient || '');
+      return Object.assign({}, r, { ymd, days: ymd ? _daysUntil(ymd) : null });
+    })
+    .sort((a, b) => (a.ymd || '~').localeCompare(b.ymd || '~') || String(a.client).localeCompare(String(b.client), 'fr'));
+  if (!rows.length) { showToast('Aucune commande en production à imprimer', 'error'); return; }
+  const late = rows.filter(r => r.days != null && r.days < 0).length;
+  _planningImprime({
+    rows,
+    titre: 'Planning de production',
+    sousTitre: `commandes en cours · échéance production · ${rows.length} dossier(s)${late ? ` · ${late} en retard` : ''}`,
+    showMoney: false,
+    showProd: true,
+    unite: 'dossier',
+  });
 }
 
 // Impression d'un bon de livraison individuel (avec zones à signer pour le suivi manuel).
@@ -20826,7 +21013,7 @@ function _buildProdDeadlines() {
     .filter(d => d && d.dateLivraisonProd)
     .filter(d => _canSeeAll || taches.some(t => t.dossierId === d.id && _sameOp(t.operateur, _myLabel)))
     .map(d => {
-      const dt = taches.filter(t => t.dossierId === d.id);
+      const dt = _tachesEff(d);
       const pct  = _dossierPct(dt, d);
       const days = _daysUntil(d.dateLivraisonProd);
       const opsSrc = _canSeeAll ? dt : dt.filter(t => _sameOp(t.operateur, _myLabel));
@@ -21078,9 +21265,15 @@ function _buildDossierRows() {
   const merged = _allTachesMerged().filter(t => t.dossierId && t.dossierId !== 'LIBRE');
   const byDossier = {};
   merged.forEach(t => { (byDossier[t.dossierId] = byDossier[t.dossierId] || []).push(t); });
+  // Un dossier dont le responsable a posé un état d'étape entre dans le cockpit même
+  // sans aucune tâche attribuée : c'est justement le cas « piloté à la main ».
+  (Array.isArray(dossiers) ? dossiers : []).forEach(d => {
+    if (d && d.id && !byDossier[d.id] && _aEtatsManuels(d)) byDossier[d.id] = [];
+  });
 
-  return Object.entries(byDossier).map(([dossierId, dt]) => {
+  return Object.entries(byDossier).map(([dossierId, dt0]) => {
     const d = (Array.isArray(dossiers) ? dossiers : []).find(x => x.id === dossierId) || {};
+    const dt = _tachesEff(d.id ? d : { id:dossierId }, dt0);
     const clos = _dossierClosed(d); // clôture admin → pipeline complet même sans tâche
     let done = 0;
     const steps = ETAPES_CONFIG.map(e => {
@@ -21623,19 +21816,163 @@ function _cockpitRow(r) {
 }
 
 // Rendu du pipeline vertical (partagé par les drawers Production & Commande)
+// ════════════════════════════════════════════════════════════
+// PILOTAGE MANUEL DES ÉTAPES — production & finition
+// Bloc affiché sur la fiche d'un dossier (panneau latéral + carte dépliée de la
+// page Production). Lecture pour tous, boutons actifs pour l'admin et le
+// responsable de production. L'état remplace le pointage de l'étape et redescend
+// dans tout le système via le statut / la progression du dossier.
+// ════════════════════════════════════════════════════════════
+function _etatManuelDate(iso){
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('fr-FR', { day:'2-digit', month:'short' })
+       + ' ' + d.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
+}
+
+function _etapesManuellesHtml(dossierId){
+  const d = _dossierParId(dossierId);
+  if (!d) return '';
+  const peut = _peutPiloterEtapes();
+  const lignes = ETAPES_MANUELLES.map(code => {
+    const e    = ETAPES_CONFIG.find(x => x.code === code) || { code, label:code, short:code };
+    const st   = _etatManuel(d, code);
+    const meta = _etatManuelMeta(d, code);
+    const btns = ETATS_MANUELS.map(o => {
+      const on  = st === o.code;
+      const sty = on ? `background:${o.bg};color:${o.color};border-color:${o.color}` : '';
+      return `<button class="emanu-btn ${on?'emanu-btn--on':''}" style="${sty}" ${peut?'':'disabled'}
+        onclick="setEtapeManuelle('${dossierId}','${code}','${o.code}')">${o.label}</button>`;
+    }).join('');
+    const trace = meta && (meta.par || meta.le)
+      ? `<div class="emanu-trace">${_pcokEsc(meta.par || '—')}${meta.le ? ' · ' + _etatManuelDate(meta.le) : ''}</div>`
+      : `<div class="emanu-trace emanu-trace--none">${_aEtatsManuels(d)
+            ? "État à poser — l'étape compte comme « à faire »"
+            : "L'étape suit les pointages tant qu'aucun état n'est posé"}</div>`;
+    const clear = (st && peut)
+      ? `<button class="emanu-clear" title="Retirer l'état manuel : l'étape repasse sous le pointage"
+           onclick="setEtapeManuelle('${dossierId}','${code}','')">Retirer</button>`
+      : '';
+    return `<div class="emanu-row">
+      <div class="emanu-head">
+        <span class="emanu-lbl" style="color:${e.color||'var(--color-text-primary)'}">${_pcokEsc(e.label)}</span>
+        ${clear}
+      </div>
+      <div class="emanu-btns">${btns}</div>
+      ${trace}
+    </div>`;
+  }).join('');
+  const note = !peut
+    ? "État posé par l'admin ou le responsable de production."
+    : _dossierClosed(d)
+      ? 'Dossier livré — une correction rouvre son avancement.'
+      : "Vous posez l'état — il remplace le pointage et met à jour tout le système.";
+  return `<div class="emanu">
+    <div class="emanu-title">Étapes pilotées par le responsable</div>
+    <div class="emanu-note">${note}</div>
+    ${lignes}
+  </div>`;
+}
+
+// Pose (ou retire, statut vide) l'état d'une étape manuelle. Mise à jour optimiste
+// de l'écran, puis écriture dans le Sheet qui recalcule statut et progression du
+// dossier — c'est cette réponse qui fait suivre le reste du système.
+async function setEtapeManuelle(dossierId, code, statut){
+  if (!_peutPiloterEtapes()) {
+    showToast("Seul l'admin ou le responsable de production peut changer cet état.", 'error');
+    return;
+  }
+  if (!_estEtapeManuelle(code)) {
+    showToast('Cette étape se pointe : son état ne se change pas à la main.', 'error');
+    return;
+  }
+  const d = _dossierParId(dossierId);
+  if (!d) { showToast('Dossier introuvable', 'error'); return; }
+  // Dossier déjà livré : on demande confirmation plutôt que de bloquer — une faute
+  // de clic sur « Terminé » doit rester corrigeable.
+  if (_dossierClosed(d) &&
+      !confirm('Ce dossier est marqué livré. Modifier quand même l\'état de cette étape ?')) return;
+  if (_etatManuel(d, code) === String(statut || '')) return;   // déjà dans cet état
+  const etape = ETAPES_CONFIG.find(e => e.code === code) || { label:code };
+  const par   = currentUser?.label || currentUser?.username || 'admin';
+  const avant = { etats: _etatsManuels(d), statut: d.statut, progression: d.progression };
+
+  const etats = Object.assign({}, avant.etats);
+  if (statut) etats[code] = { st:statut, par:par, le:new Date().toISOString() };
+  else        delete etats[code];
+  d.etatsManuels = etats;
+  d.progression  = _dossierPct(_tachesEff(d), d);
+  _refreshEtapesUI(dossierId);
+
+  if (APPS_SCRIPT_URL) {
+    const req = { action:'setEtapeManuelle', id:dossierId, etapeCode:code, statut:statut||'', par:par };
+    let r = await apiCall(req).catch(() => null);
+    // Dossier encore absent du Sheet (créé en local) : on l'enregistre puis on réessaie.
+    if (r && !r.ok && /introuvable/i.test(String(r.error||''))) {
+      await apiCall({ action:'saveDossier', dossier:d, createdBy:par }).catch(() => {});
+      r = await apiCall(req).catch(() => null);
+    }
+    if (!r || !r.ok) {
+      d.etatsManuels = avant.etats; d.statut = avant.statut; d.progression = avant.progression;
+      _refreshEtapesUI(dossierId);
+      showToast('Enregistrement impossible : ' + ((r && r.error) || 'réseau'), 'error');
+      return;
+    }
+    if (r.statut) d.statut = r.statut;
+    if (r.progression != null) d.progression = Number(r.progression);
+    d.etatsManuels = r.etatsManuels || etats;
+  }
+
+  const conf = _etatManuelConf(statut);
+  _addNotification({
+    dossierId:     dossierId,
+    numeroDossier: d.numeroDossier || dossierId,
+    etapeCode:     code,
+    etapeLabel:    etape.label,
+    operateur:     par,
+    message:       statut
+      ? `${par} a passé l'étape "${etape.label}" à ${(conf&&conf.label)||statut} — dossier ${d.numeroDossier||dossierId}`
+      : `${par} a remis l'étape "${etape.label}" au pointage — dossier ${d.numeroDossier||dossierId}`,
+  });
+  _refreshEtapesUI(dossierId);
+  showToast(statut ? `${etape.label} → ${(conf&&conf.label)||statut}` : `${etape.label} repasse au pointage`);
+}
+
+// Rafraîchit les écrans qui montrent l'avancement du dossier (page courante +
+// panneau latéral ouvert) : l'état doit se voir partout sans recharger.
+function _refreshEtapesUI(dossierId){
+  const actif = id => document.getElementById(id)?.classList.contains('active');
+  try {
+    if (actif('page-production'))  renderTaches();
+    if (actif('page-attribution')) renderDossiers();
+    if (actif('page-tableau'))     renderKanbanPage();
+    if (actif('page-suivi'))       renderSuiviPage();
+    if (actif('page-commandes'))   renderCommandes();
+  } catch(e) { /* un écran absent ne doit pas bloquer l'enregistrement */ }
+  // Panneau latéral production ouvert → reconstruire son contenu sur ce dossier
+  const dr = document.getElementById('prodDrawer');
+  if (dr && dr.classList.contains('open') && dossierId) {
+    try { openProdDrawer(dossierId); } catch(e) {}
+  }
+}
+
 function _pcokStepsHtml(steps) {
   return steps.map((s,i) => {
     const col = s.status==='TERMINE'?'#16a34a':s.status==='EN_COURS'?'#d97706':s.status==='A_FAIRE'?'#2563eb':'#d6d3d1';
     const lbl = s.status==='TERMINE'?'Terminé':s.status==='EN_COURS'?'En cours':s.status==='A_FAIRE'?'À faire':'—';
     const ops = [...new Set(s.te.map(t=>t.operateur).filter(Boolean))].join(', ');
     const retard = s.te.some(t => _getTacheRetardInfo(t).isRetard);
+    // Étape sans pointage : c'est le responsable qui en pose l'état.
+    const manu = _estEtapeManuelle(s.e.code)
+      ? '<span class="pcok-dstep-manu">responsable</span>' : '';
     return `<div class="pcok-dstep ${s.status==='EN_COURS'?'pcok-dstep--active':''}">
       <div class="pcok-dstep-rail">
         <span class="pcok-dstep-dot" style="background:${col}">${s.status==='TERMINE'?'✓':i+1}</span>
         ${i<steps.length-1?`<span class="pcok-dstep-line" style="background:${s.status==='TERMINE'?'#16a34a':'#e5e3df'}"></span>`:''}
       </div>
       <div class="pcok-dstep-body">
-        <div class="pcok-dstep-head"><span class="pcok-dstep-lbl">${_pcokEsc(s.e.label)}</span><span class="pcok-dstep-st" style="color:${col}">${lbl}${retard?' · <b style="color:#dc2626">retard</b>':''}</span></div>
+        <div class="pcok-dstep-head"><span class="pcok-dstep-lbl">${_pcokEsc(s.e.label)}${manu}</span><span class="pcok-dstep-st" style="color:${col}">${lbl}${retard?' · <b style="color:#dc2626">retard</b>':''}</span></div>
         ${ops?`<div class="pcok-dstep-ops">${_pcokEsc(ops)}</div>`:'<div class="pcok-dstep-ops pcok-muted">Non assigné</div>'}
       </div>
     </div>`;
@@ -21689,6 +22026,7 @@ function _cockpitDetailBody(r, avecTete) {
     <div class="pcok-drawer-prog"><div class="pcok-prog-bar"><div style="width:${r.pct}%;background:${r.pct===100?'#16a34a':'#e8834a'}"></div></div><span>${r.pct}%</span></div>
     <div class="pcok-drawer-pipe-title">Pipeline de production</div>
     <div class="pcok-drawer-pipe">${stepsHtml}</div>
+    ${_etapesManuellesHtml(r.dossierId)}
     <div class="pcok-drawer-actions">
       ${canAttrib?`<button class="pcok-btn pcok-btn--primary" onclick="closeProdDrawer();openAttribForDossier('${r.dossierId}')">Gérer l'attribution →</button>`:''}
       ${_peutCloturer(_dossierParId(r.dossierId)) ? `<button class="pcok-btn" style="color:#16a34a;border-color:rgba(22,163,74,.4)" title="${_CLOT_TITRE}" onclick="cloturerDossier('${r.dossierId}')">✓ Clôturer</button>` : ''}
@@ -21739,7 +22077,7 @@ async function pointerStart(tacheId) {
     const si = ETAPES_CONFIG.findIndex(e => e.code === t.etapeCode);
     for (let i = 0; i < si; i++) {
       const prev = ETAPES_CONFIG[i];
-      const pt = taches.filter(x => x.dossierId === t.dossierId && x.etapeCode === prev.code);
+      const pt = _tachesEtape(t.dossierId, prev.code);
       if (pt.length && !pt.every(x => x.statut === 'TERMINE')) {
         showToast(`Impossible de démarrer : "${prev.label}" n'est pas encore terminée.`, 'error');
         return;

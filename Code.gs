@@ -53,9 +53,13 @@ const MACHINE_HEADERS  = ['ID','Machine','RefType','RefID','RefLabel','Client','
 // Cols M/N = accusé « client prévenu » du Suivi commande (retard sur la date de
 // production). Sur les classeurs antérieurs elles sont créées à la première écriture
 // (handleSetClientPrevenu) : ensureSheet ne migre pas une feuille déjà en place.
+// Col O = EtatsManuels : états des étapes pilotées à la main par le responsable
+// de production (JSON, cf. ETAPES_MANUELLES). Créée à la première écriture sur les
+// classeurs antérieurs (_ensureEtatsManuelsCol_) : ensureSheet ne migre pas une
+// feuille déjà en place.
 const DOSSIER_HEADERS = ['ID','NumeroDossier','Client','Produit','Quantite','Statut',
   'Progression','DateCreation','DateLivraison','Priorite','SourceVente','Notes',
-  'ClientPrevenuLe','ClientPrevenuPar'];
+  'ClientPrevenuLe','ClientPrevenuPar','EtatsManuels'];
 
 // Feuille Finitions : fiche d'atelier de l'étape FINITION (traçabilité seule pour
 // l'instant — pas de déduction de stock). Une ligne par dossier (upsert sur ID).
@@ -94,6 +98,63 @@ const ETAPES_PROD = [
   { code:'FINITION',      label:'Finition',                          progress:90  },
   { code:'LIVRE',         label:'Livraison',                         progress:100 },
 ];
+
+// Étapes PILOTÉES À LA MAIN par l'admin / le responsable de production : l'atelier
+// ne pointe pas ces étapes (pas d'ordinateur aux machines), le responsable pose
+// l'état directement sur le dossier (col O = EtatsManuels, JSON
+// { CODE:{st,par,le} }). Les étapes amont (validation commande, PAO, validations
+// client…) restent en pointage.
+// ⚠️ Doit rester IDENTIQUE à ETAPES_MANUELLES (app.js).
+const ETAPES_MANUELLES      = ['PRODUCTION','FINITION'];
+const ETATS_MANUELS_VALIDES = ['A_FAIRE','EN_COURS','TERMINE'];
+const COL_ETATS_MANUELS     = 15;   // col O de la feuille Dossiers
+
+// Crée la colonne EtatsManuels sur les classeurs antérieurs (14 colonnes).
+function _ensureEtatsManuelsCol_(sh) {
+  if (sh.getLastColumn() < COL_ETATS_MANUELS) {
+    sh.getRange(1, COL_ETATS_MANUELS).setValue('EtatsManuels');
+  }
+}
+
+function _etatsManuelsFromCell_(cell) {
+  const raw = String(cell || '').trim();
+  if (!raw) return {};
+  try {
+    const o = JSON.parse(raw);
+    return (o && typeof o === 'object') ? o : {};
+  } catch (e) { return {}; }
+}
+
+// États manuels d'une ligne Dossiers déjà localisée.
+function _etatsManuelsRow_(sh, rowNum) {
+  if (sh.getLastColumn() < COL_ETATS_MANUELS) return {};
+  return _etatsManuelsFromCell_(sh.getRange(rowNum, COL_ETATS_MANUELS).getValue());
+}
+
+// États manuels d'un dossier retrouvé par son ID.
+function _etatsManuelsDossier_(ss, dossierId) {
+  const sh = ss.getSheetByName(SHEET_DOSSIERS);
+  if (!sh || sh.getLastRow() <= 1 || sh.getLastColumn() < COL_ETATS_MANUELS) return {};
+  const match = sh.getRange(2, 1, sh.getLastRow() - 1, 1)
+    .createTextFinder(String(dossierId)).matchEntireCell(true).findNext();
+  return match ? _etatsManuelsRow_(sh, match.getRow()) : {};
+}
+
+// Applique les états manuels sur la carte « étape -> statuts de tâches » utilisée
+// pour calculer statut et progression. Un état posé à la main REMPLACE les
+// pointages de son étape. Et dès qu'un seul état manuel existe sur le dossier,
+// TOUTES les étapes manuelles entrent dans son pipeline (défaut « à faire ») :
+// sinon « Production terminée » ferait sauter le dossier à LIVRE en sautant la
+// finition, qui n'a par construction aucune tâche.
+function _overlayEtatsManuels_(byEtape, etats) {
+  if (!etats || !Object.keys(etats).length) return byEtape;
+  ETAPES_MANUELLES.forEach(function(code) {
+    const st = etats[code] && etats[code].st;
+    if (st)                                          byEtape[code] = [st];
+    else if (!byEtape[code] || !byEtape[code].length) byEtape[code] = ['A_FAIRE'];
+  });
+  return byEtape;
+}
 
 // ── Sécurité : hashage SHA-256 des mots de passe ──────────
 function _hashPwd_(pwd) {
@@ -170,6 +231,7 @@ function doPost(e) {
     else if (action === 'saveDossier')       result = handleSaveDossier(data);
     else if (action === 'updateDossier')     result = handleUpdateDossier(data);
     else if (action === 'cloturerDossier')   result = handleCloturerDossier(data);
+    else if (action === 'setEtapeManuelle')  result = handleSetEtapeManuelle(data);
     else if (action === 'creerDossierManuel') result = handleCreerDossierManuel(data);
     else if (action === 'saveTacheLibre')    result = handleSaveTacheLibre(data);
     else if (action === 'setTacheLibrePhotos') result = handleSetTacheLibrePhotos(data);
@@ -243,6 +305,7 @@ function doGet(e) {
       else if (action === 'addArretCaisse')    result = handleAddArretCaisse(data);
       else if (action === 'updateDossier')     result = handleUpdateDossier(data);
       else if (action === 'cloturerDossier')   result = handleCloturerDossier(data);
+      else if (action === 'setEtapeManuelle')  result = handleSetEtapeManuelle(data);
       else if (action === 'attribuerTache')    result = handleAttribuerTache(data);
       else if (action === 'pointerAction')     result = handlePointerAction(data);
       else if (action === 'deleteTache')       result = handleDeleteTache(data);
@@ -1360,6 +1423,7 @@ const _JMETA_ = {
   PRODUIT_DELETE:['Stock','Produit supprimé'],
   DOSSIER_CREATE:['Production','Dossier créé'], DOSSIER_MANUEL:['Production','Dossier manuel'],
   DOSSIER_CLOTURE:['Production','Dossier clôturé'],
+  ETAPE_MANUELLE:['Production','État d\'étape modifié'],
   TACHE_ATTRIB:['Production','Tâche attribuée'], TACHE_LIBRE_CREATE:['Production','Tâche créée'],
   TACHE_START:['Production','Tâche démarrée'], TACHE_FIN:['Production','Tâche terminée'],
   TACHES_RESET:['Production','Tâches réinitialisées'],
@@ -2162,8 +2226,9 @@ function handleGetDossiers(data) {
   const LIMIT  = Number((data && data.limit)) || 300;
   const start  = Math.max(2, lastRow - LIMIT + 1);
   const nRows  = lastRow - start + 1;
-  // 12 colonnes historiques + les 2 du « client prévenu » quand le classeur les a déjà.
-  const nCols  = Math.max(12, Math.min(sh.getLastColumn(), 14));
+  // 12 colonnes historiques + les 2 du « client prévenu » et les états manuels
+  // d'étapes quand le classeur les a déjà.
+  const nCols  = Math.max(12, Math.min(sh.getLastColumn(), COL_ETATS_MANUELS));
   const rows   = sh.getRange(start, 1, nRows, nCols).getValues();
 
   let list   = [];
@@ -2174,7 +2239,8 @@ function handleGetDossiers(data) {
     list.push({ id:r[0], numeroDossier:r[1], client:r[2], produit:r[3],
       quantite:Number(r[4]), statut:r[5], progression:Number(r[6]),
       dateCreation:dc, dateLivraison:dl, priorite:r[9], sourceVente:r[10], notes:r[11],
-      clientPrevenuLe: _prevenuIso_(r[12]), clientPrevenuPar: r[13] ? String(r[13]) : '' });
+      clientPrevenuLe: _prevenuIso_(r[12]), clientPrevenuPar: r[13] ? String(r[13]) : '',
+      etatsManuels: _etatsManuelsFromCell_(r[COL_ETATS_MANUELS - 1]) });
   }
 
   if (data && data.statut && data.statut !== 'TOUS') {
@@ -2304,6 +2370,9 @@ function handleCloturerDossier(data) {
   // dossier qu'on vient de passer à LIVRE. Un dossier sans aucune tâche n'est pas
   // concerné : prog.statut === null et majProgressionDossier_ sort sans rien écrire.
   const nbTaches = _cloreTachesDossier_(ss, data.id);
+  // Même raison pour les étapes pilotées à la main : laissées « à faire », elles
+  // feraient redescendre le dossier au premier recalcul de progression.
+  _cloreEtatsManuels_(sh, rowNum, data.par || 'admin');
   sh.getRange(rowNum, 6, 1, 2).setValues([['LIVRE', 100]]); // col F = Statut, col G = Progression
   sh.getRange(rowNum, 9, 1, 1).setValue(new Date());        // col I = DateLivraison
   _logAction_('DOSSIER_CLOTURE', data.par || 'admin',
@@ -2311,6 +2380,65 @@ function handleCloturerDossier(data) {
     + (nbTaches ? ' — ' + nbTaches + ' tâche(s) terminée(s)' : ' — aucune tâche attribuée'));
   CacheService.getScriptCache().remove('dashboard_v1');
   return { ok:true, tachesCloturees:nbTaches };
+}
+
+// ── Étapes pilotées à la main : production / finition ─────
+// L'admin ou le responsable de production pose l'état de l'étape directement sur
+// le dossier — ni tâche ni pointage, l'atelier n'a pas d'ordinateur aux machines.
+// Cet état devient la source de vérité de l'étape pour TOUT le système : statut et
+// progression du dossier sont recalculés ici (même modèle que majProgressionDossier_),
+// donc l'attribution, le suivi commande, le cockpit, le dashboard et le portail
+// opérateur affichent le même avancement.
+// statut vide = on retire l'état manuel et l'étape repasse sous le pointage.
+function handleSetEtapeManuelle(data) {
+  if (!data.id) return { ok:false, error:'id requis' };
+  const code = String(data.etapeCode || '');
+  if (ETAPES_MANUELLES.indexOf(code) < 0) {
+    return { ok:false, error:'Étape non pilotable à la main : ' + code };
+  }
+  const st = String(data.statut || '');
+  if (st && ETATS_MANUELS_VALIDES.indexOf(st) < 0) {
+    return { ok:false, error:'statut invalide : ' + st };
+  }
+  const ss = getSS();
+  const sh = ss.getSheetByName(SHEET_DOSSIERS);
+  if (!sh) return { ok:false, error:'Feuille Dossiers introuvable' };
+  const lastRow = sh.getLastRow();
+  if (lastRow <= 1) return { ok:false, error:'Dossier introuvable' };
+  const match = sh.getRange(2, 1, lastRow - 1, 1)
+    .createTextFinder(String(data.id)).matchEntireCell(true).findNext();
+  if (!match) return { ok:false, error:'Dossier introuvable' };
+  const rowNum = match.getRow();
+
+  _ensureEtatsManuelsCol_(sh);
+  const etats = _etatsManuelsRow_(sh, rowNum);
+  if (st) etats[code] = { st:st, par:String(data.par || ''), le:new Date().toISOString() };
+  else    delete etats[code];
+  // Format texte imposé : sans ça Sheets prendrait le JSON pour une formule.
+  sh.getRange(rowNum, COL_ETATS_MANUELS).setNumberFormat('@')
+    .setValue(Object.keys(etats).length ? JSON.stringify(etats) : '');
+
+  const prog = _computeDossierProgress_(ss, data.id, etats);
+  if (prog.statut !== null) {
+    sh.getRange(rowNum, 6, 1, 2).setValues([[prog.statut, prog.progression]]);
+    if (prog.statut === 'LIVRE') sh.getRange(rowNum, 9).setValue(new Date());
+  }
+  _logAction_('ETAPE_MANUELLE', data.par || 'frontend',
+    'Dossier ' + data.id + ' — ' + code + ' → ' + (st || 'pointage'));
+  CacheService.getScriptCache().remove('dashboard_v1');
+  return { ok:true, etatsManuels:etats,
+           statut:prog.statut, progression:prog.progression };
+}
+
+// Passe à TERMINE toutes les étapes pilotées à la main d'un dossier clôturé.
+function _cloreEtatsManuels_(sh, rowNum, par) {
+  _ensureEtatsManuelsCol_(sh);
+  const etats = _etatsManuelsRow_(sh, rowNum);
+  const le    = new Date().toISOString();
+  ETAPES_MANUELLES.forEach(function(code) {
+    etats[code] = { st:'TERMINE', par:String(par || ''), le:le };
+  });
+  sh.getRange(rowNum, COL_ETATS_MANUELS).setNumberFormat('@').setValue(JSON.stringify(etats));
 }
 
 // Passe à TERMINE toutes les tâches non terminées d'un dossier (feuille Taches :
@@ -2941,16 +3069,24 @@ function _progressFromByEtape_(byEtape) {
   return out;
 }
 
-function _computeDossierProgress_(ss, dossierId) {
-  const shT = ss.getSheetByName(SHEET_TACHES);
-  if (!shT || shT.getLastRow() <= 1) return { statut:null, progression:0 };
-  const rows = shT.getDataRange().getValues();
+// `etatsManuels` optionnel : passé par l'appelant qui a déjà la ligne Dossiers sous
+// la main (évite une seconde recherche) ; omis, on le relit depuis la feuille.
+function _computeDossierProgress_(ss, dossierId, etatsManuels) {
   const byEtape = {}; // etapeCode -> [statuts]
-  for (let i = 1; i < rows.length; i++) {
-    if (String(rows[i][1]) !== String(dossierId)) continue; // col 2 = DossierId
-    const code = rows[i][3];                                 // col 4 = EtapeCode
-    (byEtape[code] = byEtape[code] || []).push(rows[i][6]);  // col 7 = Statut
+  const shT = ss.getSheetByName(SHEET_TACHES);
+  if (shT && shT.getLastRow() > 1) {
+    const rows = shT.getDataRange().getValues();
+    for (let i = 1; i < rows.length; i++) {
+      if (String(rows[i][1]) !== String(dossierId)) continue; // col 2 = DossierId
+      const code = rows[i][3];                                 // col 4 = EtapeCode
+      (byEtape[code] = byEtape[code] || []).push(rows[i][6]);  // col 7 = Statut
+    }
   }
+  const etats = (etatsManuels === undefined)
+    ? _etatsManuelsDossier_(ss, dossierId)
+    : (etatsManuels || {});
+  _overlayEtatsManuels_(byEtape, etats);
+  if (!Object.keys(byEtape).length) return { statut:null, progression:0 };
   return _progressFromByEtape_(byEtape);
 }
 
@@ -2968,8 +3104,9 @@ function majProgressionDossier_(ss, dossierId, etapeCode) {
   if (!match) return;
   const rowNum = match.getRow();
 
-  // Recalcule d'après les tâches réelles (et non la position de l'étape terminée).
-  const prog = _computeDossierProgress_(ss, dossierId);
+  // Recalcule d'après les tâches réelles (et non la position de l'étape terminée),
+  // états manuels du responsable de production inclus.
+  const prog = _computeDossierProgress_(ss, dossierId, _etatsManuelsRow_(sh, rowNum));
   if (prog.statut === null) return; // dossier sans tâche : ne rien écraser
   sh.getRange(rowNum, 6, 1, 2).setValues([[prog.statut, prog.progression]]);
   if (prog.statut === 'LIVRE') {
