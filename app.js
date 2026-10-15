@@ -17090,6 +17090,67 @@ function setProdPhaseFilter(f) {
   renderTaches();
 }
 
+// ════════════════════════════════════════════════════════════
+// FILTRE « DATE DE PRODUCTION »
+// Une seule valeur pour toute la page Production — vue responsable (cockpit) ET
+// vue opérateur — reprise par défaut quand on imprime le planning :
+//   '' = toutes les dates · 'AUJ' · 'DEMAIN' · 'SEMAINE' (aujourd'hui → +6 j)
+//   · ou une date ISO précise (yyyy-mm-dd).
+// ════════════════════════════════════════════════════════════
+let _prodDateProd = '';
+
+const _PROD_PERIODES = [
+  { k:'AUJ',     label:"Aujourd'hui" },
+  { k:'DEMAIN',  label:'Demain' },
+  { k:'SEMAINE', label:'7 prochains jours' },
+  { k:'',        label:'Toutes les dates' },
+];
+
+function _estDateIso(v){ return /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')); }
+
+// Un dossier sans date de production ne ressort dans AUCUNE période : il n'est pas
+// planifié, le dire franchement vaut mieux que de le glisser dans la journée.
+function _matchDateProd(ymd, f) {
+  if (!f) return true;
+  if (!ymd) return false;
+  const d = _daysUntil(ymd);
+  if (f === 'AUJ')     return d === 0;
+  if (f === 'DEMAIN')  return d === 1;
+  if (f === 'SEMAINE') return d != null && d >= 0 && d <= 6;
+  return ymd === f;
+}
+
+// Date de production d'un dossier (ISO) — source unique des filtres et du planning.
+function _dateProdDossier(dossierId) {
+  const d = _dossierParId(dossierId);
+  return d ? _toIsoDate(d.dateLivraisonProd || d.dateLivraison || '') : '';
+}
+
+function _prodDateProdLabel(f) {
+  const v = (f === undefined) ? _prodDateProd : f;
+  if (!v) return 'toutes les dates';
+  const p = _PROD_PERIODES.find(x => x.k === v);
+  return p ? p.label.toLowerCase() : (_dispDate(v) || v);
+}
+
+function setProdDateProd(v) {
+  _prodDateProd = v || '';
+  _cockpitLimit = _COCKPIT_PAGE;   // nouveau filtre → on repart de la 1re page
+  renderTaches();
+}
+
+// Même contrôle dans les deux vues : raccourcis de période + date précise.
+function _prodDateProdControls() {
+  const iso  = _estDateIso(_prodDateProd) ? _prodDateProd : '';
+  const chip = (k, lbl) => `<button class="pdp-chip ${_prodDateProd === k ? 'pdp-chip--on' : ''}" onclick="setProdDateProd('${k}')">${lbl}</button>`;
+  return `<span class="pdp" title="Filtrer sur la date de production">
+    <span class="pdp-lbl">Date prod.</span>
+    ${chip('AUJ', 'Auj.')}${chip('DEMAIN', 'Demain')}${chip('SEMAINE', '7 j')}
+    <input type="date" class="select-input pdp-date" value="${iso}" onchange="setProdDateProd(this.value)" />
+    ${_prodDateProd ? `<button class="pdp-clear" onclick="setProdDateProd('')" title="Retirer le filtre">×</button>` : ''}
+  </span>`;
+}
+
 function _buildProgressBar(dossierId) {
   const dt = _tachesEffId(dossierId);
   // Cloisonnement : un opérateur ne voit que SON nom sous les étapes du pipeline.
@@ -20138,23 +20199,69 @@ function printLivraisons() {
   });
 }
 
-// Planning de production : la même fiche, mais pour l'atelier — échéance = date de
-// production, étape en cours et responsable en clair, et AUCUN montant (la feuille
-// circule entre les postes). Imprimé depuis la page Production.
-function printPlanningProduction() {
-  const rows = _delivBuildRows()
+// Commandes encore en production, datées sur leur date de production (à défaut la
+// date client) et filtrées sur la période demandée.
+function _planningProdRows(f) {
+  return _delivBuildRows()
     .filter(r => r.status === 'pending')
     .map(r => {
       const ymd = _toIsoDate(r.dateProd || r.dateClient || '');
       return Object.assign({}, r, { ymd, days: ymd ? _daysUntil(ymd) : null });
     })
+    .filter(r => _matchDateProd(r.ymd, f))
     .sort((a, b) => (a.ymd || '~').localeCompare(b.ymd || '~') || String(a.client).localeCompare(String(b.client), 'fr'));
-  if (!rows.length) { showToast('Aucune commande en production à imprimer', 'error'); return; }
+}
+
+// Le bouton « Planning » demande d'abord la période : la fiche part le plus souvent
+// pour une journée précise, et tout imprimer ferait des dizaines de pages. La
+// période affichée sur la page est proposée par défaut.
+let _planningProdSel = '';
+
+function openPlanningProdModal() {
+  _planningProdSel = _prodDateProd;
+  _renderPlanningProdOptions();
+  openModal('planningProdModal');
+}
+
+function setPlanningProdSel(v) {
+  _planningProdSel = v || '';
+  _renderPlanningProdOptions();
+}
+
+function _renderPlanningProdOptions() {
+  const el = document.getElementById('planningProdOptions');
+  if (!el) return;
+  const iso = _estDateIso(_planningProdSel) ? _planningProdSel : '';
+  const ligne = (k, label) => {
+    const n = _planningProdRows(k).length;
+    return `<button class="pprod-opt ${_planningProdSel === k ? 'pprod-opt--on' : ''}" onclick="setPlanningProdSel('${k}')">
+      <span>${label}</span><span class="pprod-n">${n}</span>
+    </button>`;
+  };
+  el.innerHTML = _PROD_PERIODES.map(p => ligne(p.k, p.label)).join('')
+    + `<div class="pprod-opt pprod-opt--date ${iso ? 'pprod-opt--on' : ''}">
+         <span>Date précise</span>
+         <input type="date" class="select-input" value="${iso}" onchange="setPlanningProdSel(this.value)" />
+       </div>`;
+}
+
+function confirmPlanningProd() {
+  closeModal('planningProdModal');
+  printPlanningProduction(_planningProdSel);
+}
+
+// Planning de production : la même fiche que la livraison, mais pour l'atelier —
+// échéance = date de production, étape en cours et responsable en clair, et AUCUN
+// montant (la feuille circule entre les postes).
+function printPlanningProduction(filtre) {
+  const f = (filtre === undefined) ? _prodDateProd : filtre;
+  const rows = _planningProdRows(f);
+  if (!rows.length) { showToast('Aucune commande en production sur cette période', 'error'); return; }
   const late = rows.filter(r => r.days != null && r.days < 0).length;
   _planningImprime({
     rows,
     titre: 'Planning de production',
-    sousTitre: `commandes en cours · échéance production · ${rows.length} dossier(s)${late ? ` · ${late} en retard` : ''}`,
+    sousTitre: `commandes en cours · date de production : ${_prodDateProdLabel(f)} · ${rows.length} dossier(s)${late ? ` · ${late} en retard` : ''}`,
     showMoney: false,
     showProd: true,
     unite: 'dossier',
@@ -21084,6 +21191,7 @@ function renderTaches() {
   // ── Vue opérateur (ses propres tâches) : restaurer les barres statiques ──
   const _fs = document.getElementById('prodFiltersSticky'); if (_fs) _fs.style.display = '';
   const _et = document.getElementById('prodExpandToggle'); if (_et) _et.style.display = '';
+  const _dp = document.getElementById('prodDateProdBar'); if (_dp) _dp.innerHTML = _prodDateProdControls();
 
   // Mettre à jour la barre charge opérateurs
   const wlEl = document.getElementById('opWorkloadContainer');
@@ -21122,6 +21230,13 @@ function renderTaches() {
   // phase d'épreuve courante correspond ; les tâches libres (sans dossier) sortent.
   if (_prodPhaseFilter !== 'all') {
     dossierList = dossierList.filter(t => _dossierEpreuvePhase(t.dossierId) === _prodPhaseFilter);
+    libreList = [];
+  }
+
+  // Filtre date de production — une tâche libre n'ayant pas de dossier, elle n'a
+  // pas de date de production : la section sort du filtre.
+  if (_prodDateProd) {
+    dossierList = dossierList.filter(t => _matchDateProd(_dateProdDossier(t.dossierId), _prodDateProd));
     libreList = [];
   }
 
@@ -21334,7 +21449,8 @@ function _cockpitBucketMatch(r, k) {
 }
 
 function _cockpitFilterRows(rows) {
-  let out = rows.filter(r => _cockpitBucketMatch(r, _cockpitFilter));
+  let out = rows.filter(r => _matchDateProd(r.ymd, _prodDateProd));
+  out = out.filter(r => _cockpitBucketMatch(r, _cockpitFilter));
   if (_cockpitOp !== 'TOUS')
     out = out.filter(r => r.responsables.some(o => _sameOp(o, _cockpitOp)) || r.steps.some(s => s.te.some(t => _sameOp(t.operateur, _cockpitOp))));
   if (_cockpitShift !== 'TOUS')
@@ -21615,7 +21731,9 @@ function renderProdCockpit() {
   const wl = document.getElementById('opWorkloadContainer'); if (wl) wl.style.display = 'none';
   const et = document.getElementById('prodExpandToggle'); if (et) et.style.display = 'none';
 
-  const all = _buildDossierRows();
+  // Le filtre date de production s'applique AVANT les cartes et les compteurs :
+  // sinon ils annonceraient des dossiers que le tableau n'affiche pas.
+  const all = _buildDossierRows().filter(r => _matchDateProd(r.ymd, _prodDateProd));
   const cnt = k => all.filter(r => _cockpitBucketMatch(r, k)).length;
   const opsSet = [...new Set(all.flatMap(r => r.responsables))].filter(Boolean).sort((a,b)=>a.localeCompare(b,'fr'));
   const etapesUsed = ETAPES_CONFIG.filter(e => all.some(r => r.curStep && r.curStep.code === e.code));
@@ -21677,7 +21795,7 @@ function _cockpitToolbar(cnt, opsSet, etapesUsed, all) {
   ].map(([k,l]) => `<option value="${k}" ${_cockpitGroupBy===k?'selected':''}>Grouper : ${l}</option>`).join('');
   const dirIcon = _cockpitSort.dir === 'asc' ? '↑' : '↓';
   return `<div class="pcok-toolbar">
-    <div class="pcok-chips">${shiftChips}</div>
+    <div class="pcok-chips">${shiftChips}${_prodDateProdControls()}</div>
     <div class="pcok-controls">
       <div class="pcok-search">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>

@@ -26,7 +26,7 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20261015-planning-production">
+<link rel="stylesheet" href="./style.css?v=20261015-filtre-date-prod">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
@@ -1086,6 +1086,24 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 .emanu-btn--on { box-shadow:inset 0 0 0 1px currentColor; }
 .emanu-trace { font-size:10.5px; color:var(--color-text-secondary); margin-top:6px; }
 .emanu-trace--none { color:var(--color-text-muted); font-style:italic; }
+/* Filtre « date de production » — présent dans les deux vues de la page Production */
+.pdp { display:inline-flex; align-items:center; gap:4px; flex-wrap:wrap; }
+.pdp-lbl { font-size:11px; font-weight:700; color:var(--color-text-secondary); text-transform:uppercase; letter-spacing:.04em; margin-right:2px; }
+.pdp-chip { padding:5px 10px; font-family:inherit; font-size:11.5px; font-weight:600; color:var(--color-text-secondary); background:var(--color-surface); border:1px solid var(--color-border); border-radius:8px; cursor:pointer; }
+.pdp-chip:hover { border-color:var(--color-primary); color:var(--color-primary); }
+.pdp-chip--on { background:var(--color-primary); border-color:var(--color-primary); color:#fff; }
+.pdp-date { min-width:130px; padding:5px 8px; font-size:11.5px; }
+.pdp-clear { width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; font-size:15px; line-height:1; color:var(--color-text-muted); background:none; border:1px solid var(--color-border); border-radius:8px; cursor:pointer; font-family:inherit; }
+.pdp-clear:hover { color:var(--color-danger); border-color:var(--color-danger); }
+/* Choix de la période avant impression du planning de production */
+.pprod-opts { display:flex; flex-direction:column; gap:6px; }
+.pprod-opt { display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%; padding:10px 12px; font-family:inherit; font-size:13px; font-weight:600; color:var(--color-text-primary); text-align:left; background:var(--color-surface); border:1px solid var(--color-border); border-radius:10px; cursor:pointer; }
+.pprod-opt:hover { border-color:var(--color-primary); }
+.pprod-opt--on { border-color:var(--color-primary); background:var(--color-primary-light); color:var(--color-primary); }
+.pprod-opt--date { cursor:default; }
+.pprod-opt--date input { max-width:150px; padding:5px 8px; font-size:12px; }
+.pprod-n { font-size:11px; font-weight:700; color:var(--color-text-secondary); background:var(--color-bg); border-radius:999px; padding:2px 8px; }
+.pprod-opt--on .pprod-n { background:#fff; color:var(--color-primary); }
 .pcok-drawer-actions { display:flex; gap:8px; margin-top:20px; padding-top:16px; border-top:1px solid var(--color-border); }
 .pcok-btn { flex:1; padding:10px 14px; border:1px solid var(--color-border); border-radius:9px; background:var(--color-surface); color:var(--color-text-primary); font-size:13px; font-weight:600; cursor:pointer; font-family:inherit; }
 .pcok-btn:hover { border-color:var(--color-primary); }
@@ -2364,7 +2382,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
           Imprimer
         </button>
-        <button class="btn-secondary-action" onclick="printPlanningProduction()" title="Imprimer le planning de production : étape en cours et responsable par commande">
+        <button class="btn-secondary-action" onclick="openPlanningProdModal()" title="Imprimer le planning de production : étape en cours et responsable par commande">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="14" x2="16" y2="14"/><line x1="8" y1="18" x2="13" y2="18"/></svg>
           Planning
         </button>
@@ -2422,6 +2440,8 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         Effacer filtre
       </button>
+      <!-- Filtre date de production — rempli par _prodDateProdControls() -->
+      <span id="prodDateProdBar"></span>
     </div>
     </div><!-- /prod-filters-sticky -->
 
@@ -3917,7 +3937,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20261015-planning-production"></script>
+<script src="./app.js?v=20261015-filtre-date-prod"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
@@ -4053,6 +4073,24 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
         <button class="btn-logout" onclick="closeModal('pointageModal')">Annuler</button>
         <button class="btn-login" style="width:auto;padding:12px 20px;margin-top:0;background:var(--green)" onclick="confirmPointage()"> Marquer terminé</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ MODAL PLANNING DE PRODUCTION — choix de la période ═══ -->
+  <div class="modal-overlay" id="planningProdModal">
+    <div class="modal" style="max-width:420px">
+      <div class="modal-title">
+        Planning de production
+        <button class="modal-close" onclick="closeModal('planningProdModal')"></button>
+      </div>
+      <p style="margin:0 0 12px;font-size:12.5px;color:var(--color-text-secondary)">
+        Quelle période imprimer ? Le compte indique les dossiers concernés par leur date de production.
+      </p>
+      <div id="planningProdOptions" class="pprod-opts"></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
+        <button class="btn-logout" onclick="closeModal('planningProdModal')">Annuler</button>
+        <button class="btn-login" style="width:auto;padding:12px 20px;margin-top:0" onclick="confirmPlanningProd()">Imprimer</button>
       </div>
     </div>
   </div>
