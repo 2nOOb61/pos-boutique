@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '216 · 2026-10-14';
+const APP_VERSION = '219 · 2026-10-15';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -18434,21 +18434,13 @@ function _calEvents(kind){
 // Groupe les événements d'un calendrier par jour, limité au mois affiché.
 function _calByDay(kind){
   const year = _calRef.getFullYear(), month = _calRef.getMonth();
-  const todayIso = _calTodayIso();
   const byDay = {};
   _calEvents(kind).forEach(e=>{
     if(e.status==='cancelled') return;
     const d = new Date(e.ymd+'T00:00:00');
     if(isNaN(d.getTime()) || d.getFullYear()!==year || d.getMonth()!==month) return;
     if(!_calMatchesBase(e)) return;
-    const st = _calFilters.status;
-    if(st){
-      const done = e.status==='completed';
-      const late = !done && e.ymd < todayIso;
-      if(st==='completed' && !done) return;
-      if(st==='active'    && (done || late)) return;
-      if(st==='late'      && !late) return;
-    }
+    if(!_calMatchesStatus(e)) return;          // même lecture du statut que la vue liste
     (byDay[e.ymd] = byDay[e.ymd]||[]).push(e);
   });
   return byDay;
@@ -18519,8 +18511,15 @@ function renderCalendrier(){
   _calRenderKpis();
   const lbl = document.getElementById('calMonthLabel');
   if(lbl) lbl.textContent = _CAL_MONTHS[_calRef.getMonth()]+' '+_calRef.getFullYear();
-  const p = document.getElementById('calMonthProd');   if(p) p.innerHTML = _calRenderMonth('prod');
-  const c = document.getElementById('calMonthClient'); if(c) c.innerHTML = _calRenderMonth('client');
+  // Une seule vue est construite à la fois : la grille mensuelle plafonnée à
+  // quatre commandes par case, ou le cockpit en liste (voir plus bas).
+  if(_calView === 'liste'){
+    _calRenderList();
+  } else {
+    const p = document.getElementById('calMonthProd');   if(p) p.innerHTML = _calRenderMonth('prod');
+    const c = document.getElementById('calMonthClient'); if(c) c.innerHTML = _calRenderMonth('client');
+    const w = document.getElementById('calListWrap');    if(w) w.innerHTML = '';
+  }
 }
 
 // Ouvre la source (dossier/commande/réservation) au clic sur un événement.
@@ -18653,6 +18652,338 @@ function printCalendrier(){
     ${tableFor('client')}
   </body></html>`);
   w.document.close();
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// CALENDRIER — VUE LISTE (le cockpit de la page Livraisons, pour le calendrier)
+// ══════════════════════════════════════════════════════════════════════════
+// La grille mensuelle montre la charge d'un coup d'œil, mais elle plafonne à
+// quatre commandes par case et ne sait rien dire des commandes SANS date. La
+// vue liste reprend donc la grammaire du cockpit Livraisons — chips
+// d'échéance, filtre de date, tri, densité, sections par journée — pour
+// travailler la file d'attente au lieu de la survoler.
+// Les filtres de la barre sticky (client, statut, responsable, pôle,
+// recherche) sont PARTAGÉS avec la grille : on bascule d'une vue à l'autre
+// sans les reposer. C'est aussi pourquoi la barre d'outils de la liste n'a pas
+// son propre champ de recherche : celui de la barre sticky, qui n'est jamais
+// redessiné, garde le focus pendant la frappe.
+
+let _calView = 'grille';                 // 'grille' | 'liste'
+let _calListState = { axis:'client', bucket:'MOIS', sort:'echeance', dir:'asc', density:'compact', date:'' };
+const _CAL_LIST_PAGE = 60;
+let _calListLimit = _CAL_LIST_PAGE;
+let _calListClosed = new Set();          // journées repliées (clé = ISO du jour, '~' = sans date)
+
+// « Mois affiché » et « Terminées » suivent la navigation mensuelle ; les
+// autres chips regardent TOUTES les dates — une commande en retard de six
+// semaines doit rester visible quand on consulte le mois en cours.
+const _CAL_LIST_BUCKETS = [
+  ['MOIS',      'Mois affiché'],
+  ['RETARD',    'En retard'],
+  ['AUJ',       "Aujourd'hui"],
+  ['SEMAINE',   'Cette semaine'],
+  ['SANS_DATE', 'Sans date'],
+  ['TERMINE',   'Terminées'],
+  ['TOUS',      'Toutes'],
+];
+
+function setCalView(v){
+  _calView = v === 'liste' ? 'liste' : 'grille';
+  const page = document.getElementById('page-calendrier');
+  if (page) page.classList.toggle('cal-mode-liste', _calView === 'liste');
+  const bg = document.getElementById('calViewGrille'), bl = document.getElementById('calViewListe');
+  if (bg) { bg.classList.toggle('cal-vt--on', _calView === 'grille'); bg.setAttribute('aria-pressed', _calView === 'grille'); }
+  if (bl) { bl.classList.toggle('cal-vt--on', _calView === 'liste');  bl.setAttribute('aria-pressed', _calView === 'liste'); }
+  renderCalendrier();
+}
+
+function setCalListAxis(v)      { _calListState.axis = v === 'prod' ? 'prod' : 'client'; _calListLimit = _CAL_LIST_PAGE; _calRenderList(); }
+function setCalListBucket(k)    { _calListState.bucket = k; _calListLimit = _CAL_LIST_PAGE; _calRenderList(); }
+function setCalListSort(v)      { if (_calListState.sort === v) _calListState.dir = _calListState.dir === 'asc' ? 'desc' : 'asc';
+                                  else { _calListState.sort = v; _calListState.dir = 'asc'; } _calRenderList(); }
+function toggleCalListDir()     { _calListState.dir = _calListState.dir === 'asc' ? 'desc' : 'asc'; _calRenderList(); }
+function toggleCalListDensity() { _calListState.density = _calListState.density === 'compact' ? 'detaille' : 'compact'; _calRenderList(); }
+function setCalListDate(v)      { _calListState.date = _toIsoDate(v || ''); _calListLimit = _CAL_LIST_PAGE; _calRenderList(); }
+function clearCalListDate()     { _calListState.date = ''; _calListLimit = _CAL_LIST_PAGE; _calRenderList(); }
+function calListShowMore()      { _calListLimit += _CAL_LIST_PAGE; _calRenderList(); }
+function calListToggleDay(k)    { if (_calListClosed.has(k)) _calListClosed.delete(k); else _calListClosed.add(k); _calRenderList(); }
+function calListFoldAll(close)  {
+  if (!close) _calListClosed.clear();
+  else [...new Set(_calListVisibleRows().map(r => r.ymd || '~'))].forEach(k => _calListClosed.add(k));
+  _calRenderList();
+}
+
+// Statut demandé par la barre sticky (En cours / En retard / Terminé).
+// Partagé par la grille et la liste pour que les deux vues disent la même chose.
+function _calMatchesStatus(e){
+  const st = _calFilters.status;
+  if (!st) return true;
+  const done = e.status === 'completed';
+  const late = !done && !!e.ymd && e.ymd < _calTodayIso();
+  if (st === 'completed') return done;
+  if (st === 'active')    return !done && !late;
+  if (st === 'late')      return late;
+  return true;
+}
+
+// Une ligne de liste = une commande vue par la date qui fait foi (`axis`).
+// `other` porte l'autre date du couple production ↔ livraison : c'est elle qui
+// révèle les délais courts, invisibles dans une grille seule.
+function _calListRows(){
+  const axis = _calListState.axis;
+  if (!_calPair || !_calPair.linked) _calPair = _calBuildPairs();
+  return _collectDeliveries().filter(x => x.status !== 'cancelled').map(x => {
+    const ymd   = _toIsoDate(axis === 'prod' ? (x.dateProd   || '') : (x.dateClient || ''));
+    const other = _toIsoDate(axis === 'prod' ? (x.dateClient || '') : (x.dateProd   || ''));
+    const key   = x.kind + ':' + x.id;
+    return Object.assign({}, x, {
+      ymd, other,
+      days:   ymd ? _daysUntil(ymd) : null,
+      short:  !!_calPair.short[key]  && x.status !== 'completed',
+      linked: !!_calPair.linked[key]
+    });
+  });
+}
+
+function _calListBucketMatch(r, k){
+  const inMonth = !!r.ymd
+    && Number(r.ymd.slice(0,4)) === _calRef.getFullYear()
+    && Number(r.ymd.slice(5,7)) === _calRef.getMonth() + 1;
+  const done = r.status === 'completed';
+  if (k === 'MOIS')      return inMonth;
+  if (k === 'RETARD')    return !done && r.days != null && r.days < 0;
+  if (k === 'AUJ')       return !done && r.days === 0;
+  if (k === 'SEMAINE')   return !done && r.days != null && r.days >= 0 && r.days <= 7;
+  if (k === 'SANS_DATE') return !r.ymd;
+  if (k === 'TERMINE')   return done && inMonth;
+  if (k === 'TOUS')      return true;
+  return true;
+}
+
+function _calListSort(rows){
+  const { sort, dir } = _calListState;
+  const sign = dir === 'desc' ? -1 : 1;
+  const cmp = ({
+    echeance: (a,b) => (a.days == null ? 1e9 : a.days) - (b.days == null ? 1e9 : b.days),
+    client:   (a,b) => String(a.client).localeCompare(String(b.client), 'fr'),
+    resp:     (a,b) => String(a.commercial || '').localeCompare(String(b.commercial || ''), 'fr'),
+    total:    (a,b) => a.total - b.total,
+  })[sort] || (() => 0);
+  return rows.slice().sort((a,b) => (sign * cmp(a,b))
+    || ((a.days == null ? 1e9 : a.days) - (b.days == null ? 1e9 : b.days))
+    || String(a.client).localeCompare(String(b.client), 'fr'));
+}
+
+function _calListVisibleRows(){
+  const rows = _calListRows().filter(r =>
+    _calMatchesBase(r) && _calMatchesStatus(r)
+    && _calListBucketMatch(r, _calListState.bucket)
+    && (!_calListState.date || r.ymd === _calListState.date));
+  return _calListSort(rows);
+}
+
+// Échéance en clair — « Terminé » et non « Livrée » : sur l'axe production la
+// ligne parle d'un atelier, pas d'un coursier.
+function _calRetInfo(r){
+  if (r.status === 'completed') return { txt:'Terminé',   col:'#16a34a' };
+  if (r.days == null)           return { txt:'Sans date', col:'#a8a29e' };
+  if (r.days < 0)               return { txt:'+' + Math.abs(r.days) + 'j retard', col:'#dc2626' };
+  if (r.days === 0)             return { txt:'Auj.',      col:'#e8834a' };
+  if (r.days === 1)             return { txt:'Demain',    col:'#e8834a' };
+  if (r.days <= 7)              return { txt:r.days + 'j', col:'#d97706' };
+  return { txt:r.days + 'j', col:'#78716c' };
+}
+
+function _calRenderList(){
+  const wrap = document.getElementById('calListWrap');
+  if (!wrap) return;
+  if (_calView !== 'liste') { wrap.innerHTML = ''; return; }
+  const showMoney = _DELIV_MONEY_ROLES.includes(currentUser?.role);
+  // Les compteurs des chips ignorent le chip courant et le filtre de date :
+  // ils doivent dire ce qu'on trouverait en cliquant ailleurs.
+  const all = _calListRows().filter(r => _calMatchesBase(r) && _calMatchesStatus(r));
+  const cnt = k => all.filter(r => _calListBucketMatch(r, k)).length;
+  const rows = _calListVisibleRows();
+  const page = rows.slice(0, _calListLimit);
+  const more = rows.length > _calListLimit
+    ? `<div class="pcok-more"><button onclick="calListShowMore()">Afficher plus (${rows.length - _calListLimit} restantes)</button></div>` : '';
+  wrap.innerHTML = `<div class="pcok">
+      ${_calListToolbar(cnt)}
+      ${_calListCount(rows, showMoney)}
+      ${_calListGroups(page, showMoney)}
+      ${more}
+    </div>`;
+}
+
+function _calListToolbar(cnt){
+  const chips = _CAL_LIST_BUCKETS.map(([k, lbl]) => {
+    const active = _calListState.bucket === k;
+    return `<button class="pcok-chip ${active ? 'pcok-chip--active' : ''} ${k === 'RETARD' ? 'pcok-chip--warn' : ''}" onclick="setCalListBucket('${k}')">${lbl}<span class="pcok-chip-n">${cnt(k)}</span></button>`;
+  }).join('');
+  const axisOpts = [['client','Échéance client'],['prod','Échéance production']]
+    .map(([v,l]) => `<option value="${v}" ${_calListState.axis === v ? 'selected' : ''}>${l}</option>`).join('');
+  const sortOpts = [['echeance','Échéance'],['client','Client'],['resp','Responsable'],['total','Montant']]
+    .map(([k,l]) => `<option value="${k}" ${_calListState.sort === k ? 'selected' : ''}>Trier : ${l}</option>`).join('');
+  const dateFilter = `<div class="pcok-datefilter${_calListState.date ? ' pcok-datefilter--active' : ''}" title="N'afficher qu'une date d'échéance précise">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        <input type="date" value="${_calListState.date || ''}" onchange="setCalListDate(this.value)" aria-label="Date d'échéance" />
+        ${_calListState.date ? `<button class="pcok-datefilter-clear" title="Effacer la date" onclick="clearCalListDate()">×</button>` : ''}
+      </div>`;
+  return `<div class="pcok-toolbar">
+    <div class="pcok-chips">${chips}</div>
+    <div class="pcok-controls">
+      <select class="select-input" onchange="setCalListAxis(this.value)" title="Date qui fait foi">${axisOpts}</select>
+      ${dateFilter}
+      <select class="select-input" onchange="setCalListSort(this.value)" title="Trier">${sortOpts}</select>
+      <button class="pcok-iconbtn" title="Sens du tri" onclick="toggleCalListDir()">${_calListState.dir === 'asc' ? '↑' : '↓'}</button>
+      <button class="pcok-iconbtn" title="Vue compacte / détaillée" onclick="toggleCalListDensity()">${_calListState.density === 'compact' ? 'Détaillé' : 'Compact'}</button>
+      <button class="pcok-iconbtn" title="Replier toutes les journées" onclick="calListFoldAll(true)">Replier</button>
+      <button class="pcok-iconbtn" title="Déplier toutes les journées" onclick="calListFoldAll(false)">Déplier</button>
+      <button class="pcok-iconbtn" title="Imprimer la liste telle qu'elle est filtrée" onclick="printCalListe()">Imprimer</button>
+    </div>
+  </div>`;
+}
+
+function _calListCount(rows, showMoney){
+  const bucketLbl = (_CAL_LIST_BUCKETS.find(b => b[0] === _calListState.bucket) || ['',''])[1].toLowerCase();
+  const suitLeMois = _calListState.bucket === 'MOIS' || _calListState.bucket === 'TERMINE';
+  const scope   = suitLeMois ? ' · ' + _CAL_MONTHS[_calRef.getMonth()] + ' ' + _calRef.getFullYear() : '';
+  const dateLbl = _calListState.date ? ' · date ' + _dispDate(_calListState.date) : '';
+  // Le rappel des retards n'a rien à dire quand on est DÉJÀ dans le chip « En retard ».
+  const late = _calListState.bucket === 'RETARD' ? 0
+    : rows.filter(r => r.status !== 'completed' && r.days != null && r.days < 0).length;
+  const sum  = rows.reduce((s,r) => s + (Number(r.total) || 0), 0);
+  return `<div class="pcok-count">${rows.length} échéance${rows.length > 1 ? 's' : ''} · ${bucketLbl}${scope}${dateLbl} · date ${_calListState.axis === 'prod' ? 'production' : 'livraison client'}${late ? ` · <span style="color:#dc2626;font-weight:700">${late} en retard</span>` : ''}${showMoney ? ` · Total ${fmt(sum)}` : ''}</div>`;
+}
+
+// Une section-carte par journée (même grammaire que les sections de Commandes),
+// la couleur de la bande disant l'urgence du jour : rouge en retard, orange
+// pour les deux jours qui viennent, couleur de l'axe sinon.
+function _calListGroups(rows, showMoney){
+  if (!rows.length) return `<div class="pcok-empty">
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.4"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+    <p>Aucune échéance dans ce filtre</p>
+  </div>`;
+  const det     = _calListState.density === 'detaille';
+  const axisCol = _calListState.axis === 'prod' ? '#7c3aed' : '#0d9488';
+  const groups = {}, order = [];
+  rows.forEach(r => {
+    const k = r.ymd || '~';
+    if (!groups[k]) { groups[k] = { ymd:r.ymd, rows:[] }; order.push(k); }
+    groups[k].rows.push(r);
+  });
+  const desc = _calListState.sort === 'echeance' && _calListState.dir === 'desc';
+  order.sort((a,b) => {
+    if (a === '~') return 1;
+    if (b === '~') return -1;
+    return (a < b ? -1 : a > b ? 1 : 0) * (desc ? -1 : 1);
+  });
+  const sections = order.map(k => {
+    const g = groups[k];
+    const meta = _delivDateLabel(g.ymd);
+    // `_delivDateLabel` parle toujours de livraison : sur l'axe production la
+    // journée sans date doit dire ce qu'il manque vraiment.
+    if (!g.ymd && _calListState.axis === 'prod') meta.label = 'Sans date de production';
+    // Une journée entièrement soldée n'est plus « en retard » : la bande passe
+    // au vert et le compte à rebours disparaît, sinon le planning alerte sur
+    // du travail déjà fait.
+    const fini = g.rows.every(r => r.status === 'completed');
+    const col = fini ? '#16a34a'
+      : meta.cls === 'late' ? '#dc2626' : meta.cls === 'soon' ? '#e8834a' : meta.cls === 'none' ? '#a8a29e' : axisCol;
+    const ferme = _calListClosed.has(k);
+    const qte = g.rows.reduce((s,r) => s + (r.items || []).reduce((t,i) => t + (Number(i.qty) || 1), 0), 0);
+    const droite = showMoney ? fmt(g.rows.reduce((s,r) => s + (Number(r.total) || 0), 0)) : qte + ' article' + (qte > 1 ? 's' : '');
+    return `<section class="cmdg${ferme ? ' cmdg--ferme' : ''}" style="--g:${col}">
+      <button type="button" class="cmdg-head" aria-expanded="${!ferme}" onclick="calListToggleDay('${k}')">
+        <span class="cmdg-dot"></span>
+        <span class="cmdg-t">${_pcokEsc(meta.label)}${meta.tag && !fini ? ' · ' + _pcokEsc(meta.tag) : ''}${fini ? ' · soldée' : ''}</span>
+        <span class="cmdg-n">${g.rows.length} commande${g.rows.length > 1 ? 's' : ''}</span>
+        <span class="cmdg-m">${droite}</span>
+        <span class="cmdg-chev">${ferme ? '⌄' : '⌃'}</span>
+      </button>
+      ${ferme ? '' : `<div class="cmdg-body">${_calListTable(g.rows, showMoney, det)}</div>`}
+    </section>`;
+  }).join('');
+  return `<div class="cmdg-list">${sections}</div>`;
+}
+
+function _calListTable(rows, showMoney, det){
+  const otherLbl = _calListState.axis === 'prod' ? 'Livraison client' : 'Production';
+  const th = (key, label, cls = '') => {
+    const active = key && _calListState.sort === key;
+    const arrow = active ? (_calListState.dir === 'asc' ? ' ↑' : ' ↓') : '';
+    return `<th class="pcok-th ${cls} ${active ? 'pcok-th--active' : ''}" ${key ? `onclick="setCalListSort('${key}')" style="cursor:pointer"` : ''}>${label}${arrow}</th>`;
+  };
+  const head = `<tr>
+    ${th('', '')}
+    ${th('client', 'Réf / Client')}
+    ${th('echeance', 'Échéance')}
+    ${det ? th('', 'Articles') : ''}
+    ${th('', otherLbl)}
+    ${th('', 'Mode')}
+    ${th('resp', 'Responsable')}
+    ${showMoney ? th('total', 'Total', 'pcok-num') : ''}
+    <th class="pcok-th"></th>
+  </tr>`;
+  return `<div class="pcok-tablewrap"><table class="pcok-table"><thead>${head}</thead><tbody>${rows.map(r => _calListRow(r, showMoney, det)).join('')}</tbody></table></div>`;
+}
+
+function _calListRow(r, showMoney, det){
+  const today = _calTodayIso();
+  const done  = r.status === 'completed';
+  const late  = !done && !!r.ymd && r.ymd < today;
+  const axisCol = _calListState.axis === 'prod' ? '#7c3aed' : '#0d9488';
+  const dotC = done ? '#16a34a' : r.short ? '#dc2626' : late ? '#d97706'
+    : r.days == null ? '#a8a29e' : (r.days === 0 || r.days === 1) ? '#e8834a' : axisCol;
+  const ret  = _calRetInfo(r);
+  const ech  = r.ymd ? new Date(r.ymd + 'T00:00:00').toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit' }) : '—';
+  const echC = late ? '#dc2626' : (!done && (r.days === 0 || r.days === 1)) ? '#e8834a' : 'var(--color-text-primary)';
+  const poleDots = _normPoles(r.poles).map(pk => `<span class="cal-pole-dot" style="background:${_poleColor(pk)}" title="${escapeHtml(_poleLabel(pk))}"></span>`).join('');
+  const items = r.items || [];
+  const first = items[0];
+  const shortItems = !items.length ? '—' : (items.length === 1 ? `${first.name} ×${first.qty || 1}` : `${first.name} +${items.length - 1}`);
+  const livChip = r.livStatut ? `<div style="margin-top:3px">${_livBadge(r.livStatut, _livInfo(r.livEtat))}</div>` : '';
+  const accent = done ? '' : late ? 'inset 3px 0 0 #dc2626' : (r.days === 0 || r.days === 1) ? 'inset 3px 0 0 #e8834a' : '';
+  return `<tr class="pcok-row ${done ? 'pcok-row--done' : ''}" ${accent ? `style="box-shadow:${accent}"` : ''} onclick="_calOpenDetail('${r.kind}','${r.id}','${r.dossierId || ''}')">
+    <td class="pcok-td-prio"><span class="pcok-prio" style="background:${dotC}"></span></td>
+    <td class="pcok-td-client">
+      <div class="pcok-client">${_pcokEsc(r.client)} ${poleDots}${r.linked ? _CAL_LINK_SVG : ''}</div>
+      <div class="pcok-ref">${_pcokEsc(r.ref)} · ${r.kind === 'reservation' ? 'Réservation' : 'Commande'}</div>
+      ${livChip}
+    </td>
+    <td class="pcok-td-ech">
+      <div style="color:${echC};font-weight:600">${ech}</div>
+      <div class="pcok-ret" style="color:${ret.col};background:${ret.col}1a;margin-top:2px">${ret.txt}</div>
+    </td>
+    ${det ? `<td class="pcok-muted">${_pcokEsc(shortItems)}</td>` : ''}
+    <td class="pcok-muted">${_dispDate(r.other) || '—'}${r.short ? `<div class="pcok-ret" style="color:#dc2626;background:#dc26261a;margin-top:2px" title="La production est collée à la livraison">Délai court</div>` : ''}</td>
+    <td><span style="font-size:10px;font-weight:700;color:${r.mode === 'livraison' ? '#c2410c' : '#1a4a3a'}">${r.mode === 'livraison' ? 'Livraison' : 'Retrait'}</span></td>
+    <td class="pcok-muted">${_pcokEsc(r.commercial || '—')}</td>
+    ${showMoney ? `<td class="pcok-num" style="font-weight:700">${fmt(r.total)}</td>` : ''}
+    <td class="pcok-td-act"><svg class="pcok-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></td>
+  </tr>`;
+}
+
+// Impression de la liste telle qu'elle est filtrée — la fiche papier du
+// planning, groupée par journée comme à l'écran (feuille partagée avec les
+// Livraisons et le Suivi de production).
+function printCalListe(){
+  const rows = _calListVisibleRows();
+  if (!rows.length) { showToast('Aucune échéance à imprimer', 'error'); return; }
+  const bucketLbl = (_CAL_LIST_BUCKETS.find(b => b[0] === _calListState.bucket) || ['',''])[1];
+  const suitLeMois = _calListState.bucket === 'MOIS' || _calListState.bucket === 'TERMINE';
+  const late = rows.filter(r => r.status !== 'completed' && r.days != null && r.days < 0).length;
+  _planningImprime({
+    rows,
+    titre: 'Planning calendrier',
+    sousTitre: `${bucketLbl}${suitLeMois ? ' · ' + _CAL_MONTHS[_calRef.getMonth()] + ' ' + _calRef.getFullYear() : ''}`
+      + ` · date ${_calListState.axis === 'prod' ? 'production' : 'livraison client'}`
+      + `${_calListState.date ? ' · date ' + _dispDate(_calListState.date) : ''}`
+      + ` · ${rows.length} commande(s)${late ? ` · ${late} en retard` : ''}`,
+    showMoney: _DELIV_MONEY_ROLES.includes(currentUser?.role),
+    showProd: false,
+    unite: 'commande',
+  });
 }
 
 // « En route » = partie avec le coursier et pas encore rentrée. Elle sort des
