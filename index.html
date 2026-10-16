@@ -1072,6 +1072,17 @@
   /* Mobile : seule la recherche reste visible, le reste se déplie à la demande.
      Sans cela, cartes d'état + chips + date + recherche + six listes déroulantes
      remplissaient l'écran avant le premier dossier. */
+  /* Les six cartes d'etat tenaient sur deux rangees, soit une centaine de pixels
+     avant le premier dossier : sur mobile elles deviennent une bande qui defile,
+     comme le bandeau d'alertes juste en dessous. Aucune n'est perdue, et la
+     liste commence plus haut. */
+  .cmdf-cards { display:flex; gap:6px; overflow-x:auto; scrollbar-width:none;
+    scroll-snap-type:x proximity; padding-bottom:4px; margin-bottom:8px; }
+  .cmdf-cards::-webkit-scrollbar { display:none; }
+  .cmdf-card { flex:0 0 auto; min-width:106px; scroll-snap-align:start; }
+  /* Alertes : meme bande, un peu plus serree sur petit ecran. */
+  .pcok-alerts { margin:8px 0 4px; }
+  .pcok-alert { width:168px; }
   .pcok-plus-btn { display:inline-flex; align-items:center; gap:6px; }
   .pcok-controls-sec { display:none; }
   .pcok-controls--ouvert .pcok-controls-sec { display:flex; flex-wrap:wrap; gap:6px; width:100%; }
@@ -4004,7 +4015,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20261016-prod-ui"></script>
+<script src="./app.js?v=20261016-prod-ui2"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
