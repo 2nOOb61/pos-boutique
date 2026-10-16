@@ -32,7 +32,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '219 · 2026-10-15';
+const APP_VERSION = '221 · 2026-10-16';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
