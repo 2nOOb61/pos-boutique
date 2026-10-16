@@ -10,10 +10,60 @@ async function sha256(str) {
 
 // Un mot de passe local valide est TOUJOURS un hash SHA-256 (64 hex).
 function _isPwdHash(v) { return /^[0-9a-f]{64}$/i.test(String(v || '')); }
-// Au moins un compte de ce poste porte un vrai hash = le poste est amorcé.
-function _anyLocalPwdHash() { return localUsers.some(x => _isPwdHash(x.pass)); }
 
-// Purge des mots de passe locaux qui ne sont pas des hashs SHA-256.
+// ── HASHS DES ANCIENS MOTS DE PASSE D'USINE ────────────
+// SHA-256 de '1234', '0000', '1111', '2222', '3333', '4444', '5555', '6666',
+// '7777' : les mots de passe d'usine que `localUsers` portait en clair jusqu'au
+// correctif (cf. `git show 4e3e241^:app.js`, vers la ligne 186).
+// Pourquoi ces valeurs sont-elles écrites en dur ici : l'ancienne
+// _migrateLocalUserPasswords() tournait à CHAQUE démarrage et hashait tout
+// `pass` de moins de 60 caractères. Sur tous les postes déjà en service, ces
+// mots de passe de 4 chiffres ont donc été convertis en hashs parfaitement
+// valides et réécrits dans localStorage : effacer les seuls `pass` non hashés
+// ne les atteint pas, et le fallback hors ligne les accepterait encore.
+// Elles sont en constantes littérales (et non recalculées via sha256, qui est
+// async) pour que la purge reste SYNCHRONE : elle est appelée sans await au
+// démarrage, et une course avec doLogin rouvrirait le trou par intermittence.
+// Faux positif assumé : si quelqu'un a réellement choisi '1234' comme mot de
+// passe, son hash est purgé aussi — il se reconnecte une fois en ligne et le
+// hash est reposé par doLogin.
+const FACTORY_PWD_HASHES = [
+  '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4', // 1234
+  '9af15b336e6a9619928537df30b2e6a2376569fcf9d7e773eccede65606529a0', // 0000
+  '0ffe1abd1a08215353c233d6e009613e95eec4253832a761af28ff37ac5a150c', // 1111
+  'edee29f882543b956620b26d0ee0e7e950399b1c4222f5de05e06425b4c995e9', // 2222
+  '318aee3fed8c9d040d35a7fc1fa776fb31303833aa2de885354ddf3d44d8fb69', // 3333
+  '79f06f8fde333461739f220090a23cb2a79f6d714bee100d0e4b4af249294619', // 4444
+  'c1f330d0aff31c1c87403f1e4347bcc21aff7c179908723535f2b31723702525', // 5555
+  'd7697570462f7562b83e81258de0f1e41832e98072e44c36ec8efec46786e24e', // 6666
+  '41c991eb6a66242c0454191244278183ce58cf4a6bcd372f799e4b9cc01886af', // 7777
+];
+function _isFactoryPwdHash(v) {
+  return FACTORY_PWD_HASHES.indexOf(String(v || '').toLowerCase()) >= 0;
+}
+// Un `pass` exploitable = un hash qui n'est pas un hash d'usine.
+function _isUsablePwdHash(v) { return _isPwdHash(v) && !_isFactoryPwdHash(v); }
+// Au moins un compte de ce poste porte un hash exploitable = le poste est amorcé.
+function _anyLocalPwdHash() { return localUsers.some(x => _isUsablePwdHash(x.pass)); }
+
+// ── MARQUEUR « CE POSTE A DÉJÀ SERVI » ───────────────
+// Posé dès qu'un mot de passe stocké (clair hérité ou hash d'usine) est trouvé
+// puis effacé : les deux trahissent un poste qui a déjà tourné sur une version
+// antérieure, donc EN SERVICE. Sans ce marqueur, le nettoyage rendrait ce poste
+// indistinguable d'une install neuve et rouvrirait le chemin d'amorçage —
+// c'est-à-dire le trou qu'on ferme ici : admin / '1234' hors ligne. La remise en
+// route passe alors par une connexion au Sheet (ou un mot de passe redéfini
+// depuis Utilisateurs). Lu par doLogin via _posteDejaEnService().
+const POSTE_EN_SERVICE_KEY = 'pos-poste-en-service';
+function _markPosteEnService() {
+  try { localStorage.setItem(POSTE_EN_SERVICE_KEY, '1'); } catch(e) {}
+}
+function _posteDejaEnService() {
+  try { return localStorage.getItem(POSTE_EN_SERVICE_KEY) === '1'; } catch(e) { return false; }
+}
+
+// Purge des mots de passe locaux inexploitables : ni hash SHA-256, ou bien hash
+// d'un ancien mot de passe d'usine (cf. FACTORY_PWD_HASHES ci-dessus).
 // Appelée au démarrage. Avant, cette fonction HASHAIT le texte clair trouvé :
 // les mots de passe d'usine ('1234', '7777'…) devenaient donc des hashs
 // parfaitement valides, et n'importe qui pouvait ouvrir un compte jamais
@@ -23,9 +73,16 @@ function _anyLocalPwdHash() { return localUsers.some(x => _isPwdHash(x.pass)); }
 // Utilisateurs permet le login hors ligne. Voir BOOTSTRAP_* pour l'amorçage.
 function _purgeLocalPlainPasswords() {
   let changed = false;
+  let hadStoredPwd = false;
   for (const u of localUsers) {
-    if (u.pass && !_isPwdHash(u.pass)) { u.pass = null; changed = true; }
+    if (u.pass && !_isUsablePwdHash(u.pass)) {
+      // clair hérité ou hash d'usine : les deux trahissent un poste déjà utilisé
+      hadStoredPwd = true;
+      u.pass = null;
+      changed = true;
+    }
   }
+  if (hadStoredPwd) _markPosteEnService();
   if (changed) {
     try { localStorage.setItem('pos-users', JSON.stringify(localUsers)); } catch(e) {}
   }
@@ -212,7 +269,8 @@ let localUsers = [
 // Choix retenu : un unique chemin explicite — le compte 'admin' avec le mot de
 // passe d'amorçage ci-dessous — ouvert SEULEMENT si les deux conditions sont
 // réunies au moment du login :
-//   1) aucun compte de ce poste ne porte encore de hash (poste jamais amorcé) ;
+//   1) ce poste n'a jamais servi : aucun compte n'y porte de hash exploitable, et
+//      la purge n'y a trouvé aucun mot de passe stocké (cf. POSTE_EN_SERVICE_KEY) ;
 //   2) le Sheet ne peut pas trancher : injoignable / non configuré, ou bien il
 //      ne contient aucun compte ADMIN avec mot de passe défini (Sheet neuf).
 // L'amorçage ne pose JAMAIS de hash : il ne crée donc pas un mot de passe '1234'
@@ -534,7 +592,7 @@ async function doLogin() {
   if (!loginOk) {
     const lu = localUsers.find(x =>
       x.username.toLowerCase() === u &&
-      _isPwdHash(x.pass) && x.pass === pHashed &&
+      _isUsablePwdHash(x.pass) && x.pass === pHashed &&
       x.actif !== false
     );
     if (lu) {
@@ -549,7 +607,8 @@ async function doLogin() {
   // On ne pose aucun hash : le chemin reste ouvert jusqu'à ce qu'un vrai mot de
   // passe soit défini, et se referme définitivement dès qu'il en existe un.
   if (!loginOk && u === BOOTSTRAP_ADMIN_USER && p === BOOTSTRAP_ADMIN_PASS
-      && !_anyLocalPwdHash() && !(await _sheetHasAdminPassword())) {
+      && !_posteDejaEnService() && !_anyLocalPwdHash()
+      && !(await _sheetHasAdminPassword())) {
     const seedAdmin = localUsers.find(x => x.username === BOOTSTRAP_ADMIN_USER) || {};
     loginOk = true;
     userInfo = {
@@ -4301,16 +4360,20 @@ function loadUsers() {
         const patched = { ...su };
         const badLabel = !patched.label || patched.label === 'undefined';
         if (badLabel) patched.label = def?.label || su.username;
-        if (!_isPwdHash(patched.pass)) {
+        if (!_isUsablePwdHash(patched.pass)) {
           if (patched.pass) dropped = true;
           patched.pass = null;
         }
         return patched;
       });
-      // Un mot de passe en clair hérité d'une ancienne version ne doit pas rester
-      // au repos dans le stockage : on réécrit la liste nettoyée tout de suite.
+      // Un mot de passe hérité (clair, ou hash d'usine posé par l'ancienne
+      // migration) ne doit pas rester au repos dans le stockage : on réécrit la
+      // liste nettoyée tout de suite, et on marque le poste comme déjà en
+      // service — c'est ici, et pas dans _purgeLocalPlainPasswords(), que les
+      // valeurs stockées sont encore visibles (loadUsers tourne en premier).
       if (dropped) {
         try { localStorage.setItem('pos-users', JSON.stringify(localUsers)); } catch(e) {}
+        _markPosteEnService();
       }
     }
   } catch(e) {}
@@ -5278,8 +5341,8 @@ async function loadUsersFromScript() {
         // Mot de passe : on ne garde QUE le hash local posé par une connexion
         // réussie sur ce poste. Le Sheet ne renvoie jamais de mot de passe ; toute
         // valeur non-hash qui arriverait ici ne doit pas servir d'identifiant.
-        patched.pass = _isPwdHash(patched.pass) ? patched.pass
-                     : (_isPwdHash(local && local.pass) ? local.pass : null);
+        patched.pass = _isUsablePwdHash(patched.pass) ? patched.pass
+                     : (_isUsablePwdHash(local && local.pass) ? local.pass : null);
         // Le Sheet peut ne pas (encore) stocker superAdmin → conserver le flag local
         if (patched.superAdmin === undefined && local && local.superAdmin !== undefined) patched.superAdmin = local.superAdmin;
         const badLabel = !patched.label || patched.label === 'undefined';
@@ -9468,7 +9531,7 @@ let tachesLibres = []; // doit être déclaré avant loadTachesLibres()
 loadConfig();
 loadData();
 loadUsers();
-_purgeLocalPlainPasswords(); // efface tout mot de passe local non hashé (sécurité login)
+_purgeLocalPlainPasswords(); // efface les mots de passe locaux non hashés ET les hashs d'usine
 loadTachesLibres();
 loadCommentsLocal();
 loadDemandesAchatLocal();
