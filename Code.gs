@@ -33,7 +33,7 @@ const SHEET_COURSES_LIBRES = 'CoursesLibres'; // courses du coursier hors comman
 // encaisser annoncée au départ (vide si aucune).
 const COURSE_LIBRE_HEADERS_ = ['ID','Date','Heure','Coursier','Beneficiaire','Destination','Demandeur','Motif','Detail','Montant','Fiche','Imprime_Par','Timestamp'];
 const SHEET_BATS          = 'BATs';           // suivi des BAT (épreuves) : versions, envoi client, retours, validation
-const BAT_HEADERS_        = ['ID','DossierId','NumeroDossier','Version','Statut','Retours','FileName','FileUrl','FileDlUrl','FileType','CreatedBy','CreatedAt','SentBy','SentAt','DecidedBy','DecidedAt','Files','Kind'];
+const BAT_HEADERS_        = ['ID','DossierId','NumeroDossier','Version','Statut','Retours','FileName','FileUrl','FileDlUrl','FileType','CreatedBy','CreatedAt','SentBy','SentAt','DecidedBy','DecidedAt','Files','Kind','RetourPhysiqueAt','RetourPhysiquePar','RetourPhysiqueRecu','RetourPhysiqueModifs'];
 
 // Nouvelles feuilles
 const SHEET_DOSSIERS   = 'Dossiers';
@@ -1191,6 +1191,12 @@ function handleAddBat(data) {
   // Colonne Kind (18) ajoutée après coup (Simulation / BAT) : même schéma de patch
   // d'en-tête que Files, pour ne pas décaler les lignes existantes.
   if (sh.getLastColumn() < 18) sh.getRange(1, 18).setValue('Kind');
+  // Colonnes 19-22 : retour de l'épreuve PHYSIQUE signée (date, qui l'a pointée,
+  // qui l'a rapportée, et les modifications relevées dessus). Même schéma de patch
+  // d'en-tête : une feuille existante gagne les colonnes sans décaler ses lignes.
+  if (sh.getLastColumn() < 22) {
+    sh.getRange(1, 19, 1, 4).setValues([['RetourPhysiqueAt','RetourPhysiquePar','RetourPhysiqueRecu','RetourPhysiqueModifs']]);
+  }
 
   let filesJson = '';
   try { filesJson = JSON.stringify(Array.isArray(b.files) ? b.files : []); } catch (_) { filesJson = '[]'; }
@@ -1202,7 +1208,9 @@ function handleAddBat(data) {
     String(b.sentBy || ''), String(b.sentAt || ''),
     String(b.decidedBy || ''), String(b.decidedAt || ''),
     filesJson,
-    (b.kind === 'simulation' ? 'simulation' : 'bat')
+    (b.kind === 'simulation' ? 'simulation' : 'bat'),
+    String(b.retourPhysiqueAt || ''), String(b.retourPhysiquePar || ''),
+    String(b.retourPhysiqueRecu || ''), String(b.retourPhysiqueModifs || '')
   ];
   const last = sh.getLastRow();
   if (last > 1) {
@@ -1239,7 +1247,10 @@ function handleGetBats(data) {
       fileName, fileUrl, fileDlUrl, fileType, files, kind,
       createdBy: String(r[10]), createdAt: String(r[11]),
       sentBy: String(r[12]), sentAt: String(r[13]),
-      decidedBy: String(r[14]), decidedAt: String(r[15])
+      decidedBy: String(r[14]), decidedAt: String(r[15]),
+      // col 19-22 = retour de l'épreuve physique, absentes des feuilles antérieures
+      retourPhysiqueAt:     String(r[18] || ''), retourPhysiquePar:    String(r[19] || ''),
+      retourPhysiqueRecu:   String(r[20] || ''), retourPhysiqueModifs: String(r[21] || '')
     };
   }).filter(x => x.id);
   if (data && data.dossierId) list = list.filter(x => String(x.dossierId) === String(data.dossierId));

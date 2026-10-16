@@ -26,7 +26,7 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20261016-login-offline">
+<link rel="stylesheet" href="./style.css?v=20261016-bat-retour">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
@@ -4015,7 +4015,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20261016-prod-ui2"></script>
+<script src="./app.js?v=20261016-bat-retour"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
@@ -4169,6 +4169,35 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
         <button class="btn-logout" onclick="closeModal('planningProdModal')">Annuler</button>
         <button class="btn-login" style="width:auto;padding:12px 20px;margin-top:0" onclick="confirmPlanningProd()">Imprimer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ MODAL RETOUR DU BAT PHYSIQUE (Suivi BAT) ═══ -->
+  <div class="modal-overlay" id="batRetourModal">
+    <div class="modal" style="max-width:520px">
+      <div class="modal-title">
+        <span id="batRetourTitre">Retour du BAT physique</span>
+        <button class="modal-close" onclick="closeModal('batRetourModal')"></button>
+      </div>
+      <p style="margin:0 0 14px;font-size:12.5px;color:var(--color-text-secondary)">
+        L'épreuve papier est revenue en boutique. Notez ici ce que le client a écrit dessus :
+        c'est ce document signé qui fait foi en production.
+      </p>
+      <div class="bat-ret-form">
+        <label class="bat-ret-lbl" for="batRetourDate">Date du retour</label>
+        <input type="date" id="batRetourDate" class="select-input" />
+
+        <label class="bat-ret-lbl" for="batRetourRecu">Rapporté par</label>
+        <input type="text" id="batRetourRecu" class="select-input" placeholder="Le client, un coursier, le commercial…" />
+
+        <label class="bat-ret-lbl" for="batRetourModifs">Modifications relevées sur l'épreuve</label>
+        <textarea id="batRetourModifs" class="select-input" rows="6"
+          placeholder="Une modification par ligne — ex. :&#10;Logo à agrandir&#10;Couleur du fond trop foncée&#10;Faute sur « Antananarivo »"></textarea>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
+        <button class="btn-logout" onclick="closeModal('batRetourModal')">Annuler</button>
+        <button class="btn-login" style="width:auto;padding:12px 20px;margin-top:0" onclick="saveBatRetourPhysique()">Enregistrer le retour</button>
       </div>
     </div>
   </div>

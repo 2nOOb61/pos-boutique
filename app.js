@@ -97,7 +97,7 @@ function _purgeLocalPlainPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '225 · 2026-10-16';
+const APP_VERSION = '226 · 2026-10-16';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -15505,6 +15505,48 @@ function batMarkSent(batId){
   _refreshBatUi(b.dossierId);
 }
 
+// Le papier arrive au comptoir : commercial ou PAO peuvent le pointer (l'un le
+// reçoit du client, l'autre le récupère pour produire).
+function _canBatRetourPhysique(){ return _canCommercialBat() || _canPaoBat(); }
+
+let _batRetourEditId = null;
+
+function openBatRetourPhysique(batId){
+  if (!_canBatRetourPhysique()) { showToast('Réservé au commercial ou à la PAO', 'error'); return; }
+  const b = bats.find(x => x.id === batId); if (!b) return;
+  _batRetourEditId = batId;
+  const iso = b.retourPhysiqueAt ? String(b.retourPhysiqueAt).slice(0, 10) : _todayISO();
+  const el = id => document.getElementById(id);
+  if (el('batRetourTitre')) el('batRetourTitre').textContent = `Retour du BAT physique — v${b.version}${b.numeroDossier ? ' · ' + b.numeroDossier : ''}`;
+  if (el('batRetourDate'))  el('batRetourDate').value  = iso;
+  if (el('batRetourRecu'))  el('batRetourRecu').value  = b.retourPhysiqueRecu || '';
+  if (el('batRetourModifs'))el('batRetourModifs').value= b.retourPhysiqueModifs || '';
+  openModal('batRetourModal');
+}
+
+function saveBatRetourPhysique(){
+  const b = bats.find(x => x.id === _batRetourEditId); if (!b) return;
+  const el = id => document.getElementById(id);
+  const date = (el('batRetourDate') && el('batRetourDate').value) || _todayISO();
+  // On garde l'heure de saisie : deux épreuves rendues le même jour restent
+  // ordonnées dans la timeline.
+  const dejaPointe = !!b.retourPhysiqueAt;
+  b.retourPhysiqueAt     = new Date(date + 'T' + new Date().toTimeString().slice(0, 8)).toISOString();
+  b.retourPhysiqueRecu   = ((el('batRetourRecu') && el('batRetourRecu').value) || '').trim();
+  b.retourPhysiqueModifs = ((el('batRetourModifs') && el('batRetourModifs').value) || '').trim();
+  b.retourPhysiquePar    = _myOpLabel();
+  saveData(); syncBatToScript(b);
+  closeModal('batRetourModal');
+  if (!dejaPointe) {
+    _addNotification({ dossierId:b.dossierId, numeroDossier:b.numeroDossier, etapeCode:'BAT',
+      etapeLabel:'Retour BAT physique', operateur:_myOpLabel(),
+      message:`BAT v${b.version} — épreuve papier revenue en boutique (${b.numeroDossier || 'dossier'})`
+        + (b.retourPhysiqueModifs ? ` · modifications : ${b.retourPhysiqueModifs}` : ' · sans modification notée') });
+  }
+  showToast(dejaPointe ? 'Retour physique mis à jour' : 'BAT physique pointé comme revenu');
+  _refreshBatUi(b.dossierId);
+}
+
 function batValidate(batId){
   if (!_canCommercialBat()) { showToast('Réservé au commercial', 'error'); return; }
   const b = bats.find(x => x.id === batId); if (!b) return;
@@ -15601,6 +15643,21 @@ function _batSectionInner(d){
     if (isPao) actions += `<button class="bat-btn" onclick="batCreate('${d.id}','bat')">Nouveau BAT</button>`;
   }
 
+  // ── Retour du BAT PHYSIQUE ────────────────────────────────────────────
+  // La décision du client (validé / retours) et le retour de l'exemplaire PAPIER
+  // sont deux faits distincts : le client peut valider au téléphone et rapporter
+  // l'épreuve signée deux jours plus tard, annotée de corrections. L'atelier a
+  // besoin de savoir que le document est en boutique AVANT de lancer la série.
+  // Proposé dès que le BAT est parti chez le client, quelle que soit la décision.
+  if (phase === 'bat' && latest && latest.sentAt) {
+    if (_canBatRetourPhysique()) {
+      actions += `<button class="bat-btn bat-btn--retphy" onclick="openBatRetourPhysique('${latest.id}')">`
+        + (latest.retourPhysiqueAt ? 'Modifier le retour physique' : 'Retour BAT physique') + `</button>`;
+    } else if (!latest.retourPhysiqueAt) {
+      actions += `<span class="bat-hint">Retour du BAT physique à pointer par le commercial…</span>`;
+    }
+  }
+
   // Liste des versions (simulation + BAT, plus récent en tête)
   const roundsHtml = rounds.length ? rounds.map(b => {
     const isSim = _batKind(b) === 'simulation';
@@ -15626,7 +15683,8 @@ function _batSectionInner(d){
     const timeline = [
       b.createdAt ? `Créé ${_batWhen(b.createdAt)}${b.createdBy?' · '+escapeHtml(b.createdBy):''}` : '',
       b.sentAt ? `Envoyé ${_batWhen(b.sentAt)}${b.sentBy?' · '+escapeHtml(b.sentBy):''}` : '',
-      b.decidedAt ? `${b.status==='valide'?'Validé':'Retour'} ${_batWhen(b.decidedAt)}${b.decidedBy?' · '+escapeHtml(b.decidedBy):''}` : ''
+      b.decidedAt ? `${b.status==='valide'?'Validé':'Retour'} ${_batWhen(b.decidedAt)}${b.decidedBy?' · '+escapeHtml(b.decidedBy):''}` : '',
+      b.retourPhysiqueAt ? `Épreuve papier revenue ${_batWhen(b.retourPhysiqueAt)}${b.retourPhysiquePar?' · '+escapeHtml(b.retourPhysiquePar):''}` : ''
     ].filter(Boolean).join(' — ');
     return `<div class="bat-round">
         <div class="bat-round-top">
@@ -15637,6 +15695,12 @@ function _batSectionInner(d){
         </div>
         ${pendBar}
         ${b.retours ? `<div class="bat-retours"><b>Retours client :</b> ${escapeHtml(b.retours)}</div>` : ''}
+        ${b.retourPhysiqueAt ? `<div class="bat-retphy">
+          <b>BAT physique revenu</b> — ${_batWhen(b.retourPhysiqueAt)}${b.retourPhysiqueRecu ? ` · rapporté par ${escapeHtml(b.retourPhysiqueRecu)}` : ''}${b.retourPhysiquePar ? ` · pointé par ${escapeHtml(b.retourPhysiquePar)}` : ''}
+          <div class="bat-retphy-m">${b.retourPhysiqueModifs
+            ? escapeHtml(b.retourPhysiqueModifs).replace(/\n/g, '<br>')
+            : '<i>Aucune modification notée sur l\'épreuve.</i>'}</div>
+        </div>` : ''}
         ${timeline ? `<div class="bat-time">${timeline}</div>` : ''}
       </div>`;
   }).join('') : '<div class="bat-empty">Aucune épreuve pour l\'instant.</div>';
