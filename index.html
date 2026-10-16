@@ -679,6 +679,33 @@
 .pcok-chip--warn.pcok-chip--active { background:#fee2e2; border-color:#fca5a5; color:#dc2626; }
 .pcok-chip-n { font-size:10px; font-weight:800; background:rgba(0,0,0,.07); border-radius:999px; padding:1px 7px; min-width:16px; text-align:center; }
 .pcok-chip--active .pcok-chip-n { background:rgba(255,255,255,.55); }
+/* Icônes SVG de la barre d'outils : alignées sur le texte et de la même couleur
+   (currentColor), pour remplacer les emojis qui changeaient de dessin et de
+   couleur selon le système. */
+.ckp-i { flex:none; vertical-align:-2px; }
+/* Sur ordinateur les contrôles secondaires font partie du même flex que la
+   recherche (display:contents), et le bouton de repli n'existe pas. */
+.pcok-controls-sec { display:contents; }
+.pcok-plus-btn { display:none; }
+/* Filtres actifs — un filtre oublié fait croire à une liste vide : ils restent
+   affichés en clair sous la barre d'outils, chacun retirable d'un clic. */
+.pcok-actifs { display:flex; align-items:center; gap:6px; flex-wrap:wrap; padding-top:2px; }
+.pcok-actifs-lbl { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:800;
+  text-transform:uppercase; letter-spacing:.04em; color:var(--color-text-secondary); }
+.pcok-tag { display:inline-flex; align-items:center; gap:6px; padding:5px 9px; border-radius:999px;
+  border:1.5px solid rgba(26,74,58,.3); background:var(--color-primary-light); color:var(--color-primary);
+  font-size:12px; font-weight:600; font-family:inherit; cursor:pointer; transition:.12s; }
+.pcok-tag:hover { border-color:var(--color-primary); background:#dceae4; }
+.pcok-tag-l { font-weight:800; opacity:.75; }
+.pcok-tag-v { font-weight:600; }
+.pcok-tag--reset { background:var(--color-surface); border-color:var(--color-border);
+  color:var(--color-text-secondary); font-weight:700; }
+.pcok-tag--reset:hover { border-color:#dc2626; color:#dc2626; background:#fef2f2; }
+/* Clavier : chaque contrôle du cockpit montre où se trouve le focus. */
+.pcok-chip:focus-visible, .pcok-tag:focus-visible, .pcok-iconbtn:focus-visible,
+.pcok-th:focus-visible, .cmdg-head:focus-visible, .cmdc-btn:focus-visible,
+.pcok-search input:focus-visible, .pcok-controls .select-input:focus-visible {
+  outline:2px solid var(--color-primary); outline-offset:2px; border-radius:8px; }
 /* Sections-cartes de la page Commandes (Grouper par : echeance / paiement / commercial).
    Un classement EXCLUSIF : une commande n'apparait que dans une section. */
 .cmdg-list { display:flex; flex-direction:column; gap:12px; margin-top:4px; }
@@ -888,6 +915,7 @@
 .pcok--attr { padding-bottom:4px; }
 .pcok-empty { display:flex; flex-direction:column; align-items:center; gap:10px; padding:56px 0; color:var(--color-text-secondary); }
 .pcok-empty p { font-size:13px; font-weight:500; margin:0; }
+.pcok-empty-aide { font-size:12px; font-weight:400 !important; color:var(--color-text-muted); max-width:34ch; text-align:center; }
 /* Récapitulatif des adresses de livraison (panneau repliable) */
 .deliv-recap { border:1px solid var(--color-border,#e5e3df); border-radius:12px; background:var(--color-surface,#fff); margin-bottom:12px; overflow:hidden; }
 .deliv-recap-head { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:11px 14px; cursor:pointer; user-select:none; }
@@ -1027,6 +1055,28 @@
 .bloc-action { display:inline-block; font-size:11.5px; font-weight:700; padding:3px 9px; border-radius:8px; border:1.5px solid; background:transparent; line-height:1.35; }
 @media(max-width:760px){ .bloc-cards { grid-template-columns:repeat(2,1fr); } }
 /* Responsive : tableau → cartes empilées */
+/* Mobile : les contrôles du cockpit sont des cibles tactiles (44 px recommandés),
+   et les filtres actifs défilent horizontalement plutôt que d'empiler cinq
+   lignes au-dessus de la liste. */
+@media(max-width:760px){
+  .pcok-chip, .pcok-iconbtn, .pcok-tag { min-height:40px; }
+  /* Les puces de date de production vivent dans la meme barre : meme cible tactile. */
+  .pdp-chip, .pdp-clear { min-height:40px; padding-left:12px; padding-right:12px; }
+  .pdp-date { min-height:40px; }
+  .pcok-controls .select-input { min-height:40px; font-size:13px; }
+  .pcok-search input { min-height:40px; font-size:16px; }   /* 16px = pas de zoom auto iOS */
+  .pcok-actifs { flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; padding-bottom:2px; }
+  .pcok-actifs::-webkit-scrollbar { display:none; }
+  .pcok-actifs-lbl { flex:none; }
+  .pcok-tag { flex:none; }
+  /* Mobile : seule la recherche reste visible, le reste se déplie à la demande.
+     Sans cela, cartes d'état + chips + date + recherche + six listes déroulantes
+     remplissaient l'écran avant le premier dossier. */
+  .pcok-plus-btn { display:inline-flex; align-items:center; gap:6px; }
+  .pcok-controls-sec { display:none; }
+  .pcok-controls--ouvert .pcok-controls-sec { display:flex; flex-wrap:wrap; gap:6px; width:100%; }
+  .pcok-controls--ouvert .pcok-controls-sec > * { flex:1 1 46%; }
+}
 @media(max-width:760px){
   .pcok-table thead { display:none; }
   .pcok-table, .pcok-table tbody, .pcok-table tr, .pcok-table td { display:block; width:100%; }
@@ -3954,7 +4004,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20261016-livree"></script>
+<script src="./app.js?v=20261016-prod-ui"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

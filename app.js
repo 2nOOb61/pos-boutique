@@ -97,7 +97,7 @@ function _purgeLocalPlainPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '223 · 2026-10-16';
+const APP_VERSION = '224 · 2026-10-16';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -9581,6 +9581,25 @@ let _cockpitDensity = 'compact'; // compact | detaille
 let _cockpitOpsOpen = false;    // heatmap opérateurs repliée par défaut
 let _cockpitLimit   = 60;       // pagination : nb de lignes affichées (pas à pas)
 const _COCKPIT_PAGE = 60;
+// Nombre de dossiers affichés d'un coup, réglable depuis la barre d'outils :
+// l'atelier qui dépouille sa journée en veut 20, le chef qui cherche une commande
+// les veut tous. 0 = tout afficher. Vaut aussi pour les sections quand la liste
+// est groupée, pour que « Afficher plus » annonce partout le même pas.
+const _CKP_TAILLES = [20, 50, 100, 0];
+function _cockpitPageSize(){
+  try {
+    const v = Number(localStorage.getItem('pos-prod-page'));
+    if (_CKP_TAILLES.includes(v)) return v === 0 ? 100000 : v;
+  } catch(e) {}
+  return _COCKPIT_PAGE;
+}
+function _cockpitPageSizeBrut(){
+  try {
+    const v = Number(localStorage.getItem('pos-prod-page'));
+    if (_CKP_TAILLES.includes(v)) return v;
+  } catch(e) {}
+  return _COCKPIT_PAGE;
+}
 
 // Pipeline de production — l'ORDRE de ce tableau pilote tout l'affichage du flux.
 // Les `code` sont des clés persistées dans les tâches (t.etapeCode) et la feuille
@@ -17343,7 +17362,7 @@ function _prodDateProdLabel(f) {
 
 function setProdDateProd(v) {
   _prodDateProd = v || '';
-  _cockpitLimit = _COCKPIT_PAGE;   // nouveau filtre → on repart de la 1re page
+  _cockpitLimit = _cockpitPageSize();   // nouveau filtre → on repart de la 1re page
   renderTaches();
 }
 
@@ -22080,8 +22099,14 @@ let _cockpitGroupBy = (function(){
   catch(e) { return 'etape'; }
 })();
 let _cockpitGrpFermes = (function(){
-  try { return new Set(JSON.parse(localStorage.getItem('pos-prod-grp-fermes') || '[]')); }
-  catch(e) { return new Set(); }
+  // Premier affichage : on ouvre ce qui attend une action et on replie les
+  // dossiers terminés, qui n'attendent plus personne. Ensuite c'est le choix de
+  // l'opérateur qui fait foi (il est enregistré sur le poste).
+  try {
+    const brut = localStorage.getItem('pos-prod-grp-fermes');
+    if (brut == null) return new Set(['TERMINE']);
+    return new Set(JSON.parse(brut) || []);
+  } catch(e) { return new Set(['TERMINE']); }
 })();
 let _cockpitGrpLimites = {};
 
@@ -22117,7 +22142,7 @@ function prodToggleGroupe(cle){
 }
 function prodGroupePlus(cle){
   const k = String(cle);
-  _cockpitGrpLimites[k] = (_cockpitGrpLimites[k] || _CMD_GRP_PAGE) + _CMD_GRP_PAGE;
+  _cockpitGrpLimites[k] = (_cockpitGrpLimites[k] || _cockpitPageSize()) + _cockpitPageSize();
   _cockpitRenderBody();
 }
 
@@ -22139,6 +22164,94 @@ function _ckpSousLigne(rows){
   const run = rows.filter(r => r._hasRunning).length;
   if (run) return run + ' en cours';
   return '';
+}
+
+// Icônes de la barre d'outils du suivi de production. Tracés Lucide, jamais
+// d'emoji : un emoji change de dessin selon le système, ne se colore pas avec le
+// texte et se lit « symbole soleil » dans un lecteur d'écran.
+function _ckpIcon(nom, taille){
+  const t = taille || 14;
+  const s = `<svg class="ckp-i" viewBox="0 0 24 24" width="${t}" height="${t}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">`;
+  if (nom === 'soleil')      return s+'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/></svg>';
+  if (nom === 'lune')        return s+'<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
+  if (nom === 'loupe')       return s+'<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
+  if (nom === 'chevron-bas') return s+'<polyline points="6 9 12 15 18 9"/></svg>';
+  if (nom === 'chevron-haut')return s+'<polyline points="18 15 12 9 6 15"/></svg>';
+  if (nom === 'fleche-haut') return s+'<line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>';
+  if (nom === 'fleche-bas')  return s+'<line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>';
+  if (nom === 'tableau')     return s+'<line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>';
+  if (nom === 'cartes')      return s+'<rect x="3" y="3" width="18" height="7" rx="1.5"/><rect x="3" y="14" width="18" height="7" rx="1.5"/></svg>';
+  if (nom === 'croix')       return s+'<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+  if (nom === 'filtre')      return s+'<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>';
+  if (nom === 'vide')        return s+'<path d="M3 7h18M6 7v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>';
+  return '';
+}
+
+// ── Filtres actifs ────────────────────────────────────────────────────────
+// Un filtre qu'on a oublié fait croire à une liste vide ou incomplète. Chaque
+// filtre posé s'affiche donc en clair, se retire d'un clic, et « Tout
+// réinitialiser » rend la liste complète.
+function _cockpitFiltresActifs(){
+  const tags = [];
+  if (_cockpitFilter !== 'TOUS') {
+    const f = _CKP_FILTRES.find(x => x[0] === _cockpitFilter);
+    tags.push(['filtre', 'État', f ? f[1] : _cockpitFilter]);
+  }
+  if (_cockpitEtape !== 'TOUS') {
+    const e = ETAPES_CONFIG.find(x => x.code === _cockpitEtape);
+    tags.push(['etape', 'Étape', e ? e.label : _cockpitEtape]);
+  }
+  if (_cockpitOp    !== 'TOUS') tags.push(['op',    'Opérateur', _cockpitOp]);
+  if (_cockpitShift !== 'TOUS') tags.push(['shift', 'Équipe',    _cockpitShift]);
+  if (_prodDateProd)            tags.push(['date',  'Date prod.', _prodDateProdLabel()]);
+  if ((_cockpitSearch || '').trim()) tags.push(['search', 'Recherche', '« ' + _cockpitSearch.trim() + ' »']);
+  if (!tags.length) return '';
+  const chips = tags.map(([cle, lbl, val]) =>
+    `<button type="button" class="pcok-tag" onclick="_cockpitClearFiltre('${cle}')"
+       aria-label="Retirer le filtre ${_pcokEsc(lbl)} : ${_pcokEsc(val)}">
+       <span class="pcok-tag-l">${_pcokEsc(lbl)}</span><span class="pcok-tag-v">${_pcokEsc(val)}</span>${_ckpIcon('croix', 12)}
+     </button>`).join('');
+  return `<div class="pcok-actifs" role="status" aria-live="polite">
+    <span class="pcok-actifs-lbl">${_ckpIcon('filtre')} ${tags.length} filtre${tags.length > 1 ? 's' : ''} actif${tags.length > 1 ? 's' : ''}</span>
+    ${chips}
+    <button type="button" class="pcok-tag pcok-tag--reset" onclick="_cockpitResetFiltres()">Tout réinitialiser</button>
+  </div>`;
+}
+
+function _cockpitClearFiltre(quoi){
+  if (quoi === 'filtre')      _cockpitFilter = 'TOUS';
+  else if (quoi === 'etape')  _cockpitEtape  = 'TOUS';
+  else if (quoi === 'op')     _cockpitOp     = 'TOUS';
+  else if (quoi === 'shift')  _cockpitShift  = 'TOUS';
+  else if (quoi === 'search') _cockpitSearch = '';
+  else if (quoi === 'date')   { setProdDateProd(''); return; }   // re-rend déjà
+  _cockpitLimit = _cockpitPageSize();
+  renderProdCockpit();
+}
+
+function _cockpitResetFiltres(){
+  _cockpitFilter = 'TOUS'; _cockpitEtape = 'TOUS'; _cockpitOp = 'TOUS';
+  _cockpitShift  = 'TOUS'; _cockpitSearch = '';
+  _cockpitLimit  = _cockpitPageSize();
+  setProdDateProd('');          // remet la période ET re-rend la page
+}
+
+// Repli des contrôles secondaires sur mobile (sur ordinateur ils sont toujours
+// visibles, la place ne manque pas). Non persisté : on rouvre la page sur la
+// liste, pas sur ses réglages.
+let _cockpitFiltresOuverts = false;
+function _cockpitToggleFiltres(){
+  _cockpitFiltresOuverts = !_cockpitFiltresOuverts;
+  renderProdCockpit();
+}
+
+function _cockpitSetPageSize(v){
+  const n = Number(v);
+  if (!_CKP_TAILLES.includes(n)) return;
+  try { localStorage.setItem('pos-prod-page', String(n)); } catch(e) {}
+  _cockpitLimit = _cockpitPageSize();
+  _cockpitGrpLimites = {};
+  renderProdCockpit();
 }
 
 function _cockpitFilterCards(all) {
@@ -22215,7 +22328,7 @@ function _cockpitGroupes(rows) {
 
 function _cockpitGroupeHtml(g, rendu) {
   const ferme = _cockpitGrpFermes.has(g.cle);
-  const lim   = _cockpitGrpLimites[g.cle] || _CMD_GRP_PAGE;
+  const lim   = _cockpitGrpLimites[g.cle] || _cockpitPageSize();
   const page  = g.rows.slice(0, lim);
   const reste = g.rows.length - page.length;
   const suite = reste > 0
@@ -22227,7 +22340,7 @@ function _cockpitGroupeHtml(g, rendu) {
       <span class="cmdg-t">${_pcokEsc(g.titre)}</span>
       <span class="cmdg-n">${g.rows.length} dossier${g.rows.length>1?'s':''}</span>
       <span class="cmdg-m">${_pcokEsc(g.argent)}</span>
-      <span class="cmdg-chev">${ferme?'⌄':'⌃'}</span>
+      <span class="cmdg-chev">${_ckpIcon(ferme ? 'chevron-bas' : 'chevron-haut')}</span>
     </button>
     ${ferme ? '' : `<div class="cmdg-body">${rendu(page)}${suite}</div>`}
   </section>`;
@@ -22235,7 +22348,7 @@ function _cockpitGroupeHtml(g, rendu) {
 
 // Liste en cartes dépliables — le détail (pipeline + actions) s'ouvre SOUS la carte.
 function _cockpitCards(rows) {
-  if (!rows.length) return `<div class="pcok-empty"><p>Aucun dossier ne correspond aux filtres.</p></div>`;
+  if (!rows.length) return _cockpitEtatVide();
   return `<div class="cmdc-list">${rows.map(_cockpitCarte).join('')}</div>`;
 }
 
@@ -22299,7 +22412,7 @@ function _cockpitCarte(r) {
       </div>
       <div class="cmdc-go">
         <button type="button" class="cmdc-btn" onclick="event.stopPropagation();prodToggleCarte('${id}')">
-          ${ouvert ? 'Masquer le détail' : 'Voir le détail'}<span class="cmdc-chev">${ouvert?'⌃':'⌄'}</span>
+          ${ouvert ? 'Masquer le détail' : 'Voir le détail'}<span class="cmdc-chev">${_ckpIcon(ouvert ? 'chevron-haut' : 'chevron-bas')}</span>
         </button>
         <button type="button" class="cmdc-btn2" title="Ouvrir la fiche dans le panneau latéral" onclick="event.stopPropagation();openProdDrawer('${id}')">Fiche</button>
       </div>
@@ -22364,9 +22477,9 @@ function _cockpitToolbar(cnt, opsSet, etapesUsed, all) {
   // Chips équipe (Jour/Nuit) — filtre indépendant, compte les dossiers ayant ≥1 tâche du shift.
   const shiftCnt = sh => sh === 'TOUS' ? all.length
     : all.filter(r => r.steps.some(s => s.te.some(t => (t.shift || '') === sh))).length;
-  const shiftChips = [['TOUS','Toutes'], ['Jour','☀️ Jour'], ['Nuit','🌙 Nuit']].map(([k,lbl]) => {
+  const shiftChips = [['TOUS','Toutes',''], ['Jour','Jour','soleil'], ['Nuit','Nuit','lune']].map(([k,lbl,ic]) => {
     const active = _cockpitShift === k;
-    return `<button class="pcok-chip ${active?'pcok-chip--active':''}" onclick="_cockpitSetShift('${k}')">${lbl}<span class="pcok-chip-n">${shiftCnt(k)}</span></button>`;
+    return `<button class="pcok-chip ${active?'pcok-chip--active':''}" aria-pressed="${active}" onclick="_cockpitSetShift('${k}')">${ic?_ckpIcon(ic,13):''}${lbl}<span class="pcok-chip-n">${shiftCnt(k)}</span></button>`;
   }).join('');
   const opOpts = ['<option value="TOUS">Tous les opérateurs</option>']
     .concat(opsSet.map(o => `<option value="${_pcokEsc(o)}" ${_cockpitOp===o?'selected':''}>${_pcokEsc(o)}</option>`)).join('');
@@ -22378,24 +22491,39 @@ function _cockpitToolbar(cnt, opsSet, etapesUsed, all) {
   const grpOpts = [
     ['etape','Étape'], ['echeance','Échéance'], ['operateur','Opérateur'], ['aucun','Sans groupe']
   ].map(([k,l]) => `<option value="${k}" ${_cockpitGroupBy===k?'selected':''}>Grouper : ${l}</option>`).join('');
-  const dirIcon = _cockpitSort.dir === 'asc' ? '↑' : '↓';
+  const asc = _cockpitSort.dir === 'asc';
+  const tailleOpts = _CKP_TAILLES.map(n =>
+    `<option value="${n}" ${_cockpitPageSizeBrut() === n ? 'selected' : ''}>${n === 0 ? 'Tout afficher' : n + ' par page'}</option>`).join('');
+  // Nombre de filtres posés : affiché sur le bouton mobile, pour qu'un filtre
+  // replié ne reste jamais invisible.
+  const nActifs = (_cockpitFilter !== 'TOUS') + (_cockpitEtape !== 'TOUS') + (_cockpitOp !== 'TOUS')
+                + (_cockpitShift !== 'TOUS') + (!!_prodDateProd) + (!!(_cockpitSearch || '').trim());
   return `<div class="pcok-toolbar">
     <div class="pcok-chips">${shiftChips}${_prodDateProdControls()}</div>
-    <div class="pcok-controls">
+    <div class="pcok-controls${_cockpitFiltresOuverts ? ' pcok-controls--ouvert' : ''}">
       <div class="pcok-search">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input type="text" placeholder="Rechercher client, produit, réf…" value="${_pcokEsc(_cockpitSearch)}" oninput="_cockpitSetSearch(this.value)" />
+        ${_ckpIcon('loupe')}
+        <input type="text" id="pcokSearchInput" aria-label="Rechercher un dossier par client, produit ou référence"
+               placeholder="Rechercher client, produit, réf…" value="${_pcokEsc(_cockpitSearch)}" oninput="_cockpitSetSearch(this.value)" />
       </div>
-      <select class="select-input" onchange="_cockpitSetOp(this.value)" title="Filtrer par opérateur">${opOpts}</select>
-      <select class="select-input" onchange="_cockpitSetEtape(this.value)" title="Filtrer par étape">${etOpts}</select>
-      <select class="select-input" onchange="_cockpitSetGroupBy(this.value)" title="Regrouper les dossiers en sections">${grpOpts}</select>
-      <select class="select-input" onchange="_cockpitSetSort(this.value)" title="Trier">${sortOpts}</select>
-      <button class="pcok-iconbtn" title="Sens du tri" onclick="_cockpitToggleSortDir()">${dirIcon}</button>
-      <button class="pcok-iconbtn" title="Basculer entre les cartes dépliables et le tableau dense" onclick="_cockpitSetVue('${_cockpitVue==='cartes'?'table':'cartes'}')">${_cockpitVue==='cartes'?'☰ Tableau':'▤ Cartes'}</button>
+      <button type="button" class="pcok-iconbtn pcok-plus-btn" aria-expanded="${_cockpitFiltresOuverts}"
+              aria-controls="pcokControlsSec" onclick="_cockpitToggleFiltres()">
+        ${_ckpIcon('filtre')} Filtres et tri${nActifs ? `<span class="pcok-chip-n">${nActifs}</span>` : ''}
+      </button>
+      <div class="pcok-controls-sec" id="pcokControlsSec">
+      <select class="select-input" onchange="_cockpitSetOp(this.value)" aria-label="Filtrer par opérateur" title="Filtrer par opérateur">${opOpts}</select>
+      <select class="select-input" onchange="_cockpitSetEtape(this.value)" aria-label="Filtrer par étape" title="Filtrer par étape">${etOpts}</select>
+      <select class="select-input" onchange="_cockpitSetGroupBy(this.value)" aria-label="Regrouper les dossiers en sections" title="Regrouper les dossiers en sections">${grpOpts}</select>
+      <select class="select-input" onchange="_cockpitSetSort(this.value)" aria-label="Trier les dossiers" title="Trier">${sortOpts}</select>
+      <button class="pcok-iconbtn" aria-label="Sens du tri : ${asc ? 'croissant' : 'décroissant'}" title="Sens du tri" onclick="_cockpitToggleSortDir()">${_ckpIcon(asc ? 'fleche-haut' : 'fleche-bas')}</button>
+      <select class="select-input" onchange="_cockpitSetPageSize(this.value)" aria-label="Nombre de dossiers affichés par page" title="Dossiers par page">${tailleOpts}</select>
+      <button class="pcok-iconbtn" title="Basculer entre les cartes dépliables et le tableau dense" onclick="_cockpitSetVue('${_cockpitVue==='cartes'?'table':'cartes'}')">${_cockpitVue==='cartes'?_ckpIcon('tableau')+' Tableau':_ckpIcon('cartes')+' Cartes'}</button>
       ${_cockpitVue === 'cartes'
         ? `<button class="pcok-iconbtn" title="Déplier ou replier toutes les cartes affichées" onclick="prodToggleToutesCartes()">Tout déplier</button>`
         : `<button class="pcok-iconbtn pcok-density" title="Vue compacte / détaillée" onclick="_cockpitToggleDensity()">${_cockpitDensity==='compact'?'Détaillé':'Compact'}</button>`}
-    </div>
+      </div><!-- /.pcok-controls-sec -->
+    </div><!-- /.pcok-controls -->
+    ${_cockpitFiltresActifs()}
   </div>`;
 }
 
@@ -22450,16 +22578,33 @@ function _cockpitOpHeatmap() {
   </div>`;
 }
 
-function _cockpitTable(rows) {
-  if (!rows.length) return `<div class="pcok-empty">
-    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.4"><polyline points="20 6 9 17 4 12"/></svg>
-    <p>Aucun dossier${_cockpitFilter!=='TOUS'||_cockpitSearch?' dans ce filtre':''}</p>
+// Trois situations, trois messages : rien à produire, une recherche sans
+// résultat, ou des filtres trop serrés — dans les deux derniers cas on donne la
+// sortie de secours plutôt que de laisser l'opérateur devant une page vide.
+function _cockpitEtatVide(){
+  const q = (_cockpitSearch || '').trim();
+  const filtre = _cockpitFilter !== 'TOUS' || _cockpitEtape !== 'TOUS' || _cockpitOp !== 'TOUS'
+              || _cockpitShift !== 'TOUS' || !!_prodDateProd;
+  let titre, aide;
+  if (q)           { titre = `Aucun dossier pour « ${_pcokEsc(q)} »`; aide = 'Vérifiez l\'orthographe, ou cherchez sur le nom du client ou la référence.'; }
+  else if (filtre) { titre = 'Aucun dossier avec ces filtres'; aide = 'Les filtres actifs sont listés en haut de la liste.'; }
+  else             { titre = 'Aucun dossier en production'; aide = 'Les commandes attribuées à l\'atelier apparaîtront ici.'; }
+  return `<div class="pcok-empty">
+    ${_ckpIcon('vide', 22)}
+    <p>${titre}</p>
+    <p class="pcok-empty-aide">${aide}</p>
+    ${(q || filtre) ? `<button type="button" class="pcok-iconbtn" onclick="_cockpitResetFiltres()">Tout réinitialiser</button>` : ''}
   </div>`;
+}
+
+function _cockpitTable(rows) {
+  if (!rows.length) return _cockpitEtatVide();
   const det = _cockpitDensity === 'detaille';
   const th = (key, label) => {
     const active = key && _cockpitSort.key === key;
-    const arrow = active ? (_cockpitSort.dir==='asc' ? ' ↑' : ' ↓') : '';
-    return `<th class="pcok-th ${active?'pcok-th--active':''}" ${key?`onclick="_cockpitSetSort('${key}')" style="cursor:pointer"`:''}>${label}${arrow}</th>`;
+    const arrow = active ? ' ' + _ckpIcon(_cockpitSort.dir === 'asc' ? 'fleche-haut' : 'fleche-bas', 11) : '';
+    const aria  = !key ? '' : ` aria-sort="${active ? (_cockpitSort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}"`;
+    return `<th class="pcok-th ${active?'pcok-th--active':''}"${aria} ${key?`onclick="_cockpitSetSort('${key}')" style="cursor:pointer"`:''}>${label}${arrow}</th>`;
   };
   const head = `<tr>
     ${th('priorite','!')}
@@ -22739,10 +22884,10 @@ function _cockpitDetailBody(r, avecTete) {
 }
 
 // ── Setters cockpit ─────────────────────────────────────────────────────────
-function _cockpitSetFilter(k){ _cockpitFilter = k; _cockpitLimit = _COCKPIT_PAGE; renderProdCockpit(); }
-function _cockpitSetOp(v){ _cockpitOp = v; _cockpitLimit = _COCKPIT_PAGE; renderProdCockpit(); }
-function _cockpitSetShift(k){ _cockpitShift = k; _cockpitLimit = _COCKPIT_PAGE; renderProdCockpit(); }
-function _cockpitSetEtape(v){ _cockpitEtape = v; _cockpitLimit = _COCKPIT_PAGE; renderProdCockpit(); }
+function _cockpitSetFilter(k){ _cockpitFilter = k; _cockpitLimit = _cockpitPageSize(); renderProdCockpit(); }
+function _cockpitSetOp(v){ _cockpitOp = v; _cockpitLimit = _cockpitPageSize(); renderProdCockpit(); }
+function _cockpitSetShift(k){ _cockpitShift = k; _cockpitLimit = _cockpitPageSize(); renderProdCockpit(); }
+function _cockpitSetEtape(v){ _cockpitEtape = v; _cockpitLimit = _cockpitPageSize(); renderProdCockpit(); }
 function _cockpitSetSort(k){
   if (_cockpitSort.key === k) _cockpitSort.dir = _cockpitSort.dir==='asc' ? 'desc' : 'asc';
   else { _cockpitSort.key = k; _cockpitSort.dir = 'asc'; }
@@ -22751,8 +22896,8 @@ function _cockpitSetSort(k){
 function _cockpitToggleSortDir(){ _cockpitSort.dir = _cockpitSort.dir==='asc' ? 'desc' : 'asc'; renderProdCockpit(); }
 function _cockpitToggleDensity(){ _cockpitDensity = _cockpitDensity==='compact' ? 'detaille' : 'compact'; renderProdCockpit(); }
 function _cockpitToggleOps(){ _cockpitOpsOpen = !_cockpitOpsOpen; renderProdCockpit(); }
-function _cockpitSetSearch(v){ _cockpitSearch = v; _cockpitLimit = _COCKPIT_PAGE; _debSearch('cockpit', _cockpitRenderBody); }
-function _cockpitShowMore(){ _cockpitLimit += _COCKPIT_PAGE; _cockpitRenderBody(); }
+function _cockpitSetSearch(v){ _cockpitSearch = v; _cockpitLimit = _cockpitPageSize(); _debSearch('cockpit', _cockpitRenderBody); }
+function _cockpitShowMore(){ _cockpitLimit += _cockpitPageSize(); _cockpitRenderBody(); }
 
 // La gestionnaire de stock EST l'acheteuse : elle peut démarrer/terminer
 // n'importe quelle tâche d'achat (étape ACHAT), au même titre qu'admin/chef —
