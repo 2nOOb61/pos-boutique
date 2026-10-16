@@ -20433,8 +20433,10 @@ function _delivProdInfo(dossierId, idx) {
 // colonnes vides à remplir à la main sur le terrain.
 //   showProd  : ajoute « Production » (étape en cours + %) et « Responsable ».
 //   showMoney : ajoute le total — jamais sur la fiche d'atelier, qui circule.
+//   showDates : ajoute « Prod. prévue » et « Livraison client » — les deux dates
+//               de l'échéancier en clair, pour la fiche qui part sur le terrain.
 //   unite     : le mot compté dans l'en-tête de chaque groupe de date.
-function _planningImprime({ rows, titre, sousTitre, showMoney, showProd, unite }) {
+function _planningImprime({ rows, titre, sousTitre, showMoney, showProd, showDates, unite }) {
   const shop = (typeof shopConfig !== 'undefined' && shopConfig && shopConfig.name) || 'FOREVER MG';
   const mot  = unite || 'livraison';
 
@@ -20445,7 +20447,9 @@ function _planningImprime({ rows, titre, sousTitre, showMoney, showProd, unite }
   let seq = 0;
   // Une seule construction des lignes de production pour toute la fiche.
   const prodIdx = showProd ? new Map(_buildDossierRows().map(x => [x.dossierId, x])) : null;
-  const cols = 12 + (showProd ? 2 : 0) + (showMoney ? 1 : 0);
+  // 11 colonnes fixes (N° → ✓) + les colonnes optionnelles : sert au colspan des
+  // lignes de groupe, qui doit couvrir la largeur exacte du tableau.
+  const cols = 11 + (showProd ? 2 : 0) + (showMoney ? 1 : 0) + (showDates ? 2 : 0);
   const body = order.map(k => {
     const g = groups[k];
     const meta = _delivDateLabel(g.ymd);
@@ -20459,6 +20463,7 @@ function _planningImprime({ rows, titre, sousTitre, showMoney, showProd, unite }
       return `<tr>
         <td class="c b">${seq}</td>
         <td${lateCls}>${ret.txt}</td>
+        ${showDates ? `<td class="c nw">${_dispDate(r.dateProd) || '—'}</td><td class="c nw b">${_dispDate(r.dateClient) || '—'}</td>` : ''}
         <td>${r.client}<div class="ref">${r.ref} · ${r.kind === 'reservation' ? 'Réservation' : 'Commande'}</div></td>
         <td>${r.contact || ''}</td>
         <td>${items}</td>
@@ -20486,6 +20491,7 @@ function _planningImprime({ rows, titre, sousTitre, showMoney, showProd, unite }
       th{background:#e9e9e9;font-size:8.5px;text-transform:uppercase;text-align:center}
       td{height:30px}
       .c{text-align:center}.r{text-align:right;white-space:nowrap}.b{font-weight:bold}
+      .nw{white-space:nowrap}
       .ref{font-size:8px;color:#777;margin-top:1px}
       .grp td{background:#1a4a3a;color:#fff;font-weight:bold;font-size:10.5px;height:auto;text-transform:none}
       .late{color:#c00}.soon{color:#c2410c}
@@ -20495,14 +20501,18 @@ function _planningImprime({ rows, titre, sousTitre, showMoney, showProd, unite }
       <div class="sub">${sousTitre} · édité le ${new Date().toLocaleDateString('fr-FR')} ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</div>
       <table>
         <colgroup>
-          <col style="width:3%"><col style="width:6%"><col style="width:13%"><col style="width:8%">
-          <col style="width:${showProd ? 14 : 17}%"><col style="width:${showProd ? 12 : 15}%"><col style="width:7%">
+          <col style="width:3%"><col style="width:6%">
+          ${showDates ? '<col style="width:7%"><col style="width:7%">' : ''}
+          <col style="width:13%"><col style="width:8%">
+          <col style="width:${showProd ? 14 : (showDates ? 13 : 17)}%"><col style="width:${showProd ? 12 : (showDates ? 13 : 15)}%"><col style="width:7%">
           ${showProd ? '<col style="width:9%"><col style="width:9%">' : ''}
           ${showMoney ? '<col style="width:6%">' : ''}
           <col style="width:7%"><col style="width:5%"><col style="width:7%"><col style="width:3%">
         </colgroup>
         <thead><tr>
-          <th>N°</th><th>Retard</th><th>Client / Réf</th><th>Contact</th><th>Articles</th><th>Mode / Adresse</th><th>Commercial</th>
+          <th>N°</th><th>Retard</th>
+          ${showDates ? '<th>Prod. prévue</th><th>Livraison client</th>' : ''}
+          <th>Client / Réf</th><th>Contact</th><th>Articles</th><th>Mode / Adresse</th><th>Commercial</th>
           ${showProd ? '<th>Production</th><th>Responsable</th>' : ''}
           ${showMoney ? '<th>Total</th>' : ''}
           <th>Livreur</th><th>Heure sortie</th><th>Reçu par</th><th>✓</th>
@@ -20524,8 +20534,11 @@ function printLivraisons() {
     rows,
     titre: 'Planning de livraison',
     sousTitre: `${filterLbl} · ${modeLbl} · échéance ${_delivState.groupBy === 'prod' ? 'production' : 'client'}${_delivState.date ? ' · date ' + _dispDate(_delivState.date) : ''} · ${rows.length} livraison(s)${late ? ` · ${late} en retard` : ''}`,
-    showMoney: _DELIV_MONEY_ROLES.includes(currentUser?.role),
+    // La fiche part sur le terrain : pas de montant dessus, mais les deux dates
+    // de l'échéancier (production prévue + livraison client) en clair.
+    showMoney: false,
     showProd: false,
+    showDates: true,
     unite: 'livraison',
   });
 }
