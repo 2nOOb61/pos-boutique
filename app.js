@@ -8,17 +8,25 @@ async function sha256(str) {
     .map(b => ('0' + b.toString(16)).slice(-2)).join('');
 }
 
-// Migration des mots de passe localUsers : passe du texte clair au hash SHA-256
-// Appelée une seule fois au démarrage ; après, tous les .pass sont des hex 64 chars
-async function _migrateLocalUserPasswords() {
-  let migrated = false;
+// Un mot de passe local valide est TOUJOURS un hash SHA-256 (64 hex).
+function _isPwdHash(v) { return /^[0-9a-f]{64}$/i.test(String(v || '')); }
+// Au moins un compte de ce poste porte un vrai hash = le poste est amorcé.
+function _anyLocalPwdHash() { return localUsers.some(x => _isPwdHash(x.pass)); }
+
+// Purge des mots de passe locaux qui ne sont pas des hashs SHA-256.
+// Appelée au démarrage. Avant, cette fonction HASHAIT le texte clair trouvé :
+// les mots de passe d'usine ('1234', '7777'…) devenaient donc des hashs
+// parfaitement valides, et n'importe qui pouvait ouvrir un compte jamais
+// connecté sur le poste — même si le mot de passe avait changé dans le Sheet.
+// Désormais un `pass` non-hash est simplement effacé : seul un hash posé par une
+// vraie connexion réussie (serveur OK) ou par un mot de passe défini ici dans
+// Utilisateurs permet le login hors ligne. Voir BOOTSTRAP_* pour l'amorçage.
+function _purgeLocalPlainPasswords() {
+  let changed = false;
   for (const u of localUsers) {
-    if (u.pass && u.pass.length < 60) { // pas encore un hash
-      u.pass = await sha256(u.pass);
-      migrated = true;
-    }
+    if (u.pass && !_isPwdHash(u.pass)) { u.pass = null; changed = true; }
   }
-  if (migrated) {
+  if (changed) {
     try { localStorage.setItem('pos-users', JSON.stringify(localUsers)); } catch(e) {}
   }
 }
@@ -32,7 +40,7 @@ async function _migrateLocalUserPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '221 · 2026-10-16';
+const APP_VERSION = '222 · 2026-10-16';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -183,17 +191,35 @@ var rythmeProduction = (function() {
 // DATA & STATE
 // ============================================================
 // Utilisateurs locaux (persistés dans localStorage)
+// AUCUN mot de passe d'usine ici : ces comptes ne sont qu'un catalogue de rôles.
+// `pass` reste null jusqu'à ce qu'une connexion serveur réussie (ou un mot de
+// passe défini depuis Utilisateurs) y pose un hash SHA-256 ; `hasPwd:false`
+// affiche le badge « Mot de passe manquant » dans la page Utilisateurs.
+// L'amorçage d'une installation neuve passe par BOOTSTRAP_ADMIN_* (cf. doLogin).
 let localUsers = [
-  { username:'admin',        pass:'1234', role:'admin',        label:'Administrateur',    actif:true, superAdmin:true },
-  { username:'caissier',     pass:'0000', role:'caissier',     label:'Caissier',          actif:true },
-  { username:'utilisateur',  pass:'1111', role:'utilisateur',  label:'Utilisateur',       actif:true },
-  { username:'gestionnaire', pass:'2222', role:'gestionnaire', label:'Gestionnaire Stock', actif:true },
-  { username:'comptable',    pass:'3333', role:'comptable',    label:'Comptable',         actif:true },
-  { username:'chef_atelier', pass:'4444', role:'chef_atelier', label:'Chef Atelier',      actif:true },
-  { username:'pao',          pass:'5555', role:'pao',          label:'Graphiste PAO',     actif:true },
-  { username:'finition',     pass:'6666', role:'finition',     label:'Finisheur',         actif:true },
-  { username:'livreur',      pass:'7777', role:'livreur',      label:'Livreur',           actif:true },
+  { username:'admin',        pass:null, hasPwd:false, role:'admin',        label:'Administrateur',    actif:true, superAdmin:true },
+  { username:'caissier',     pass:null, hasPwd:false, role:'caissier',     label:'Caissier',          actif:true },
+  { username:'utilisateur',  pass:null, hasPwd:false, role:'utilisateur',  label:'Utilisateur',       actif:true },
+  { username:'gestionnaire', pass:null, hasPwd:false, role:'gestionnaire', label:'Gestionnaire Stock', actif:true },
+  { username:'comptable',    pass:null, hasPwd:false, role:'comptable',    label:'Comptable',         actif:true },
+  { username:'chef_atelier', pass:null, hasPwd:false, role:'chef_atelier', label:'Chef Atelier',      actif:true },
+  { username:'pao',          pass:null, hasPwd:false, role:'pao',          label:'Graphiste PAO',     actif:true },
+  { username:'finition',     pass:null, hasPwd:false, role:'finition',     label:'Finisheur',         actif:true },
+  { username:'livreur',      pass:null, hasPwd:false, role:'livreur',      label:'Livreur',           actif:true },
 ];
+
+// ── AMORÇAGE D'UNE INSTALLATION NEUVE ──────────────────
+// Choix retenu : un unique chemin explicite — le compte 'admin' avec le mot de
+// passe d'amorçage ci-dessous — ouvert SEULEMENT si les deux conditions sont
+// réunies au moment du login :
+//   1) aucun compte de ce poste ne porte encore de hash (poste jamais amorcé) ;
+//   2) le Sheet ne peut pas trancher : injoignable / non configuré, ou bien il
+//      ne contient aucun compte ADMIN avec mot de passe défini (Sheet neuf).
+// L'amorçage ne pose JAMAIS de hash : il ne crée donc pas un mot de passe '1234'
+// permanent, et l'admin doit en définir un dans Réglages → Utilisateurs. Dès
+// qu'un mot de passe existe (ici ou dans le Sheet), ce chemin se referme.
+const BOOTSTRAP_ADMIN_USER = 'admin';
+const BOOTSTRAP_ADMIN_PASS = '1234';
 
 const ROLE_LABELS = {
   admin:         'Administrateur',
@@ -475,15 +501,16 @@ async function doLogin() {
         userInfo.label = userInfo.nom || userInfo.username || u;
       }
       // Mettre à jour / créer le compte local avec le hash du mot de passe
-      // → permet le login offline même après effacement du localStorage
+      // → seul moyen d'autoriser ensuite le login hors ligne (cf. fallback local)
       const luIdx = localUsers.findIndex(x => x.username.toLowerCase() === u);
       if (luIdx >= 0) {
-        localUsers[luIdx].pass  = pHashed;
-        localUsers[luIdx].label = userInfo.label;
-        localUsers[luIdx].role  = userInfo.role;
+        localUsers[luIdx].pass   = pHashed;
+        localUsers[luIdx].hasPwd = true;
+        localUsers[luIdx].label  = userInfo.label;
+        localUsers[luIdx].role   = userInfo.role;
         if (userInfo.actif !== undefined) localUsers[luIdx].actif = userInfo.actif;
       } else {
-        localUsers.push({ username: u, pass: pHashed, role: userInfo.role, label: userInfo.label, actif: true });
+        localUsers.push({ username: u, pass: pHashed, hasPwd: true, role: userInfo.role, label: userInfo.label, actif: true });
       }
       try { localStorage.setItem('pos-users', JSON.stringify(localUsers)); } catch(e) {}
     } else if (r && !r.ok) {
@@ -500,17 +527,38 @@ async function doLogin() {
     }
   }
 
-  // Fallback local : accepte le mot de passe en clair OU son hash SHA-256
+  // Fallback local : UNIQUEMENT un hash SHA-256 posé sur ce poste par une
+  // connexion serveur réussie (voir plus haut) ou par un mot de passe défini
+  // dans Utilisateurs. Le mot de passe en clair n'est plus accepté : il ouvrait
+  // tout compte encore sur son mot de passe d'usine, même changé dans le Sheet.
   if (!loginOk) {
     const lu = localUsers.find(x =>
       x.username.toLowerCase() === u &&
-      (x.pass === p || x.pass === pHashed) &&
+      _isPwdHash(x.pass) && x.pass === pHashed &&
       x.actif !== false
     );
     if (lu) {
       const lbl = (lu.label && lu.label !== 'undefined') ? lu.label : (lu.username || u);
       loginOk = true; userInfo = { username: lu.username, role: lu.role, label: lbl };
     }
+  }
+
+  // Amorçage d'une installation neuve (voir BOOTSTRAP_ADMIN_* en haut du fichier) :
+  // seul le compte 'admin', seul le mot de passe d'amorçage, et seulement si
+  // aucun mot de passe n'existe encore — ni sur ce poste, ni dans le Sheet.
+  // On ne pose aucun hash : le chemin reste ouvert jusqu'à ce qu'un vrai mot de
+  // passe soit défini, et se referme définitivement dès qu'il en existe un.
+  if (!loginOk && u === BOOTSTRAP_ADMIN_USER && p === BOOTSTRAP_ADMIN_PASS
+      && !_anyLocalPwdHash() && !(await _sheetHasAdminPassword())) {
+    const seedAdmin = localUsers.find(x => x.username === BOOTSTRAP_ADMIN_USER) || {};
+    loginOk = true;
+    userInfo = {
+      username: BOOTSTRAP_ADMIN_USER,
+      role: 'admin',
+      label: seedAdmin.label || 'Administrateur',
+      superAdmin: true,
+    };
+    showToast('Premier accès : définissez un mot de passe dans Réglages → Utilisateurs', 'info');
   }
 
   btn.disabled = false; btn.textContent = 'Se connecter';
@@ -4242,17 +4290,28 @@ function loadUsers() {
   try {
     const u = localStorage.getItem('pos-users');
     if (u) {
-      const defaults = localUsers; // valeurs initiales avec pass avant écrasement
+      const defaults = localUsers; // valeurs initiales (libellés), sans mot de passe
       const stored   = JSON.parse(u);
-      // Restaurer le pass depuis les défauts si le stockage l'a perdu
+      // On NE réinjecte PLUS de mot de passe d'usine quand le stockage l'a perdu :
+      // c'était la porte d'entrée '1234' / '7777' sur un compte jamais connecté.
+      // Un `pass` absent ou non hashé = pas de connexion hors ligne pour ce compte.
+      let dropped = false;
       localUsers = stored.map(su => {
         const def = defaults.find(d => d.username === su.username);
         const patched = { ...su };
         const badLabel = !patched.label || patched.label === 'undefined';
         if (badLabel) patched.label = def?.label || su.username;
-        if (!patched.pass && def?.pass) patched.pass = def.pass;
+        if (!_isPwdHash(patched.pass)) {
+          if (patched.pass) dropped = true;
+          patched.pass = null;
+        }
         return patched;
       });
+      // Un mot de passe en clair hérité d'une ancienne version ne doit pas rester
+      // au repos dans le stockage : on réécrit la liste nettoyée tout de suite.
+      if (dropped) {
+        try { localStorage.setItem('pos-users', JSON.stringify(localUsers)); } catch(e) {}
+      }
     }
   } catch(e) {}
 }
@@ -4975,6 +5034,25 @@ async function apiCall(payload) {
   }
 }
 
+// ── Le Sheet détient-il un mot de passe d'administrateur ? ──
+// Arbitre du chemin d'amorçage de doLogin : si le Sheet répond et qu'un compte
+// admin y a déjà un mot de passe (`hasPwd`), l'installation est configurée →
+// aucun accès d'amorçage. Sheet injoignable / non configuré, ou réponse
+// illisible → false : on ne peut pas trancher, l'amorçage reste possible (mais
+// seulement si ce poste n'a lui non plus aucun hash).
+// On regarde les comptes ADMIN et pas « au moins un compte » : sinon définir
+// d'abord le mot de passe d'un caissier, sur une install neuve, enfermerait
+// l'admin dehors (plus aucun accès nulle part, même après remise à zéro locale).
+async function _sheetHasAdminPassword() {
+  if (!APPS_SCRIPT_URL) return false;
+  try {
+    const r = await apiCall({ action: 'getUsers' });
+    if (!r || !r.ok || !Array.isArray(r.users)) return false;
+    return r.users.some(x => x && x.hasPwd &&
+      (x.role === 'admin' || String(x.username || '').toLowerCase() === BOOTSTRAP_ADMIN_USER));
+  } catch(e) { return false; }
+}
+
 // ── Login via Apps Script ─────────────────────────────────
 async function loginViaScript(username, password) {
   if (!APPS_SCRIPT_URL) return null;
@@ -5158,18 +5236,19 @@ async function loadSalesFromScript(fullReload = false, serverTruth = false) {
 }
 
 // ── Charger les utilisateurs depuis Sheet ────────────────
-// `seed` : le Sheet est vide, on l'initialise → le mot de passe d'usine des
-// comptes encore en clair part avec, sinon personne ne pourrait se connecter sur
-// une installation neuve. Hors initialisation (bouton « ↑ Sync Sheet »), AUCUN
-// mot de passe ne part d'ici : ce bouton répare les rôles, noms et accès.
+// `seed` : le Sheet est vide, on l'initialise — les comptes partent SANS mot de
+// passe (le local n'en détient plus aucun en clair). Le Sheet les marque alors
+// « Mot de passe manquant » ; c'est l'admin amorcé (BOOTSTRAP_ADMIN_*) qui les
+// définit depuis Utilisateurs. AUCUN mot de passe ne part d'ici, seed ou pas :
+// ce bouton répare les rôles, noms et accès (cf. handleSaveUser dans Code.gs,
+// qui n'accepte un nouveau mot de passe que via le champ `password`).
 async function syncAllUsersToSheet(seed) {
   if (!APPS_SCRIPT_URL) return;
   showLoader('Synchronisation des utilisateurs...');
   let ok = 0;
   for (const u of localUsers) {
-    const plain = (seed && u.pass && !/^[0-9a-f]{64}$/i.test(String(u.pass))) ? String(u.pass) : '';
     try {
-      const r = await apiCall({ action: 'saveUser', user: _userSyncPayload(u, plain) });
+      const r = await apiCall({ action: 'saveUser', user: _userSyncPayload(u, '') });
       if (r && r.ok !== false) ok++;
     } catch(e) {}
   }
@@ -5196,7 +5275,11 @@ async function loadUsersFromScript() {
         const local = localUsers.find(lu => lu.username.toLowerCase() === su.username.toLowerCase());
         const patched = { ...su };
         if (!patched.label && patched.nom) patched.label = patched.nom; // compat ancien champ nom
-        if (!patched.pass  && local?.pass)  patched.pass  = local.pass;
+        // Mot de passe : on ne garde QUE le hash local posé par une connexion
+        // réussie sur ce poste. Le Sheet ne renvoie jamais de mot de passe ; toute
+        // valeur non-hash qui arriverait ici ne doit pas servir d'identifiant.
+        patched.pass = _isPwdHash(patched.pass) ? patched.pass
+                     : (_isPwdHash(local && local.pass) ? local.pass : null);
         // Le Sheet peut ne pas (encore) stocker superAdmin → conserver le flag local
         if (patched.superAdmin === undefined && local && local.superAdmin !== undefined) patched.superAdmin = local.superAdmin;
         const badLabel = !patched.label || patched.label === 'undefined';
@@ -9385,7 +9468,7 @@ let tachesLibres = []; // doit être déclaré avant loadTachesLibres()
 loadConfig();
 loadData();
 loadUsers();
-_migrateLocalUserPasswords(); // hash les mots de passe en clair au premier démarrage
+_purgeLocalPlainPasswords(); // efface tout mot de passe local non hashé (sécurité login)
 loadTachesLibres();
 loadCommentsLocal();
 loadDemandesAchatLocal();
