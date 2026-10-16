@@ -1592,11 +1592,12 @@ function handleSaveUser(data) {
   const sh  = ss.getSheetByName(SHEET_USERS);
   const u   = data.user;
   // Hasher le mot de passe s'il est fourni en clair.
-  // Champ attendu = "password". Compat ancien frontend qui envoyait "pass" :
-  // on ne l'accepte QUE s'il est en clair (pas un hash 64-hex), car le hash local
-  // est non salé et écraserait le vrai mot de passe lors d'une édition sans changement.
+  // SEUL le champ "password" change le mot de passe : il n'existe que quand
+  // l'opérateur en a saisi un dans le modal. Le champ "pass" du frontend n'est
+  // plus accepté : c'est le hash local non salé, ou le mot de passe d'usine en
+  // clair pour un compte jamais connecté sur le poste, et il remettait donc le
+  // mot de passe d'usine au moindre Activer/Désactiver ou Sync Sheet.
   let pwd = u.password || '';
-  if (!pwd && u.pass && !/^[0-9a-f]{64}$/i.test(String(u.pass))) pwd = String(u.pass);
   if (pwd && !/^[0-9a-f]{64}$/i.test(pwd)) {
     pwd = _hashPwd_(pwd);
   }
@@ -1606,14 +1607,20 @@ function handleSaveUser(data) {
   const rows = sh.getDataRange().getValues();
   for (let i = 1; i < rows.length; i++) {
     if (String(rows[i][0]).toLowerCase() === String(u.username).toLowerCase()) {
+      // Champ absent du payload = « inchangé » : on garde la cellule existante.
+      // Sinon une simple modification de rôle effaçait les accès personnalisés
+      // (le frontend ne les envoie que s'il les connaît).
       const storedPwd = pwd || rows[i][1];
-      sh.getRange(i+1,1,1,7).setValues([[u.username, storedPwd, u.role, u.label||u.nom||u.username, u.actif!==false?'oui':'non', u.customPages ? JSON.stringify(u.customPages) : '', _suCell]]);
-      _logAction_('USER_UPDATE', data.editedBy||'admin', 'Modifié: ' + u.username + ' rôle:' + u.role);
+      const storedCp  = (u.customPages === undefined) ? rows[i][5]
+                      : (u.customPages ? JSON.stringify(u.customPages) : '');
+      const storedSu  = (u.superAdmin  === undefined) ? rows[i][6] : _suCell;
+      sh.getRange(i+1,1,1,7).setValues([[u.username, storedPwd, u.role, u.label||u.nom||u.username, u.actif!==false?'oui':'non', storedCp, storedSu]]);
+      _logAction_('USER_UPDATE', data.editedBy||u.editedBy||'admin', 'Modifié: ' + u.username + ' rôle:' + u.role);
       return { ok:true };
     }
   }
   sh.appendRow([u.username, pwd, u.role||'caissier', u.label||u.nom||u.username, 'oui', u.customPages ? JSON.stringify(u.customPages) : '', _suCell]);
-  _logAction_('USER_CREATE', data.editedBy||'admin', 'Créé: ' + u.username + ' rôle:' + (u.role||'caissier'));
+  _logAction_('USER_CREATE', data.editedBy||u.editedBy||'admin', 'Créé: ' + u.username + ' rôle:' + (u.role||'caissier'));
   return { ok:true };
 }
 

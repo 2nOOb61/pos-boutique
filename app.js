@@ -4462,6 +4462,37 @@ function togglePassVis() {
   btn.textContent = inp.type === 'password' ? '' : '';
 }
 
+// Charge utile de synchronisation d'un utilisateur vers le Sheet.
+// Le champ `pass` local ne part JAMAIS : c'est soit un hash SHA-256 non salé,
+// soit — pour un compte jamais connecté sur ce poste — le mot de passe d'usine
+// EN CLAIR (voir les valeurs par défaut de `localUsers`). Le serveur prenait un
+// `pass` non haché pour un nouveau mot de passe : un simple Activer/Désactiver
+// remettait donc le mot de passe d'usine. Seul `password`, saisi à la main dans
+// le modal, change le mot de passe serveur.
+// `customPages` n'est envoyé que si le compte local porte le champ : absent du
+// payload = « inchangé » côté serveur, qui garde les accès déjà enregistrés.
+function _userSyncPayload(u, password) {
+  const p = {
+    username:   u.username,
+    role:       u.role,
+    label:      u.label,
+    actif:      u.actif !== false,
+    superAdmin: u.superAdmin === true,
+    editedBy:   (currentUser && currentUser.username) || '',
+  };
+  if ('customPages' in u) p.customPages = u.customPages;
+  if (password) p.password = password;
+  return p;
+}
+
+// Prévient quand le Sheet n'a pas confirmé l'écriture : le local est à jour mais
+// les autres postes ne verront rien tant que la synchro n'est pas repassée.
+function _warnUserSync(r, label) {
+  if (r && r.ok !== false) return true;
+  showToast(`${label} : enregistré sur ce poste, mais le Google Sheet n'a pas répondu — relancez « ↑ Sync Sheet » dans les Réglages`, 'error');
+  return false;
+}
+
 async function saveUser() {
   const username = document.getElementById('uUsername').value.trim().toLowerCase();
   const label    = document.getElementById('uLabel').value.trim();
@@ -4488,6 +4519,12 @@ async function saveUser() {
     }
   }
 
+  // On ne se coupe pas l'herbe sous le pied : la carte désactive déjà le bouton
+  // « Désactiver » sur son propre compte, le modal doit faire pareil.
+  if (!isNew && !actif && currentUser && localUsers[editingUserId].username === currentUser.username) {
+    showToast('Impossible : vous ne pouvez pas désactiver votre propre compte', 'error'); return;
+  }
+
   // Statut super admin : seul un super admin peut l'attribuer/retirer, et
   // uniquement à un compte de rôle admin. On conserve l'ancienne valeur sinon.
   const prevSuper = !isNew && localUsers[editingUserId].superAdmin === true;
@@ -4510,7 +4547,7 @@ async function saveUser() {
   const passHashed = pass ? await sha256(pass) : null;
 
   if (isNew) {
-    localUsers.push({ username, pass: passHashed, role, label, actif, superAdmin: wantSuper });
+    localUsers.push({ username, pass: passHashed, hasPwd: true, role, label, actif, superAdmin: wantSuper });
     showToast(` Utilisateur ${label} créé`);
   } else {
     const u = localUsers[editingUserId];
@@ -4518,20 +4555,37 @@ async function saveUser() {
     u.role  = role;
     u.actif = actif;
     u.superAdmin = wantSuper;
-    if (passHashed) u.pass = passHashed;
+    // `hasPwd` vient du Sheet et pilote le badge « Mot de passe manquant » :
+    // il doit tomber dès que le mot de passe est défini, sans attendre un
+    // rechargement depuis le Sheet.
+    if (passHashed) { u.pass = passHashed; u.hasPwd = true; }
     showToast(` ${label} mis à jour`);
   }
 
   saveUsers();
   closeModal('userModal');
   renderUsersPage();
-  // Sync vers Google Sheet — mot de passe EN CLAIR sous le champ "password"
-  // (le serveur le hashera, salé). On n'envoie PAS le champ "pass" (hash local
-  // non salé) qui écraserait le mot de passe serveur lors d'une édition sans
-  // changement. Si pass est vide (édition sans changement) → champ omis → serveur garde l'ancien.
+
   const base = localUsers[isNew ? localUsers.length - 1 : editingUserId];
-  const syncUser = { username: base.username, role: base.role, label: base.label, actif: base.actif, superAdmin: base.superAdmin === true, password: pass || undefined };
-  if (syncUser.username) saveUserToScript(syncUser);
+
+  // Modifier son propre compte doit se voir tout de suite : nom affiché, rôle,
+  // navigation et zones super admin. Sinon l'écran garde l'ancien rôle jusqu'à
+  // la reconnexion (tout le reste du système lit `currentUser`).
+  if (!isNew && currentUser && base.username === currentUser.username) {
+    currentUser.label      = base.label;
+    currentUser.role       = base.role;
+    currentUser.superAdmin = base.superAdmin === true;
+    const lbl = document.getElementById('currentUserLabel');
+    if (lbl) lbl.textContent = currentUser.label;
+    applyRolePermissions(currentUser.role);
+  }
+
+  // Sync vers Google Sheet — mot de passe EN CLAIR sous le champ "password"
+  // (le serveur le hashera, salé). Si pass est vide (édition sans changement)
+  // → champ omis → le serveur garde l'ancien mot de passe.
+  if (base.username) {
+    _warnUserSync(await saveUserToScript(_userSyncPayload(base, pass)), base.label || base.username);
+  }
 }
 
 // ── Personnalisation des autorisations par opérateur ────────
@@ -4607,11 +4661,11 @@ async function savePermissions() {
   }
 
   if (APPS_SCRIPT_URL) {
-    saveUserToScript({ username: u.username, role: u.role, label: u.label, actif: u.actif, customPages: u.customPages, superAdmin: u.superAdmin === true });
+    _warnUserSync(await saveUserToScript(_userSyncPayload(u)), 'Autorisations');
   }
 }
 
-function deleteUser(idx) {
+async function deleteUser(idx) {
   const u = localUsers[idx];
   if (!confirm(`Supprimer l'utilisateur "${u.label}" (@${u.username}) ?`)) return;
   const username = u.username;
@@ -4619,10 +4673,10 @@ function deleteUser(idx) {
   saveUsers();
   renderUsersPage();
   showToast(`Utilisateur supprimé`);
-  deleteUserFromScript(username);
+  _warnUserSync(await deleteUserFromScript(username), 'Suppression de ' + username);
 }
 
-function toggleUserActive(idx) {
+async function toggleUserActive(idx) {
   const u = localUsers[idx];
   const otherAdmins = localUsers.filter((x,i) => i !== idx && x.role === 'admin' && x.actif !== false);
   if (u.role === 'admin' && u.actif !== false && otherAdmins.length === 0) {
@@ -4632,7 +4686,7 @@ function toggleUserActive(idx) {
   saveUsers();
   renderUsersPage();
   showToast(u.actif ? ` ${u.label} activé` : `⏸ ${u.label} désactivé`);
-  saveUserToScript(u);
+  _warnUserSync(await saveUserToScript(_userSyncPayload(u)), u.label || u.username);
 }
 
 // Ventes en attente (hors ligne)
@@ -5104,12 +5158,20 @@ async function loadSalesFromScript(fullReload = false, serverTruth = false) {
 }
 
 // ── Charger les utilisateurs depuis Sheet ────────────────
-async function syncAllUsersToSheet() {
+// `seed` : le Sheet est vide, on l'initialise → le mot de passe d'usine des
+// comptes encore en clair part avec, sinon personne ne pourrait se connecter sur
+// une installation neuve. Hors initialisation (bouton « ↑ Sync Sheet »), AUCUN
+// mot de passe ne part d'ici : ce bouton répare les rôles, noms et accès.
+async function syncAllUsersToSheet(seed) {
   if (!APPS_SCRIPT_URL) return;
   showLoader('Synchronisation des utilisateurs...');
   let ok = 0;
   for (const u of localUsers) {
-    try { await apiCall({ action: 'saveUser', user: u }); ok++; } catch(e) {}
+    const plain = (seed && u.pass && !/^[0-9a-f]{64}$/i.test(String(u.pass))) ? String(u.pass) : '';
+    try {
+      const r = await apiCall({ action: 'saveUser', user: _userSyncPayload(u, plain) });
+      if (r && r.ok !== false) ok++;
+    } catch(e) {}
   }
   hideLoader();
   showToast(`${ok} utilisateur(s) synchronisé(s) vers le Sheet`);
@@ -5120,7 +5182,7 @@ async function loadUsersFromScript() {
   const r = await apiCall({ action: 'getUsers' });
   // Sheet vide → pousser tous les utilisateurs locaux pour initialiser le Sheet
   if (r && r.ok && Array.isArray(r.users) && r.users.length === 0) {
-    await syncAllUsersToSheet();
+    await syncAllUsersToSheet(true);
     return;
   }
   if (r && r.ok && Array.isArray(r.users) && r.users.length > 0) {
@@ -5211,14 +5273,14 @@ async function loadReservationsFromScript() {
 
 // ── Sauvegarder un utilisateur vers Sheet ────────────────
 async function saveUserToScript(user) {
-  if (!APPS_SCRIPT_URL) return;
-  await apiCall({ action: 'saveUser', user });
+  if (!APPS_SCRIPT_URL) return { ok: true };   // pas de Sheet configuré : le local suffit
+  return await apiCall({ action: 'saveUser', user });
 }
 
 // ── Supprimer un utilisateur du Sheet ────────────────────
 async function deleteUserFromScript(username) {
-  if (!APPS_SCRIPT_URL) return;
-  await apiCall({ action: 'deleteUser', username });
+  if (!APPS_SCRIPT_URL) return { ok: true };
+  return await apiCall({ action: 'deleteUser', username, deletedBy: (currentUser && currentUser.username) || '' });
 }
 
 // ── UI Loader ─────────────────────────────────────────────
