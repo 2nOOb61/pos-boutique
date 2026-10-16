@@ -97,7 +97,7 @@ function _purgeLocalPlainPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '222 · 2026-10-16';
+const APP_VERSION = '223 · 2026-10-16';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -19299,13 +19299,40 @@ function delivMarkDepart(coursier, silent){
   return n;
 }
 
-// Erreur de manipulation : la course n'était pas partie. On efface l'état,
-// elle redevient une livraison en attente ordinaire.
+// Retour du coursier, en lot : les courses cochées sont arrivées chez le client.
+// Même état que le (L) de la fiche papier (cf. delivMarkRetour), mais sans ouvrir
+// une à une les lignes — le coursier revient avec dix courses faites, on coche et
+// on valide. Passe par _livSetEtat, donc tout le système suit d'un coup : état
+// local, journal des mouvements, synchro GAS (avec file d'attente hors ligne),
+// cockpit Commandes, calendrier et filtres de cette page.
+// Le statut commercial n'est PAS touché : une commande livrée mais impayée reste
+// une créance à l'écran, c'est toute la raison d'être de cet état séparé.
+function delivMarkLivree(){
+  const rows = _delivSelRows();
+  if (!rows.length) { showToast("Cochez d'abord les courses livrées", 'error'); return 0; }
+  let n = 0;
+  rows.forEach(r => {
+    if (r.livStatut === 'LIVREE') return;                  // déjà livrée
+    _livSetEtat(r.kind, r.id, 'LIVREE', { ref:r.ref, client:r.client });
+    n++;
+  });
+  // Une course livrée sort des vues « en cours » : la laisser cochée afficherait
+  // une barre de sélection au-dessus d'un tableau qui ne la contient plus.
+  rows.forEach(r => _delivSel.delete(_delivSelKey(r)));
+  showToast(n ? n + ' course(s) livrée(s)' : 'Ces courses sont déjà livrées', n ? 'success' : 'info');
+  renderLivraisons(); _cmdRenderBodySafe();
+  return n;
+}
+
+// Erreur de manipulation : la course n'était pas partie, ou elle n'était pas
+// livrée. On efface l'état, elle redevient une livraison en attente ordinaire.
+// C'est la seule marche arrière depuis LIVREE : les boutons (L) (R) (A) du
+// tiroir ne s'affichent que sur une course encore en route.
 function delivCancelDepart(){
-  const rows = _delivSelRows().filter(r => r.livStatut === 'EN_LIVRAISON');
-  if (!rows.length) { showToast('Aucune course en livraison dans la sélection', 'info'); return; }
+  const rows = _delivSelRows().filter(r => r.livStatut === 'EN_LIVRAISON' || r.livStatut === 'LIVREE');
+  if (!rows.length) { showToast('Aucune course en livraison ou livrée dans la sélection', 'info'); return; }
   rows.forEach(r => _livSetEtat(r.kind, r.id, ''));
-  showToast(rows.length + ' départ(s) annulé(s)', 'info');
+  showToast(rows.length + ' course(s) remise(s) en attente', 'info');
   renderLivraisons(); _cmdRenderBodySafe();
 }
 
@@ -19335,13 +19362,19 @@ function _cmdRenderBodySafe(){ try { if (document.getElementById('cmdCockpitBody
 // cochée, pour ne pas encombrer le cockpit le reste du temps.
 function _delivSelBar(){
   if (!_delivSel.size) return '';
+  const sel      = _delivSelRows();
+  // Marche arrière : proposée dès qu'une course cochée porte un état, et libellée
+  // selon ce qu'on défait — un départ, ou une livraison déjà pointée.
+  const aDefaire = sel.filter(r => r.livStatut === 'EN_LIVRAISON' || r.livStatut === 'LIVREE');
+  const aLivree  = aDefaire.some(r => r.livStatut === 'LIVREE');
   return `<div class="deliv-selbar">
       <span class="deliv-selbar-n">${_delivSel.size} course${_delivSel.size > 1 ? 's' : ''} cochée${_delivSel.size > 1 ? 's' : ''}</span>
       <div class="deliv-selbar-act">
         <button class="pcok-iconbtn" onclick="clearDelivSel()">Tout décocher</button>
-        ${_delivSelRows().some(r => r.livStatut === 'EN_LIVRAISON')
-          ? `<button class="pcok-iconbtn" title="La course n'est finalement pas partie — annuler le départ" onclick="delivCancelDepart()">Annuler le départ</button>` : ''}
+        ${aDefaire.length
+          ? `<button class="pcok-iconbtn" title="${aLivree ? 'Pointage erroné — remettre ces courses en livraison en attente' : "La course n'est finalement pas partie — annuler le départ"}" onclick="delivCancelDepart()">${aLivree ? 'Remettre en attente' : 'Annuler le départ'}</button>` : ''}
         <button class="pcok-iconbtn" title="Marquer les courses cochées comme parties avec le coursier" onclick="delivMarkDepart()">Parties en livraison</button>
+        <button class="pcok-iconbtn" style="background:#16a34a;border-color:#16a34a;color:#fff" title="Le coursier est revenu : marquer les courses cochées comme arrivées chez le client" onclick="delivMarkLivree()">Livrées</button>
         <button class="deliv-fiche-btn" onclick="openFicheCoursier()">
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
           Fiche coursier</button>
