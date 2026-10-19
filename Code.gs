@@ -54,7 +54,7 @@ const MACHINE_HEADERS  = ['ID','Machine','RefType','RefID','RefLabel','Client','
 // production). Sur les classeurs antérieurs elles sont créées à la première écriture
 // (handleSetClientPrevenu) : ensureSheet ne migre pas une feuille déjà en place.
 // Col O = EtatsManuels : états des étapes pilotées à la main par le responsable
-// de production (JSON, cf. ETAPES_MANUELLES). Créée à la première écriture sur les
+// de production (JSON, cf. ETAPES_PILOTABLES). Créée à la première écriture sur les
 // classeurs antérieurs (_ensureEtatsManuelsCol_) : ensureSheet ne migre pas une
 // feuille déjà en place.
 const DOSSIER_HEADERS = ['ID','NumeroDossier','Client','Produit','Quantite','Statut',
@@ -99,13 +99,24 @@ const ETAPES_PROD = [
   { code:'LIVRE',         label:'Livraison',                         progress:100 },
 ];
 
-// Étapes PILOTÉES À LA MAIN par l'admin / le responsable de production : l'atelier
-// ne pointe pas ces étapes (pas d'ordinateur aux machines), le responsable pose
-// l'état directement sur le dossier (col O = EtatsManuels, JSON
-// { CODE:{st,par,le} }). Les étapes amont (validation commande, PAO, validations
-// client…) restent en pointage.
-// ⚠️ Doit rester IDENTIQUE à ETAPES_MANUELLES (app.js).
-const ETAPES_MANUELLES      = ['PRODUCTION','FINITION'];
+// Étapes PILOTABLES À LA MAIN par l'admin / le responsable de production : il pose
+// l'état directement sur le dossier (col O = EtatsManuels, JSON { CODE:{st,par,le} })
+// au lieu d'attendre un pointage. TOUTES les étapes du pipeline le sont : on doit
+// pouvoir débloquer le circuit à n'importe quel endroit (validation commerciale
+// faite au téléphone, PAO validée de vive voix, achat réglé hors système…).
+// L'état posé REMPLACE le pointage de son étape ; le retirer rend l'étape au
+// pointage.
+// ⚠️ Doit rester IDENTIQUE à ETAPES_PILOTABLES (app.js, operateur.html).
+const ETAPES_PILOTABLES = ETAPES_PROD.map(function(e) { return e.code; });
+
+// Parmi elles, les étapes d'ATELIER : par construction elles n'ont jamais de
+// pointage (pas d'ordinateur aux machines). Dès qu'un état manuel existe sur le
+// dossier, elles entrent dans son pipeline avec « à faire » par défaut — sinon
+// « Production terminée » ferait sauter le dossier à LIVRE en sautant la finition.
+// Les autres étapes, elles, ne comptent que si elles portent un pointage ou un
+// état explicitement posé : la progression garde sa base « étapes applicables ».
+// ⚠️ Doit rester IDENTIQUE à ETAPES_ATELIER (app.js, operateur.html).
+const ETAPES_ATELIER        = ['PRODUCTION','FINITION'];
 const ETATS_MANUELS_VALIDES = ['A_FAIRE','EN_COURS','TERMINE'];
 const COL_ETATS_MANUELS     = 15;   // col O de la feuille Dossiers
 
@@ -142,16 +153,19 @@ function _etatsManuelsDossier_(ss, dossierId) {
 
 // Applique les états manuels sur la carte « étape -> statuts de tâches » utilisée
 // pour calculer statut et progression. Un état posé à la main REMPLACE les
-// pointages de son étape. Et dès qu'un seul état manuel existe sur le dossier,
-// TOUTES les étapes manuelles entrent dans son pipeline (défaut « à faire ») :
-// sinon « Production terminée » ferait sauter le dossier à LIVRE en sautant la
-// finition, qui n'a par construction aucune tâche.
+// pointages de son étape, sur N'IMPORTE QUELLE étape du pipeline. Et dès qu'un
+// seul état manuel existe sur le dossier, les étapes d'ATELIER entrent dans son
+// pipeline (défaut « à faire ») : sinon « Production terminée » ferait sauter le
+// dossier à LIVRE en sautant la finition, qui n'a par construction aucune tâche.
+// Les autres étapes sans état restent sur leurs pointages : poser un état sur la
+// validation commande n'invente pas neuf étapes au dossier.
 function _overlayEtatsManuels_(byEtape, etats) {
   if (!etats || !Object.keys(etats).length) return byEtape;
-  ETAPES_MANUELLES.forEach(function(code) {
+  ETAPES_PILOTABLES.forEach(function(code) {
     const st = etats[code] && etats[code].st;
-    if (st)                                          byEtape[code] = [st];
-    else if (!byEtape[code] || !byEtape[code].length) byEtape[code] = ['A_FAIRE'];
+    if (st) byEtape[code] = [st];
+    else if (ETAPES_ATELIER.indexOf(code) >= 0 &&
+             (!byEtape[code] || !byEtape[code].length)) byEtape[code] = ['A_FAIRE'];
   });
   return byEtape;
 }
@@ -2400,9 +2414,11 @@ function handleCloturerDossier(data) {
   return { ok:true, tachesCloturees:nbTaches };
 }
 
-// ── Étapes pilotées à la main : production / finition ─────
-// L'admin ou le responsable de production pose l'état de l'étape directement sur
-// le dossier — ni tâche ni pointage, l'atelier n'a pas d'ordinateur aux machines.
+// ── Étapes pilotées à la main : tout le pipeline ──────────
+// L'admin ou le responsable de production pose l'état de N'IMPORTE QUELLE étape
+// directement sur le dossier — ni tâche ni pointage requis : l'atelier n'a pas
+// d'ordinateur aux machines, et une validation obtenue au téléphone ou un achat
+// réglé hors système ne doivent pas bloquer le circuit.
 // Cet état devient la source de vérité de l'étape pour TOUT le système : statut et
 // progression du dossier sont recalculés ici (même modèle que majProgressionDossier_),
 // donc l'attribution, le suivi commande, le cockpit, le dashboard et le portail
@@ -2411,8 +2427,8 @@ function handleCloturerDossier(data) {
 function handleSetEtapeManuelle(data) {
   if (!data.id) return { ok:false, error:'id requis' };
   const code = String(data.etapeCode || '');
-  if (ETAPES_MANUELLES.indexOf(code) < 0) {
-    return { ok:false, error:'Étape non pilotable à la main : ' + code };
+  if (ETAPES_PILOTABLES.indexOf(code) < 0) {
+    return { ok:false, error:'Étape inconnue : ' + code };
   }
   const st = String(data.statut || '');
   if (st && ETATS_MANUELS_VALIDES.indexOf(st) < 0) {
@@ -2448,12 +2464,15 @@ function handleSetEtapeManuelle(data) {
            statut:prog.statut, progression:prog.progression };
 }
 
-// Passe à TERMINE toutes les étapes pilotées à la main d'un dossier clôturé.
+// Clôture d'un dossier : passe à TERMINE ses étapes d'atelier (jamais pointées) et
+// tout état déjà posé à la main ailleurs dans le pipeline. On ne crée PAS d'état
+// sur les étapes restées au pointage : leurs tâches sont closes par
+// _cloreTachesDossier_, et en inventer un les rendrait applicables après coup.
 function _cloreEtatsManuels_(sh, rowNum, par) {
   _ensureEtatsManuelsCol_(sh);
   const etats = _etatsManuelsRow_(sh, rowNum);
   const le    = new Date().toISOString();
-  ETAPES_MANUELLES.forEach(function(code) {
+  ETAPES_ATELIER.concat(Object.keys(etats)).forEach(function(code) {
     etats[code] = { st:'TERMINE', par:String(par || ''), le:le };
   });
   sh.getRange(rowNum, COL_ETATS_MANUELS).setNumberFormat('@').setValue(JSON.stringify(etats));

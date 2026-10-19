@@ -97,7 +97,7 @@ function _purgeLocalPlainPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '226 · 2026-10-16';
+const APP_VERSION = '227 · 2026-10-19';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -9619,20 +9619,28 @@ const ETAPES_CONFIG = [
 ];
 
 // ════════════════════════════════════════════════════════════
-// ÉTAPES PILOTÉES À LA MAIN — production & finition
-// L'atelier n'a pas d'ordinateur aux machines : ces étapes ne se pointent pas,
-// l'admin ou le responsable de production pose l'état directement sur le dossier
-// (feuille Dossiers, col. EtatsManuels). Les étapes amont — validation commande,
-// conception/simulation (PAO), validations client — restent en pointage.
-// ⚠️ ETAPES_MANUELLES doit rester IDENTIQUE à celle de Code.gs.
+// ÉTAPES PILOTÉES À LA MAIN — TOUT le pipeline
+// L'admin ou le responsable de production peut poser l'état de n'importe quelle
+// étape directement sur le dossier (feuille Dossiers, col. EtatsManuels), sans
+// attendre un pointage : l'atelier n'a pas d'ordinateur aux machines, et une
+// validation obtenue au téléphone ou un achat réglé hors système ne doivent pas
+// bloquer le circuit. L'état REMPLACE le pointage de son étape ; le retirer rend
+// l'étape au pointage.
+// ⚠️ ETAPES_PILOTABLES et ETAPES_ATELIER doivent rester IDENTIQUES à Code.gs.
 // ════════════════════════════════════════════════════════════
-const ETAPES_MANUELLES = ['PRODUCTION','FINITION'];
+const ETAPES_PILOTABLES = ETAPES_CONFIG.map(e => e.code);
+// Étapes d'atelier : jamais pointées, donc dès qu'un état manuel existe sur le
+// dossier elles entrent dans son pipeline avec « à faire » par défaut (sinon
+// « Production terminée » ferait sauter le dossier à 100 % en sautant la finition).
+// Les autres étapes sans état posé restent sur leurs pointages.
+const ETAPES_ATELIER   = ['PRODUCTION','FINITION'];
 const ETATS_MANUELS = [
   { code:'A_FAIRE',  label:'À faire',  color:'#2563eb', bg:'#dbeafe' },
   { code:'EN_COURS', label:'En cours', color:'#d97706', bg:'#fef3c7' },
   { code:'TERMINE',  label:'Terminé',  color:'#16a34a', bg:'#dcfce7' },
 ];
-function _estEtapeManuelle(code){ return ETAPES_MANUELLES.includes(code); }
+function _estEtapePilotable(code){ return ETAPES_PILOTABLES.includes(code); }
+function _estEtapeAtelier(code){ return ETAPES_ATELIER.includes(code); }
 // Seuls l'admin et le responsable de production (chef d'atelier) posent ces états.
 function _peutPiloterEtapes(){ return ['admin','chef_atelier'].includes(currentUser?.role); }
 
@@ -9643,16 +9651,23 @@ function _etatsManuels(d){
   return (typeof raw === 'object') ? raw : {};
 }
 function _etatManuel(d, code){ return String((_etatsManuels(d)[code] || {}).st || ''); }
+// L'étape ne suit plus ses pointages : un état y est posé, ou c'est une étape
+// d'atelier d'un dossier déjà piloté (défaut « à faire »). Même règle que
+// _tachesEff et que _overlayEtatsManuels_ côté serveur.
+function _etapeVerrouillee(d, code){
+  return !!_etatManuel(d, code) || (_estEtapeAtelier(code) && _aEtatsManuels(d));
+}
 function _etatManuelMeta(d, code){ return _etatsManuels(d)[code] || null; }
 function _aEtatsManuels(d){ return Object.keys(_etatsManuels(d)).length > 0; }
 function _etatManuelConf(st){ return ETATS_MANUELS.find(x => x.code === st) || null; }
 
-// Tâches « effectives » d'un dossier : les pointages réels, sauf sur les étapes
-// pilotées à la main où l'état posé par le responsable REMPLACE les pointages, sous
-// la forme d'une tâche virtuelle. Tous les affichages de pipeline (cockpit, cartes,
-// suivi commande, impressions) et le calcul de progression lisent ainsi le même
-// avancement, exactement comme le serveur (_overlayEtatsManuels_ dans Code.gs).
-// Dès qu'un état manuel existe sur le dossier, les étapes manuelles sans état
+// Tâches « effectives » d'un dossier : les pointages réels, sauf sur les étapes où
+// le responsable a posé un état — il REMPLACE alors les pointages sous la forme
+// d'une tâche virtuelle, sur n'importe quelle étape du pipeline. Tous les
+// affichages (cockpit, cartes, suivi commande, impressions) et le calcul de
+// progression lisent ainsi le même avancement, exactement comme le serveur
+// (_overlayEtatsManuels_ dans Code.gs).
+// Dès qu'un état manuel existe sur le dossier, les étapes d'ATELIER sans état
 // comptent « à faire » : sinon « Production terminée » ferait sauter le dossier à
 // 100 % en sautant la finition, qui n'a par construction aucune tâche.
 function _tachesEff(d, dtBase){
@@ -9661,10 +9676,11 @@ function _tachesEff(d, dtBase){
     : (Array.isArray(taches) ? taches : []).filter(t => t.dossierId === (d && d.id));
   if (!d || !_aEtatsManuels(d)) return dt;
   const em  = _etatsManuels(d);
-  const out = dt.filter(t => !_estEtapeManuelle(t.etapeCode));
-  ETAPES_MANUELLES.forEach(code => {
+  const out = dt.filter(t => !_etapeVerrouillee(d, t.etapeCode));
+  ETAPES_PILOTABLES.forEach(code => {
     const st = String((em[code] || {}).st || '');
     if (st) { out.push(_tacheManuelle(d, code, st, em[code])); return; }
+    if (!_estEtapeAtelier(code)) return;          // reste sur ses pointages
     const reelles = dt.filter(t => t.etapeCode === code);
     out.push(...(reelles.length ? reelles : [_tacheManuelle(d, code, 'A_FAIRE', null)]));
   });
@@ -10143,7 +10159,7 @@ function _dossierClosed(d) {
 // étape tardive terminée gonflait le % pour des étapes jamais travaillées).
 function _dossierPct(dt, d) {
   if (_dossierClosed(d)) return 100;
-  // États manuels (production / finition) inclus : même modèle que le serveur.
+  // États manuels (sur n'importe quelle étape) inclus : même modèle que le serveur.
   const dte = _tachesEff(d, dt);
   let done = 0, applicable = 0;
   for (const e of ETAPES_CONFIG) {
@@ -16299,8 +16315,8 @@ function renderAttrPanel(tachesD, commentsD = []) {
   const panel = document.getElementById('attrPanel');
   if (!panel || !selectedDossier) return;
   const d = selectedDossier;
-  // Les états posés à la main par le responsable (production / finition) remplacent
-  // les pointages de leur étape — ici comme sur tous les autres écrans.
+  // Les états posés à la main par le responsable remplacent les pointages de leur
+  // étape, quelle qu'elle soit — ici comme sur tous les autres écrans.
   tachesD = _tachesEff(d, tachesD);
 
   // Récupérer la source (réservation ou commande) pour afficher les vrais détails
@@ -16550,7 +16566,7 @@ function renderAttrPanel(tachesD, commentsD = []) {
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">
             <span style="font-size:12px;font-weight:600;color:var(--color-text-primary)">${e.label}</span>
-            ${_estEtapeManuelle(e.code) ? '<span class="pcok-dstep-manu">responsable</span>' : ''}
+            ${_etapeVerrouillee(d, e.code) ? '<span class="pcok-dstep-manu">responsable</span>' : ''}
             ${etapeIcon}
           </div>
           <div style="font-size:11px;color:var(--color-text-secondary);margin-top:1px;display:flex;flex-wrap:wrap;gap:2px">
@@ -22729,11 +22745,12 @@ function _cockpitRow(r) {
 
 // Rendu du pipeline vertical (partagé par les drawers Production & Commande)
 // ════════════════════════════════════════════════════════════
-// PILOTAGE MANUEL DES ÉTAPES — production & finition
+// PILOTAGE MANUEL DES ÉTAPES — tout le pipeline
 // Bloc affiché sur la fiche d'un dossier (panneau latéral + carte dépliée de la
 // page Production). Lecture pour tous, boutons actifs pour l'admin et le
-// responsable de production. L'état remplace le pointage de l'étape et redescend
-// dans tout le système via le statut / la progression du dossier.
+// responsable de production, sur les dix étapes : on doit pouvoir intervenir à
+// n'importe quel endroit du circuit. L'état remplace le pointage de l'étape et
+// redescend dans tout le système via le statut / la progression du dossier.
 // ════════════════════════════════════════════════════════════
 function _etatManuelDate(iso){
   if (!iso) return '';
@@ -22746,29 +22763,36 @@ function _etatManuelDate(iso){
 function _etapesManuellesHtml(dossierId){
   const d = _dossierParId(dossierId);
   if (!d) return '';
-  const peut = _peutPiloterEtapes();
-  const lignes = ETAPES_MANUELLES.map(code => {
+  const peut   = _peutPiloterEtapes();
+  const pilote = _aEtatsManuels(d);
+  const lignes = ETAPES_PILOTABLES.map((code, i) => {
     const e    = ETAPES_CONFIG.find(x => x.code === code) || { code, label:code, short:code };
     const st   = _etatManuel(d, code);
     const meta = _etatManuelMeta(d, code);
     const btns = ETATS_MANUELS.map(o => {
       const on  = st === o.code;
       const sty = on ? `background:${o.bg};color:${o.color};border-color:${o.color}` : '';
+      // Recliquer l'état actif le retire : l'étape repasse sous le pointage.
       return `<button class="emanu-btn ${on?'emanu-btn--on':''}" style="${sty}" ${peut?'':'disabled'}
-        onclick="setEtapeManuelle('${dossierId}','${code}','${o.code}')">${o.label}</button>`;
+        title="${on ? 'Retirer cet état : retour au pointage' : _pcokEsc(e.label) + ' → ' + o.label}"
+        onclick="setEtapeManuelle('${dossierId}','${code}','${on?'':o.code}')">${o.label}</button>`;
     }).join('');
+    // Une ligne de trace par étape ferait dix lignes de bruit : on ne l'affiche que
+    // si elle apprend quelque chose — qui a posé l'état, ou qu'il en manque un.
     const trace = meta && (meta.par || meta.le)
       ? `<div class="emanu-trace">${_pcokEsc(meta.par || '—')}${meta.le ? ' · ' + _etatManuelDate(meta.le) : ''}</div>`
-      : `<div class="emanu-trace emanu-trace--none">${_aEtatsManuels(d)
-            ? "État à poser — l'étape compte comme « à faire »"
-            : "L'étape suit les pointages tant qu'aucun état n'est posé"}</div>`;
+      : (pilote && _estEtapeAtelier(code))
+        ? `<div class="emanu-trace emanu-trace--none">État à poser — l'étape compte comme « à faire »</div>`
+        : '';
     const clear = (st && peut)
       ? `<button class="emanu-clear" title="Retirer l'état manuel : l'étape repasse sous le pointage"
            onclick="setEtapeManuelle('${dossierId}','${code}','')">Retirer</button>`
       : '';
-    return `<div class="emanu-row">
+    return `<div class="emanu-row${st ? ' emanu-row--on' : ''}">
       <div class="emanu-head">
+        <span class="emanu-num" style="background:${e.color||'#78716c'}18;color:${e.color||'#78716c'}">${i+1}</span>
         <span class="emanu-lbl" style="color:${e.color||'var(--color-text-primary)'}">${_pcokEsc(e.label)}</span>
+        ${_estEtapeAtelier(code) ? '<span class="emanu-tag">atelier</span>' : ''}
         ${clear}
       </div>
       <div class="emanu-btns">${btns}</div>
@@ -22776,12 +22800,13 @@ function _etapesManuellesHtml(dossierId){
     </div>`;
   }).join('');
   const note = !peut
-    ? "État posé par l'admin ou le responsable de production."
+    ? "États posés par l'admin ou le responsable de production."
     : _dossierClosed(d)
       ? 'Dossier livré — une correction rouvre son avancement.'
-      : "Vous posez l'état — il remplace le pointage et met à jour tout le système.";
+      : "Posez l'état de n'importe quelle étape : il remplace le pointage et met à "
+        + "jour tout le système. Recliquez-le pour rendre l'étape au pointage.";
   return `<div class="emanu">
-    <div class="emanu-title">Étapes pilotées par le responsable</div>
+    <div class="emanu-title">Pilotage des étapes</div>
     <div class="emanu-note">${note}</div>
     ${lignes}
   </div>`;
@@ -22795,8 +22820,8 @@ async function setEtapeManuelle(dossierId, code, statut){
     showToast("Seul l'admin ou le responsable de production peut changer cet état.", 'error');
     return;
   }
-  if (!_estEtapeManuelle(code)) {
-    showToast('Cette étape se pointe : son état ne se change pas à la main.', 'error');
+  if (!_estEtapePilotable(code)) {
+    showToast('Étape inconnue : ' + code, 'error');
     return;
   }
   const d = _dossierParId(dossierId);
@@ -22875,8 +22900,8 @@ function _pcokStepsHtml(steps) {
     const lbl = s.status==='TERMINE'?'Terminé':s.status==='EN_COURS'?'En cours':s.status==='A_FAIRE'?'À faire':'—';
     const ops = [...new Set(s.te.map(t=>t.operateur).filter(Boolean))].join(', ');
     const retard = s.te.some(t => _getTacheRetardInfo(t).isRetard);
-    // Étape sans pointage : c'est le responsable qui en pose l'état.
-    const manu = _estEtapeManuelle(s.e.code)
+    // Étape dont l'état a été posé à la main : le pointage n'y fait plus foi.
+    const manu = (s.te || []).some(t => t.manuel)
       ? '<span class="pcok-dstep-manu">responsable</span>' : '';
     return `<div class="pcok-dstep ${s.status==='EN_COURS'?'pcok-dstep--active':''}">
       <div class="pcok-dstep-rail">

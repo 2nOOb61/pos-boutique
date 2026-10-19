@@ -106,13 +106,23 @@
     .tabs {
       display:flex; gap:0; background:var(--primary);
       padding:0 20px; border-top:1px solid rgba(255,255,255,.1);
+      overflow-x:auto; scrollbar-width:none;
     }
+    .tabs::-webkit-scrollbar { display:none; }
     .tab-btn {
       padding:10px 18px; border:none; background:none;
       font-family:inherit; font-size:13px; font-weight:500;
       color:rgba(255,255,255,.55); cursor:pointer; transition:all .15s;
       border-bottom:2px solid transparent;
       display:flex; align-items:center; gap:6px;
+      flex-shrink:0; white-space:nowrap;
+    }
+    /* L atelier travaille au telephone : 4 onglets doivent tenir sur 375 px sans
+       faire deborder la page horizontalement. */
+    @media (max-width:430px) {
+      .tabs    { padding:0 6px; }
+      .tab-btn { padding:10px 11px; gap:5px; }
+      .tab-label-long { display:none; }
     }
     .tab-btn.active { color:white; border-bottom-color:var(--secondary); font-weight:600; }
     .tab-btn:hover:not(.active) { color:rgba(255,255,255,.8); }
@@ -282,6 +292,97 @@
     .empty-title { font-size:15px; font-weight:600; color:var(--text-secondary); }
     .empty-sub   { font-size:13px; color:var(--text-muted); margin-top:4px; }
 
+    /* ══ CIRCUIT DES TRAVAUX ══ */
+    #circuitView { display:none; }
+
+    .circ-bar { display:flex; align-items:center; gap:8px; margin-bottom:14px; flex-wrap:wrap; }
+    .circ-search {
+      flex:1; min-width:150px; padding:9px 12px; border:1.5px solid var(--border);
+      border-radius:10px; font-family:inherit; font-size:14px;
+      color:var(--text); background:var(--surface);
+    }
+    .circ-search:focus { outline:none; border-color:var(--primary); }
+    .circ-seg {
+      display:flex; background:var(--surface); border:1.5px solid var(--border);
+      border-radius:10px; overflow:hidden;
+    }
+    .circ-seg button {
+      border:none; background:none; font-family:inherit; font-size:12px; font-weight:600;
+      color:var(--text-secondary); padding:8px 13px; cursor:pointer; transition:all .15s;
+    }
+    .circ-seg button.active { background:var(--primary); color:white; }
+
+    .circ-card {
+      background:var(--surface); border:1px solid var(--border); border-radius:14px;
+      padding:14px 16px; margin-bottom:12px; box-shadow:0 1px 3px rgba(0,0,0,.04);
+    }
+    .circ-card.mine { border-left:4px solid var(--secondary); }
+    .circ-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; cursor:pointer; }
+    .circ-num    { font-size:13px; font-weight:700; color:var(--primary); }
+    .circ-client { font-size:15px; font-weight:600; color:var(--text); margin-top:2px; }
+    .circ-sub    { font-size:12px; color:var(--text-muted); margin-top:2px; }
+    .circ-pct    { font-size:18px; font-weight:700; white-space:nowrap; }
+    .circ-mine-tag {
+      display:inline-block; font-size:9px; font-weight:700; background:var(--secondary-light);
+      color:var(--secondary); padding:2px 7px; border-radius:8px; margin-left:6px;
+      vertical-align:middle;
+    }
+
+    /* Frise des etapes */
+    .circ-flow { display:flex; align-items:flex-start; overflow-x:auto; margin-top:14px; padding-bottom:4px; }
+    .circ-step {
+      display:flex; flex-direction:column; align-items:center; flex:1; min-width:44px;
+      position:relative; background:none; border:none; padding:0;
+      font-family:inherit; cursor:pointer;
+    }
+    .circ-link { position:absolute; top:13px; left:50%; width:100%; height:2px; }
+    .circ-node {
+      width:26px; height:26px; border-radius:50%; display:flex; align-items:center;
+      justify-content:center; font-size:10px; font-weight:700; position:relative; z-index:1;
+      flex-shrink:0; border:2px solid; transition:transform .15s;
+    }
+    .circ-step:hover .circ-node { transform:scale(1.14); }
+    .circ-step.here .circ-node {
+      box-shadow:0 0 0 3px var(--secondary-light), 0 0 0 4.5px var(--secondary);
+    }
+    .circ-cap {
+      font-size:8px; font-weight:600; margin-top:5px; text-align:center;
+      line-height:1.2; max-width:46px; word-break:break-word;
+    }
+
+    /* Detail deplie */
+    .circ-detail { margin-top:13px; border-top:1px solid var(--border); padding-top:8px; }
+    .circ-row { padding:8px 0; border-bottom:1px solid #f5f4f1; }
+    .circ-row:last-child { border-bottom:none; }
+    .circ-row.here {
+      background:var(--secondary-light); margin:0 -10px;
+      padding:8px 10px; border-radius:8px; border-bottom:none;
+    }
+    .circ-row-top { display:flex; align-items:center; gap:9px; }
+    .circ-row-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+    .circ-row-lab { flex:1; font-size:13px; color:var(--text); }
+    .circ-row-st  { font-size:11px; font-weight:700; white-space:nowrap; }
+    .circ-row-ops { font-size:11px; color:var(--text-muted); padding-left:18px; margin-top:3px; line-height:1.5; }
+    .circ-acts    { display:flex; gap:6px; flex-wrap:wrap; padding-left:18px; margin-top:7px; }
+    .circ-btn {
+      border:none; border-radius:8px; font-family:inherit; font-size:11px; font-weight:600;
+      padding:6px 11px; cursor:pointer; display:inline-flex; align-items:center; gap:5px;
+      transition:filter .15s;
+    }
+    .circ-btn:hover  { filter:brightness(.93); }
+    .circ-btn.go     { background:var(--primary);       color:white; }
+    .circ-btn.stop   { background:var(--secondary);     color:white; }
+    .circ-btn.take   { background:var(--primary-light); color:var(--primary); }
+    .circ-btn.man    { background:var(--bg); color:var(--text-secondary); border:1.5px solid var(--border); }
+    .circ-btn.man.on { font-weight:700; border-color:currentColor; }
+    .circ-note { font-size:11px; color:var(--text-muted); font-style:italic; padding-left:18px; margin-top:5px; }
+    .circ-legend {
+      display:flex; gap:12px; flex-wrap:wrap; font-size:11px;
+      color:var(--text-muted); margin-bottom:12px;
+    }
+    .circ-legend span { display:flex; align-items:center; gap:5px; }
+    .circ-legend i { width:9px; height:9px; border-radius:50%; display:inline-block; }
+
     /* Toast */
     #toast {
       position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
@@ -419,11 +520,17 @@
       </svg>
       Mes tâches <span id="taskBadge" style="display:none;background:var(--secondary);color:white;font-size:10px;font-weight:700;padding:1px 6px;border-radius:20px;margin-left:4px"></span>
     </button>
+    <button class="tab-btn" id="tabCircuit" onclick="switchTab('circuit')">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect width="8" height="8" x="3" y="3" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/><rect width="8" height="8" x="13" y="13" rx="2"/>
+      </svg>
+      Circuit
+    </button>
     <button class="tab-btn" id="tabRefresh" onclick="loadTasks()" style="margin-left:auto">
       <svg id="refreshIcon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
       </svg>
-      Actualiser
+      <span class="tab-label-long">Actualiser</span>
     </button>
   </div>
 
@@ -497,6 +604,28 @@
 
     </div><!-- /dashView -->
 
+    <!-- ══ CIRCUIT VIEW ══ -->
+    <div id="circuitView">
+      <div class="refresh-bar">
+        <div class="refresh-title" id="circCountLabel">Circuit des travaux</div>
+      </div>
+      <div class="circ-bar">
+        <input class="circ-search" id="circSearch" type="search" autocomplete="off"
+               placeholder="N° dossier, client, produit..." oninput="onCircSearch(this.value)">
+        <div class="circ-seg">
+          <button id="circScopeTous" class="active" onclick="setCircScope('tous')">Tous</button>
+          <button id="circScopeMoi" onclick="setCircScope('moi')">Les miens</button>
+        </div>
+      </div>
+      <div class="circ-legend">
+        <span><i style="background:#16a34a"></i>Terminé</span>
+        <span><i style="background:#d97706"></i>En cours</span>
+        <span><i style="background:#2563eb"></i>À faire</span>
+        <span><i style="background:#d6d3d1"></i>Non attribué</span>
+      </div>
+      <div id="circuitList"></div>
+    </div>
+
     <!-- ══ TASKS VIEW ══ -->
     <div id="tasksView">
       <div class="refresh-bar">
@@ -547,23 +676,76 @@ const ROLE_LABELS = {
 };
 const ALLOWED_ROLES = ['chef_atelier','operateur_prod','machiniste','pao','finition','livreur','admin','gestionnaire'];
 
-const ETAPE_LABELS = {
-  ACHAT:'Achat', PAO:'PAO / Conception', BAT:'BAT physique',
-  RETOUR_CLIENT:'Retour client', MODIFICATIONS:'Modifications',
-  PRODUCTION:'Opérateur machine', FINITION:'Finition', LIVRE:'Livraison'
+// Pipeline de production — le circuit des travaux.
+// ⚠️ Les `code` et l'ORDRE doivent rester IDENTIQUES à ETAPES_CONFIG (app.js) et
+// ETAPES_PROD (Code.gs) : le serveur fait avancer le statut du dossier vers
+// l'étape suivante de SA liste quand une tâche se termine. Ne jamais renommer un
+// code existant (il est persisté dans la colonne EtapeCode de la feuille Taches).
+const ETAPES_CIRCUIT = [
+  { code:'VALID_CMD',     label:'Validation commande',      short:'Valid. cmd', color:'#0d9488' },
+  { code:'PAO',           label:'Conception / Simulation',  short:'PAO',        color:'#6c63ff' },
+  { code:'RETOUR_CLIENT', label:'Validation client',        short:'Valid. 1',   color:'#0891b2' },
+  { code:'MODIFICATIONS', label:'Modifications (PAO)',      short:'Modifs',     color:'#7c3aed' },
+  { code:'VALID_CLIENT2', label:'Validation client (2)',    short:'Valid. 2',   color:'#0e7490' },
+  { code:'BAT',           label:'BAT physique',             short:'BAT',        color:'#2563eb' },
+  { code:'ACHAT',         label:'Achat',                    short:'Achat',      color:'#d97706' },
+  { code:'PRODUCTION',    label:'Production (machine)',     short:'Machine',    color:'#e8834a' },
+  { code:'FINITION',      label:'Finition',                 short:'Finition',   color:'#1a4a3a' },
+  { code:'LIVRE',         label:'Livraison',                short:'Livré',      color:'#16a34a' },
+];
+
+// Étapes pilotables À LA MAIN : sur N'IMPORTE QUELLE étape du circuit, celui qui
+// en a le droit (ETAPE_ROLES) peut poser l'état directement sur le dossier
+// (feuille Dossiers, col. EtatsManuels) au lieu d'attendre un pointage — l'atelier
+// n'a pas d'ordinateur aux machines, et une validation obtenue de vive voix ne doit
+// pas bloquer le circuit. L'état posé remplace le pointage de son étape.
+// ⚠️ Doit rester IDENTIQUE à ETAPES_PILOTABLES (app.js et Code.gs).
+const ETAPES_PILOTABLES = ETAPES_CIRCUIT.map(e => e.code);
+// Étapes d'atelier : jamais pointées. Dès qu'un état existe sur le dossier, elles
+// entrent dans son pipeline avec « à faire » par défaut (sinon « production
+// terminée » ferait sauter le dossier à 100 % en sautant la finition). Les autres
+// étapes sans état posé restent sur leurs pointages.
+const ETAPES_ATELIER = ['PRODUCTION','FINITION'];
+const ETATS_MANUELS = [
+  { code:'A_FAIRE',  label:'À faire',  color:'#2563eb' },
+  { code:'EN_COURS', label:'En cours', color:'#d97706' },
+  { code:'TERMINE',  label:'Terminé',  color:'#16a34a' },
+];
+
+// Qui pilote quoi dans le circuit : poser l'état d'une étape manuelle, ou prendre
+// une étape de pointage encore libre. Les validations commerciales restent hors
+// de portée de l'atelier — seuls l'admin et le chef d'atelier y touchent.
+const ETAPE_ROLES = {
+  VALID_CMD:     ['admin','chef_atelier'],
+  PAO:           ['admin','chef_atelier','pao'],
+  RETOUR_CLIENT: ['admin','chef_atelier'],
+  MODIFICATIONS: ['admin','chef_atelier','pao'],
+  VALID_CLIENT2: ['admin','chef_atelier'],
+  BAT:           ['admin','chef_atelier','pao','operateur_prod','machiniste','finition'],
+  ACHAT:         ['admin','chef_atelier','gestionnaire'],
+  PRODUCTION:    ['admin','chef_atelier','operateur_prod','machiniste'],
+  FINITION:      ['admin','chef_atelier','finition','operateur_prod'],
+  LIVRE:         ['admin','chef_atelier','livreur'],
 };
-const ETAPE_COLORS = {
-  ACHAT:'#d97706', PAO:'#6c63ff', BAT:'#2563eb', RETOUR_CLIENT:'#0891b2',
-  MODIFICATIONS:'#7c3aed', PRODUCTION:'#e8834a', FINITION:'#1a4a3a', LIVRE:'#16a34a'
-};
+
+// Dérivés d'ETAPES_CIRCUIT (source de vérité unique) : le dashboard et la liste des
+// tâches lisent les mêmes libellés et couleurs que la frise.
+const ETAPE_LABELS = {};
+const ETAPE_COLORS = {};
+ETAPES_CIRCUIT.forEach(e => { ETAPE_LABELS[e.code] = e.label; ETAPE_COLORS[e.code] = e.color; });
 
 // ════════════════════════════════════════
 // STATE
 // ════════════════════════════════════════
 let currentUser = null;
-let tasks = [];
+let tasks = [];            // tâches visibles par l'utilisateur (filtrées)
+let allTasks = [];         // toutes les tâches de l'atelier — base du circuit
+let dossiers = [];         // fiches dossiers (client, produit, états manuels…)
 let pendingStop = null;
 let currentTab = 'dash';
+let circScope = 'tous';    // 'tous' | 'moi'
+let circQuery = '';
+let circOpen  = {};        // dossierId -> détail déplié
 
 // ════════════════════════════════════════
 // UTILS
@@ -615,10 +797,13 @@ async function apiWrite(payload) {
 // ════════════════════════════════════════
 function switchTab(tab) {
   currentTab = tab;
-  document.getElementById('tabDash').classList.toggle('active',  tab === 'dash');
-  document.getElementById('tabTasks').classList.toggle('active', tab === 'tasks');
-  document.getElementById('dashView').style.display  = tab === 'dash'  ? 'block' : 'none';
-  document.getElementById('tasksView').style.display = tab === 'tasks' ? 'block' : 'none';
+  document.getElementById('tabDash').classList.toggle('active',    tab === 'dash');
+  document.getElementById('tabCircuit').classList.toggle('active', tab === 'circuit');
+  document.getElementById('tabTasks').classList.toggle('active',   tab === 'tasks');
+  document.getElementById('dashView').style.display    = tab === 'dash'    ? 'block' : 'none';
+  document.getElementById('circuitView').style.display = tab === 'circuit' ? 'block' : 'none';
+  document.getElementById('tasksView').style.display   = tab === 'tasks'   ? 'block' : 'none';
+  if (tab === 'circuit') _circFocusFlows();
 }
 
 // ════════════════════════════════════════
@@ -674,9 +859,8 @@ function enterMain() {
     new Date().toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long' });
 
   // Réinitialiser les états "Chargement..." avec des vides propres
-  tasks = [];
-  renderDashboard();
-  renderTaskList();
+  tasks = []; allTasks = []; dossiers = [];
+  renderAll();
 
   startClock();
   loadTasks();
@@ -693,6 +877,17 @@ async function loadTasks() {
   icon.style.animation = 'spin .8s linear infinite';
   showLoader();
 
+  // Le circuit a besoin des dossiers — client, produit, échéance et états manuels
+  // d'étape vivent là, pas sur la tâche. Mais « Mes tâches » est l'écran de travail
+  // de l'atelier : il ne doit jamais attendre une seconde requête. On lance les deux
+  // en parallèle, on n'attend que les tâches, et le circuit se redessine quand les
+  // dossiers arrivent. Si cet appel traîne ou échoue, le circuit reste utilisable —
+  // _circDossiers() reconstruit les dossiers manquants à partir des tâches.
+  const pDossiers = apiGet('getDossiers');
+  pDossiers.then(rd => {
+    if (rd && rd.ok) { dossiers = rd.dossiers || []; renderCircuit(); }
+  }).catch(() => {});
+
   let r = null;
   try { r = await apiGet('getTaches'); } catch(e) {}
 
@@ -701,44 +896,32 @@ async function loadTasks() {
 
   if (!r) {
     showToast('Connexion impossible — vérifiez le réseau', 'error');
-    renderDashboard(); renderTaskList(); return;
+    renderAll(); return;
   }
   if (!r.ok) {
     showToast('Erreur GAS : ' + (r.error || 'inconnue'), 'error');
-    renderDashboard(); renderTaskList(); return;
+    renderAll(); return;
   }
 
   const all         = r.taches || [];
+  allTasks          = all;   // le circuit lit TOUT l'atelier, pas seulement mes tâches
   const myLabel     = (currentUser.label || currentUser.username || '').trim();
   const isAdminChef = ['admin','chef_atelier'].includes(currentUser.role);
 
-  // Filtre insensible à la casse + trim pour éviter les faux négatifs
-  const myUsername  = (currentUser.username || '').trim().toLowerCase();
-  const myLabel_    = myLabel.toLowerCase();
-  const myFirstName = myLabel_.split(' ')[0];
-
-  tasks = isAdminChef
-    ? all
-    : all.filter(t => {
-        const op = (t.operateur || '').trim().toLowerCase();
-        if (!op) return false; // tâche sans opérateur = invisible hors admin/chef
-        return op === myLabel_
-            || op === myUsername
-            || op === myFirstName
-            || myLabel_.startsWith(op)
-            || myLabel_.includes(op);
-      });
+  // Admin / chef voient tout ; les autres uniquement leurs tâches (cf. _isMine).
+  // all.slice() et non `all` : le tri ci-dessous ne doit pas réordonner allTasks.
+  tasks = isAdminChef ? all.slice() : all.filter(t => _isMine(t));
 
   const orderMap = { EN_COURS:0, A_FAIRE:1, TERMINE:2 };
   tasks.sort((a,b) => (orderMap[a.statut]??3) - (orderMap[b.statut]??3));
 
   console.log(
     '[Opérateur] GAS taches total:', all.length,
-    '| filtrées pour label:"' + myLabel_ + '" username:"' + myUsername + '":', tasks.length,
+    '| filtrées pour "' + myLabel + '":', tasks.length,
     '| Noms dans GAS:', [...new Set(all.map(t => t.operateur))].join(', ')
   );
 
-  renderDashboard(); renderTaskList();
+  renderAll();
   if (tasks.length === 0 && all.length > 0) {
     showToast('Aucune tâche assignée à "' + myLabel + '"', 'warning');
   }
@@ -915,9 +1098,9 @@ async function startTask(tacheId) {
   const r = await apiWrite({ action:'pointerAction', tacheId, action_:'START' });
   hideLoader();
   if (r && r.ok) {
-    const t = tasks.find(x => x.id === tacheId);
+    const t = _findTask(tacheId);
     if (t) { t.statut = 'EN_COURS'; t.dateDebut = new Date().toLocaleString('fr-FR'); }
-    renderDashboard(); renderTaskList();
+    renderAll();
     showToast('Tâche démarrée', 'success');
   } else {
     showToast('Erreur lors du démarrage', 'error');
@@ -925,7 +1108,7 @@ async function startTask(tacheId) {
 }
 
 function openStopModal(tacheId) {
-  const t = tasks.find(x => x.id === tacheId);
+  const t = _findTask(tacheId);
   if (!t) return;
   pendingStop = tacheId;
   const isLibre    = t.dossierId === 'LIBRE';
@@ -943,7 +1126,7 @@ function closeStopModal() {
 async function confirmStop() {
   if (!pendingStop) return;
   const tacheId = pendingStop;  // sauvegarder AVANT closeStopModal qui remet pendingStop=null
-  const t = tasks.find(x => x.id === tacheId);
+  const t = _findTask(tacheId);
   if (!t) return;
   const comment = document.getElementById('stopComment').value.trim();
   closeStopModal();
@@ -959,12 +1142,459 @@ async function confirmStop() {
     if (comment) t.commentaire = comment;
     const orderMap = { EN_COURS:0, A_FAIRE:1, TERMINE:2 };
     tasks.sort((a,b) => (orderMap[a.statut]??3) - (orderMap[b.statut]??3));
-    renderDashboard(); renderTaskList();
+    renderAll();
     showToast('Tâche terminée', 'success');
   } else {
     showToast('Erreur lors de la finalisation', 'error');
   }
 }
+
+// ════════════════════════════════════════
+// CIRCUIT DES TRAVAUX
+// L'opérateur voit où en est chaque dossier de l'atelier — qui a fait quoi, quand,
+// et ce qui arrive vers lui — et pilote ce qui le concerne : pointage de ses tâches,
+// état des étapes machine/finition, prise d'une étape libre de son métier.
+// Le calcul d'avancement reproduit exactement celui de app.js (_tachesEff,
+// _buildCardProductionSection) et du serveur (_overlayEtatsManuels_ dans Code.gs) :
+// un même dossier affiche le même pourcentage sur le poste admin et ici.
+// ════════════════════════════════════════
+
+const _SVG_PLAY  = '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
+const _SVG_STOP  = '<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>';
+const _SVG_PLUS  = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+const _SVG_CHECK = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+
+// Les noms de client et les commentaires viennent du classeur, que l'atelier
+// remplit à la main : on échappe avant de les injecter dans le HTML.
+function _esc(v) {
+  return String(v == null ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function _circDateFr(iso) {
+  if (!iso) return '';
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? m[3] + '/' + m[2] + '/' + m[1] : String(iso);
+}
+
+// Une tâche m'appartient-elle ? Le classeur stocke un NOM libre, pas un id : on
+// compare label, identifiant et prénom, insensible à la casse, pour éviter les faux
+// négatifs ("Rakoto" assigné à "Rakoto Jean").
+function _isMine(t) {
+  if (!currentUser) return false;
+  const op = String((t && t.operateur) || '').trim().toLowerCase();
+  if (!op) return false;  // tâche sans opérateur = à personne
+  const label = String(currentUser.label || currentUser.username || '').trim().toLowerCase();
+  const user  = String(currentUser.username || '').trim().toLowerCase();
+  const first = label.split(' ')[0];
+  return op === label || op === user || op === first
+      || label.startsWith(op) || label.includes(op);
+}
+
+function _findTask(id) {
+  return tasks.find(x => x.id === id) || allTasks.find(x => x.id === id) || null;
+}
+
+function _estEtapePilotable(code) { return ETAPES_PILOTABLES.includes(code); }
+function _estEtapeAtelier(code) { return ETAPES_ATELIER.includes(code); }
+function _peutPiloter(code) { return (ETAPE_ROLES[code] || []).includes(currentUser && currentUser.role); }
+function _dossierClosed(d) { return !!d && (d.statut === 'LIVRE' || Number(d.progression) === 100); }
+
+function _etatsManuels(d) {
+  const raw = d && d.etatsManuels;
+  if (!raw) return {};
+  if (typeof raw === 'string') { try { return JSON.parse(raw) || {}; } catch(e) { return {}; } }
+  return (typeof raw === 'object') ? raw : {};
+}
+function _aEtatsManuels(d) { return Object.keys(_etatsManuels(d)).length > 0; }
+function _etatManuel(d, code) { return String((_etatsManuels(d)[code] || {}).st || ''); }
+// L'étape ne suit plus ses pointages : un état y est posé, ou c'est une étape
+// d'atelier d'un dossier déjà piloté (défaut « à faire »). Même règle que
+// _tachesEff et que _overlayEtatsManuels_ côté serveur.
+function _etapeVerrouillee(d, code) {
+  return !!_etatManuel(d, code) || (_estEtapeAtelier(code) && _aEtatsManuels(d));
+}
+
+// Tâche virtuelle portant un état manuel : même forme qu'un pointage, pour que les
+// calculs every/some ci-dessous n'aient aucun cas particulier à traiter.
+function _tacheManuelle(d, code, statut, meta) {
+  const e  = ETAPES_CIRCUIT.find(x => x.code === code) || { label:code };
+  const dt = (meta && meta.le) ? new Date(meta.le) : null;
+  const str = (dt && !isNaN(dt.getTime())) ? dt.toLocaleString('fr-FR') : '';
+  return {
+    id:'MAN-' + ((d && d.id) || '') + '-' + code,
+    dossierId:(d && d.id) || '', numeroDossier:(d && d.numeroDossier) || '',
+    etapeCode:code, etapeLabel:e.label, operateur:(meta && meta.par) || '',
+    statut:statut, dateAssignation:'',
+    dateDebut:(statut !== 'A_FAIRE') ? str : '',
+    dateFin:(statut === 'TERMINE') ? str : '',
+    manuel:true
+  };
+}
+
+// Tâches « effectives » d'un dossier : les pointages réels, sauf sur les étapes où
+// un état a été posé — il REMPLACE alors les pointages, sur n'importe quelle étape
+// du circuit. Dès qu'un seul état existe, les étapes d'ATELIER entrent dans le
+// pipeline (défaut « à faire ») — sinon « production terminée » ferait sauter le
+// dossier à 100 % en sautant la finition, qui par construction n'a aucune tâche.
+function _tachesEff(d) {
+  const dt = allTasks.filter(t => t.dossierId === (d && d.id));
+  if (!d || !_aEtatsManuels(d)) return dt;
+  const em  = _etatsManuels(d);
+  const out = dt.filter(t => !_etapeVerrouillee(d, t.etapeCode));
+  ETAPES_PILOTABLES.forEach(code => {
+    const st = String((em[code] || {}).st || '');
+    if (st) { out.push(_tacheManuelle(d, code, st, em[code])); return; }
+    if (!_estEtapeAtelier(code)) return;          // reste sur ses pointages
+    const reelles = dt.filter(t => t.etapeCode === code);
+    out.push.apply(out, reelles.length ? reelles : [_tacheManuelle(d, code, 'A_FAIRE', null)]);
+  });
+  return out;
+}
+
+// État d'une étape : TERMINE seulement si TOUTES ses tâches le sont, VIDE si aucune
+// tâche n'y est attribuée. Un dossier clôturé affiche le pipeline complet.
+function _circSteps(d) {
+  const dte  = _tachesEff(d);
+  const clos = _dossierClosed(d);
+  return ETAPES_CIRCUIT.map(e => {
+    const te = dte.filter(t => t.etapeCode === e.code);
+    let status = 'VIDE';
+    if (clos)                                                                status = 'TERMINE';
+    else if (te.length > 0 && te.every(t => t.statut === 'TERMINE'))          status = 'TERMINE';
+    else if (te.some(t => t.statut === 'EN_COURS' || t.statut === 'TERMINE')) status = 'EN_COURS';
+    else if (te.some(t => t.statut === 'A_FAIRE'))                            status = 'A_FAIRE';
+    return { e:e, status:status, te:te };
+  });
+}
+
+// Avancement = étapes terminées ÷ étapes APPLICABLES (celles ayant au moins une
+// tâche). Diviser par 10 sous-évaluerait tout dossier simple entièrement fini.
+function _circPct(steps, d) {
+  if (_dossierClosed(d)) return 100;
+  const applicable = steps.filter(s => s.te.length).length;
+  const done       = steps.filter(s => s.status === 'TERMINE').length;
+  return applicable ? Math.round(done / applicable * 100) : 0;
+}
+
+function _circCol(st) {
+  return st === 'TERMINE' ? '#16a34a' : st === 'EN_COURS' ? '#d97706'
+       : st === 'A_FAIRE' ? '#2563eb' : '#d6d3d1';
+}
+function _circLab(st) {
+  return st === 'TERMINE' ? 'Terminé' : st === 'EN_COURS' ? 'En cours'
+       : st === 'A_FAIRE' ? 'À faire' : 'Non attribué';
+}
+
+// getDossiers lit les 300 dernières lignes, getTaches les 500 dernières : une tâche
+// peut donc pointer un dossier hors fenêtre. On le reconstruit en minimal plutôt
+// que de laisser l'opérateur sans circuit pour un travail qui lui est assigné.
+function _circDossiers() {
+  const byId = {};
+  dossiers.forEach(d => { if (d && d.id) byId[d.id] = d; });
+  allTasks.forEach(t => {
+    if (!t.dossierId || t.dossierId === 'LIBRE' || byId[t.dossierId]) return;
+    byId[t.dossierId] = {
+      id:t.dossierId, numeroDossier:t.numeroDossier || '', client:'', produit:'',
+      statut:'', progression:0, etatsManuels:{}, _partiel:true
+    };
+  });
+  return Object.keys(byId).map(k => byId[k]);
+}
+
+// ── Filtres ────────────────────────────────────────────────
+function setCircScope(sc) {
+  circScope = sc;
+  document.getElementById('circScopeTous').classList.toggle('active', sc === 'tous');
+  document.getElementById('circScopeMoi').classList.toggle('active',  sc === 'moi');
+  renderCircuit();
+}
+
+let _circSearchTimer;
+function onCircSearch(v) {
+  circQuery = v;
+  clearTimeout(_circSearchTimer);
+  _circSearchTimer = setTimeout(renderCircuit, 180);
+}
+
+function toggleCirc(id) { circOpen[id] = !circOpen[id]; renderCircuit(); }
+
+// ── Rendu ──────────────────────────────────────────────────
+function renderCircuit() {
+  const list = document.getElementById('circuitList');
+  if (!list) return;
+
+  // « Tous les dossiers en cours » : les dossiers clôturés sortent du circuit.
+  const encours = _circDossiers().filter(d => !_dossierClosed(d));
+
+  // Une seule passe de calcul par dossier : _circSteps balaie allTasks, le rappeler
+  // depuis le comparateur de tri le ferait tourner O(n log n) fois.
+  let rows = encours.map(d => {
+    const steps = _circSteps(d);
+    const mt    = allTasks.filter(t => t.dossierId === d.id && _isMine(t));
+    // Ce qui m'engage sur ce dossier : mes tâches pointées ET les états manuels que
+    // j'ai posés moi-même. Sans ce second terme, le finisseur qui passe la finition
+    // « en cours » ne retrouverait pas son dossier dans « Les miens » : un état
+    // manuel vit sur le dossier, pas dans la feuille Taches.
+    const em  = _etatsManuels(d);
+    const mem = Object.keys(em)
+      .filter(c => em[c] && em[c].st && _isMine({ operateur:em[c].par }))
+      .map(c => ({ etapeCode:c, statut:em[c].st, manuel:true }));
+    return { d:d, steps:steps, pct:_circPct(steps, d), mine:mt.concat(mem) };
+  });
+  const total = rows.length;
+
+  if (circScope === 'moi') rows = rows.filter(x => x.mine.length);
+
+  const q = circQuery.trim().toLowerCase();
+  if (q) rows = rows.filter(x => (
+    String(x.d.numeroDossier || '') + ' ' + String(x.d.client || '') + ' ' + String(x.d.produit || '')
+  ).toLowerCase().includes(q));
+
+  // D'abord ce sur quoi l'opérateur est engagé (en cours, puis à faire), ensuite
+  // l'avancement décroissant : ce qui est près de sortir remonte.
+  const rank = x => x.mine.some(t => t.statut === 'EN_COURS') ? 0
+                  : x.mine.some(t => t.statut === 'A_FAIRE')  ? 1
+                  : x.mine.length                             ? 2 : 3;
+  rows.sort((a, b) => (rank(a) - rank(b)) || (b.pct - a.pct));
+
+  document.getElementById('circCountLabel').textContent =
+    rows.length + ' dossier' + (rows.length !== 1 ? 's' : '') + ' en cours'
+    + (rows.length !== total ? ' sur ' + total : '');
+
+  if (!rows.length) {
+    list.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#1a4a3a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect width="8" height="8" x="3" y="3" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/><rect width="8" height="8" x="13" y="13" rx="2"/>
+          </svg>
+        </div>
+        <div class="empty-title">${total ? 'Aucun dossier ne correspond' : 'Aucun dossier en cours'}</div>
+        <div class="empty-sub">${total ? 'Modifiez la recherche ou repassez sur « Tous ».' : 'Les dossiers de production apparaîtront ici.'}</div>
+      </div>`;
+    return;
+  }
+  list.innerHTML = rows.map(_circCard).join('');
+
+  _circFocusFlows();
+}
+
+// Sur téléphone la frise ne tient pas en entier : on la cadre sur l'étape qui
+// concerne l'opérateur, sinon il ouvre la carte sur les étapes déjà passées et doit
+// faire défiler à chaque dossier. Mesuré au rect : .circ-step est positionné, donc
+// son offsetLeft se rapporte à la carte et non à la frise.
+// Appelé aussi depuis switchTab : un rendu fait pendant que la vue est masquée
+// mesure des largeurs nulles et ne peut rien cadrer.
+function _circFocusFlows() {
+  document.querySelectorAll('#circuitList .circ-flow').forEach(f => {
+    if (!f.clientWidth || f.scrollWidth <= f.clientWidth) return;
+    const step = f.children[Number(f.dataset.focus)];
+    if (!step) return;
+    const sr = step.getBoundingClientRect(), fr = f.getBoundingClientRect();
+    f.scrollLeft += (sr.left - fr.left) - (fr.width - sr.width) / 2;
+  });
+}
+
+function _circCard(row) {
+  const d = row.d, steps = row.steps, pct = row.pct;
+  const open = !!circOpen[d.id];
+
+  // Mon étape : celle de ma première tâche non terminée. On part des tâches RÉELLES
+  // (row.mine) et non des tâches effectives : dès que le responsable pose un état
+  // manuel sur production ou finition, il remplace les pointages de l'étape — mon
+  // assignation disparaîtrait alors de la frise alors que le dossier me concerne.
+  const mesCodes = row.mine.filter(t => t.statut !== 'TERMINE').map(t => t.etapeCode);
+  const myIdx = steps.findIndex(s => mesCodes.includes(s.e.code));
+
+  // L'étape où le dossier est posé : en cours sinon à faire sinon la 1re inachevée.
+  let curIdx = steps.findIndex(s => s.status === 'EN_COURS');
+  if (curIdx < 0) curIdx = steps.findIndex(s => s.status === 'A_FAIRE');
+  if (curIdx < 0) curIdx = steps.findIndex(s => s.status !== 'TERMINE');
+
+  const bits = [];
+  if (d.produit)       bits.push(_esc(d.produit));
+  if (d.quantite)      bits.push(_esc(d.quantite) + ' u');
+  if (d.dateLivraison) bits.push('livraison ' + _circDateFr(d.dateLivraison));
+  if (d.priorite && d.priorite !== 'Normale') bits.push(_esc(d.priorite));
+  if (d._partiel)      bits.push('fiche hors fenêtre de lecture');
+
+  const head = `
+    <div class="circ-head" onclick="toggleCirc('${_esc(d.id)}')">
+      <div style="min-width:0">
+        <div class="circ-num">${_esc(d.numeroDossier || d.id)}${
+          myIdx >= 0 ? '<span class="circ-mine-tag">VOUS</span>' : ''}</div>
+        <div class="circ-client">${_esc(d.client || '—')}</div>
+        ${bits.length ? `<div class="circ-sub">${bits.join(' · ')}</div>` : ''}
+      </div>
+      <div style="text-align:right;flex-shrink:0">
+        <div class="circ-pct" style="color:${pct === 100 ? '#16a34a' : '#e8834a'}">${pct}%</div>
+        <div class="circ-sub">${open ? 'Replier' : 'Détails'}</div>
+      </div>
+    </div>`;
+
+  const focusIdx = myIdx >= 0 ? myIdx : (curIdx >= 0 ? curIdx : 0);
+  const flow = `<div class="circ-flow" data-focus="${focusIdx}">${steps.map((s, i) => {
+    const c  = _circCol(s.status);
+    const bg = s.status === 'VIDE' ? '#f5f5f4' : c;
+    const bd = s.status === 'VIDE' ? '#d6d3d1' : c;
+    const fg = s.status === 'VIDE' ? '#a8a29e' : '#ffffff';
+    const ico = s.status === 'TERMINE' ? _SVG_CHECK
+              : s.status === 'EN_COURS' ? '▶' : String(i + 1);
+    const link = i < steps.length - 1
+      ? `<span class="circ-link" style="background:${s.status === 'TERMINE' ? '#16a34a' : '#e5e3df'}"></span>`
+      : '';
+    return `<button type="button" class="circ-step${i === myIdx ? ' here' : ''}"
+      onclick="toggleCirc('${_esc(d.id)}')" title="${_esc(s.e.label)} — ${_circLab(s.status)}">
+      ${link}
+      <span class="circ-node" style="background:${bg};border-color:${bd};color:${fg}">${ico}</span>
+      <span class="circ-cap" style="color:${s.status === 'VIDE' ? '#a8a29e' : c}">${_esc(s.e.short)}</span>
+    </button>`;
+  }).join('')}</div>`;
+
+  const curLine = curIdx >= 0
+    ? `<div class="circ-sub" style="margin-top:10px">Étape en cours : <strong style="color:${
+        steps[curIdx].e.color}">${_esc(steps[curIdx].e.label)}</strong></div>`
+    : '';
+
+  const detail = open
+    ? `<div class="circ-detail">${steps.map((s, i) => _circRow(d, s, i, myIdx)).join('')}</div>`
+    : '';
+
+  return `<div class="circ-card${myIdx >= 0 ? ' mine' : ''}">${head}${flow}${curLine}${detail}</div>`;
+}
+
+function _circRow(d, s, i, myIdx) {
+  const c    = _circCol(s.status);
+  const clos = _dossierClosed(d);
+  const pilote = _peutPiloter(s.e.code);
+  // Étape dont le pointage ne fait plus foi : un état y est posé, ou c'est une
+  // étape d'atelier d'un dossier déjà piloté (cf. _tachesEff).
+  const verrou = _etapeVerrouillee(d, s.e.code);
+
+  // Une étape d'atelier sans état posé porte une tâche virtuelle vide (défaut « à
+  // faire ») : il n'y a personne ni rien à dater, on ne l'affiche donc pas.
+  const ops = s.te.filter(t => !t.manuel || t.operateur || t.dateDebut).map(t => {
+    const who  = t.operateur || 'non attribué';
+    const when = t.statut === 'TERMINE'
+        ? (t.dateFin   ? ' · terminé ' + t.dateFin   : ' · terminé')
+      : t.statut === 'EN_COURS'
+        ? (t.dateDebut ? ' · débuté ' + t.dateDebut  : ' · en cours')
+        : (t.dateAssignation ? ' · assigné ' + t.dateAssignation : '');
+    return _esc(who + when)
+      + (t.manuel ? ' <em style="color:var(--text-muted)">(état posé à la main)</em>' : '')
+      + (!t.manuel && _isMine(t) ? ' <strong style="color:var(--secondary)">— vous</strong>' : '')
+      + (t.commentaire ? '<br><span style="color:var(--text-secondary)">' + _esc(t.commentaire) + '</span>' : '');
+  });
+
+  const acts = [];
+
+  // 1. Pointer MA tâche de cette étape (jamais celle d'un collègue). Dès qu'un état
+  // est posé sur l'étape, il est la source de vérité — un pointage y serait ignoré
+  // par le calcul d'avancement : on cache alors les boutons plutôt que de laisser
+  // croire qu'ils comptent. Retirer l'état rend l'étape au pointage.
+  const pointable = !verrou;
+  if (pointable) s.te.filter(t => !t.manuel && _isMine(t)).forEach(t => {
+    if (t.statut === 'A_FAIRE') {
+      acts.push(`<button class="circ-btn go" onclick="startTask('${_esc(t.id)}')">${_SVG_PLAY}Démarrer</button>`);
+    } else if (t.statut === 'EN_COURS') {
+      acts.push(`<button class="circ-btn stop" onclick="openStopModal('${_esc(t.id)}')">${_SVG_STOP}Terminer</button>`);
+    }
+  });
+
+  if (!clos && pilote) {
+    // 2. Étape encore au pointage sur laquelle je ne suis pas : la prendre.
+    if (!verrou && !s.te.some(t => _isMine(t))) {
+      acts.push(`<button class="circ-btn take" onclick="prendreEtape('${_esc(d.id)}','${s.e.code}')">${_SVG_PLUS}Je prends</button>`);
+    }
+    // 3. Poser l'état de l'étape — possible sur N'IMPORTE LAQUELLE, pour débloquer
+    // le circuit sans attendre un pointage. Recliquer l'état actif l'enlève et
+    // l'étape repasse sous le pointage (contrat de handleSetEtapeManuelle).
+    const cur = _etatManuel(d, s.e.code);
+    ETATS_MANUELS.forEach(x => {
+      const on = cur === x.code;
+      acts.push(`<button class="circ-btn man${on ? ' on' : ''}"${
+        on ? ` style="color:${x.color};background:${x.color}1f"` : ''
+      } title="${on ? 'Retirer cet état : retour au pointage' : _esc(s.e.label) + ' → ' + x.label}"
+        onclick="setEtatManuel('${_esc(d.id)}','${s.e.code}','${on ? '' : x.code}')">${x.label}</button>`);
+    });
+  }
+
+  let note = '';
+  if (clos) note = '';
+  else if (verrou && !pilote) note = 'Pilotée à la main par le responsable de production.';
+  else if (!verrou && !s.te.length && !pilote) note = 'Pas encore attribuée.';
+
+  return `<div class="circ-row${i === myIdx ? ' here' : ''}">
+    <div class="circ-row-top">
+      <span class="circ-row-dot" style="background:${c}"></span>
+      <span class="circ-row-lab">${i + 1}. ${_esc(s.e.label)}${
+        verrou ? ' <span style="font-size:10px;color:var(--text-muted)">· manuelle</span>' : ''}</span>
+      <span class="circ-row-st" style="color:${c}">${_circLab(s.status)}</span>
+    </div>
+    ${ops.length ? `<div class="circ-row-ops">${ops.join('<br>')}</div>` : ''}
+    ${note ? `<div class="circ-note">${note}</div>` : ''}
+    ${acts.length ? `<div class="circ-acts">${acts.join('')}</div>` : ''}
+  </div>`;
+}
+
+// ── Actions sur le circuit ─────────────────────────────────
+
+// Pose (ou retire, statut vide) l'état d'une étape manuelle. Le serveur recalcule
+// statut et progression du dossier et renvoie les deux : on les applique localement
+// pour un retour immédiat, le polling 60 s confirmera.
+async function setEtatManuel(dossierId, code, statut) {
+  const lab = (ETATS_MANUELS.find(x => x.code === statut) || {}).label;
+  showLoader();
+  const r = await apiWrite({
+    action:'setEtapeManuelle', id:dossierId, etapeCode:code, statut:statut,
+    par:(currentUser.label || currentUser.username || '')
+  });
+  hideLoader();
+  if (!r || !r.ok) {
+    showToast('Erreur : ' + ((r && r.error) || 'connexion impossible'), 'error');
+    return;
+  }
+  const d = dossiers.find(x => x.id === dossierId);
+  if (d && r.etatsManuels) {
+    d.etatsManuels = r.etatsManuels;
+    if (r.statut)              d.statut      = r.statut;
+    if (r.progression != null) d.progression = r.progression;
+    renderCircuit();
+  } else {
+    // apiWrite renvoie { ok:true } quand la réponse n'est pas du JSON : on ne sait
+    // pas ce qui a été écrit, donc on resynchronise au lieu de deviner.
+    await loadTasks();
+  }
+  showToast(statut ? ((ETAPE_LABELS[code] || code) + ' → ' + lab)
+                   : ((ETAPE_LABELS[code] || code) + ' repasse au pointage'), 'success');
+}
+
+// S'attribuer une étape libre, puis la pointer normalement. Visible par tout
+// l'atelier, donc confirmée avant écriture.
+async function prendreEtape(dossierId, code) {
+  const op = String(currentUser.label || currentUser.username || '').trim();
+  if (!op) { showToast("Compte sans nom d'opérateur", 'error'); return; }
+  const lab = ETAPE_LABELS[code] || code;
+  if (!confirm('Vous attribuer l\'étape « ' + lab + " » sur ce dossier ?")) return;
+
+  showLoader();
+  const r = await apiWrite({
+    action:'attribuerTache', dossierId:dossierId, etapeCode:code,
+    operateur:op, assignePar:op
+  });
+  hideLoader();
+  if (r && r.ok) {
+    showToast('Étape prise — ' + lab, 'success');
+    circOpen[dossierId] = true;
+    await loadTasks();   // récupère l'id réel de la tâche créée, pour pouvoir pointer
+  } else {
+    showToast('Erreur : ' + ((r && r.error) || 'connexion impossible'), 'error');
+  }
+}
+
+function renderAll() { renderDashboard(); renderTaskList(); renderCircuit(); }
 
 // ════════════════════════════════════════
 // INIT
