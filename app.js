@@ -97,7 +97,7 @@ function _purgeLocalPlainPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '227 · 2026-10-19';
+const APP_VERSION = '228 · 2026-10-21';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -22797,6 +22797,7 @@ function _etapesManuellesHtml(dossierId){
       </div>
       <div class="emanu-btns">${btns}</div>
       ${trace}
+      ${code === 'LIVRE' ? _etapeLivraisonActions(d) : ''}
     </div>`;
   }).join('');
   const note = !peut
@@ -22810,6 +22811,103 @@ function _etapesManuellesHtml(dossierId){
     <div class="emanu-note">${note}</div>
     ${lignes}
   </div>`;
+}
+
+// ── Issue de la course, pointée depuis le Suivi de production ───────────
+// L'étape « Livraison » du pipeline dit où en est le circuit, pas ce qu'est
+// devenue la course : une commande peut revenir sans avoir été remise (retour),
+// ou être annulée en route. Ces deux issues se pointent ici, sur la barre
+// Livraison, et redescendent dans le POS — cockpit Commandes, page Livraisons,
+// calendrier, journal du coursier — parce qu'elles passent par _livSetEtat, le
+// point d'entrée unique des états de livraison : même état, même journal et même
+// synchro (file d'attente hors ligne comprise) que les boutons (R) (A) du
+// tiroir Livraisons.
+
+// Commande / réservation d'où vient le dossier : c'est elle qui porte l'état de
+// livraison, sous la clé kind:id. _dossierSourceKey couvre aussi les dossiers
+// anciens, dont le lien n'est lisible que dans `sourceVente`.
+function _dossierSourceLiv(d){
+  const key = _dossierSourceKey(d);
+  if (!key) return null;
+  const sep  = key.indexOf(':');
+  const kind = key.slice(0, sep), id = key.slice(sep + 1);
+  const src  = kind === 'reservation'
+    ? (Array.isArray(reservations) ? reservations : []).find(r => String(r.id) === id)
+    : (Array.isArray(commandes)    ? commandes    : []).find(c => String(c.id) === id);
+  if (!src) return null;
+  return {
+    kind, id: src.id,
+    ref:    _seqRefOf(kind, src.id, _buildSeqMaps()),
+    client: src.clientName || src.client || d.client || 'Client'
+  };
+}
+
+const _LIV_ISSUES = [
+  ['RETOUR',  'Retour',  'La commande est revenue sans avoir été remise au client (absent, refus…)'],
+  ['ANNULEE', 'Annuler', 'Annuler la livraison : la course est abandonnée en route, la commande ne part pas chez le client'],
+];
+
+function _etapeLivraisonActions(d){
+  const s = _dossierSourceLiv(d);
+  if (!s) return '<div class="emanu-trace emanu-trace--none">Dossier sans commande liée : aucune livraison à pointer.</div>';
+  const peut = _peutPiloterEtapes();
+  const st   = _livStatut(s.kind, s.id);
+  const e    = _livEtat(s.kind, s.id);
+  const btns = _LIV_ISSUES.map(([c, lbl, ti]) => {
+    const on  = st === c;
+    const def = _LIV_LABELS[c];
+    // Recliquer l'issue active la retire : la course redevient une livraison
+    // en attente ordinaire — même marche arrière que delivCancelDepart.
+    const sty = on ? `background:${def[1]};color:${def[0]};border-color:${def[0]}` : '';
+    return `<button class="emanu-btn ${on ? 'emanu-btn--on' : ''}" style="${sty}" ${peut ? '' : 'disabled'}
+      title="${on ? 'Retirer cet état : la course redevient une livraison en attente' : _pcokEsc(ti)}"
+      onclick="setLivraisonDossier('${d.id}','${on ? '' : c}')">${lbl}</button>`;
+  }).join('');
+  const etat = e
+    ? `<div class="emanu-trace">${_livBadge(e.statut)} ${_pcokEsc(_livInfo(e))}${e.note ? ' · ' + _pcokEsc(e.note) : ''}</div>`
+    : '';
+  return `<div class="emanu-liv">
+    <div class="emanu-liv-head">Issue de la course <span>met à jour la commande dans le POS</span></div>
+    <div class="emanu-btns">${btns}</div>
+    ${etat}
+  </div>`;
+}
+
+// Pointe (ou retire, statut vide) l'issue de la course. Le statut commercial de
+// la commande n'est PAS touché, comme partout ailleurs dans le suivi coursier :
+// une commande rentrée mais déjà payée n'est pas une vente à défaire, et une
+// impayée doit rester une créance à l'écran. Pour annuler la VENTE, la page
+// Commandes garde son propre bouton (annulerCommande).
+function setLivraisonDossier(dossierId, statut){
+  if (!_peutPiloterEtapes()) {
+    showToast("Seul l'admin ou le responsable de production peut pointer la livraison.", 'error');
+    return;
+  }
+  const d = _dossierParId(dossierId);
+  const s = d && _dossierSourceLiv(d);
+  if (!s) { showToast('Dossier sans commande liée', 'error'); return; }
+  let note = '';
+  if (statut) {
+    const motif = prompt(statut === 'RETOUR'
+      ? 'Motif du retour (client absent, refus…) :'
+      : "Motif de l'annulation en route :", '');
+    if (motif === null) return;                  // Échap = on ne touche à rien
+    note = motif;
+  }
+  _livSetEtat(s.kind, s.id, statut, { ref:s.ref, client:s.client, note:note });
+  showToast(statut
+    ? s.client + ' — ' + ((_LIV_LABELS[statut] || [])[2] || statut)
+    : s.client + ' — course remise en livraison en attente', 'info');
+  _refreshEtapesUI(dossierId);
+  _cmdRenderBodySafe();
+  _delivRenderSafe();
+}
+
+// La page Livraisons n'est pas forcément à l'écran : on pointe depuis la
+// production. Le badge de la barre latérale, lui, se recompte dans tous les cas.
+function _delivRenderSafe(){
+  try { if (document.getElementById('page-livraisons')?.classList.contains('active')) renderLivraisons(); } catch(e) {}
+  try { updateDeliveryBadge(); } catch(e) {}
 }
 
 // Pose (ou retire, statut vide) l'état d'une étape manuelle. Mise à jour optimiste
