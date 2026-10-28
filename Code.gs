@@ -310,6 +310,11 @@ function doPost(e) {
     else if (action === 'resumeMachineSession') result = handleResumeMachineSession(data);
     else if (action === 'getMachineSessions')  result = handleGetMachineSessions(data);
     else if (action === 'deleteMachineSession') result = handleDeleteMachineSession(data);
+    else if (action === 'getMatieres')       result = handleGetMatieres(data);
+    else if (action === 'saveMatiere')       result = handleSaveMatiere(data);
+    else if (action === 'deleteMatiere')     result = handleDeleteMatiere(data);
+    else if (action === 'mouvementMatiere')  result = handleMouvementMatiere(data);
+    else if (action === 'getMouvementsMatieres') result = handleGetMouvementsMatieres(data);
     else result = { ok:false, error:'Action inconnue: ' + action };
 
     return jsonResp(result);
@@ -380,6 +385,9 @@ function doGet(e) {
       else if (action === 'pauseMachineSession') result = handlePauseMachineSession(data);
       else if (action === 'resumeMachineSession') result = handleResumeMachineSession(data);
       else if (action === 'deleteMachineSession') result = handleDeleteMachineSession(data);
+      else if (action === 'saveMatiere')       result = handleSaveMatiere(data);
+      else if (action === 'deleteMatiere')     result = handleDeleteMatiere(data);
+      else if (action === 'mouvementMatiere')  result = handleMouvementMatiere(data);
       else result = { ok:false, error:'Action payload inconnue: ' + action };
       return jsonResp(result);
     } catch(err) {
@@ -426,6 +434,8 @@ function doGet(e) {
     if (action === 'getSharedFiles')    return jsonResp(handleGetSharedFiles());
     if (action === 'getDemandesAchat')  return jsonResp(handleGetDemandesAchat(e.parameter));
     if (action === 'getMachineSessions') return jsonResp(handleGetMachineSessions(e.parameter));
+    if (action === 'getMatieres')       return jsonResp(handleGetMatieres(e.parameter));
+    if (action === 'getMouvementsMatieres') return jsonResp(handleGetMouvementsMatieres(e.parameter));
     return jsonResp({ ok:false, error:'Action GET inconnue: ' + action });
   } catch(err) {
     return jsonResp({ ok:false, error:'GET error: ' + err.message });
@@ -521,6 +531,10 @@ function initSheets() {
   ensureSheet(ss, SHEET_TACHES,     ['ID','DossierID','NumeroDossier','Etape','EtapeLabel','Operateur','Statut','DateAssignation','DateDebut','DateFin','Commentaire','AssignePar','Priorite','Echeance','Photos','Equipe']);
   // Suivi machines (sessions de travail)
   ensureSheet(ss, SHEET_MACHINES, MACHINE_HEADERS);
+
+  // Stock matieres premieres de l'atelier (fiches + journal des mouvements)
+  ensureSheet(ss, SHEET_MATIERES, MATIERE_HEADERS);
+  ensureSheet(ss, SHEET_MVT_MATIERES, MVT_MATIERE_HEADERS);
 
   return { ok:true, message:'Feuilles initialisées ' };
 }
@@ -4093,4 +4107,279 @@ function handleGetRythme() {
     }
   }
   return { ok: true, rythme: null };
+}
+
+// ============================================================
+// MATIÈRES PREMIÈRES — stock de l'atelier (distinct des Produits)
+// Deux feuilles, deux rôles :
+//  • Matieres           = l'état courant d'une matière (une ligne par matière,
+//                         réécrite sur place) : stock, seuil, prix, fournisseur.
+//  • MouvementsMatieres = le journal (une ligne par mouvement, jamais réécrite).
+// Le stock n'est JAMAIS modifié à la main dans la fiche : il ne bouge que par
+// un mouvement (handleMouvementMatiere), sous LockService, et chaque mouvement
+// garde Stock_Avant / Stock_Apres — sans quoi un inventaire n'est pas auditable.
+// Les Produits (feuille Produits) restent le stock marchand revendu en caisse.
+// ============================================================
+const SHEET_MATIERES = 'Matieres';
+// Conditionnement/QteParCond : ce qu'on achète (« rouleau de 50 m ») face à
+// l'unité de suivi (« m »). Une entrée saisie en conditionnement est convertie.
+const MATIERE_HEADERS = ['ID','Code','Designation','Categorie','Unite','Stock',
+  'SeuilAlerte','PrixAchat','Conditionnement','QteParCond','Fournisseur',
+  'Emplacement','Notes','Actif','CreePar','Timestamp','DateMAJ'];
+
+const SHEET_MVT_MATIERES = 'MouvementsMatieres';
+const MVT_MATIERE_HEADERS = ['ID','Horodatage','Date','Heure','MatiereID','Code',
+  'Designation','Type','Quantite','Unite','Stock_Avant','Stock_Apres',
+  'PrixUnitaire','Montant','Motif','Fournisseur','Ref_Dossier','Ref_Achat',
+  'Operateur','Note'];
+
+// Types de mouvement. AJUSTEMENT porte la quantité COMPTÉE (stock réel après
+// inventaire physique), pas un delta : le delta en est déduit.
+const MVT_TYPES_ = ['ENTREE','SORTIE','AJUSTEMENT'];
+
+function _matSheet_()    { return ensureSheet(getSS(), SHEET_MATIERES, MATIERE_HEADERS); }
+function _matMvtSheet_() { return ensureSheet(getSS(), SHEET_MVT_MATIERES, MVT_MATIERE_HEADERS); }
+
+// Ajoute les colonnes manquantes sur une feuille créée par une version antérieure.
+function _ensureMatiereHeaders_(sh) {
+  if (sh.getLastColumn() < MATIERE_HEADERS.length) {
+    sh.getRange(1, 1, 1, MATIERE_HEADERS.length).setValues([MATIERE_HEADERS])
+      .setBackground('#1a4a3a').setFontColor('#ffffff').setFontWeight('bold');
+  }
+}
+
+function _matNum_(v) { const n = Number(v); return isNaN(n) ? 0 : n; }
+
+function _matRowToObj_(r) {
+  return {
+    id:              String(r[0]),
+    code:            String(r[1]  || ''),
+    designation:     String(r[2]  || ''),
+    categorie:       String(r[3]  || ''),
+    unite:           String(r[4]  || 'unité'),
+    stock:           _matNum_(r[5]),
+    seuil:           _matNum_(r[6]),
+    prixAchat:       _matNum_(r[7]),
+    conditionnement: String(r[8]  || ''),
+    qteParCond:      _matNum_(r[9]),
+    fournisseur:     String(r[10] || ''),
+    emplacement:     String(r[11] || ''),
+    notes:           String(r[12] || ''),
+    actif:           String(r[13] || 'OUI').toUpperCase() !== 'NON',
+    creePar:         String(r[14] || ''),
+    timestamp:       String(r[15] || ''),
+    dateMAJ:         String(r[16] || '')
+  };
+}
+
+function handleGetMatieres(data) {
+  const sh = _matSheet_();
+  _ensureMatiereHeaders_(sh);
+  const rows = sh.getDataRange().getValues().slice(1);
+  const matieres = rows.filter(function(r) { return r[0]; }).map(_matRowToObj_);
+  return { ok:true, matieres:matieres };
+}
+
+// Journal des mouvements, du plus récent au plus ancien. `limit` borne la
+// réponse (défaut 400) : le journal grossit sans fin, le front n'en affiche
+// qu'une tranche. `matiereId` filtre sur une matière (fiche détail).
+function handleGetMouvementsMatieres(data) {
+  const sh = _matMvtSheet_();
+  const rows = sh.getDataRange().getValues().slice(1);
+  const filtId = data && data.matiereId ? String(data.matiereId) : '';
+  const limit  = Math.max(1, Math.min(2000, _matNum_(data && data.limit) || 400));
+  const mouvements = rows.filter(function(r) {
+    return r[0] && (!filtId || String(r[4]) === filtId);
+  }).map(function(r) {
+    return {
+      id:          String(r[0]),
+      horodatage:  String(r[1]  || ''),
+      date:        String(r[2]  || ''),
+      heure:       String(r[3]  || ''),
+      matiereId:   String(r[4]  || ''),
+      code:        String(r[5]  || ''),
+      designation: String(r[6]  || ''),
+      type:        String(r[7]  || ''),
+      quantite:    _matNum_(r[8]),
+      unite:       String(r[9]  || ''),
+      stockAvant:  _matNum_(r[10]),
+      stockApres:  _matNum_(r[11]),
+      prixUnitaire:_matNum_(r[12]),
+      montant:     _matNum_(r[13]),
+      motif:       String(r[14] || ''),
+      fournisseur: String(r[15] || ''),
+      refDossier:  String(r[16] || ''),
+      refAchat:    String(r[17] || ''),
+      operateur:   String(r[18] || ''),
+      note:        String(r[19] || '')
+    };
+  });
+  mouvements.reverse();
+  return { ok:true, mouvements:mouvements.slice(0, limit) };
+}
+
+// Crée ou met à jour une fiche matière. Le Stock n'est pris en compte qu'à la
+// CRÉATION (stock initial, tracé comme une ENTREE « Stock initial ») : ensuite
+// il n'appartient plus qu'aux mouvements, pour que le journal reste la vérité.
+function handleSaveMatiere(data) {
+  const m = data.matiere;
+  if (!m || !m.id) return { ok:false, error:'matiere.id requis' };
+  if (!String(m.designation || '').trim()) return { ok:false, error:'Désignation requise' };
+  const sh = _matSheet_();
+  _ensureMatiereHeaders_(sh);
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(8000);
+    const rows = sh.getDataRange().getValues();
+    const now  = new Date();
+    const tz   = Session.getScriptTimeZone();
+    const nowStr = Utilities.formatDate(now, tz, 'dd/MM/yyyy HH:mm');
+
+    // Code unique : deux matières au même code rendraient le journal illisible.
+    const code = String(m.code || '').trim();
+    if (code) {
+      for (let i = 1; i < rows.length; i++) {
+        if (String(rows[i][1] || '').trim().toLowerCase() === code.toLowerCase()
+            && String(rows[i][0]) !== String(m.id)) {
+          return { ok:false, error:'Le code ' + code + ' est déjà utilisé par ' + (rows[i][2] || 'une autre matière') };
+        }
+      }
+    }
+
+    for (let i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) === String(m.id)) {
+        // Mise à jour : on conserve le stock de la feuille, pas celui du client.
+        const row = [
+          String(m.id), code, String(m.designation || ''), String(m.categorie || ''),
+          String(m.unite || 'unité'), _matNum_(rows[i][5]), _matNum_(m.seuil),
+          _matNum_(m.prixAchat), String(m.conditionnement || ''), _matNum_(m.qteParCond),
+          String(m.fournisseur || ''), String(m.emplacement || ''), String(m.notes || ''),
+          (m.actif === false ? 'NON' : 'OUI'), String(rows[i][14] || ''),
+          String(rows[i][15] || ''), nowStr
+        ];
+        sh.getRange(i + 1, 1, 1, row.length).setValues([row]);
+        return { ok:true, updated:true, stock:_matNum_(rows[i][5]) };
+      }
+    }
+
+    const stockInit = _matNum_(m.stock);
+    sh.appendRow([
+      String(m.id), code, String(m.designation || ''), String(m.categorie || ''),
+      String(m.unite || 'unité'), stockInit, _matNum_(m.seuil), _matNum_(m.prixAchat),
+      String(m.conditionnement || ''), _matNum_(m.qteParCond), String(m.fournisseur || ''),
+      String(m.emplacement || ''), String(m.notes || ''), (m.actif === false ? 'NON' : 'OUI'),
+      String(m.creePar || ''), now.toISOString(), nowStr
+    ]);
+    if (stockInit > 0) {
+      _matLogMvt_({
+        matiereId:String(m.id), code:code, designation:String(m.designation || ''),
+        type:'ENTREE', quantite:stockInit, unite:String(m.unite || 'unité'),
+        stockAvant:0, stockApres:stockInit, prixUnitaire:_matNum_(m.prixAchat),
+        motif:'Stock initial', fournisseur:String(m.fournisseur || ''),
+        operateur:String(m.creePar || ''), note:'Création de la fiche matière'
+      });
+    }
+    return { ok:true, created:true, stock:stockInit };
+  } finally { try { lock.releaseLock(); } catch(e) {} }
+}
+
+// Supprime la fiche. Le journal des mouvements est CONSERVÉ : l'historique d'une
+// matière retirée du catalogue reste consultable (et la valorisation passée juste).
+function handleDeleteMatiere(data) {
+  if (!data.id) return { ok:false, error:'id requis' };
+  const sh = _matSheet_();
+  const rows = sh.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(data.id)) {
+      sh.deleteRow(i + 1);
+      _logAction_('deleteMatiere', data.operateur || data.username,
+        (rows[i][1] || '') + ' ' + (rows[i][2] || '') + ' - stock ' + rows[i][5]);
+      return { ok:true, deleted:true };
+    }
+  }
+  return { ok:true, deleted:false };
+}
+
+function _matLogMvt_(mv) {
+  const sh  = _matMvtSheet_();
+  const now = new Date();
+  const tz  = Session.getScriptTimeZone();
+  const qte = _matNum_(mv.quantite);
+  sh.appendRow([
+    'MVT' + now.getTime() + Math.floor(Math.random() * 1000),
+    now.toISOString(),
+    Utilities.formatDate(now, tz, 'dd/MM/yyyy'),
+    Utilities.formatDate(now, tz, 'HH:mm'),
+    String(mv.matiereId || ''), String(mv.code || ''), String(mv.designation || ''),
+    String(mv.type || ''), qte, String(mv.unite || ''),
+    _matNum_(mv.stockAvant), _matNum_(mv.stockApres),
+    _matNum_(mv.prixUnitaire), _matNum_(mv.prixUnitaire) * Math.abs(qte),
+    String(mv.motif || ''), String(mv.fournisseur || ''),
+    String(mv.refDossier || ''), String(mv.refAchat || ''),
+    String(mv.operateur || ''), String(mv.note || '')
+  ]);
+}
+
+// Le cœur du module : applique un mouvement et met le stock à jour de façon
+// atomique (LockService), puis trace. ENTREE/SORTIE = delta, AJUSTEMENT =
+// quantité comptée. Une sortie qui ferait passer le stock sous zéro est REFUSÉE
+// (sauf force:true) : un stock négatif cache toujours une entrée non saisie.
+function handleMouvementMatiere(data) {
+  const id   = String(data.matiereId || '');
+  const type = String(data.type || '').toUpperCase();
+  if (!id) return { ok:false, error:'matiereId requis' };
+  if (MVT_TYPES_.indexOf(type) < 0) return { ok:false, error:'Type inconnu: ' + type };
+  let qte = _matNum_(data.quantite);
+  if (type !== 'AJUSTEMENT' && qte <= 0) return { ok:false, error:'Quantité doit être supérieure à 0' };
+  if (type === 'AJUSTEMENT' && qte < 0)  return { ok:false, error:'Le stock compté ne peut pas être négatif' };
+
+  const sh = _matSheet_();
+  _ensureMatiereHeaders_(sh);
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+    const rows = sh.getDataRange().getValues();
+    let line = -1;
+    for (let i = 1; i < rows.length; i++) { if (String(rows[i][0]) === id) { line = i; break; } }
+    if (line < 0) return { ok:false, error:'Matière introuvable: ' + id };
+
+    const m     = _matRowToObj_(rows[line]);
+    const avant = m.stock;
+    // Une entrée peut être saisie en conditionnement (3 rouleaux de 50 m -> 150 m).
+    if (type === 'ENTREE' && data.enConditionnement && m.qteParCond > 0) qte = qte * m.qteParCond;
+
+    let apres, delta;
+    if (type === 'ENTREE')      { delta = qte;  apres = avant + qte; }
+    else if (type === 'SORTIE') { delta = -qte; apres = avant - qte; }
+    else                        { apres = qte;  delta = apres - avant; }
+
+    if (apres < 0 && !data.force) {
+      return { ok:false, insuffisant:true, stock:avant,
+               error:'Stock insuffisant : ' + avant + ' ' + m.unite + ' en stock, sortie de ' + qte + ' demandée' };
+    }
+
+    const tz = Session.getScriptTimeZone();
+    sh.getRange(line + 1, 6).setValue(apres);                                                      // Stock
+    sh.getRange(line + 1, 17).setValue(Utilities.formatDate(new Date(), tz, 'dd/MM/yyyy HH:mm'));  // DateMAJ
+    // Le prix d'achat de la fiche suit la dernière entrée valorisée : sinon la
+    // valorisation du stock resterait figée au prix du premier achat.
+    const pu = _matNum_(data.prixUnitaire);
+    if (type === 'ENTREE' && pu > 0) sh.getRange(line + 1, 8).setValue(pu);
+    if (type === 'ENTREE' && String(data.fournisseur || '').trim()) {
+      sh.getRange(line + 1, 11).setValue(String(data.fournisseur).trim());
+    }
+
+    _matLogMvt_({
+      matiereId:id, code:m.code, designation:m.designation, type:type,
+      quantite:(type === 'AJUSTEMENT' ? delta : qte), unite:m.unite,
+      stockAvant:avant, stockApres:apres,
+      prixUnitaire:(pu > 0 ? pu : m.prixAchat),
+      motif:String(data.motif || ''), fournisseur:String(data.fournisseur || ''),
+      refDossier:String(data.refDossier || ''), refAchat:String(data.refAchat || ''),
+      operateur:String(data.operateur || data.username || ''), note:String(data.note || '')
+    });
+
+    return { ok:true, stock:apres, stockAvant:avant, delta:delta,
+             alerte:(apres <= 0 ? 'RUPTURE' : (m.seuil > 0 && apres <= m.seuil ? 'FAIBLE' : '')) };
+  } finally { try { lock.releaseLock(); } catch(e) {} }
 }

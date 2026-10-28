@@ -26,7 +26,7 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20261021-livraison-retour-annuler">
+<link rel="stylesheet" href="./style.css?v=20261028-matieres-premieres">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
@@ -1417,6 +1417,10 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
             <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg></span>
             <span class="sidebar-label">Stock</span>
           </button>
+          <button class="nav-btn sidebar-btn" data-roles="admin,gestionnaire,chef_atelier" onclick="showPage('matieres',this)" aria-label="Matieres premieres">
+            <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></span>
+            <span class="sidebar-label">Matières</span>
+          </button>
           <button class="nav-btn sidebar-btn" data-roles="admin,gestionnaire,chef_atelier" onclick="showPage('achats',this)" aria-label="Achats">
             <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg></span>
             <span class="sidebar-label">Achats</span>
@@ -1570,6 +1574,53 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
       </table>
       <div id="stockCards"></div>
     </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════
+       PAGE MATIÈRES PREMIÈRES (stock de l'atelier)
+       Distinct de Stock (articles revendus en caisse) : ici on suit ce que
+       l'atelier consomme — plexi, bois, papiers, colles, encres, visserie.
+       Le stock ne bouge que par un mouvement tracé, jamais à la main.
+       ═══════════════════════════════════════════ -->
+  <div class="page" id="page-matieres" data-roles="admin,gestionnaire,chef_atelier">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+      <div>
+        <h1 style="font-size:21px;font-weight:800;color:var(--text);margin:0">Matières premières</h1>
+        <p style="font-size:13px;color:var(--muted);margin:3px 0 0">Le stock de l'atelier : ce qui entre, ce qui sort, ce qu'il reste — chaque mouvement est tracé</p>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button onclick="openMvtMatiereModal()" style="display:flex;align-items:center;gap:6px;background:var(--accent2);color:#fff;border:0;padding:9px 14px;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+          Entrée / Sortie
+        </button>
+        <button onclick="openMatiereModal()" style="display:flex;align-items:center;gap:6px;background:var(--accent);color:#fff;border:0;padding:9px 14px;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Nouvelle matière
+        </button>
+      </div>
+    </div>
+
+    <div id="matKpis" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px"></div>
+    <div id="matAlertes"></div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+      <div style="display:inline-flex;background:var(--surface2);border:1px solid var(--color-border);border-radius:10px;padding:3px;gap:3px">
+        <button id="matTabFiches"  onclick="setMatieresTab('fiches')"  style="border:0;background:var(--accent);color:#fff;font-weight:700;font-size:12.5px;padding:7px 14px;border-radius:8px;cursor:pointer">Fiches matière</button>
+        <button id="matTabJournal" onclick="setMatieresTab('journal')" style="border:0;background:transparent;color:var(--muted);font-weight:700;font-size:12.5px;padding:7px 14px;border-radius:8px;cursor:pointer">Journal des mouvements</button>
+      </div>
+      <input class="filter-input" id="matFilter" placeholder="Code, désignation, fournisseur..." oninput="renderMatieres()" style="flex:1;min-width:180px;max-width:320px" />
+      <select id="matFilterCat" onchange="renderMatieres()" class="filter-input" style="max-width:190px"></select>
+      <select id="matFilterEtat" onchange="renderMatieres()" class="filter-input" style="max-width:170px">
+        <option value="">Tous les états</option>
+        <option value="rupture">En rupture</option>
+        <option value="faible">Stock faible</option>
+        <option value="alerte">Rupture + faible</option>
+        <option value="ok">Stock OK</option>
+      </select>
+    </div>
+
+    <div id="matFichesWrap"></div>
+    <div id="matJournalWrap" style="display:none"></div>
   </div>
 
   <!-- STATS -->
@@ -3265,6 +3316,85 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 </div>
 
 <!-- MODAL PRODUIT -->
+<!-- MODAL FICHE MATIÈRE PREMIÈRE -->
+<div class="modal-overlay" id="matiereModal">
+  <div class="modal">
+    <div class="modal-title">
+      <span id="matiereModalTitle">Nouvelle matière</span>
+      <button class="modal-close" onclick="closeModal('matiereModal')">&times;</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 2fr;gap:12px">
+      <div class="form-group" style="margin-bottom:0"><label>Code</label><input id="mCode" placeholder="Ex: PLX3" autocomplete="off" /></div>
+      <div class="form-group" style="margin-bottom:0"><label>Désignation</label><input id="mDesignation" placeholder="Ex: Plexi 3 mm transparent" autocomplete="off" /></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+      <div class="form-group" style="margin-bottom:0"><label>Catégorie</label><select id="mCategorie"></select></div>
+      <div class="form-group" style="margin-bottom:0"><label>Unité de suivi</label><select id="mUnite"></select></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+      <div class="form-group" style="margin-bottom:0">
+        <label>Stock initial <span id="mStockLock" style="display:none;font-weight:400;color:var(--muted)">(via un mouvement)</span></label>
+        <input id="mStock" type="number" step="any" placeholder="0" />
+      </div>
+      <div class="form-group" style="margin-bottom:0"><label>Seuil d'alerte</label><input id="mSeuil" type="number" step="any" placeholder="0" /></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px">
+      <div class="form-group" style="margin-bottom:0"><label>Prix d'achat / unité (Ar)</label><input id="mPrixAchat" type="number" step="any" placeholder="0" /></div>
+      <div class="form-group" style="margin-bottom:0"><label>Conditionnement</label><input id="mConditionnement" placeholder="Ex: Plaque" autocomplete="off" /></div>
+      <div class="form-group" style="margin-bottom:0"><label>Qté par conditionnement</label><input id="mQteParCond" type="number" step="any" placeholder="0" /></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+      <div class="form-group" style="margin-bottom:0"><label>Fournisseur habituel</label><input id="mFournisseur" placeholder="Ex: Sodim" autocomplete="off" /></div>
+      <div class="form-group" style="margin-bottom:0"><label>Emplacement</label><input id="mEmplacement" placeholder="Ex: Étagère B2" autocomplete="off" /></div>
+    </div>
+    <div class="form-group" style="margin-top:12px;margin-bottom:0"><label>Notes</label><textarea id="mNotes" rows="2" placeholder="Référence fournisseur, précautions, équivalences..."></textarea></div>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px;color:var(--text);cursor:pointer">
+      <input type="checkbox" id="mActif" checked style="width:16px;height:16px;accent-color:#1a4a3a" />
+      Matière active (décocher pour la sortir du catalogue sans perdre son historique)
+    </label>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal('matiereModal')">Annuler</button>
+      <button class="btn-primary" onclick="saveMatiere()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL MOUVEMENT DE MATIÈRE (entrée / sortie / inventaire) -->
+<div class="modal-overlay" id="mvtMatiereModal">
+  <div class="modal">
+    <div class="modal-title">
+      <span id="mvtMatiereTitle">Mouvement de matière</span>
+      <button class="modal-close" onclick="closeModal('mvtMatiereModal')">&times;</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <button id="mvtTypeENTREE"     onclick="setMvtType('ENTREE')"     style="flex:1;border:2px solid #16a34a;background:#16a34a;color:#fff;padding:9px;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer">Entrée</button>
+      <button id="mvtTypeSORTIE"     onclick="setMvtType('SORTIE')"     style="flex:1;border:2px solid var(--color-border);background:var(--surface);color:var(--muted);padding:9px;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer">Sortie</button>
+      <button id="mvtTypeAJUSTEMENT" onclick="setMvtType('AJUSTEMENT')" style="flex:1;border:2px solid var(--color-border);background:var(--surface);color:var(--muted);padding:9px;border-radius:9px;font-size:12.5px;font-weight:700;cursor:pointer">Inventaire</button>
+    </div>
+    <div class="form-group"><label>Matière</label><select id="mvtMatiere" onchange="_mvtOnMatiereChange()"></select></div>
+    <div id="mvtStockInfo" style="background:var(--surface2);border:1px solid var(--color-border);border-radius:10px;padding:10px 12px;font-size:12.5px;color:var(--muted);margin-bottom:14px"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group" style="margin-bottom:0"><label id="mvtQteLabel">Quantité</label><input id="mvtQuantite" type="number" step="any" placeholder="0" oninput="_mvtPreview()" /></div>
+      <div class="form-group" style="margin-bottom:0" id="mvtPrixWrap"><label>Prix d'achat / unité (Ar)</label><input id="mvtPrixUnitaire" type="number" step="any" placeholder="0" oninput="_mvtPreview()" /></div>
+    </div>
+    <label id="mvtCondWrap" style="display:none;align-items:center;gap:8px;margin-top:10px;font-size:12.5px;color:var(--text);cursor:pointer">
+      <input type="checkbox" id="mvtEnCond" onchange="_mvtPreview()" style="width:16px;height:16px;accent-color:#1a4a3a" />
+      <span id="mvtCondLabel"></span>
+    </label>
+    <div class="form-group" style="margin-top:12px;margin-bottom:0"><label>Motif</label><select id="mvtMotif"></select></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+      <div class="form-group" style="margin-bottom:0" id="mvtFournWrap"><label>Fournisseur</label><input id="mvtFournisseur" placeholder="Ex: Sodim" autocomplete="off" /></div>
+      <div class="form-group" style="margin-bottom:0"><label>Dossier / Réf (optionnel)</label><input id="mvtRefDossier" placeholder="Ex: D-2026-118" autocomplete="off" /></div>
+    </div>
+    <div class="form-group" style="margin-top:12px;margin-bottom:0"><label>Note</label><input id="mvtNote" placeholder="Précision libre sur ce mouvement" autocomplete="off" /></div>
+    <div id="mvtPreview" style="margin-top:14px;font-size:13px;font-weight:700"></div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal('mvtMatiereModal')">Annuler</button>
+      <button class="btn-primary" id="mvtSubmitBtn" onclick="saveMvtMatiere()">Valider le mouvement</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="productModal">
   <div class="modal">
     <div class="modal-title">
@@ -4022,7 +4152,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20261028-fiche-bandeau"></script>
+<script src="./app.js?v=20261028-matieres-premieres"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

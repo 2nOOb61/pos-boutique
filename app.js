@@ -97,7 +97,7 @@ function _purgeLocalPlainPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '230 · 2026-10-28';
+const APP_VERSION = '231 · 2026-10-28';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -305,6 +305,7 @@ const PAGE_LABELS = {
   commandes:       'Commandes',
   livraisons:      'Livraisons',
   stock:           'Stock',
+  matieres:        'Matières premières',
   achats:          'Achats',
   depenses:        'Dépenses',
   stats:           'Statistiques',
@@ -325,6 +326,8 @@ const PAGE_ACCESS = {
   commandes:      ['admin','caissier','commerciale','gestionnaire','comptable','livreur'],
   livraisons:     ['admin','caissier','commerciale','gestionnaire','comptable','livreur','chef_atelier','operateur_prod','machiniste','finition'],
   stock:          ['admin','gestionnaire'],
+  // Matières : le chef d'atelier consomme et réceptionne, il doit pouvoir saisir.
+  matieres:       ['admin','gestionnaire','chef_atelier'],
   achats:         ['admin','gestionnaire','chef_atelier'],
   // Dépenses : même cercle que Finances — la page montre tout l'argent qui sort.
   depenses:       ['admin','comptable','gestionnaire'],
@@ -360,6 +363,9 @@ let editingProductId = null;
 let editingProductImage = null;
 
 let products = [];
+// Matières premières de l'atelier (voir le module MATIÈRES PREMIÈRES en fin de fichier).
+let matieres = [];            // fiches matière (état courant du stock)
+let mouvementsMatieres = [];  // journal des entrées / sorties / inventaires
 
 let sales = [];
 let arretsCaisse = [];
@@ -791,6 +797,7 @@ function showPage(id, btn, bnavBtn) {
   if (id==='finances')     { _ensureDossierLinks(); renderFinances(); if (APPS_SCRIPT_URL) loadCommandesFromScript().then(() => { _ensureDossierLinks(); renderFinances(); }).catch(()=>{}); }
   if (id==='perf')         { _ensureDossierLinks(); renderPerf(); if (APPS_SCRIPT_URL) _loadTachesQuietly().then(() => { _ensureDossierLinks(); renderPerf(); }).catch(()=>{}); }
   if (id==='depenses')     { renderDepenses(); if (APPS_SCRIPT_URL) Promise.all([loadDepensesFromScript(), loadDossiers()]).then(() => renderDepenses()).catch(()=>renderDepenses()); }
+  if (id==='matieres')     { renderMatieres(); if (APPS_SCRIPT_URL) Promise.all([loadMatieresFromScript(), loadMouvementsMatieresFromScript()]).then(() => renderMatieres()).catch(()=>renderMatieres()); }
   if (id==='achats')       { _ensureDossierLinks(); renderAchats(); if (APPS_SCRIPT_URL) Promise.all([loadDossiers(), _loadTachesQuietly(), loadDemandesAchatFromScript()]).then(() => { _ensureDossierLinks(); renderAchats(); }).catch(()=>renderAchats()); }
   // Garde d'accès (rôle ou overrides personnalisés)
   if (currentUser) {
@@ -5014,7 +5021,7 @@ async function apiCall(payload) {
   if (!APPS_SCRIPT_URL) return null;
 
   // ── LECTURES & LOGIN : requête GET avec params individuels ─
-  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getEncaissements', 'getDepenses', 'getCoursesLibres', 'getLivraisonsEtats', 'getLivraisonsJournal', 'getBats', 'getFinition', 'getArretsCaisse', 'getJournal', 'getDossiers', 'getTaches', 'getDashboard', 'getControlPatron', 'getComments', 'getNotifs', 'getModifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles', 'getMachineSessions'];
+  const getActions = ['getProducts', 'getSales', 'ping', 'initSheets', 'login', 'getUsers', 'getReservations', 'getCommandes', 'getEncaissements', 'getDepenses', 'getCoursesLibres', 'getLivraisonsEtats', 'getLivraisonsJournal', 'getBats', 'getFinition', 'getArretsCaisse', 'getJournal', 'getDossiers', 'getTaches', 'getDashboard', 'getControlPatron', 'getComments', 'getNotifs', 'getModifs', 'getShopConfig', 'getRythme', 'getDriveFolderUrl', 'getSharedFiles', 'getMachineSessions', 'getMatieres', 'getMouvementsMatieres'];
   if (getActions.includes(payload.action)) {
     const buildUrl = () => {
       let url = APPS_SCRIPT_URL + '?action=' + payload.action;
@@ -9535,6 +9542,7 @@ _purgeLocalPlainPasswords(); // efface les mots de passe locaux non hashés ET l
 loadTachesLibres();
 loadCommentsLocal();
 loadDemandesAchatLocal();
+loadMatieresLocal();
 loadNotifications();
 initPWA();
 _renderVersionBadge();
@@ -23532,6 +23540,14 @@ function renderAchats() {
     if (/haute/.test(low))  return `<span style="font-size:9.5px;font-weight:800;background:#fef3c7;color:#d97706;padding:2px 7px;border-radius:8px">HAUTE</span>`;
     return '';
   };
+  // Pont vers le stock matière : une fois commandée/reçue, la marchandise peut
+  // être réceptionnée en un clic (quantité, prix et fournisseur préremplis).
+  const _stockBtn = dem => {
+    if (!dem) return '';
+    if (!['COMMANDE','RECU','ACHETE'].includes(dem.statut)) return '';
+    return `<button onclick="receptionnerAchatEnStock('${dem.id}')" title="Faire entrer cette marchandise dans le stock matière"
+      style="background:#dcfce7;color:#16a34a;border:1px solid #86efac;padding:7px 12px;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">&rarr; Stock</button>`;
+  };
   const _detailsBtn = onclick => `<button onclick="${onclick}" style="background:var(--surface2);color:var(--color-text-primary);border:1px solid var(--color-border);padding:7px 12px;border-radius:9px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap">Détails / Images</button>`;
 
   // Ligne : tâche ACHAT d'un dossier (+ demande liée éventuelle)
@@ -23572,7 +23588,7 @@ function renderAchats() {
             ${dem?.notes ? `<div style="font-size:12px;color:var(--text);margin-top:6px;white-space:pre-wrap">${escapeHtml(dem.notes)}</div>` : ''}
             ${_achatImgThumbs(dem?.images)}
           </div>
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">${statusBadge}${_detailsBtn(`openDemandeAchat('${r.t.dossierId}')`)}${action}</div>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">${statusBadge}${_detailsBtn(`openDemandeAchat('${r.t.dossierId}')`)}${_stockBtn(dem)}${action}</div>
         </div>
       </div>`;
   };
@@ -23609,6 +23625,7 @@ function renderAchats() {
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
             ${statusBadge}
             <button onclick="openDemandeAchat('','${d.id}')" style="background:var(--surface2);color:var(--color-text-primary);border:1px solid var(--color-border);padding:7px 12px;border-radius:9px;font-size:12px;font-weight:600;cursor:pointer">Modifier</button>
+            ${_stockBtn(d)}
             ${action}
             <button onclick="deleteDemandeAchat('${d.id}')" title="Supprimer" style="background:none;color:#dc2626;border:1px solid var(--color-border);padding:7px 10px;border-radius:9px;font-size:12px;font-weight:600;cursor:pointer">✕</button>
           </div>
@@ -23638,6 +23655,7 @@ function renderAchats() {
           <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:var(--surface2);border:1px solid var(--color-border);border-radius:10px;padding:10px 14px;opacity:.85">
             <span style="font-size:13px;font-weight:600;color:var(--text)">${escapeHtml(d.besoin||'—')}</span>
             <span style="font-size:11.5px;color:var(--muted)">× ${d.quantite||1}${d.ref?' · '+escapeHtml(d.ref):''} · Demande libre</span>
+            <span style="margin-left:auto">${_stockBtn(d)}</span>
             <button onclick="deleteDemandeAchat('${d.id}')" title="Supprimer" style="margin-left:auto;background:none;color:#dc2626;border:1px solid var(--color-border);padding:4px 8px;border-radius:8px;font-size:11px;cursor:pointer">✕</button>
           </div>`).join('')}
       </div>
@@ -27271,6 +27289,7 @@ function saveCommandeRapide() {
     const { type } = e.data || {};
     if (type === 'sale-added')        { loadData(); renderStats(); }
     if (type === 'product-changed')   { loadData(); renderProducts(); renderStockTable(); }
+    if (type === 'matiere-changed')   { Promise.all([loadMatieresFromScript(), loadMouvementsMatieresFromScript()]).then(() => renderMatieres()).catch(()=>{}); }
     if (type === 'reservation-added') { loadData(); renderReservations(); }
   };
 
@@ -28109,4 +28128,656 @@ function _kbInjectStyle(){
     .kb-dbody{max-height:70vh}
   }`;
   document.head.appendChild(st);
+}
+
+// ============================================================
+// MATIÈRES PREMIÈRES — stock de l'atelier
+// Volontairement séparé du stock marchand (`products` / page Stock) : une
+// matière ne se vend pas, elle se consomme, et son unité de suivi n'est pas
+// la pièce (m², feuille, litre…). Deux sources GAS :
+//   • Matieres           → l'état courant (fiche + stock)
+//   • MouvementsMatieres → le journal, seule source de vérité des variations.
+// Le stock n'est modifiable QUE par un mouvement : la fiche ne porte le champ
+// Stock qu'à la création (stock initial, tracé comme une entrée côté backend).
+// ============================================================
+const MATIERE_CATEGORIES = [
+  'Bois & panneaux', 'Plexi & acrylique', 'Alucobond & métal',
+  'Papiers & cartons', 'Adhésifs & vinyles', 'Colles',
+  'Peintures & lasures', 'Encres & toners', 'Visserie & accessoires',
+  'Éclairage & LED', 'Emballage', 'Consommables atelier', 'Autre'
+];
+const MATIERE_UNITES = ['unité','pièce','feuille','plaque','m','m²','ml','kg','g','L','mL','rouleau','boîte','paquet','pot','tube','bidon','sachet'];
+
+// Motifs proposés selon le type de mouvement : un motif libre reste possible
+// via « Autre » + la note, mais un motif cadré rend le journal exploitable.
+const MVT_MOTIFS = {
+  ENTREE:     ['Achat / réception', 'Retour atelier', 'Stock initial', 'Correction d\'erreur', 'Autre'],
+  SORTIE:     ['Consommation production', 'Chute / perte', 'Casse', 'Échantillon / test', 'Prêt / sortie exceptionnelle', 'Autre'],
+  AJUSTEMENT: ['Inventaire physique', 'Correction d\'erreur', 'Autre']
+};
+const MVT_TYPE_UI = {
+  ENTREE:     { label:'Entrée',     color:'#16a34a', bg:'#dcfce7', signe:'+' },
+  SORTIE:     { label:'Sortie',     color:'#dc2626', bg:'#fee2e2', signe:'-' },
+  AJUSTEMENT: { label:'Inventaire', color:'#2563eb', bg:'#dbeafe', signe:'' }
+};
+
+let editingMatiereId = null;
+let _matTab          = 'fiches';
+let _mvtType         = 'ENTREE';
+let _matHistoFiltre  = '';   // id de matière quand le journal est filtré sur une fiche
+
+function saveMatieresLocal() {
+  try {
+    localStorage.setItem('pos-matieres', JSON.stringify(matieres));
+    localStorage.setItem('pos-mvt-matieres', JSON.stringify((mouvementsMatieres || []).slice(0, 300)));
+  } catch(e) {}
+}
+function loadMatieresLocal() {
+  try {
+    const a = localStorage.getItem('pos-matieres');
+    if (a) matieres = JSON.parse(a) || [];
+    const b = localStorage.getItem('pos-mvt-matieres');
+    if (b) mouvementsMatieres = JSON.parse(b) || [];
+  } catch(e) {}
+}
+async function loadMatieresFromScript() {
+  if (!APPS_SCRIPT_URL) return;
+  try {
+    const r = await apiCall({ action:'getMatieres' });
+    if (r && r.ok && Array.isArray(r.matieres)) { matieres = r.matieres; saveMatieresLocal(); }
+  } catch(e) { /* silencieux : le cache local reste affiché */ }
+}
+async function loadMouvementsMatieresFromScript() {
+  if (!APPS_SCRIPT_URL) return;
+  try {
+    const r = await apiCall({ action:'getMouvementsMatieres', limit:500 });
+    if (r && r.ok && Array.isArray(r.mouvements)) { mouvementsMatieres = r.mouvements; saveMatieresLocal(); }
+  } catch(e) { /* silencieux */ }
+}
+
+// Quantités : une matière se compte en m² ou en litres → décimales utiles, mais
+// pas de « 12,00 » quand 12 suffit.
+function _matQte(n) {
+  const v = Number(n) || 0;
+  return (Math.round(v * 100) / 100).toLocaleString('fr-MG', { maximumFractionDigits:2 });
+}
+function _matQteU(n, unite) { return _matQte(n) + (unite ? ' ' + unite : ''); }
+function _matById(id) { return (matieres || []).find(m => String(m.id) === String(id)) || null; }
+
+function _matEtat(m) {
+  const s = Number(m.stock) || 0;
+  if (s <= 0) return 'rupture';
+  if (Number(m.seuil) > 0 && s <= Number(m.seuil)) return 'faible';
+  return 'ok';
+}
+const _MAT_ETAT_UI = {
+  rupture: { label:'Rupture',      color:'#dc2626', bg:'#fee2e2' },
+  faible:  { label:'Stock faible', color:'#d97706', bg:'#fef3c7' },
+  ok:      { label:'OK',           color:'#16a34a', bg:'#dcfce7' }
+};
+// Valeur immobilisée d'une matière = stock × dernier prix d'achat connu.
+function _matValeur(m) { return (Number(m.stock) || 0) * (Number(m.prixAchat) || 0); }
+
+function setMatieresTab(tab) {
+  _matTab = tab;
+  if (tab === 'fiches') _matHistoFiltre = '';
+  const on  = { bg:'var(--accent)', col:'#fff' };
+  const off = { bg:'transparent',   col:'var(--muted)' };
+  const f = document.getElementById('matTabFiches'), j = document.getElementById('matTabJournal');
+  if (f) { const s = tab === 'fiches'  ? on : off; f.style.background = s.bg; f.style.color = s.col; }
+  if (j) { const s = tab === 'journal' ? on : off; j.style.background = s.bg; j.style.color = s.col; }
+  renderMatieres();
+}
+
+// Ouvre le journal filtré sur une seule matière (bouton « Historique » d'une fiche).
+function openMatiereHistorique(id) {
+  setMatieresTab('journal');       // ne remet le filtre à zéro que pour l'onglet Fiches
+  _matHistoFiltre = String(id);
+  renderMatieres();
+}
+
+function _matSyncCatFilter() {
+  const sel = document.getElementById('matFilterCat');
+  if (!sel) return;
+  const cur = sel.value;
+  const cats = Array.from(new Set((matieres || []).map(m => (m.categorie || '').trim()).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'fr'));
+  sel.innerHTML = `<option value="">Toutes les catégories</option>` + cats.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+  if (cur && cats.includes(cur)) sel.value = cur;
+}
+
+function renderMatieres() {
+  const kpisEl = document.getElementById('matKpis');
+  if (!kpisEl) return;
+  _matSyncCatFilter();
+
+  const actives = (matieres || []).filter(m => m.actif !== false);
+  const ruptures = actives.filter(m => _matEtat(m) === 'rupture');
+  const faibles  = actives.filter(m => _matEtat(m) === 'faible');
+  const valeur   = actives.reduce((s, m) => s + _matValeur(m), 0);
+  const todayFr  = new Date().toLocaleDateString('fr-FR');
+  const mvtJour  = (mouvementsMatieres || []).filter(x => x.date === todayFr).length;
+
+  const kpi = (val, label, color) => `
+    <div style="flex:1;min-width:132px;background:var(--surface);border:1px solid var(--color-border);border-radius:12px;padding:12px 14px">
+      <div style="font-size:22px;font-weight:800;color:${color};line-height:1">${val}</div>
+      <div style="font-size:11.5px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:.03em">${label}</div>
+    </div>`;
+  kpisEl.innerHTML =
+    kpi(actives.length, 'Matières suivies', 'var(--text)') +
+    kpi(ruptures.length, 'En rupture', ruptures.length ? 'var(--red)' : 'var(--text)') +
+    kpi(faibles.length, 'Sous le seuil', faibles.length ? '#d97706' : 'var(--text)') +
+    kpi(fmt(valeur), 'Valeur du stock', 'var(--accent)') +
+    kpi(mvtJour, "Mouvements aujourd'hui", 'var(--text)');
+
+  // Bandeau d'alerte : ce qui bloquera la production si personne n'agit.
+  const alertEl = document.getElementById('matAlertes');
+  const urgents = ruptures.concat(faibles);
+  if (alertEl) {
+    alertEl.innerHTML = !urgents.length ? '' : `
+      <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:12px 14px;margin-bottom:14px">
+        <div style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700;color:#c2410c;margin-bottom:8px">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          À réapprovisionner (${urgents.length})
+        </div>
+        <div style="display:flex;gap:7px;flex-wrap:wrap">${urgents.slice(0, 14).map(m => {
+          const ui = _MAT_ETAT_UI[_matEtat(m)];
+          return `<button onclick="openMvtMatiereModal('${escapeHtml(String(m.id))}','ENTREE')" title="Enregistrer une entrée"
+            style="display:flex;align-items:center;gap:6px;background:var(--surface);border:1px solid ${ui.color}44;border-radius:9px;padding:6px 10px;font-size:12px;cursor:pointer;color:var(--text)">
+            <span style="font-weight:600">${escapeHtml(m.designation || m.code || '—')}</span>
+            <span style="font-weight:800;color:${ui.color}">${_matQteU(m.stock, m.unite)}</span>
+          </button>`;
+        }).join('')}</div>
+      </div>`;
+  }
+
+  const fichesWrap  = document.getElementById('matFichesWrap');
+  const journalWrap = document.getElementById('matJournalWrap');
+  if (_matTab === 'journal') {
+    if (fichesWrap)  fichesWrap.style.display  = 'none';
+    if (journalWrap) { journalWrap.style.display = ''; journalWrap.innerHTML = _matJournalHtml(); }
+  } else {
+    if (journalWrap) journalWrap.style.display = 'none';
+    if (fichesWrap)  { fichesWrap.style.display = ''; fichesWrap.innerHTML = _matFichesHtml(); }
+  }
+}
+
+function _matEmpty(titre, sous) {
+  return `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 24px;text-align:center">
+    <div style="width:48px;height:48px;background:var(--surface2);border-radius:13px;display:flex;align-items:center;justify-content:center;margin-bottom:12px">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+    </div>
+    <p style="font-size:13.5px;font-weight:600;color:var(--muted);margin:0">${titre}</p>
+    <p style="font-size:12px;color:var(--muted);opacity:.8;margin:4px 0 0">${sous}</p>
+  </div>`;
+}
+
+function _matFiltered() {
+  const q    = (document.getElementById('matFilter')?.value || '').trim().toLowerCase();
+  const cat  = document.getElementById('matFilterCat')?.value || '';
+  const etat = document.getElementById('matFilterEtat')?.value || '';
+  return (matieres || []).filter(m => {
+    if (cat && (m.categorie || '') !== cat) return false;
+    const e = _matEtat(m);
+    if (etat === 'alerte' && e === 'ok') return false;
+    if (etat && etat !== 'alerte' && e !== etat) return false;
+    if (!q) return true;
+    return [m.code, m.designation, m.categorie, m.fournisseur, m.emplacement, m.notes]
+      .some(v => String(v || '').toLowerCase().includes(q));
+  }).sort((a, b) => {
+    // Ce qui manque d'abord : la page sert à savoir quoi racheter.
+    const w = { rupture:0, faible:1, ok:2 };
+    const d = w[_matEtat(a)] - w[_matEtat(b)];
+    if (d) return d;
+    return String(a.designation || '').localeCompare(String(b.designation || ''), 'fr');
+  });
+}
+
+function _matFichesHtml() {
+  const list = _matFiltered();
+  if (!list.length) {
+    return `<div style="background:var(--surface);border:1px solid var(--color-border);border-radius:14px">${
+      (matieres || []).length
+        ? _matEmpty('Aucune matière ne correspond', 'Modifiez la recherche ou les filtres.')
+        : _matEmpty('Aucune matière enregistrée', 'Créez votre première fiche avec « Nouvelle matière ».')
+    }</div>`;
+  }
+
+  const rows = list.map(m => {
+    const ui  = _MAT_ETAT_UI[_matEtat(m)];
+    const ina = m.actif === false;
+    const id  = escapeHtml(String(m.id));
+    return `<tr style="${ina ? 'opacity:.5' : ''}">
+      <td class="td-mono" style="font-weight:600">${escapeHtml(m.code || '—')}</td>
+      <td>
+        <div style="font-weight:600">${escapeHtml(m.designation || '—')}${ina ? ' <span style="font-size:10px;font-weight:700;color:var(--muted)">(inactive)</span>' : ''}</div>
+        ${m.emplacement ? `<div style="font-size:11px;color:var(--muted)">${escapeHtml(m.emplacement)}</div>` : ''}
+      </td>
+      <td style="font-size:12.5px;color:var(--muted)">${escapeHtml(m.categorie || '—')}</td>
+      <td class="td-mono" style="font-weight:700;color:${ui.color}">${_matQteU(m.stock, m.unite)}</td>
+      <td class="td-mono" style="font-size:12.5px;color:var(--muted)">${m.seuil > 0 ? _matQte(m.seuil) : '—'}</td>
+      <td class="td-mono">${m.prixAchat > 0 ? fmt(m.prixAchat) : '—'}</td>
+      <td class="td-mono" style="font-weight:600">${_matValeur(m) > 0 ? fmt(_matValeur(m)) : '—'}</td>
+      <td style="font-size:12.5px;color:var(--muted)">${escapeHtml(m.fournisseur || '—')}</td>
+      <td><span style="background:${ui.bg};color:${ui.color};padding:2px 9px;border-radius:20px;font-size:11px;font-weight:700">${ui.label}</span></td>
+      <td style="white-space:nowrap">
+        <button onclick="openMvtMatiereModal('${id}','ENTREE')" title="Entrée de stock" style="background:#dcfce7;color:#16a34a;border:0;width:28px;height:28px;border-radius:7px;font-size:15px;font-weight:800;cursor:pointer">+</button>
+        <button onclick="openMvtMatiereModal('${id}','SORTIE')" title="Sortie de stock" style="background:#fee2e2;color:#dc2626;border:0;width:28px;height:28px;border-radius:7px;font-size:15px;font-weight:800;cursor:pointer">-</button>
+        <button onclick="openMatiereHistorique('${id}')" title="Historique des mouvements" style="background:var(--surface2);color:var(--text);border:1px solid var(--color-border);width:28px;height:28px;border-radius:7px;cursor:pointer;vertical-align:middle"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></button>
+        <button onclick="openMatiereModal('${id}')" title="Modifier la fiche" style="background:var(--surface2);color:var(--text);border:1px solid var(--color-border);width:28px;height:28px;border-radius:7px;cursor:pointer;vertical-align:middle"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z"/></svg></button>
+        <button onclick="deleteMatiere('${id}')" title="Supprimer la fiche" style="background:transparent;color:var(--red);border:1px solid transparent;width:28px;height:28px;border-radius:7px;cursor:pointer;vertical-align:middle"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  const cards = list.map(m => {
+    const ui = _MAT_ETAT_UI[_matEtat(m)];
+    const id = escapeHtml(String(m.id));
+    return `<div class="stock-card" style="${m.actif === false ? 'opacity:.55' : ''}">
+      <div class="stock-card-top">
+        <div>
+          <div class="stock-card-name">${escapeHtml(m.designation || '—')}</div>
+          <div class="stock-card-cat">${escapeHtml(m.code || '—')}${m.categorie ? ' · ' + escapeHtml(m.categorie) : ''}</div>
+        </div>
+        <span style="background:${ui.bg};color:${ui.color};padding:2px 9px;border-radius:20px;font-size:11px;font-weight:700;white-space:nowrap">${ui.label}</span>
+      </div>
+      <div class="stock-card-row">
+        <div class="stock-card-field"><span class="stock-card-field-label">Stock</span><span class="stock-card-field-val" style="color:${ui.color}">${_matQteU(m.stock, m.unite)}</span></div>
+        <div class="stock-card-field"><span class="stock-card-field-label">Seuil</span><span class="stock-card-field-val">${m.seuil > 0 ? _matQte(m.seuil) : '—'}</span></div>
+        <div class="stock-card-field"><span class="stock-card-field-label">Prix achat</span><span class="stock-card-field-val">${m.prixAchat > 0 ? fmt(m.prixAchat) : '—'}</span></div>
+        <div class="stock-card-field"><span class="stock-card-field-label">Valeur</span><span class="stock-card-field-val">${_matValeur(m) > 0 ? fmt(_matValeur(m)) : '—'}</span></div>
+      </div>
+      <div class="stock-card-actions">
+        <button style="background:#dcfce7;color:#16a34a" onclick="openMvtMatiereModal('${id}','ENTREE')">Entrée</button>
+        <button style="background:#fee2e2;color:#dc2626" onclick="openMvtMatiereModal('${id}','SORTIE')">Sortie</button>
+        <button style="background:rgba(7,61,55,0.10);color:var(--accent)" onclick="openMatiereModal('${id}')">Fiche</button>
+        <button style="background:var(--surface2);color:var(--text)" onclick="openMatiereHistorique('${id}')">Historique</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  const totalVal = list.reduce((s, m) => s + _matValeur(m), 0);
+  return `<div class="stock-table-wrap">
+    <table>
+      <thead><tr>
+        <th>Code</th><th>Désignation</th><th>Catégorie</th><th>Stock</th><th>Seuil</th>
+        <th>Prix achat</th><th>Valeur</th><th>Fournisseur</th><th>État</th><th>Actions</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr>
+        <td colspan="6" style="padding:12px 16px;font-size:12px;color:var(--muted);text-align:right">${list.length} matière${list.length > 1 ? 's' : ''} affichée${list.length > 1 ? 's' : ''} — total</td>
+        <td class="td-mono" style="font-weight:800;padding:12px 0">${fmt(totalVal)}</td>
+        <td colspan="3"></td>
+      </tr></tfoot>
+    </table>
+    <div id="matCards">${cards}</div>
+  </div>`;
+}
+
+function _matJournalHtml() {
+  const filtre = _matHistoFiltre ? _matById(_matHistoFiltre) : null;
+  const q = (document.getElementById('matFilter')?.value || '').trim().toLowerCase();
+  let list = (mouvementsMatieres || []);
+  if (_matHistoFiltre) list = list.filter(x => String(x.matiereId) === String(_matHistoFiltre));
+  if (q) list = list.filter(x => [x.code, x.designation, x.motif, x.operateur, x.refDossier, x.note]
+    .some(v => String(v || '').toLowerCase().includes(q)));
+
+  const entete = `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:14px 16px;border-bottom:1px solid var(--color-border)">
+    <div>
+      <div style="font-size:14px;font-weight:700;color:var(--text)">${filtre ? 'Historique — ' + escapeHtml(filtre.designation || filtre.code) : 'Journal des mouvements'}</div>
+      <div style="font-size:11.5px;color:var(--muted);margin-top:2px">${filtre ? 'Tous les mouvements de cette matière' : 'Chaque entrée, sortie et inventaire, du plus récent au plus ancien'}</div>
+    </div>
+    ${filtre ? `<button onclick="_matHistoFiltre='';renderMatieres()" style="background:var(--surface2);border:1px solid var(--color-border);color:var(--text);padding:7px 12px;border-radius:9px;font-size:12px;font-weight:600;cursor:pointer">Voir tout le journal</button>` : ''}
+  </div>`;
+
+  if (!list.length) {
+    return `<div style="background:var(--surface);border:1px solid var(--color-border);border-radius:14px">${entete}${
+      _matEmpty('Aucun mouvement', 'Les entrées et sorties de matière apparaîtront ici.')}</div>`;
+  }
+
+  const rows = list.map(x => {
+    const ui = MVT_TYPE_UI[x.type] || MVT_TYPE_UI.AJUSTEMENT;
+    const qte = Number(x.quantite) || 0;
+    const sgn = x.type === 'AJUSTEMENT' ? (qte >= 0 ? '+' : '-') : ui.signe;
+    const col = x.type === 'AJUSTEMENT' ? (qte >= 0 ? '#16a34a' : '#dc2626') : ui.color;
+    return `<tr>
+      <td class="td-mono" style="font-size:12px;white-space:nowrap">${escapeHtml(x.date)}<span style="color:var(--muted)"> ${escapeHtml(x.heure)}</span></td>
+      <td><span style="background:${ui.bg};color:${ui.color};padding:2px 9px;border-radius:20px;font-size:11px;font-weight:700">${ui.label}</span></td>
+      <td>
+        <div style="font-weight:600;font-size:13px">${escapeHtml(x.designation || '—')}</div>
+        ${x.code ? `<div class="td-mono" style="font-size:11px;color:var(--muted)">${escapeHtml(x.code)}</div>` : ''}
+      </td>
+      <td class="td-mono" style="font-weight:800;color:${col};white-space:nowrap">${sgn}${_matQteU(Math.abs(qte), x.unite)}</td>
+      <td class="td-mono" style="font-size:12.5px;color:var(--muted);white-space:nowrap">${_matQte(x.stockAvant)} &rarr; <strong style="color:var(--text)">${_matQte(x.stockApres)}</strong></td>
+      <td style="font-size:12.5px">${escapeHtml(x.motif || '—')}${x.note ? `<div style="font-size:11px;color:var(--muted)">${escapeHtml(x.note)}</div>` : ''}</td>
+      <td style="font-size:12.5px;color:var(--muted)">${escapeHtml(x.refDossier || x.refAchat || '—')}</td>
+      <td style="font-size:12.5px;color:var(--muted)">${escapeHtml(x.operateur || '—')}</td>
+      <td class="td-mono" style="font-size:12.5px">${x.montant > 0 ? fmt(x.montant) : '—'}</td>
+    </tr>`;
+  }).join('');
+
+  return `<div style="background:var(--surface);border:1px solid var(--color-border);border-radius:14px;overflow:hidden">
+    ${entete}
+    <div class="stock-table-wrap" style="border:0;border-radius:0">
+      <table>
+        <thead><tr>
+          <th>Date</th><th>Type</th><th>Matière</th><th>Quantité</th><th>Stock</th>
+          <th>Motif</th><th>Réf.</th><th>Par</th><th>Montant</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+// ── Fiche matière ───────────────────────────────────────────
+function _matFillSelect(id, values, current) {
+  const sel = document.getElementById(id);
+  if (!sel) return;
+  sel.innerHTML = values.map(v => `<option value="${escapeHtml(v)}"${v === current ? ' selected' : ''}>${escapeHtml(v)}</option>`).join('');
+  if (current && !values.includes(current)) {
+    sel.insertAdjacentHTML('afterbegin', `<option value="${escapeHtml(current)}" selected>${escapeHtml(current)}</option>`);
+  }
+}
+
+function openMatiereModal(id = null) {
+  editingMatiereId = id;
+  const m = id ? _matById(id) : null;
+  document.getElementById('matiereModalTitle').textContent = m ? 'Modifier la matière' : 'Nouvelle matière';
+  _matFillSelect('mCategorie', MATIERE_CATEGORIES, m ? m.categorie : 'Autre');
+  _matFillSelect('mUnite',     MATIERE_UNITES,     m ? m.unite     : 'unité');
+
+  const set = (f, v) => { const el = document.getElementById(f); if (el) el.value = v == null ? '' : v; };
+  set('mCode',            m ? m.code : '');
+  set('mDesignation',     m ? m.designation : '');
+  set('mSeuil',           m && m.seuil      ? m.seuil      : '');
+  set('mPrixAchat',       m && m.prixAchat  ? m.prixAchat  : '');
+  set('mConditionnement', m ? m.conditionnement : '');
+  set('mQteParCond',      m && m.qteParCond ? m.qteParCond : '');
+  set('mFournisseur',     m ? m.fournisseur : '');
+  set('mEmplacement',     m ? m.emplacement : '');
+  set('mNotes',           m ? m.notes : '');
+  document.getElementById('mActif').checked = m ? m.actif !== false : true;
+
+  // Le stock d'une matière existante ne se corrige pas dans la fiche : il passe
+  // par un mouvement, sinon le journal cesserait d'expliquer le stock affiché.
+  const stockEl = document.getElementById('mStock');
+  const lockEl  = document.getElementById('mStockLock');
+  if (m) {
+    stockEl.value = m.stock;
+    stockEl.readOnly = true;
+    stockEl.style.opacity = '.6';
+    if (lockEl) lockEl.style.display = '';
+  } else {
+    stockEl.value = '';
+    stockEl.readOnly = false;
+    stockEl.style.opacity = '';
+    if (lockEl) lockEl.style.display = 'none';
+  }
+  openModal('matiereModal');
+  setTimeout(() => document.getElementById(m ? 'mDesignation' : 'mCode').focus(), 100);
+}
+
+async function saveMatiere() {
+  const val = f => (document.getElementById(f)?.value || '').trim();
+  const num = f => { const n = parseFloat(val(f).replace(',', '.')); return isNaN(n) ? 0 : n; };
+  const designation = val('mDesignation');
+  if (!designation) { showToast('La désignation est obligatoire', 'error'); return; }
+
+  const existante = editingMatiereId ? _matById(editingMatiereId) : null;
+  const code = val('mCode');
+  // Doublon de code : vérifié aussi côté backend, mais l'attraper ici évite un
+  // aller-retour réseau pour rien.
+  if (code && (matieres || []).some(m => String(m.id) !== String(editingMatiereId)
+      && String(m.code || '').trim().toLowerCase() === code.toLowerCase())) {
+    showToast('Ce code est déjà utilisé par une autre matière', 'error');
+    return;
+  }
+
+  const m = {
+    id:              editingMatiereId || ('MAT' + Date.now() + Math.floor(Math.random() * 1000)),
+    code:            code,
+    designation:     designation,
+    categorie:       val('mCategorie'),
+    unite:           val('mUnite') || 'unité',
+    stock:           existante ? existante.stock : num('mStock'),
+    seuil:           num('mSeuil'),
+    prixAchat:       num('mPrixAchat'),
+    conditionnement: val('mConditionnement'),
+    qteParCond:      num('mQteParCond'),
+    fournisseur:     val('mFournisseur'),
+    emplacement:     val('mEmplacement'),
+    notes:           val('mNotes'),
+    actif:           !!document.getElementById('mActif').checked,
+    creePar:         existante ? existante.creePar : (currentUser?.label || currentUser?.username || '')
+  };
+
+  const i = (matieres || []).findIndex(x => String(x.id) === String(m.id));
+  if (i >= 0) matieres[i] = Object.assign({}, matieres[i], m); else matieres.push(m);
+  saveMatieresLocal();
+  closeModal('matiereModal');
+  renderMatieres();
+  showToast(existante ? 'Fiche matière mise à jour' : 'Matière créée');
+
+  if (APPS_SCRIPT_URL) {
+    try {
+      const r = await apiCall({ action:'saveMatiere', matiere:m, username:currentUser?.username || '' });
+      if (r && r.ok === false) { showToast(r.error || 'Enregistrement refusé par le serveur', 'error'); }
+      // Création avec stock initial : le backend a écrit un mouvement → on relit.
+      if (!existante && m.stock > 0) await loadMouvementsMatieresFromScript();
+      await loadMatieresFromScript();
+      renderMatieres();
+    } catch(e) { showToast('Hors ligne : la fiche sera resynchronisée', 'error'); }
+  }
+}
+
+async function deleteMatiere(id) {
+  const m = _matById(id);
+  if (!m) return;
+  if (!confirm(`Supprimer la fiche « ${m.designation || m.code} » ?\n\nL'historique de ses mouvements est conservé dans le journal.`)) return;
+  matieres = (matieres || []).filter(x => String(x.id) !== String(id));
+  saveMatieresLocal();
+  renderMatieres();
+  showToast('Matière supprimée');
+  if (APPS_SCRIPT_URL) {
+    try { await apiCall({ action:'deleteMatiere', id:id, operateur:currentUser?.label || currentUser?.username || '', username:currentUser?.username || '' }); }
+    catch(e) { showToast('Suppression non synchronisée (hors ligne)', 'error'); }
+  }
+}
+
+// ── Mouvement de stock ──────────────────────────────────────
+function setMvtType(type) {
+  _mvtType = type;
+  ['ENTREE','SORTIE','AJUSTEMENT'].forEach(t => {
+    const b = document.getElementById('mvtType' + t);
+    if (!b) return;
+    const ui = MVT_TYPE_UI[t];
+    const on = t === type;
+    b.style.borderColor = on ? ui.color : 'var(--color-border)';
+    b.style.background  = on ? ui.color : 'var(--surface)';
+    b.style.color       = on ? '#fff'   : 'var(--muted)';
+  });
+  const lbl = document.getElementById('mvtQteLabel');
+  if (lbl) lbl.textContent = type === 'AJUSTEMENT' ? 'Stock réellement compté' : 'Quantité';
+  // Prix et fournisseur n'ont de sens qu'à l'entrée (on valorise ce qui arrive).
+  const pw = document.getElementById('mvtPrixWrap');
+  const fw = document.getElementById('mvtFournWrap');
+  if (pw) pw.style.display = type === 'ENTREE' ? '' : 'none';
+  if (fw) fw.style.display = type === 'ENTREE' ? '' : 'none';
+  _matFillSelect('mvtMotif', MVT_MOTIFS[type], MVT_MOTIFS[type][0]);
+  _mvtOnMatiereChange();
+}
+
+function openMvtMatiereModal(matiereId = null, type = 'ENTREE', prefill = null) {
+  const dispo = (matieres || []).filter(m => m.actif !== false);
+  if (!dispo.length) { showToast("Créez d'abord une fiche matière", 'error'); return; }
+  const sel = document.getElementById('mvtMatiere');
+  sel.innerHTML = dispo
+    .slice()
+    .sort((a, b) => String(a.designation || '').localeCompare(String(b.designation || ''), 'fr'))
+    .map(m => `<option value="${escapeHtml(String(m.id))}">${escapeHtml((m.code ? m.code + ' — ' : '') + (m.designation || ''))}</option>`).join('');
+  if (matiereId && _matById(matiereId)) sel.value = String(matiereId);
+
+  ['mvtQuantite','mvtPrixUnitaire','mvtRefDossier','mvtNote'].forEach(f => { const el = document.getElementById(f); if (el) el.value = ''; });
+  document.getElementById('mvtFournisseur').value = '';
+  document.getElementById('mvtEnCond').checked = false;
+  setMvtType(type);
+
+  // Pré-remplissage depuis une réception d'achat (quantité, prix, fournisseur, réf).
+  if (prefill) {
+    const set = (f, v) => { const el = document.getElementById(f); if (el && v != null && v !== '') el.value = v; };
+    set('mvtQuantite', prefill.quantite);
+    set('mvtPrixUnitaire', prefill.prixUnitaire);
+    set('mvtFournisseur', prefill.fournisseur);
+    set('mvtRefDossier', prefill.refDossier);
+    set('mvtNote', prefill.note);
+    if (prefill.motif) {
+      const ms = document.getElementById('mvtMotif');
+      if (ms && Array.from(ms.options).some(o => o.value === prefill.motif)) ms.value = prefill.motif;
+    }
+    _mvtRefAchat = prefill.refAchat || '';
+  } else {
+    _mvtRefAchat = '';
+  }
+
+  document.getElementById('mvtMatiereTitle').textContent = 'Mouvement de matière';
+  openModal('mvtMatiereModal');
+  _mvtOnMatiereChange();
+  setTimeout(() => document.getElementById('mvtQuantite').focus(), 100);
+}
+let _mvtRefAchat = '';
+
+function _mvtOnMatiereChange() {
+  const m = _matById(document.getElementById('mvtMatiere')?.value);
+  const info = document.getElementById('mvtStockInfo');
+  const cw   = document.getElementById('mvtCondWrap');
+  if (!m) { if (info) info.innerHTML = ''; if (cw) cw.style.display = 'none'; return; }
+  const ui = _MAT_ETAT_UI[_matEtat(m)];
+  if (info) info.innerHTML = `Stock actuel : <strong style="color:${ui.color}">${_matQteU(m.stock, m.unite)}</strong>`
+    + (m.seuil > 0 ? ` · seuil d'alerte ${_matQteU(m.seuil, m.unite)}` : '')
+    + (m.prixAchat > 0 ? ` · dernier prix ${fmt(m.prixAchat)}/${escapeHtml(m.unite)}` : '');
+  // Conditionnement : proposé seulement à l'entrée et si la conversion est connue.
+  if (cw) {
+    const show = _mvtType === 'ENTREE' && m.qteParCond > 0;
+    cw.style.display = show ? 'flex' : 'none';
+    if (show) document.getElementById('mvtCondLabel').textContent =
+      `Quantité saisie en ${(m.conditionnement || 'conditionnement').toLowerCase()} (1 = ${_matQteU(m.qteParCond, m.unite)})`;
+    else document.getElementById('mvtEnCond').checked = false;
+  }
+  _mvtPreview();
+}
+
+function _mvtPreview() {
+  const el = document.getElementById('mvtPreview');
+  if (!el) return;
+  const m = _matById(document.getElementById('mvtMatiere')?.value);
+  const raw = parseFloat((document.getElementById('mvtQuantite')?.value || '').replace(',', '.'));
+  if (!m || isNaN(raw)) { el.innerHTML = ''; return; }
+  const enCond = !!document.getElementById('mvtEnCond')?.checked && m.qteParCond > 0;
+  const qte    = _mvtType === 'ENTREE' && enCond ? raw * m.qteParCond : raw;
+  const avant  = Number(m.stock) || 0;
+  const apres  = _mvtType === 'ENTREE' ? avant + qte : _mvtType === 'SORTIE' ? avant - qte : qte;
+  const neg    = apres < 0;
+  const alerte = !neg && apres <= 0 ? 'rupture' : (!neg && m.seuil > 0 && apres <= m.seuil ? 'faible' : '');
+  const pu     = parseFloat((document.getElementById('mvtPrixUnitaire')?.value || '').replace(',', '.'));
+  const mont   = _mvtType === 'ENTREE' && !isNaN(pu) && pu > 0 ? pu * qte : 0;
+  el.innerHTML = `<span style="color:var(--muted);font-weight:600">Après ce mouvement :</span>
+    <span style="color:${neg ? 'var(--red)' : 'var(--text)'}"> ${_matQte(avant)} &rarr; ${_matQte(apres)} ${escapeHtml(m.unite)}</span>
+    ${mont > 0 ? `<span style="color:var(--muted);font-weight:600"> · montant ${fmt(mont)}</span>` : ''}
+    ${neg ? `<div style="color:var(--red);font-weight:600;font-size:12px;margin-top:4px">Stock insuffisant — le mouvement sera refusé. Enregistrez d'abord l'entrée manquante.</div>` : ''}
+    ${alerte === 'rupture' ? `<div style="color:#d97706;font-weight:600;font-size:12px;margin-top:4px">La matière passera en rupture.</div>` : ''}
+    ${alerte === 'faible'  ? `<div style="color:#d97706;font-weight:600;font-size:12px;margin-top:4px">La matière passera sous son seuil d'alerte.</div>` : ''}`;
+}
+
+async function saveMvtMatiere() {
+  const m = _matById(document.getElementById('mvtMatiere')?.value);
+  if (!m) { showToast('Choisissez une matière', 'error'); return; }
+  const raw = parseFloat((document.getElementById('mvtQuantite')?.value || '').replace(',', '.'));
+  if (isNaN(raw)) { showToast('Saisissez une quantité', 'error'); return; }
+  if (_mvtType !== 'AJUSTEMENT' && raw <= 0) { showToast('La quantité doit être supérieure à 0', 'error'); return; }
+  if (_mvtType === 'AJUSTEMENT' && raw < 0)  { showToast('Le stock compté ne peut pas être négatif', 'error'); return; }
+  if (!APPS_SCRIPT_URL) {
+    // Un mouvement non synchronisé fausserait le stock de tous les autres postes :
+    // mieux vaut le refuser que mentir sur l'inventaire.
+    showToast('Connexion au serveur requise pour un mouvement de stock', 'error');
+    return;
+  }
+
+  const enCond = !!document.getElementById('mvtEnCond')?.checked;
+  const pu     = parseFloat((document.getElementById('mvtPrixUnitaire')?.value || '').replace(',', '.'));
+  const btn    = document.getElementById('mvtSubmitBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Enregistrement...'; }
+
+  try {
+    const r = await apiCall({
+      action:'mouvementMatiere',
+      matiereId:m.id, type:_mvtType, quantite:raw,
+      enConditionnement:(_mvtType === 'ENTREE' && enCond),
+      prixUnitaire:(!isNaN(pu) && pu > 0 ? pu : 0),
+      motif:(document.getElementById('mvtMotif')?.value || ''),
+      fournisseur:(_mvtType === 'ENTREE' ? (document.getElementById('mvtFournisseur')?.value || '') : ''),
+      refDossier:(document.getElementById('mvtRefDossier')?.value || ''),
+      refAchat:_mvtRefAchat,
+      note:(document.getElementById('mvtNote')?.value || ''),
+      operateur:(currentUser?.label || currentUser?.username || ''),
+      username:(currentUser?.username || '')
+    });
+    if (!r || r.ok === false) {
+      showToast((r && r.error) || 'Mouvement refusé par le serveur', 'error');
+      return;
+    }
+    closeModal('mvtMatiereModal');
+    const ui = MVT_TYPE_UI[_mvtType];
+    showToast(`${ui.label} enregistrée — ${_matQteU(r.stock, m.unite)} en stock`);
+    if (r.alerte === 'RUPTURE') showToast(`${m.designation} est en rupture`, 'error');
+    else if (r.alerte === 'FAIBLE') showToast(`${m.designation} est sous son seuil`, 'error');
+    await Promise.all([loadMatieresFromScript(), loadMouvementsMatieresFromScript()]);
+    renderMatieres();
+    if (window._posBroadcast) window._posBroadcast('matiere-changed', { id:m.id });
+  } catch(e) {
+    showToast('Échec de l\'enregistrement du mouvement', 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Valider le mouvement'; }
+  }
+}
+
+// ── Réception d'un achat → entrée de stock ──────────────────
+// Pont avec la page Achats : une demande reçue alimente le stock matière sans
+// ressaisir quantité, prix ni fournisseur. La matière est devinée par code puis
+// par désignation ; si rien ne correspond, on ouvre la fiche à créer.
+function _matFindByLibelle(libelle) {
+  const t = String(libelle || '').trim().toLowerCase();
+  if (!t) return null;
+  const list = (matieres || []).filter(m => m.actif !== false);
+  return list.find(m => m.code && t === String(m.code).toLowerCase())
+      || list.find(m => m.designation && t === String(m.designation).toLowerCase())
+      || list.find(m => m.designation && (t.includes(String(m.designation).toLowerCase()) || String(m.designation).toLowerCase().includes(t)))
+      || null;
+}
+
+function receptionnerAchatEnStock(demandeId) {
+  const d = (Array.isArray(demandesAchat) ? demandesAchat : []).find(x => String(x.id) === String(demandeId));
+  if (!d) { showToast('Demande d\'achat introuvable', 'error'); return; }
+  const m = _matFindByLibelle(d.besoin);
+  const prefill = {
+    quantite:     d.quantite || '',
+    prixUnitaire: d.prix || '',
+    fournisseur:  d.fournisseur || '',
+    refDossier:   d.ref || '',
+    refAchat:     d.id,
+    motif:        'Achat / réception',
+    note:         'Réception achat' + (d.besoin ? ' : ' + d.besoin : '')
+  };
+  showPage('matieres');
+  if (!m) {
+    showToast('Aucune matière ne correspond à « ' + (d.besoin || '?') + ' » — créez sa fiche', 'error');
+    openMatiereModal();
+    const el = document.getElementById('mDesignation');
+    if (el) el.value = d.besoin || '';
+    const f = document.getElementById('mFournisseur');
+    if (f) f.value = d.fournisseur || '';
+    const p = document.getElementById('mPrixAchat');
+    if (p && d.prix) p.value = d.prix;
+    return;
+  }
+  openMvtMatiereModal(m.id, 'ENTREE', prefill);
 }
