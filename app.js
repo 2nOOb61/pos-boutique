@@ -97,7 +97,7 @@ function _purgeLocalPlainPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '228 · 2026-10-21';
+const APP_VERSION = '229 · 2026-10-28';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -9661,6 +9661,87 @@ function _etatManuelMeta(d, code){ return _etatsManuels(d)[code] || null; }
 function _aEtatsManuels(d){ return Object.keys(_etatsManuels(d)).length > 0; }
 function _etatManuelConf(st){ return ETATS_MANUELS.find(x => x.code === st) || null; }
 
+// ── INSTALLATION SUR SITE ──────────────────────────────────────────────
+// Certains dossiers ne s'arrêtent pas à la livraison : il faut aller POSER
+// l'ouvrage chez le client. L'atelier doit le savoir avant d'emballer (visserie,
+// gabarits, équipe de pose), d'où un marqueur porté par le DOSSIER (col P de la
+// feuille Dossiers) et imprimé en grand sur ses fiches. Il n'est pas déduit du
+// mode de livraison : un retrait boutique peut être posé chez le client, et une
+// livraison simple ne vaut pas installation.
+function _installInfo(d){
+  const raw = d && d.installation;
+  if (!raw) return null;
+  if (raw === true) return { on:true, par:'', le:'', note:'' };
+  if (typeof raw === 'string'){
+    const t = raw.trim();
+    if (!t) return null;
+    if (t.charAt(0) === '{'){
+      try { const o = JSON.parse(t); return (o && o.on) ? { on:true, par:o.par||'', le:o.le||'', note:o.note||'' } : null; }
+      catch(e){ return null; }
+    }
+    return /^(oui|yes|true|1|x)$/i.test(t) ? { on:true, par:'', le:'', note:'' } : null;
+  }
+  return (typeof raw === 'object' && raw.on)
+    ? { on:true, par:raw.par||'', le:raw.le||'', note:raw.note||'' } : null;
+}
+function _aInstallation(d){ return !!_installInfo(d); }
+function _installNote(d){ return (_installInfo(d) || {}).note || ''; }
+
+const _INSTALL_ICO = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>';
+
+// Bandeau écran : même message que la fiche imprimée, pour qu'on sache avant
+// d'imprimer ce qui va sortir en grand. Styles en ligne — comme _clotMiniBtn,
+// il doit s'afficher pareil dans le panneau d'Attribution et dans le tiroir du
+// cockpit Production, qui n'ont aucune classe commune.
+function _installBannerEcran(d){
+  if (!_aInstallation(d)) return '';
+  const note = _installNote(d);
+  return `<div style="margin-top:10px;display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:10px;background:#fdf0e8;border:2px solid #e8834a">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#c2410c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:1px"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:14px;font-weight:900;color:#c2410c;text-transform:uppercase;letter-spacing:.04em;line-height:1.15">Installation sur site</div>
+        <div style="font-size:11.5px;color:#1c1917;margin-top:2px">À poser chez le client — ressort en grand sur les fiches imprimées.</div>
+        ${note ? `<div style="font-size:12px;font-weight:700;color:#1c1917;margin-top:4px;white-space:pre-wrap">${escapeHtml(note)}</div>` : ''}
+      </div>
+    </div>`;
+}
+
+// Bouton de bascule. `variant` 'pcok' = barre d'actions du cockpit Production
+// (classe maison), sinon bouton autonome pour l'en-tête d'Attribution.
+function _installToggleBtn(dossierId, variant){
+  if (!_peutPiloterEtapes()) return '';
+  const on  = _aInstallation(_dossierParId(dossierId));
+  const ti  = on ? "Retirer l'installation sur site"
+                 : "Marquer « installation sur site » : la consigne ressort en grand sur les fiches imprimées";
+  const lbl = `${_INSTALL_ICO} Installation`;
+  if (variant === 'pcok') {
+    const sty = on ? 'color:#c2410c;border-color:#e8834a;background:#fdf0e8;font-weight:700' : '';
+    return `<button class="pcok-btn" style="${sty}" title="${ti}" onclick="toggleInstallationDossier('${dossierId}')">${lbl}</button>`;
+  }
+  const sty = on
+    ? 'background:#fdf0e8;color:#c2410c;border:1.5px solid #e8834a'
+    : 'background:var(--surface2);color:var(--text);border:1px solid var(--border)';
+  return `<button onclick="toggleInstallationDossier('${dossierId}')" title="${ti}"
+    style="display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:7px;cursor:pointer;font-size:11px;font-weight:600;flex-shrink:0;${sty}">${lbl}</button>`;
+}
+
+// Bandeau d'alerte imprimé : volontairement en bordure épaisse + gros texte.
+// Les fonds de couleur sautent dès que l'utilisateur imprime sans « graphiques
+// d'arrière-plan » ; un cadre et du 22pt gras, eux, sortent toujours.
+function _installBannerPrint(d){
+  const inf = _installInfo(d);
+  if (!inf) return '';
+  const ico = '<svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="#c2410c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:3px"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+  return `<div style="display:flex;align-items:flex-start;gap:14px;border:3px solid #c2410c;background:#fdf0e8;border-radius:12px;padding:14px 18px;margin-bottom:18px">
+      ${ico}
+      <div style="flex:1">
+        <div style="font-size:22pt;line-height:1.05;font-weight:900;color:#c2410c;letter-spacing:-.02em;text-transform:uppercase">Installation sur site</div>
+        <div style="font-size:11pt;color:#1c1917;margin-top:5px">À <strong>poser chez le client</strong> après production — prévoir le matériel et l'équipe de pose.</div>
+        ${inf.note ? `<div style="font-size:12pt;font-weight:700;color:#1c1917;margin-top:6px">${escapeHtml(inf.note)}</div>` : ''}
+      </div>
+    </div>`;
+}
+
 // Tâches « effectives » d'un dossier : les pointages réels, sauf sur les étapes où
 // le responsable a posé un état — il REMPLACE alors les pointages sous la forme
 // d'une tâche virtuelle, sur n'importe quelle étape du pipeline. Tous les
@@ -16464,6 +16545,7 @@ function renderAttrPanel(tachesD, commentsD = []) {
             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
             Imprimer
           </button>
+          ${_installToggleBtn(d.id)}
           ${['admin','chef_atelier'].includes(currentUser?.role) ? `<div class="kebab-wrap">
             <button class="kebab-btn" aria-label="Plus d'actions" aria-haspopup="true" onclick="toggleKebab('attrh${d.id}',event)"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>
             <div class="kebab-menu" id="kb-attrh${d.id}" role="menu">
@@ -16481,6 +16563,7 @@ function renderAttrPanel(tachesD, commentsD = []) {
         <span style="color:var(--color-border)">·</span>
         <span style="background:${prioBg};color:${prioColor};font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px">${d.priorite}</span>
       </div>
+      ${_installBannerEcran(d)}
       ${_commercial ? `<div style="margin-top:8px;display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:9px;background:var(--color-primary-light);border:1px solid rgba(26,74,58,.2)">
         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="#1a4a3a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         <span style="font-size:11px;color:var(--color-text-secondary)">Commercial : <strong style="color:#1a4a3a;font-weight:700">${_commercial}</strong></span>
@@ -16694,6 +16777,7 @@ function printFicheTravailDossier(dossierId) {
   const body = `
     <div class="rpt-title">Fiche de travail${d.numeroDossier ? ' — ' + escapeHtml(d.numeroDossier) : ''}</div>
     <div class="rpt-period">Collaborateurs ayant travaillé sur le dossier — à remplir et signer à la main</div>
+    ${_installBannerPrint(d)}
     <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
       <tr>${infoCell('Nom du client', escapeHtml(client))}${infoCell('Commercial', escapeHtml(commercial))}</tr>
       <tr>${infoCell('Date de production', dProd)}${infoCell('Date de livraison', dLiv)}</tr>
@@ -16872,6 +16956,8 @@ function printDossier(dossierId) {
         <div style="font-size:9pt;color:#78716c">Imprimé le ${new Date().toLocaleDateString('fr-FR', {day:'2-digit',month:'long',year:'numeric'})}</div>
       </div>
     </div>
+
+    ${_installBannerPrint(d)}
 
     <!-- FICHE CLIENT & STATUT -->
     <div style="display:flex;gap:16px;margin-bottom:22px">
@@ -22974,6 +23060,77 @@ async function setEtapeManuelle(dossierId, code, statut){
   showToast(statut ? `${etape.label} → ${(conf&&conf.label)||statut}` : `${etape.label} repasse au pointage`);
 }
 
+// Rafraîchissement propre au marqueur d'installation. Contrairement à la clôture
+// (_refreshApresCloture), on NE referme PAS le tiroir du cockpit : c'est de là
+// qu'on clique le plus souvent, et le voir disparaître ferait douter de ce qui a
+// été enregistré.
+function _refreshInstallUI(dossierId){
+  _refreshEtapesUI(dossierId);   // page à l'écran + tiroir du cockpit, rouvert tel quel
+  if (selectedDossier && selectedDossier.id === dossierId && typeof renderAttrPanel === 'function') {
+    try {
+      renderAttrPanel(taches.filter(t => t.dossierId === dossierId),
+                      dossierComments.filter(c => c.dossierId === dossierId));
+    } catch(e) {}
+  }
+}
+
+// Marque (ou retire) l'installation sur site. Réservée à l'admin et au responsable
+// de production, comme les états d'étapes : c'est une consigne d'atelier, pas une
+// note libre. L'écran est mis à jour tout de suite, puis le Sheet tranche — en cas
+// d'échec réseau on remet l'état précédent plutôt que de laisser croire que c'est
+// enregistré.
+async function toggleInstallationDossier(dossierId){
+  if (!_peutPiloterEtapes()) {
+    showToast("Seul l'admin ou le responsable de production peut marquer l'installation.", 'error');
+    return;
+  }
+  const d = _dossierParId(dossierId) || (selectedDossier && selectedDossier.id === dossierId ? selectedDossier : null);
+  if (!d) { showToast('Dossier introuvable', 'error'); return; }
+  const avant = d.installation || null;
+  const on    = !_aInstallation(d);
+  let note = '';
+  if (on) {
+    const v = prompt("Installation sur site — précisions pour l'atelier (lieu, accès, matériel…) :\n(laisser vide s'il n'y a rien à préciser)", '');
+    if (v === null) return;                    // Échap = on ne touche à rien
+    note = String(v).trim();
+  }
+  const par = currentUser?.label || currentUser?.username || 'admin';
+  d.installation = on ? { on:true, par:par, le:new Date().toISOString(), note:note } : null;
+  _refreshInstallUI(dossierId);
+
+  if (APPS_SCRIPT_URL) {
+    const req = { action:'setDossierInstallation', id:dossierId, installation:on, note:note, par:par };
+    let r = await apiCall(req).catch(() => null);
+    // Dossier encore absent du Sheet (créé en local) : on l'enregistre puis on réessaie.
+    if (r && !r.ok && /introuvable/i.test(String(r.error||''))) {
+      await apiCall({ action:'saveDossier', dossier:d, createdBy:par }).catch(() => {});
+      r = await apiCall(req).catch(() => null);
+    }
+    if (!r || !r.ok) {
+      d.installation = avant;
+      _refreshInstallUI(dossierId);
+      showToast('Enregistrement impossible : ' + ((r && r.error) || 'réseau'), 'error');
+      return;
+    }
+    d.installation = r.installation || null;
+    _refreshInstallUI(dossierId);
+  }
+
+  _addNotification({
+    dossierId:     dossierId,
+    numeroDossier: d.numeroDossier || dossierId,
+    etapeCode:     'INSTALLATION',
+    etapeLabel:    'Installation',
+    operateur:     par,
+    message: on
+      ? `${par} a marqué le dossier ${d.numeroDossier || dossierId} « installation sur site »${note ? ' — ' + note : ''}`
+      : `${par} a retiré l'installation sur site du dossier ${d.numeroDossier || dossierId}`,
+  });
+  showToast(on
+    ? 'Installation sur site marquée — elle ressort en grand sur les fiches imprimées'
+    : 'Installation sur site retirée');
+}
+
 // Rafraîchit les écrans qui montrent l'avancement du dossier (page courante +
 // panneau latéral ouvert) : l'état doit se voir partout sans recharger.
 function _refreshEtapesUI(dossierId){
@@ -23058,6 +23215,7 @@ function _cockpitDetailBody(r, avecTete) {
       <span class="pcok-drawer-ech" style="color:${dCol}">${ech}${dtxt?' · '+dtxt:''}</span>
     </div>
     ${r.produit?`<div class="pcok-drawer-prod">${_pcokEsc(r.produit)}</div>`:''}
+    ${_installBannerEcran(_dossierParId(r.dossierId))}
     <div class="pcok-drawer-prog"><div class="pcok-prog-bar"><div style="width:${r.pct}%;background:${r.pct===100?'#16a34a':'#e8834a'}"></div></div><span>${r.pct}%</span></div>
     <div class="pcok-drawer-pipe-title">Pipeline de production</div>
     <div class="pcok-drawer-pipe">${stepsHtml}</div>
@@ -23065,6 +23223,7 @@ function _cockpitDetailBody(r, avecTete) {
     <div class="pcok-drawer-actions">
       ${canAttrib?`<button class="pcok-btn pcok-btn--primary" onclick="closeProdDrawer();openAttribForDossier('${r.dossierId}')">Gérer l'attribution →</button>`:''}
       ${_peutCloturer(_dossierParId(r.dossierId)) ? `<button class="pcok-btn" style="color:#16a34a;border-color:rgba(22,163,74,.4)" title="${_CLOT_TITRE}" onclick="cloturerDossier('${r.dossierId}')">✓ Clôturer</button>` : ''}
+      ${_installToggleBtn(r.dossierId, 'pcok')}
       <button class="pcok-btn" onclick="printFicheTravailDossier('${r.dossierId}')">Fiche travail</button>
       <button class="pcok-btn" onclick="printDossier('${r.dossierId}')">Imprimer</button>
     </div>`;

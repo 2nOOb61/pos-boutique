@@ -59,7 +59,7 @@ const MACHINE_HEADERS  = ['ID','Machine','RefType','RefID','RefLabel','Client','
 // feuille déjà en place.
 const DOSSIER_HEADERS = ['ID','NumeroDossier','Client','Produit','Quantite','Statut',
   'Progression','DateCreation','DateLivraison','Priorite','SourceVente','Notes',
-  'ClientPrevenuLe','ClientPrevenuPar','EtatsManuels'];
+  'ClientPrevenuLe','ClientPrevenuPar','EtatsManuels','Installation'];
 
 // Feuille Finitions : fiche d'atelier de l'étape FINITION (traçabilité seule pour
 // l'instant — pas de déduction de stock). Une ligne par dossier (upsert sur ID).
@@ -120,11 +120,42 @@ const ETAPES_ATELIER        = ['PRODUCTION','FINITION'];
 const ETATS_MANUELS_VALIDES = ['A_FAIRE','EN_COURS','TERMINE'];
 const COL_ETATS_MANUELS     = 15;   // col O de la feuille Dossiers
 
+// Col P = Installation : le dossier demande une POSE SUR SITE après la
+// production. L'atelier doit le voir de loin (fiches imprimées), d'où un
+// marqueur porté par le dossier lui-même et non déduit du mode de livraison :
+// une commande retirée en boutique peut être posée chez le client, et une
+// livraison simple ne vaut pas installation.
+const COL_INSTALLATION      = 16;   // col P de la feuille Dossiers
+
 // Crée la colonne EtatsManuels sur les classeurs antérieurs (14 colonnes).
 function _ensureEtatsManuelsCol_(sh) {
   if (sh.getLastColumn() < COL_ETATS_MANUELS) {
     sh.getRange(1, COL_ETATS_MANUELS).setValue('EtatsManuels');
   }
+}
+
+// Crée la colonne Installation sur les classeurs antérieurs (15 colonnes).
+function _ensureInstallationCol_(sh) {
+  if (sh.getLastColumn() < COL_INSTALLATION) {
+    sh.getRange(1, COL_INSTALLATION).setValue('Installation');
+  }
+}
+
+// Cellule Installation -> { on, par, le, note } ou null quand aucune pose n'est
+// demandée. Accepte aussi les valeurs simples ('OUI', true) qu'une saisie
+// directe dans le classeur pourrait y laisser.
+function _installationFromCell_(cell) {
+  if (cell === true) return { on:true, par:'', le:'', note:'' };
+  const raw = String(cell == null ? '' : cell).trim();
+  if (!raw) return null;
+  if (raw.charAt(0) === '{') {
+    try {
+      const o = JSON.parse(raw);
+      if (!o || typeof o !== 'object' || !o.on) return null;
+      return { on:true, par:String(o.par || ''), le:String(o.le || ''), note:String(o.note || '') };
+    } catch (e) { return null; }
+  }
+  return /^(oui|yes|true|1|x)$/i.test(raw) ? { on:true, par:'', le:'', note:'' } : null;
 }
 
 function _etatsManuelsFromCell_(cell) {
@@ -246,6 +277,7 @@ function doPost(e) {
     else if (action === 'updateDossier')     result = handleUpdateDossier(data);
     else if (action === 'cloturerDossier')   result = handleCloturerDossier(data);
     else if (action === 'setEtapeManuelle')  result = handleSetEtapeManuelle(data);
+    else if (action === 'setDossierInstallation') result = handleSetDossierInstallation(data);
     else if (action === 'creerDossierManuel') result = handleCreerDossierManuel(data);
     else if (action === 'saveTacheLibre')    result = handleSaveTacheLibre(data);
     else if (action === 'setTacheLibrePhotos') result = handleSetTacheLibrePhotos(data);
@@ -320,6 +352,7 @@ function doGet(e) {
       else if (action === 'updateDossier')     result = handleUpdateDossier(data);
       else if (action === 'cloturerDossier')   result = handleCloturerDossier(data);
       else if (action === 'setEtapeManuelle')  result = handleSetEtapeManuelle(data);
+      else if (action === 'setDossierInstallation') result = handleSetDossierInstallation(data);
       else if (action === 'attribuerTache')    result = handleAttribuerTache(data);
       else if (action === 'pointerAction')     result = handlePointerAction(data);
       else if (action === 'deleteTache')       result = handleDeleteTache(data);
@@ -1449,6 +1482,7 @@ const _JMETA_ = {
   DOSSIER_CREATE:['Production','Dossier créé'], DOSSIER_MANUEL:['Production','Dossier manuel'],
   DOSSIER_CLOTURE:['Production','Dossier clôturé'],
   ETAPE_MANUELLE:['Production','État d\'étape modifié'],
+  DOSSIER_INSTALLATION:['Production','Installation sur site'],
   TACHE_ATTRIB:['Production','Tâche attribuée'], TACHE_LIBRE_CREATE:['Production','Tâche créée'],
   TACHE_START:['Production','Tâche démarrée'], TACHE_FIN:['Production','Tâche terminée'],
   TACHES_RESET:['Production','Tâches réinitialisées'],
@@ -2260,7 +2294,7 @@ function handleGetDossiers(data) {
   const nRows  = lastRow - start + 1;
   // 12 colonnes historiques + les 2 du « client prévenu » et les états manuels
   // d'étapes quand le classeur les a déjà.
-  const nCols  = Math.max(12, Math.min(sh.getLastColumn(), COL_ETATS_MANUELS));
+  const nCols  = Math.max(12, Math.min(sh.getLastColumn(), COL_INSTALLATION));
   const rows   = sh.getRange(start, 1, nRows, nCols).getValues();
 
   let list   = [];
@@ -2272,7 +2306,8 @@ function handleGetDossiers(data) {
       quantite:Number(r[4]), statut:r[5], progression:Number(r[6]),
       dateCreation:dc, dateLivraison:dl, priorite:r[9], sourceVente:r[10], notes:r[11],
       clientPrevenuLe: _prevenuIso_(r[12]), clientPrevenuPar: r[13] ? String(r[13]) : '',
-      etatsManuels: _etatsManuelsFromCell_(r[COL_ETATS_MANUELS - 1]) });
+      etatsManuels: _etatsManuelsFromCell_(r[COL_ETATS_MANUELS - 1]),
+      installation: _installationFromCell_(r[COL_INSTALLATION - 1]) });
   }
 
   if (data && data.statut && data.statut !== 'TOUS') {
@@ -2462,6 +2497,37 @@ function handleSetEtapeManuelle(data) {
   CacheService.getScriptCache().remove('dashboard_v1');
   return { ok:true, etatsManuels:etats,
            statut:prog.statut, progression:prog.progression };
+}
+
+// Marque (ou retire) la POSE SUR SITE sur un dossier. Porté par le dossier et non
+// par la commande : l'information sert l'atelier (prévoir le matériel de pose, ne
+// pas emballer définitivement) et se pose depuis le Suivi de production.
+// `installation` faux = on efface le marqueur.
+function handleSetDossierInstallation(data) {
+  if (!data || !data.id) return { ok:false, error:'id requis' };
+  const ss = getSS();
+  const sh = ss.getSheetByName(SHEET_DOSSIERS);
+  if (!sh) return { ok:false, error:'Feuille Dossiers introuvable' };
+  const lastRow = sh.getLastRow();
+  if (lastRow <= 1) return { ok:false, error:'Dossier introuvable' };
+  const match = sh.getRange(2, 1, lastRow - 1, 1)
+    .createTextFinder(String(data.id)).matchEntireCell(true).findNext();
+  if (!match) return { ok:false, error:'Dossier introuvable' };
+  const rowNum = match.getRow();
+
+  _ensureInstallationCol_(sh);
+  const on  = data.installation === true || data.installation === 'true';
+  const val = on
+    ? { on:true, par:String(data.par || ''), le:new Date().toISOString(), note:String(data.note || '') }
+    : null;
+  // Format texte imposé : sans ça Sheets prendrait le JSON pour une formule.
+  sh.getRange(rowNum, COL_INSTALLATION).setNumberFormat('@')
+    .setValue(val ? JSON.stringify(val) : '');
+
+  _logAction_('DOSSIER_INSTALLATION', data.par || 'frontend',
+    'Dossier ' + data.id + ' — ' + (on ? ('pose sur site' + (val.note ? ' : ' + val.note : '')) : 'pose retirée'));
+  CacheService.getScriptCache().remove('dashboard_v1');
+  return { ok:true, installation: val };
 }
 
 // Clôture d'un dossier : passe à TERMINE ses étapes d'atelier (jamais pointées) et
