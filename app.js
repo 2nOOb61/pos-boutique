@@ -97,7 +97,7 @@ function _purgeLocalPlainPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '229 · 2026-10-28';
+const APP_VERSION = '230 · 2026-10-28';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -16885,11 +16885,11 @@ function printDossier(dossierId) {
   const imagesHtml = allImages.length
     ? `<div style="margin-bottom:28px">
         <h2 style="font-size:12pt;font-weight:700;color:#1a4a3a;border-left:3px solid #e8834a;padding-left:10px;margin-bottom:12px;text-transform:uppercase;letter-spacing:.05em">Images & Photos</h2>
-        <div style="display:flex;flex-wrap:wrap;gap:10px">
+        <div style="display:flex;flex-wrap:wrap;gap:12px">
           ${allImages.map(img => `
-            <div style="text-align:center">
-              <img src="${img.src}" style="width:160px;height:120px;object-fit:cover;border-radius:8px;border:1px solid #e5e3df;display:block" />
-              <div style="font-size:8pt;color:#78716c;margin-top:4px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${img.name}</div>
+            <div style="flex:0 0 calc(50% - 6px);max-width:calc(50% - 6px);text-align:center">
+              <img src="${img.src}" style="width:100%;height:210px;object-fit:cover;border-radius:8px;border:1px solid #e5e3df;display:block" />
+              <div style="font-size:8pt;color:#78716c;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(img.name)}</div>
             </div>`).join('')}
         </div>
       </div>`
@@ -16902,25 +16902,32 @@ function printDossier(dossierId) {
       </div>`
     : '';
 
-  // ── Infos livraison/retrait
+  // ── Infos livraison/retrait — vit sous la carte client, dans la 1re colonne
+  // du bandeau : pas de marge basse, c'est le `gap` de la colonne qui espace.
   const deliveryHtml = src?.deliveryMode === 'livraison'
-    ? `<div style="padding:10px 14px;background:#fdf0e8;border:1px solid rgba(232,131,74,.3);border-radius:8px;margin-bottom:14px">
-        <div style="font-size:10pt;font-weight:700;color:#e8834a;margin-bottom:4px">LIVRAISON À DOMICILE</div>
-        ${src.deliveryAddress ? `<div style="font-size:11pt;color:#1c1917">${src.deliveryAddress}</div>` : ''}
-        ${src.deliveryDate ? `<div style="font-size:10pt;color:#78716c;margin-top:3px">Date prévue : <strong>${new Date(src.deliveryDate+'T00:00:00').toLocaleDateString('fr-FR')}</strong></div>` : ''}
+    ? `<div style="padding:9px 13px;background:#fdf0e8;border:1px solid rgba(232,131,74,.3);border-radius:8px">
+        <div style="font-size:9.5pt;font-weight:700;color:#e8834a;margin-bottom:3px">LIVRAISON À DOMICILE</div>
+        ${src.deliveryAddress ? `<div style="font-size:10.5pt;color:#1c1917">${escapeHtml(src.deliveryAddress)}</div>` : ''}
+        ${src.deliveryDate ? `<div style="font-size:9.5pt;color:#78716c;margin-top:3px">Date prévue : <strong>${new Date(src.deliveryDate+'T00:00:00').toLocaleDateString('fr-FR')}</strong></div>` : ''}
       </div>`
     : src
-    ? `<div style="padding:8px 14px;background:#e8f4f0;border:1px solid rgba(26,74,58,.2);border-radius:8px;margin-bottom:14px;font-size:10pt;color:#1a4a3a;font-weight:600">RETRAIT EN BOUTIQUE</div>`
+    ? `<div style="padding:8px 13px;background:#e8f4f0;border:1px solid rgba(26,74,58,.2);border-radius:8px;font-size:9.5pt;color:#1a4a3a;font-weight:700;letter-spacing:.03em">RETRAIT EN BOUTIQUE</div>`
     : '';
 
-  // ── Notes
+  // ── Notes (briefing client) — `flex:1` pour tenir toute la hauteur du bandeau
   const notesHtml = src?.notes
-    ? `<div style="padding:10px 14px;background:#fef3c7;border-left:3px solid #d97706;border-radius:6px;margin-bottom:14px;font-size:11pt;color:#1c1917"><strong>Notes :</strong> ${src.notes}</div>`
+    ? `<div style="flex:1;padding:10px 14px;background:#fef3c7;border-left:3px solid #d97706;border-radius:6px;font-size:10.5pt;line-height:1.45;color:#1c1917"><strong>Notes :</strong> ${escapeHtml(src.notes)}</div>`
     : '';
   // ── Remarque finance
   const _remTxt = (src && src.remarque) || d.remarque || '';
   const remarqueHtmlPrint = _remTxt
-    ? `<div style="padding:10px 14px;background:#eef6ff;border-left:3px solid #2563eb;border-radius:6px;margin-bottom:14px;font-size:11pt;color:#1c1917"><strong>Remarque finance :</strong> ${escapeHtml(_remTxt)}</div>`
+    ? `<div style="padding:10px 14px;background:#eef6ff;border-left:3px solid #2563eb;border-radius:6px;font-size:10.5pt;line-height:1.45;color:#1c1917"><strong>Remarque finance :</strong> ${escapeHtml(_remTxt)}</div>`
+    : '';
+
+  // 3e colonne du bandeau : les consignes qui accompagnent le dossier. Absente
+  // quand il n'y en a aucune — client et statut reprennent alors la largeur.
+  const asideHtml = (notesHtml || remarqueHtmlPrint)
+    ? `<div style="flex:2 1 0;min-width:0;display:flex;flex-direction:column;gap:10px">${notesHtml}${remarqueHtmlPrint}</div>`
     : '';
 
   // ── Priorité / statut
@@ -16959,32 +16966,34 @@ function printDossier(dossierId) {
 
     ${_installBannerPrint(d)}
 
-    <!-- FICHE CLIENT & STATUT -->
-    <div style="display:flex;gap:16px;margin-bottom:22px">
-      <div style="flex:1;padding:14px 16px;background:#f8f7f4;border-radius:10px;border:1px solid #e5e3df">
-        <div style="font-size:9pt;font-weight:700;color:#78716c;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Client</div>
-        <div style="font-size:14pt;font-weight:700;color:#1c1917">${src?.clientName || d.client || '—'}</div>
-        ${src?.clientContact ? `<div style="font-size:11pt;color:#78716c;margin-top:4px"> ${src.clientContact}</div>` : ''}
-        ${src?.clientType ? `<div style="font-size:10pt;color:#78716c;margin-top:2px">${src.clientType}</div>` : ''}
+    <!-- BANDEAU : CLIENT · STATUT · CONSIGNES -->
+    <!-- Les trois tiennent sur une bande : le briefing client se lit à côté du -->
+    <!-- dossier et non deux écrans plus bas, et la fiche y gagne une demi-page. -->
+    <div style="display:flex;align-items:stretch;gap:12px;margin-bottom:20px">
+      <div style="flex:1.5 1 0;min-width:0;display:flex;flex-direction:column;gap:8px">
+        <div style="padding:12px 14px;background:#f8f7f4;border-radius:10px;border:1px solid #e5e3df">
+          <div style="font-size:8.5pt;font-weight:700;color:#78716c;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Client</div>
+          <div style="font-size:12.5pt;font-weight:700;color:#1c1917;line-height:1.25">${escapeHtml(src?.clientName || d.client || '—')}</div>
+          ${src?.clientContact ? `<div style="font-size:10.5pt;color:#78716c;margin-top:4px">${escapeHtml(src.clientContact)}</div>` : ''}
+          ${src?.clientType ? `<div style="font-size:9.5pt;color:#78716c;margin-top:2px">${escapeHtml(src.clientType)}</div>` : ''}
+        </div>
+        ${deliveryHtml}
       </div>
-      <div style="padding:14px 16px;background:#f8f7f4;border-radius:10px;border:1px solid #e5e3df;min-width:180px">
-        <div style="font-size:9pt;font-weight:700;color:#78716c;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Statut dossier</div>
-        <div style="font-size:11pt;font-weight:700;color:${etapeCur?.color||'#1a4a3a'};margin-bottom:6px">${etapeCur?.label || d.statut || 'Créé'}</div>
-        <div style="height:6px;background:#e5e3df;border-radius:6px;overflow:hidden;margin-bottom:6px">
+      <div style="flex:1.1 1 0;min-width:0;padding:12px 14px;background:#f8f7f4;border-radius:10px;border:1px solid #e5e3df">
+        <div style="font-size:8.5pt;font-weight:700;color:#78716c;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">Statut dossier</div>
+        <div style="font-size:10.5pt;font-weight:700;color:${etapeCur?.color||'#1a4a3a'};margin-bottom:6px;line-height:1.25">${etapeCur?.label || d.statut || 'Créé'}</div>
+        <div style="height:6px;background:#e5e3df;border-radius:6px;overflow:hidden;margin-bottom:5px">
           <div style="height:100%;width:${pct}%;background:${pct===100?'#16a34a':pct>0?'#e8834a':'#e5e3df'};border-radius:6px"></div>
         </div>
-        <div style="font-size:10pt;color:#78716c">Progression : <strong>${pct}%</strong></div>
-        <div style="margin-top:8px">
-          <span style="background:${prioBg};color:${prioColor};font-size:9pt;font-weight:700;padding:2px 10px;border-radius:10px">${d.priorite || 'Normale'}</span>
+        <div style="font-size:9.5pt;color:#78716c">Progression : <strong>${pct}%</strong></div>
+        <div style="margin-top:7px">
+          <span style="background:${prioBg};color:${prioColor};font-size:8.5pt;font-weight:700;padding:2px 10px;border-radius:10px">${d.priorite || 'Normale'}</span>
         </div>
-        ${d.dateBAT ? `<div style="margin-top:10px;padding-top:8px;border-top:1px dashed #e5e3df"><div style="font-size:9pt;font-weight:700;color:#2563eb;text-transform:uppercase;letter-spacing:.06em">BAT (épreuve)</div><div style="font-size:13pt;font-weight:800;color:#1d4ed8;margin-top:2px">${new Date(d.dateBAT+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'})}</div></div>` : ''}
-        ${d.dateLivraisonProd ? `<div style="margin-top:10px;padding-top:8px;border-top:1px dashed #e5e3df"><div style="font-size:9pt;font-weight:700;color:#e8834a;text-transform:uppercase;letter-spacing:.06em">Livraison production</div><div style="font-size:13pt;font-weight:800;color:#c2410c;margin-top:2px">${new Date(d.dateLivraisonProd+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'})}</div></div>` : ''}
+        ${d.dateBAT ? `<div style="margin-top:9px;padding-top:7px;border-top:1px dashed #e5e3df"><div style="font-size:8.5pt;font-weight:700;color:#2563eb;text-transform:uppercase;letter-spacing:.06em">BAT (épreuve)</div><div style="font-size:11pt;font-weight:800;color:#1d4ed8;margin-top:2px;line-height:1.2">${new Date(d.dateBAT+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'})}</div></div>` : ''}
+        ${d.dateLivraisonProd ? `<div style="margin-top:9px;padding-top:7px;border-top:1px dashed #e5e3df"><div style="font-size:8.5pt;font-weight:700;color:#e8834a;text-transform:uppercase;letter-spacing:.06em">Livraison production</div><div style="font-size:11pt;font-weight:800;color:#c2410c;margin-top:2px;line-height:1.2">${new Date(d.dateLivraisonProd+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'})}</div></div>` : ''}
       </div>
+      ${asideHtml}
     </div>
-
-    ${deliveryHtml}
-    ${notesHtml}
-    ${remarqueHtmlPrint}
 
     <!-- ARTICLES -->
     <div style="margin-bottom:28px">
