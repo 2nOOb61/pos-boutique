@@ -263,6 +263,7 @@ function doPost(e) {
     else if (action === 'saveLivraisonEtat')  result = handleSaveLivraisonEtat(data);
     else if (action === 'getLivraisonsEtats') result = handleGetLivraisonsEtats(data);
     else if (action === 'getLivraisonsJournal') result = handleGetLivraisonsJournal(data);
+    else if (action === 'reporterLivraison')  result = handleReporterLivraison(data);
     else if (action === 'addBat')            result = handleAddBat(data);
     else if (action === 'getBats')           result = handleGetBats(data);
     else if (action === 'saveFinition')      result = handleSaveFinition(data);
@@ -350,6 +351,7 @@ function doGet(e) {
       else if (action === 'saveCourseLibre')   result = handleSaveCourseLibre(data);
       else if (action === 'deleteCourseLibre') result = handleDeleteCourseLibre(data);
       else if (action === 'saveLivraisonEtat') result = handleSaveLivraisonEtat(data);
+      else if (action === 'reporterLivraison') result = handleReporterLivraison(data);
       else if (action === 'addBat')            result = handleAddBat(data);
       else if (action === 'saveFinition')      result = handleSaveFinition(data);
       else if (action === 'getFinition')       result = handleGetFinition(data);
@@ -1236,6 +1238,103 @@ function handleGetLivraisonsEtats(data) {
   return { ok:true, etats:etats };
 }
 
+// ── REPORT DE LIVRAISON ────────────────────────────────────
+// Une livraison qui ne part pas à la date prévue n'est pas une livraison en
+// retard à rattraper : c'est une livraison REPLANIFIÉE, et toute la maison doit
+// voir la nouvelle date (cockpit Livraisons, cockpit Commandes, Production,
+// calendrier, planning imprimé). Un seul appel écrit donc les TROIS endroits où
+// la date fait foi, pour qu'aucun écran ne reste sur l'ancienne :
+//   • la source commerciale — Commandes col J (client) / col W (production),
+//     Réservations col 26 ;
+//   • le dossier de production — Dossiers col I (DateLivraison) ;
+//   • le journal des livraisons — un mouvement REPORT qui garde la trace de
+//     « ancienne date → nouvelle date · motif », jamais réécrit.
+// La feuille Livraisons (état terrain : parti / livré / retour) n'est PAS
+// touchée : un report ne sort pas une course de la rue ni ne l'y met.
+function handleReporterLivraison(data) {
+  const kind = String((data && data.kind) || '');
+  const id   = String((data && data.id)   || '');
+  if (!kind || !id) return { ok:false, error:'Livraison invalide' };
+  if (kind !== 'commande' && kind !== 'reservation') return { ok:false, error:'Type de livraison inconnu : ' + kind };
+  const dateApres = String((data.dateApres || '')).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateApres)) return { ok:false, error:'Nouvelle date attendue au format AAAA-MM-JJ' };
+  const prodApres = data.prodApres === undefined || data.prodApres === null ? null : String(data.prodApres).trim();
+  if (prodApres && !/^\d{4}-\d{2}-\d{2}$/.test(prodApres)) return { ok:false, error:'Date de production attendue au format AAAA-MM-JJ' };
+
+  const lock = LockService.getScriptLock();
+  try { lock.waitLock(20000); } catch(e) { return { ok:false, error:'Système occupé, réessayez' }; }
+  try {
+    const ss  = getSS();
+    const cle = kind + ':' + id;
+    let touche = false;
+
+    if (kind === 'commande') {
+      const sh = ss.getSheetByName(SHEET_COMMANDES);
+      if (!sh) return { ok:false, error:'Feuille Commandes introuvable' };
+      const rows = sh.getDataRange().getValues();
+      for (let i = 1; i < rows.length; i++) {
+        if (String(rows[i][0]) !== id) continue;
+        sh.getRange(i+1, 10).setValue(dateApres);                        // col J = Date_Livraison (client)
+        if (prodApres !== null) sh.getRange(i+1, 23).setValue(prodApres); // col W = Date_Livraison_Prod
+        touche = true;
+      }
+      if (!touche) return { ok:false, error:'Commande introuvable' };
+    } else {
+      const sh = ss.getSheetByName(SHEET_RESERVATIONS);
+      if (!sh) return { ok:false, error:'Feuille Réservations introuvable' };
+      const need = 26 - sh.getMaxColumns();   // feuilles antérieures aux colonnes livraison
+      if (need > 0) sh.insertColumnsAfter(sh.getMaxColumns(), need);
+      const rows = sh.getDataRange().getValues();
+      for (let i = 1; i < rows.length; i++) {
+        if (String(rows[i][0]) !== id) continue;
+        sh.getRange(i+1, 26).setValue(dateApres); // col 26 = Date livraison
+        touche = true;
+      }
+      if (!touche) return { ok:false, error:'Réservation introuvable' };
+    }
+
+    // Dossier de production lié : c'est CETTE date que lisent la vue Production
+    // et le tableau de bord. Un dossier absent n'est pas une erreur (vente sans
+    // production), on continue.
+    const dossierId = String((data.dossierId || '')).trim();
+    if (dossierId) {
+      const shD = ss.getSheetByName(SHEET_DOSSIERS);
+      if (shD) {
+        const rowsD = shD.getDataRange().getValues();
+        for (let i = 1; i < rowsD.length; i++) {
+          if (String(rowsD[i][0]) !== dossierId) continue;
+          shD.getRange(i+1, 9).setValue(dateApres);  // col I = DateLivraison
+          break;
+        }
+      }
+    }
+
+    // Trace : « 12/11/2025 → 20/11/2025 · Client absent ». Le motif est repris tel
+    // quel pour que la raison des reports à répétition se lise d'un coup d'œil.
+    const note = [
+      _jourFr_(data.dateAvant) + ' → ' + _jourFr_(dateApres),
+      String(data.motif || '').trim()
+    ].filter(function(x){ return x; }).join(' · ');
+    _journalLivraison_(ss, {
+      kind: kind, id: id, ref: data.ref || '', client: data.client || '',
+      coursier: '', note: note, par: data.par || '',
+      timestamp: data.timestamp || new Date().toISOString()
+    }, 'REPORT');
+
+    CacheService.getScriptCache().remove('dashboard_v1');
+    _logAction_('LIVRAISON_REPORT', data.par || 'utilisateur', cle + ' ' + String(data.client || '') + ' — ' + note);
+    return { ok:true, cle:cle, dateApres:dateApres, prodApres:prodApres };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// 'yyyy-MM-dd' → 'dd/MM/yyyy' pour les libellés du journal (vide si absent).
+function _jourFr_(iso) {
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? (m[3] + '/' + m[2] + '/' + m[1]) : (String(iso || '') || 'sans date');
+}
+
 // ── Suivi BAT (épreuves) ───────────────────────────────────
 // UPSERT par ID : un même BAT est mis à jour au fil de son cycle
 // (à envoyer → envoyé client → validé / retour). 16 colonnes = BAT_HEADERS_.
@@ -1842,6 +1941,10 @@ function handleAddReservation(data) {
 
 function handleUpdateReservation(data) {
   const sh   = getSS().getSheetByName(SHEET_RESERVATIONS);
+  if (data.deliveryDate !== undefined) {                 // feuilles antérieures aux colonnes livraison
+    const need = 26 - sh.getMaxColumns();
+    if (need > 0) sh.insertColumnsAfter(sh.getMaxColumns(), need);
+  }
   const rows = sh.getDataRange().getValues();
   const rawStatus = data.statut || data.status;
   const sheetStatut = rawStatus === 'completed' ? 'Terminée'
@@ -1854,6 +1957,9 @@ function handleUpdateReservation(data) {
     if (sheetStatut)     sh.getRange(i+1, 19).setValue(sheetStatut);   // col 19 = Statut
     if (data.dateFinalisation) sh.getRange(i+1, 20).setValue(data.dateFinalisation);
     if (data.saleId)     sh.getRange(i+1, 21).setValue(String(data.saleId));
+    // Date de livraison (col 26) : une réservation se reporte comme une commande.
+    // La migration de largeur a lieu AVANT la boucle (cf. plus haut).
+    if (data.deliveryDate !== undefined) sh.getRange(i+1, 26).setValue(data.deliveryDate);
     updated = true;
   }
   return updated ? { ok:true } : { ok:false, error:'Réservation introuvable' };

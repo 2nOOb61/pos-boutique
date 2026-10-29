@@ -673,6 +673,7 @@ async function doLogin() {
       ]).then(() => syncPendingOfflineSales().catch(() => {}))
         .then(() => _flushClibQueue().catch(() => {}))
         .then(() => _flushLivQueue().catch(() => {}))
+        .then(() => _flushReportQueue().catch(() => {}))
         .then(() => {
           saveData(); // Persister l'état fusionné
           // Re-rendu avec les données fraîches (l'app était déjà affichée)
@@ -4170,6 +4171,7 @@ function initPWA() {
     try { _flushBatFilesQueue(); } catch(e) {} // reprise montée Drive des fichiers Simulation/BAT
     try { _flushClibQueue();     } catch(e) {} // courses libres saisies hors ligne
     try { _flushLivQueue();      } catch(e) {} // départs / retours marqués hors ligne
+    try { _flushReportQueue();   } catch(e) {} // reports de livraison saisis hors ligne
   });
   if (!navigator.onLine) document.getElementById('offlineBadge').classList.add('show');
 }
@@ -5406,7 +5408,12 @@ async function loadReservationsFromScript() {
       deliveryMode:    res.deliveryMode    || local?.deliveryMode    || 'retrait',
       deliveryAddress: res.deliveryAddress || local?.deliveryAddress || '',
       deliveryFee:     res.deliveryFee     || local?.deliveryFee     || 0,
-      deliveryDate:    res.deliveryDate    || local?.deliveryDate    || '',
+      // Report tout juste saisi (cf. `freshEdit` des commandes) : le Sheet peut
+      // encore renvoyer l'ancienne date le temps que l'écriture se règle.
+      deliveryDate:    (local && local._dateEditedAt && (Date.now() - local._dateEditedAt < 20000))
+                         ? local.deliveryDate
+                         : (res.deliveryDate || local?.deliveryDate || ''),
+      _dateEditedAt:   local?._dateEditedAt,
     };
   });
   reservations = [...mergedFromSheet, ...localOnly];
@@ -8171,7 +8178,7 @@ function _livHistoHtml(kind, id){
   const mv = _livMouvements(kind, id);
   if (!mv.length) return '';
   const lignes = mv.map(m => {
-    const def = _LIV_LABELS[m.mouvement] || ['#78716c', '#f5f5f4', _livMouvLabel(m.mouvement)];
+    const def = _LIV_LABELS[m.mouvement] || _LIV_MOUV_STYLE[m.mouvement] || ['#78716c', '#f5f5f4', _livMouvLabel(m.mouvement)];
     return `<div class="liv-histo-l">
         <span class="liv-histo-h">${_pcokEsc(m.date)} ${_pcokEsc(m.heure)}</span>
         <span class="pcok-badge" style="color:${def[0]};background:${def[1]}">${_livMouvLabel(m.mouvement)}</span>
@@ -18381,6 +18388,11 @@ function _delivRouteChunks(){
 function openDelivRoute(url){ if (url) window.open(url, '_blank'); }
 
 const _DELIV_MONEY_ROLES = ['admin','caissier','commerciale','comptable','gestionnaire'];
+// Reporter une livraison = redonner une date au client. C'est une décision
+// commerciale (ou du responsable d'atelier quand la production décale), pas un
+// geste de coursier : le livreur constate, il ne replanifie pas.
+const _DELIV_REPORT_ROLES = ['admin','caissier','commerciale','gestionnaire','chef_atelier'];
+function _peutReporterLivraison(){ return _DELIV_REPORT_ROLES.includes(currentUser?.role); }
 
 // Liste normalisée des livraisons depuis commandes + réservations (hors annulées).
 // ══════════════════════════════════════════════════════════════════════════
@@ -18434,6 +18446,13 @@ const _LIV_MOUV_LABELS = {
   RETOUR:        'Retour',
   ANNULEE:       'Annulée en route',
   DEPART_ANNULE: 'Départ annulé',
+  REPORT:        'Report de livraison',
+};
+// Couleurs des mouvements qui ne sont PAS des états terrain (donc absents de
+// `_LIV_LABELS`, qui sert aux pastilles d'état) : un report replanifie une course,
+// il ne la met ni ne la sort de la rue.
+const _LIV_MOUV_STYLE = {
+  REPORT: ['#2563eb', '#dbeafe'],
 };
 function _livMouvLabel(m){ return _LIV_MOUV_LABELS[m] || m; }
 // Mouvements d'une course, du plus récent au plus ancien.
@@ -18510,6 +18529,351 @@ async function _flushLivQueue(){
   _livQueueWrite(restants);
   const n = q.length - restants.length;
   if (n > 0) showToast(n + ' changement(s) de livraison synchronisé(s)', 'success');
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// REPORT DE LIVRAISON — replanifier une course, partout à la fois
+// ══════════════════════════════════════════════════════════════════════════
+// Une livraison rarement tenue à la date promise, c'est le quotidien de l'atelier.
+// Corriger la date « à la main » dans chaque écran, c'était trois endroits à ne
+// pas oublier (commande, dossier de production, Sheet) et aucune trace du pourquoi.
+// Un REPORT fait les trois d'un seul geste et laisse une ligne dans le journal
+// des livraisons : qui a reporté, de quand à quand, et pour quel motif. L'écran
+// peut donc dire « reportée 2 fois, promise au départ le 12/11 » — ce que la seule
+// date courante ne dira jamais.
+const REPORT_MOTIFS = [
+  'Client indisponible',
+  'Report demandé par le client',
+  'Production en retard',
+  'Matière manquante',
+  'Panne machine',
+  'Problème de transport / coursier',
+  'Validation client (BAT) en attente',
+  'Intempéries / jour férié',
+  'Autre',
+];
+
+// Décalage d'une date ISO de n jours (n peut être négatif). '' si date absente.
+function _isoShift(iso, n) {
+  const s = _toIsoDate(iso || '');
+  if (!s) return '';
+  const d = new Date(s + 'T00:00:00');
+  if (isNaN(d.getTime())) return '';
+  d.setDate(d.getDate() + Number(n || 0));
+  return _isoOf(d);
+}
+function _isoOf(d) {
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function _isoToday() { return _isoOf(new Date()); }
+// Nombre de jours entre deux dates ISO (b − a). null si l'une manque.
+function _isoDiffDays(a, b) {
+  const A = _toIsoDate(a || ''), B = _toIsoDate(b || '');
+  if (!A || !B) return null;
+  const da = new Date(A + 'T00:00:00'), db = new Date(B + 'T00:00:00');
+  if (isNaN(da.getTime()) || isNaN(db.getTime())) return null;
+  return Math.round((db - da) / 86400000);
+}
+
+// Reports d'une course, du plus ancien au plus récent (le journal fait foi : aucune
+// colonne à ajouter aux feuilles, et l'historique est le même sur tous les postes).
+function _livReports(kind, id) {
+  const cle = _livKey(kind, id);
+  return livJournal.filter(m => m.cle === cle && m.mouvement === 'REPORT')
+                   .sort((a, b) => String(a.ts).localeCompare(String(b.ts)));
+}
+// Résumé pour l'écran : combien de reports, et la date promise au tout début
+// (celle d'avant le premier report, lue dans la note « 12/11/2025 → 20/11/2025 »).
+function _livReportInfo(kind, id) {
+  const rs = _livReports(kind, id);
+  if (!rs.length) return { n: 0, initiale: '', dernier: null };
+  const m = String(rs[0].note || '').match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  return {
+    n: rs.length,
+    initiale: m ? (m[3] + '-' + m[2] + '-' + m[1]) : '',
+    dernier: rs[rs.length - 1],
+  };
+}
+
+// File hors ligne des reports : même principe que les états de livraison — la
+// nouvelle date s'affiche tout de suite et part au Sheet dès le retour du réseau.
+const _REPORT_QUEUE_KEY = 'pos-pending-liv-reports';
+function _reportQueueRead(){ try { return JSON.parse(localStorage.getItem(_REPORT_QUEUE_KEY) || '[]'); } catch(e) { return []; } }
+function _reportQueueWrite(q){ try { localStorage.setItem(_REPORT_QUEUE_KEY, JSON.stringify(q)); } catch(e) {} }
+// Même garde-fou que `_livEcritOk` : `apiCall` renvoie { ok:true } nu quand Google
+// répond du HTML au lieu du JSON. On exige `cle`, que seul le vrai handler pose.
+function _reportEcritOk(r){ return !!(r && r.ok && r.cle); }
+
+// Un REFUS du serveur (date invalide, commande absente) ne se réessaie pas : il
+// se reproduirait à l'identique à chaque reprise réseau. Seuls l'absence de
+// réponse et les réponses non-JSON partent en file.
+function _reportRefus(r){ return !!(r && r.ok === false); }
+
+// Rend 'ok' (écrit au Sheet), 'file' (réseau muet → rejeu plus tard) ou 'refus'
+// (le serveur a dit non) : trois situations que l'opérateur ne doit pas confondre.
+async function _reportSync(payload) {
+  if (!APPS_SCRIPT_URL) return 'file';
+  try {
+    const r = await apiCall(Object.assign({ action:'reporterLivraison' }, payload));
+    if (_reportEcritOk(r)) return 'ok';
+    if (_reportRefus(r))   return 'refus:' + (r.error || 'erreur inconnue');
+  } catch(e) {}
+  const q = _reportQueueRead();
+  q.push(payload); _reportQueueWrite(q);
+  return 'file';
+}
+
+async function _flushReportQueue() {
+  if (!APPS_SCRIPT_URL) return;
+  const q = _reportQueueRead();
+  if (!q.length) return;
+  const restants = [];
+  let ecrits = 0;
+  for (const p of q) {
+    try {
+      const r = await apiCall(Object.assign({ action:'reporterLivraison' }, p));
+      if (_reportEcritOk(r))      ecrits++;
+      else if (!_reportRefus(r))  restants.push(p);   // refus serveur → abandonné
+    } catch(e) { restants.push(p); }
+  }
+  _reportQueueWrite(restants);
+  if (ecrits > 0) showToast(ecrits + ' report(s) de livraison synchronisé(s)', 'success');
+}
+
+// Redessine tous les écrans qui affichent une date de livraison. Chaque rendu est
+// isolé : une page absente du rôle courant ne doit pas interrompre les autres.
+function _livRefreshAll() {
+  ['renderLivraisons','renderCommandes','renderReservations','renderCalendrier','renderDossiers','renderProdCockpit','renderStats']
+    .forEach(fn => { try { if (typeof window[fn] === 'function') window[fn](); } catch(e) {} });
+  try { updateDeliveryBadge(); } catch(e) {}
+  try { updatePendingBadge();  } catch(e) {}
+  try { updateResBadge();      } catch(e) {}
+}
+
+// Applique un report : source commerciale → dossier de production → journal → Sheet.
+// `prodApres` à null laisse la date de production inchangée.
+async function _livApplyReport(kind, id, opts) {
+  const o = opts || {};
+  const dateApres = _toIsoDate(o.dateApres || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateApres)) { showToast('Nouvelle date invalide', 'error'); return false; }
+
+  const isCmd = kind === 'commande';
+  const src = isCmd
+    ? (commandes || []).find(c => String(c.id) === String(id))
+    : (reservations || []).find(r => String(r.id) === String(id));
+  if (!src) { showToast((isCmd ? 'Commande' : 'Réservation') + ' introuvable', 'error'); return false; }
+
+  const dateAvant = _toIsoDate((isCmd ? src.dateLivraison : src.deliveryDate) || '');
+  const prodAvant = isCmd ? _toIsoDate(src.dateLivraisonProd || '') : '';
+  const prodApres = (isCmd && o.prodApres) ? _toIsoDate(o.prodApres) : null;
+  if (dateAvant === dateApres && (prodApres === null || prodApres === prodAvant)) {
+    showToast('La date est déjà celle-là', 'info'); return false;
+  }
+
+  // 1) La source commerciale fait foi — c'est elle que `_syncDossierDates()` recopie.
+  if (isCmd) {
+    src.dateLivraison = dateApres;
+    if (prodApres !== null) src.dateLivraisonProd = prodApres;
+  } else {
+    src.deliveryDate = dateApres;
+  }
+  src._dateEditedAt = Date.now(); // protège d'un écrasement par un reload GAS périmé
+
+  // 2) Dossier de production lié (vue Production, planning atelier, tableau de bord)
+  const dos = (dossiers || []).find(d => d.sourceType === kind && String(d.sourceId) === String(id))
+           || (src.dossierId ? (dossiers || []).find(d => String(d.id) === String(src.dossierId)) : null);
+  if (dos) {
+    dos.dateLivraison = dateApres;
+    if (prodApres !== null) dos.dateLivraisonProd = prodApres;
+  }
+  try { if (typeof _syncDossierDates === 'function') _syncDossierDates(); } catch(e) {}
+
+  // 3) Journal — même ligne que celle qu'écrira le GAS (même horodatage, donc pas
+  //    de doublon au rechargement ni au rejeu de la file hors ligne).
+  const now  = new Date();
+  const ts   = now.toISOString();
+  const ref  = _seqRefOf(kind, id, _buildSeqMaps()) || '';
+  const client = (isCmd ? (src.clientName || src.client) : src.clientName) || 'Client';
+  const motif  = String(o.motif || '').trim();
+  const note   = [_dispDate(dateAvant) || 'sans date', '→', _dispDate(dateApres)].join(' ')
+               + (motif ? ' · ' + motif : '');
+  livJournal.push({
+    ts, date: now.toLocaleDateString('fr-FR'), heure: now.toLocaleTimeString('fr-FR', { hour12:false }),
+    cle: _livKey(kind, id), kind: String(kind), id: String(id), ref, client,
+    mouvement: 'REPORT', coursier: '', note,
+    par: currentUser?.username || currentUser?.name || ''
+  });
+  _livJournalSaveLocal();
+
+  saveData();
+  _livRefreshAll();
+
+  // 4) Sheet (ou file hors ligne)
+  const etat = await _reportSync({
+    kind: String(kind), id: String(id),
+    dossierId: dos ? String(dos.id) : '',
+    ref, client,
+    dateAvant, dateApres,
+    prodAvant, prodApres,
+    motif, par: currentUser?.username || currentUser?.name || '',
+    timestamp: ts
+  });
+  try { logActivity('LIVRAISON_REPORT', (ref || id) + ' — ' + client + ' : ' + note); } catch(e) {}
+  _addReportNotification(dos, client, note, ref);
+  if (etat === 'ok')          showToast('Livraison reportée au ' + _dispDate(dateApres), 'success');
+  else if (etat === 'file')   showToast('Report enregistré hors ligne — sera synchronisé', 'info');
+  else                        showToast('Report refusé par le serveur (' + etat.slice(6)
+                                        + ') — rechargez la page pour revenir à la date du Sheet', 'error');
+  return true;
+}
+
+// L'atelier doit apprendre le report sans qu'on l'appelle : une date qui bouge
+// change son planning du jour.
+function _addReportNotification(dos, client, note, ref) {
+  try {
+    if (typeof _addNotification !== 'function') return;
+    _addNotification({
+      dossierId: dos ? dos.id : '', numeroDossier: (dos && dos.numeroDossier) || ref || '',
+      etapeCode: 'REPORT', etapeLabel: 'Report de livraison',
+      operateur: currentUser?.label || currentUser?.username || 'Commercial',
+      message: 'Livraison de ' + client + ' reportée : ' + note
+    });
+  } catch(e) {}
+}
+
+// ── Modal « Reporter la livraison » ────────────────────────────────────────
+let _repCtx = null;
+
+function openReportLivraison(kind, id) {
+  const r = _delivBuildRows().find(x => x.kind === kind && String(x.id) === String(id));
+  if (!r) { showToast('Livraison introuvable', 'error'); return; }
+  const info = _livReportInfo(kind, id);
+  _repCtx = {
+    kind, id: String(id), dossierId: r.dossierId || '',
+    dateAvant: r.dateClient || '', prodAvant: r.dateProd || '',
+    client: r.client, ref: r.ref, isCmd: kind === 'commande',
+  };
+  const retard = _repCtx.dateAvant ? _isoDiffDays(_repCtx.dateAvant, _isoToday()) : null;
+
+  document.getElementById('reportLivBody').innerHTML = `
+    <div class="rep-head">
+      <div class="rep-head-ref">${_pcokEsc(r.ref)} · ${r.kind === 'reservation' ? 'Réservation' : 'Commande'}</div>
+      <div class="rep-head-client">${_pcokEsc(r.client)}</div>
+      <div class="rep-head-ech">Date prévue : <b>${_repCtx.dateAvant ? _dispDate(_repCtx.dateAvant) : 'aucune'}</b>${
+        retard != null && retard > 0 ? ' <span style="color:#dc2626">— ' + retard + 'j de retard</span>' : ''}</div>
+      ${info.n ? `<div class="rep-head-hist">Déjà reportée ${info.n} fois${
+        info.initiale ? ' · promise au départ le ' + _dispDate(info.initiale) : ''}</div>` : ''}
+    </div>
+
+    <div class="form-group">
+      <label>Nouvelle date de livraison</label>
+      <div class="rep-quick">
+        ${[['+1 jour',1],['+2 jours',2],['+3 jours',3],['+1 semaine',7]].map(([lbl,n]) =>
+          `<button type="button" class="rep-quick-btn" onclick="_repQuick(${n})">${lbl}</button>`).join('')}
+      </div>
+      <input type="date" id="repDate" value="${_isoShift(_repBase(), 1)}" min="${_isoToday()}" onchange="_repPreview()" />
+    </div>
+
+    ${_repCtx.isCmd ? `<div class="form-group rep-prod">
+      <label class="rep-check">
+        <input type="checkbox" id="repShiftProd" ${_repCtx.prodAvant ? 'checked' : ''} onchange="_repPreview()" />
+        <span>Décaler aussi la date de production du même nombre de jours</span>
+      </label>
+      <div class="rep-prod-info" id="repProdInfo"></div>
+    </div>` : ''}
+
+    <div class="form-group">
+      <label>Motif du report</label>
+      <select id="repMotif" onchange="_repPreview()">
+        ${REPORT_MOTIFS.map(m => `<option value="${_pcokEsc(m)}">${_pcokEsc(m)}</option>`).join('')}
+      </select>
+      <input id="repMotifLibre" placeholder="Précisez le motif…" style="margin-top:6px;display:none" />
+    </div>
+
+    <div class="rep-foot-note" id="repRecap"></div>`;
+  // Le tiroir livraison est au-dessus des modals (z-index 1201 contre 500) : il
+  // masquerait la fenêtre de report. On le referme, et on le rouvre en sortant —
+  // validé ou non — pour que l'opérateur retrouve sa fiche là où il l'a laissée.
+  closeDrawers();
+  openModal('reportLivModal');
+  _repPreview();
+}
+
+// Fermeture du report (Annuler / croix) : on rouvre la fiche livraison derrière.
+function closeReportLivraison() {
+  const ctx = _repCtx;
+  _repCtx = null;
+  closeModal('reportLivModal');
+  if (ctx) { try { openDelivDrawer(ctx.kind, ctx.id); } catch(e) {} }
+}
+
+// Point de départ des « +N jours » : l'échéance si elle est encore à venir, sinon
+// aujourd'hui. Reporter une livraison déjà en retard de 5 jours « de 2 jours » veut
+// dire après-demain, pas une date encore passée.
+function _repBase() {
+  if (!_repCtx) return _isoToday();
+  const d = _repCtx.dateAvant ? _isoDiffDays(_isoToday(), _repCtx.dateAvant) : null;
+  return (d != null && d > 0) ? _repCtx.dateAvant : _isoToday();
+}
+
+function _repQuick(n) {
+  if (!_repCtx) return;
+  const el = document.getElementById('repDate');
+  if (el) el.value = _isoShift(_repBase(), n);
+  _repPreview();
+}
+
+// Décalage retenu pour la production = écart entre l'ANCIENNE et la NOUVELLE date
+// client. C'est bien ce décalage qu'il faut appliquer à l'atelier, pas la date
+// client elle-même : la production reste en avance du même nombre de jours.
+function _repProdApres() {
+  if (!_repCtx || !_repCtx.isCmd || !_repCtx.prodAvant) return null;
+  if (!document.getElementById('repShiftProd')?.checked) return null;
+  const neuf = _toIsoDate(document.getElementById('repDate')?.value || '');
+  const delta = _isoDiffDays(_repCtx.dateAvant || _isoToday(), neuf);
+  if (delta == null || delta === 0) return null;
+  return _isoShift(_repCtx.prodAvant, delta);
+}
+
+function _repPreview() {
+  if (!_repCtx) return;
+  const motifSel = document.getElementById('repMotif')?.value || '';
+  const libre = document.getElementById('repMotifLibre');
+  if (libre) libre.style.display = motifSel === 'Autre' ? '' : 'none';
+
+  const neuf = _toIsoDate(document.getElementById('repDate')?.value || '');
+  const pi = document.getElementById('repProdInfo');
+  if (pi) {
+    const p = _repProdApres();
+    pi.textContent = !_repCtx.prodAvant
+      ? 'Aucune date de production enregistrée sur cette commande.'
+      : p ? 'Production : ' + _dispDate(_repCtx.prodAvant) + ' → ' + _dispDate(p)
+          : 'Production inchangée (' + _dispDate(_repCtx.prodAvant) + ')';
+  }
+  const rc = document.getElementById('repRecap');
+  if (rc) {
+    rc.innerHTML = !neuf ? 'Choisissez une date.'
+      : 'Mise à jour de la ' + (_repCtx.isCmd ? 'commande' : 'réservation')
+        + ', du dossier de production, du calendrier et du planning imprimé — nouvelle échéance <b>'
+        + _dispDate(neuf) + '</b>.';
+  }
+}
+
+async function confirmReportLivraison() {
+  if (!_repCtx) return;
+  const neuf = _toIsoDate(document.getElementById('repDate')?.value || '');
+  if (!neuf) { showToast('Choisissez la nouvelle date', 'error'); return; }
+  let motif = document.getElementById('repMotif')?.value || '';
+  if (motif === 'Autre') {
+    const libre = (document.getElementById('repMotifLibre')?.value || '').trim();
+    if (!libre) { showToast('Précisez le motif', 'error'); return; }
+    motif = libre;
+  }
+  const btn = document.getElementById('repConfirmBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Enregistrement…'; }
+  const ok = await _livApplyReport(_repCtx.kind, _repCtx.id, { dateApres: neuf, prodApres: _repProdApres(), motif });
+  if (btn) { btn.disabled = false; btn.textContent = 'Reporter la livraison'; }
+  if (ok) closeReportLivraison(); // le tiroir rouvre sur la nouvelle date
 }
 
 // Point d'entrée unique de tout changement d'état. `statut` vide = annuler le
@@ -20743,7 +21107,9 @@ function _delivRow(r, showMoney, det) {
   const typeLabel = r.kind === 'reservation' ? 'Réservation' : 'Commande';
   // Une course en route n'est plus en retard : elle est dans la rue. L'accent
   // rouge laisserait croire qu'elle attend encore en boutique.
-  const livChip = r.livStatut ? `<div style="margin-top:3px">${_livBadge(r.livStatut, _livInfo(r.livEtat))}</div>` : '';
+  const _rep = _livReportInfo(r.kind, r.id);
+  const repChip = _rep.n ? `<span class="pcok-badge" style="color:#2563eb;background:#dbeafe" title="${_pcokEsc('Reportée ' + _rep.n + ' fois' + (_rep.initiale ? ' — promise au départ le ' + _dispDate(_rep.initiale) : ''))}">Reportée ×${_rep.n}</span>` : '';
+  const livChip = (r.livStatut || repChip) ? `<div style="margin-top:3px;display:flex;gap:4px;flex-wrap:wrap">${r.livStatut ? _livBadge(r.livStatut, _livInfo(r.livEtat)) : ''}${repChip}</div>` : '';
   const accent = _delivEnRoute(r) ? 'inset 3px 0 0 #c2410c'
     : r.status === 'pending' && r.days != null && r.days < 0 ? 'inset 3px 0 0 #dc2626'
     : (r.status === 'pending' && (r.days === 0 || r.days === 1)) ? 'inset 3px 0 0 #e8834a' : '';
@@ -20787,6 +21153,11 @@ function _delivDrawerContent(r) {
     _dispDate(r.dateProd)   ? `<div class="pcok-drawer-item"><span style="color:#e8834a">Production</span><b>${_dispDate(r.dateProd)}</b></div>` : '',
   ].join('');
   const pipe = r.dossierId ? _cmdPipelineHtml(r.dossierId) : '';
+  // Une échéance qui a déjà bougé ne se lit pas sur la seule date courante : on dit
+  // combien de fois, et ce qui avait été promis au départ.
+  const rep = _livReportInfo(r.kind, r.id);
+  const repHtml = rep.n ? `<div class="pcok-drawer-ech" style="color:#2563eb;margin:-6px 0 12px">
+      Reportée ${rep.n} fois${rep.initiale ? ` · promise au départ le ${_dispDate(rep.initiale)}` : ''}</div>` : '';
   return `<div class="pcok-drawer-head">
       <div style="min-width:0">
         <div class="pcok-drawer-ref">${_pcokEsc(r.ref)}${r.commercial ? ' · ' + _pcokEsc(r.commercial) : ''}</div>
@@ -20801,6 +21172,7 @@ function _delivDrawerContent(r) {
       ${r.contact ? `<span style="font-size:12.5px;color:var(--color-text-secondary)">${_pcokEsc(r.contact)}</span>` : ''}
     </div>
     <div class="pcok-drawer-ech" style="color:${dCol};margin-bottom:12px">Échéance : ${livTxt}${dtxt ? ' · ' + dtxt : ''}</div>
+    ${repHtml}
     ${r.livEtat ? `<div class="pcok-drawer-items" style="margin-bottom:12px">
         <div class="pcok-drawer-item"><span>Suivi coursier</span><b style="text-align:right;white-space:normal">${_pcokEsc(_livInfo(r.livEtat)) || '—'}</b></div>
         ${r.livEtat.note ? `<div class="pcok-drawer-item"><span>Motif</span><b style="text-align:right;white-space:normal">${_pcokEsc(r.livEtat.note)}</b></div>` : ''}
@@ -20819,6 +21191,10 @@ function _delivDrawerActions(r) {
   const canAttrib = (typeof PAGE_ACCESS !== 'undefined') && PAGE_ACCESS.attribution && PAGE_ACCESS.attribution.includes(currentUser?.role);
   const btns = [];
   btns.push(`<button class="pcok-btn pcok-btn--primary" onclick="_delivPrintOne('${r.kind}','${r.id}')">Imprimer le bon</button>`);
+  // Report : l'action du quotidien quand la date promise n'a pas été tenue. En
+  // orange, à côté de l'impression, parce que c'est elle qu'on vient chercher.
+  if (r.status === 'pending' && _peutReporterLivraison())
+    btns.push(`<button class="pcok-btn pcok-btn--report" onclick="openReportLivraison('${r.kind}','${r.id}')">Reporter la livraison</button>`);
   btns.push(`<button class="pcok-btn" onclick="closeDrawers();_openDeliverySource('${r.kind}','${r.id}','${r.dossierId}')">Ouvrir le dossier</button>`);
   if (isCmd) {
     btns.push(`<button class="pcok-btn" onclick="closeDrawers();editCommandeDateClient('${r.id}')">Date livraison</button>`);
