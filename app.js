@@ -1668,6 +1668,20 @@ function saveReservation(accompte, depositMethod, given, change, provider, ref, 
   const _resDossier = _createDossierFromSource('reservation', reservation);
   reservation.dossierId = _resDossier.id;
   reservations.unshift(reservation);
+  // Journal d'encaissement : l'acompte encaissé à la création — même règle que les
+  // commandes. Sans cet événement l'argent n'apparaîtrait dans AUCUN arrêt de
+  // caisse : ni aujourd'hui, ni à la finalisation (qui ne compte que le solde).
+  // Même référence que le ticket de réservation imprimé, pour rapprocher papier
+  // et fiche ligne à ligne.
+  if (accompte > 0) {
+    _recordEncaissement({
+      source: 'reservation', refId: reservation.id,
+      refLabel: _factureNum(reservation),
+      client: clientName, montant: accompte,
+      method: depositMethod, provider: provider || '', ref: ref || '',
+      type: restant > 0 ? 'acompte' : 'solde', resteApres: restant
+    });
+  }
   saveData();
   syncReservationToSheets(reservation);
   printReservationTicket(reservation);
@@ -1894,10 +1908,29 @@ function _doFinalize(r, method, given, change, provider, ref) {
 
   sales.unshift(sale);
 
+  // Journal d'encaissement : le SOLDE réellement encaissé maintenant, au nom de
+  // CELUI QUI ENCAISSE — même règle que _doCmdFinalize. Sans cet événement, le
+  // solde d'une réservation finalisée par un autre agent (le comptable, par ex.)
+  // tomberait dans l'arrêt de caisse de son créateur, qui n'a rien touché.
+  const _resteSolde = Math.max(0, Number(r.restant) || 0);
+  if (_resteSolde > 0) {
+    _recordEncaissement({
+      source: 'reservation', refId: r.id, refLabel: _factureNum(r),
+      client: r.clientName, montant: _resteSolde,
+      method, provider: provider || '', ref: ref || '',
+      type: 'solde', resteApres: 0
+    });
+  }
+
   // Mettre à jour la réservation
   r.status           = 'completed';
   r.dateFinalisation = new Date().toISOString();
   r.saleId           = sale.id;
+  // Qui a finalisé (≠ caissier d'origine de la réservation) : l'arrêt de caisse
+  // s'en sert pour ne PAS rattacher la vente au créateur quand un autre agent a
+  // encaissé le solde (même colonne que sur les commandes).
+  r.finaliseParUser  = currentUser?.username || '';
+  r.finaliseParLabel = currentUser?.label || currentUser?.username || '';
 
   saveData();
   renderStats();
@@ -5245,7 +5278,7 @@ async function syncReservationToSheets(res) {
 // ── Mettre à jour le statut d'une réservation dans Sheet ─
 async function syncReservationCompleteToSheets(res) {
   if (!APPS_SCRIPT_URL) return;
-  await apiCall({ action: 'updateReservation', id: res.id, status: res.status, dateFinalisation: res.dateFinalisation || '', saleId: res.saleId || '' });
+  await apiCall({ action: 'updateReservation', id: res.id, status: res.status, dateFinalisation: res.dateFinalisation || '', saleId: res.saleId || '', finaliseParUser: res.finaliseParUser || '', finaliseParLabel: res.finaliseParLabel || '' });
 }
 
 // Met à jour uniquement la colonne Attachments_JSON dans le Sheet
@@ -26616,6 +26649,23 @@ function openArretCaisse() {
   loadEncaissementsFromScript().then(() => { _refreshArretIfOpen(); }).catch(() => {});
 }
 
+// Vente issue d'une commande / réservation finalisée par un AUTRE agent.
+// `finaliseParUser` vit sur la commande ou la réservation (colonnes synchronisées),
+// jamais sur la vente : celle-ci reste attribuée à son créateur, par choix. C'est
+// pourtant le finalisateur qui a reçu l'argent et qui porte l'encaissement — la
+// rattacher au créateur la compterait une seconde fois, dans une caisse qui n'a
+// rien touché. Donnée ancienne (colonne vide) : comportement inchangé.
+function _finaliseParAutre(s, username, label) {
+  let src = null;
+  if (s.fromCommande != null && s.fromCommande !== '')
+    src = commandes.find(c => String(c.id) === String(s.fromCommande));
+  else if (s.fromReservation != null && s.fromReservation !== '')
+    src = reservations.find(r => String(r.id) === String(s.fromReservation));
+  const who = (src && src.finaliseParUser) ? String(src.finaliseParUser) : '';
+  if (!who) return false;
+  return who !== username && who !== label;
+}
+
 // Fiche d'encaissement du jour pour le caissier courant.
 // Source = journal `encaissements` (argent réellement reçu), avec repli sur les
 // ventes du jour sans événement lié (robustesse transition / anciennes données).
@@ -26655,6 +26705,8 @@ function _getArretData() {
   });
   todaySales.forEach(s => {
     if (covered.has(String(s.id))) return;
+    // Encaissée par un autre agent : l'argent est dans SA caisse, pas ici.
+    if (_finaliseParAutre(s, username, label)) return;
     // Finalisation d'une commande : normalement couverte par son encaissement de
     // SOLDE. Mais ce solde peut manquer au journal du périmètre (reste calculé à 0
     // à cause d'une synchro concurrente ou d'un acompte saisi sur un autre poste)
@@ -26677,6 +26729,23 @@ function _getArretData() {
         type: 'solde', resteApres: 0
       });
       return;
+    }
+    // Réservation finalisée : acompte journalisé à la création, solde à la
+    // finalisation. La rattraper ici la compterait une seconde fois. Le test
+    // porte sur le journal COMPLET (pas sur le périmètre) : l'acompte peut dater
+    // d'un autre jour. Une réservation sans aucun événement est antérieure au
+    // journal — repli inchangé, sinon son argent ne figurerait nulle part.
+    if (s.fromReservation != null && s.fromReservation !== '') {
+      const _resEvts = encaissements.filter(e =>
+        e.source === 'reservation' && String(e.refId) === String(s.fromReservation));
+      if (_resEvts.length) {
+        const hasSolde = evts.some(e =>
+          e.source === 'reservation' && String(e.refId) === String(s.fromReservation) &&
+          (e.type === 'solde' || e.type === 'paiement'));
+        if (hasSolde) return;
+        const solde = Math.max(0, (Number(s.total) || 0) - (Number(s.accompte) || 0));
+        if (solde <= 0) return;   // rien encaissé à la finalisation (déjà prépayée)
+      }
     }
     const total = Number(s.total) || 0;
     // Ventes finalisées depuis une réservation : `due` fait foi (solde déjà réglé).
@@ -26704,8 +26773,9 @@ function _getArretData() {
   // Retrouve les articles (nom/qté/prix unitaire) de la source d'un encaissement
   const _itemsOf = e => {
     let src = null;
-    if (e.source === 'commande')    src = commandes.find(c => String(c.id) === String(e.refId));
-    else if (e.source === 'vente')  src = sales.find(s => String(s.id) === String(e.refId));
+    if (e.source === 'commande')         src = commandes.find(c => String(c.id) === String(e.refId));
+    else if (e.source === 'reservation') src = reservations.find(r => String(r.id) === String(e.refId));
+    else if (e.source === 'vente')       src = sales.find(s => String(s.id) === String(e.refId));
     return ((src && src.items) || []).map(i => ({
       name: i.name, qty: Number(i.qty) || 0, price: Number(i.price) || 0
     }));
@@ -26730,8 +26800,9 @@ function _getArretData() {
   // Le titulaire (émetteur) d'un chèque vit sur la vente liée (payTitulaire), pas sur l'événement.
   const _titulaireOf = e => {
     let s = null;
-    if (e.source === 'vente')          s = sales.find(x => String(x.id) === String(e.refId));
-    else if (e.source === 'commande')  s = sales.find(x => x.fromCommande != null && String(x.fromCommande) === String(e.refId));
+    if (e.source === 'vente')            s = sales.find(x => String(x.id) === String(e.refId));
+    else if (e.source === 'commande')    s = sales.find(x => x.fromCommande != null && String(x.fromCommande) === String(e.refId));
+    else if (e.source === 'reservation') s = sales.find(x => x.fromReservation != null && String(x.fromReservation) === String(e.refId));
     return s ? payTitulaire(s) : '';
   };
   const chequeDetails = evts.filter(e => payKey(e.method) === 'cheque').map(e => ({

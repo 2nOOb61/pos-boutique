@@ -1863,6 +1863,8 @@ function handleGetReservations() {
         deliveryAddress: String(r[23] || ''),
         deliveryFee:     Number(r[24]) || 0,
         deliveryDate:    _fmtDateCell_(r[25]),
+        finaliseParUser:  String(r[26] || ''),   // col 27 = qui a finalisé (username)
+        finaliseParLabel: String(r[27] || ''),   // col 28 = qui a finalisé (libellé)
       };
       order.push(id);
     }
@@ -1903,8 +1905,9 @@ function handleAddReservation(data) {
   const reference    = r.depositRef      || '';
   const caissier     = r.caissier        || '';
   const items        = Array.isArray(r.items) ? r.items : [];
-  // Infos livraison (cols 23-26, ajoutées) — migration auto si l'ancienne feuille s'arrête à 22
-  const need = 26 - sh.getMaxColumns();
+  // Infos livraison (cols 23-26) + qui a finalisé (cols 27-28) — migration auto
+  // si l'ancienne feuille s'arrête à 22.
+  const need = 28 - sh.getMaxColumns();
   if (need > 0) sh.insertColumnsAfter(sh.getMaxColumns(), need);
   const delivMode = r.deliveryMode    || 'retrait';
   const delivAddr = r.deliveryAddress || '';
@@ -1960,6 +1963,18 @@ function handleUpdateReservation(data) {
     // Date de livraison (col 26) : une réservation se reporte comme une commande.
     // La migration de largeur a lieu AVANT la boucle (cf. plus haut).
     if (data.deliveryDate !== undefined) sh.getRange(i+1, 26).setValue(data.deliveryDate);
+    // Qui a encaissé le solde à la finalisation (≠ caissier d'origine) : l'arrêt
+    // de caisse s'en sert pour n'imputer la vente qu'à celui qui a reçu l'argent.
+    if (data.finaliseParUser !== undefined) {                                   // col 27 = username
+      const needF = 27 - sh.getMaxColumns();
+      if (needF > 0) sh.insertColumnsAfter(sh.getMaxColumns(), needF);
+      sh.getRange(i+1, 27).setValue(String(data.finaliseParUser || ''));
+    }
+    if (data.finaliseParLabel !== undefined) {                                  // col 28 = libellé
+      const needL = 28 - sh.getMaxColumns();
+      if (needL > 0) sh.insertColumnsAfter(sh.getMaxColumns(), needL);
+      sh.getRange(i+1, 28).setValue(String(data.finaliseParLabel || ''));
+    }
     updated = true;
   }
   return updated ? { ok:true } : { ok:false, error:'Réservation introuvable' };
