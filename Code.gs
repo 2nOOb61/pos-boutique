@@ -4583,6 +4583,7 @@ function _suiviPayload_(data) {
   var horizonTxt = jourPlus_(horizon);   // échéance avant cette date = imminente
 
   var dossiers = [], taches = [], bats = [], courses = [], journal = [];
+  var candidatsLivres = [], aConfirmer = [];
   var retards = 0, parOperateur = {};
   var dossiersLus = 0, tachesLues = 0, dossiersDormants = 0, tachesDormantes = 0;
   var tronqueDossiers = false, tronqueTaches = false;
@@ -4601,9 +4602,24 @@ function _suiviPayload_(data) {
       var r = rowsD[i];
       if (!r[0]) continue;
       var statut = String(r[5] || '');
-      if (statut === 'LIVRE') continue;
-      var ech = _fmtDateCell_(r[8]);
+      var ech  = _fmtDateCell_(r[8]);
       var cree = _fmtDateCell_(r[7]);
+      var em   = _etatsManuelsFromCell_(r[COL_ETATS_MANUELS - 1]);
+      // « Livré » côté production : par le statut calculé, ou par un état posé
+      // à la main sur l'étape LIVRE. Les deux disent la même chose.
+      var livreDeclare = (statut === 'LIVRE') ||
+        !!(em && em.LIVRE && String(em.LIVRE.st || '') === 'TERMINE');
+
+      // Candidat au croisement avec le journal : la production dit « livré »,
+      // seul LivraisonsJournal le prouve. On ne remonte pas au-delà de la
+      // fenêtre, sinon tout l'historique ancien reviendrait à confirmer.
+      if (livreDeclare && ((cree && cree >= neufTxt) || (ech && ech >= neufTxt))) {
+        candidatsLivres.push({ num: String(r[1] || ''), client: String(r[2] || ''),
+          produit: String(r[3] || ''), qte: Number(r[4]) || 0, echeance: ech,
+          srcId: _refSource_(r[10]) });
+      }
+      if (statut === 'LIVRE') continue;
+
       // Vivant = échéance dans l'horizon (ou déjà dépassée), ou créé récemment.
       var vivant = (ech && ech <= horizonTxt) || (cree && cree >= neufTxt);
       if (!vivant && !toutVoir) { dossiersDormants++; continue; }
@@ -4618,7 +4634,6 @@ function _suiviPayload_(data) {
       if (inst && inst.on) d.installation = true;
       // Étapes validées à la main : elles REMPLACENT le pointage, donc une étape
       // sans tâche pointée n'est pas forcément une étape non faite.
-      var em = _etatsManuelsFromCell_(r[COL_ETATS_MANUELS - 1]);
       var emTxt = [];
       for (var code in em) {
         if (em.hasOwnProperty(code)) emTxt.push(code + '=' + String((em[code] && em[code].st) || ''));
@@ -4713,6 +4728,27 @@ function _suiviPayload_(data) {
     journal.reverse();
   }
 
+  // ── Croisement production ↔ journal ───────────────────────
+  // Règle 7 du suivi : une étape « LIVRE » ne confirme PAS une livraison.
+  // Un dossier déclaré livré dont aucun mouvement LIVREE ne porte l'ID de sa
+  // commande part en « à confirmer ». Un dossier sans ID source (créé à la
+  // main) n'est pas vérifiable : il part aussi en « à confirmer », jamais en
+  // « livré ». On ne conclut pas à la place de l'humain.
+  var livreIds = {};
+  if (rowsJ) {
+    for (var q = 0; q < rowsJ.length; q++) {
+      if (String(rowsJ[q][8] || '') === 'LIVREE') livreIds[String(rowsJ[q][5] || '')] = true;
+    }
+  }
+  for (var c = 0; c < candidatsLivres.length; c++) {
+    var cd = candidatsLivres[c];
+    if (!cd.srcId || !livreIds[cd.srcId]) {
+      if (!cd.srcId) cd.verifiable = false;
+      aConfirmer.push(cd);
+    }
+  }
+  aConfirmer.reverse();
+
   return {
     ok: true,
     genere: Utilities.formatDate(now, tz, "yyyy-MM-dd'T'HH:mm:ss"),
@@ -4722,12 +4758,22 @@ function _suiviPayload_(data) {
                  tronqueDossiers: tronqueDossiers, tronqueTaches: tronqueTaches },
     compteurs: { dossiersOuverts: dossiers.length, dossiersEnRetard: retards,
                  dossiersDormants: dossiersDormants, tachesDormantes: tachesDormantes,
+                 livraisonsAConfirmer: aConfirmer.length,
                  tachesOuvertes: taches.length, batsEnAttente: bats.length,
                  coursesEnCours: courses.length, mouvementsJournal: journal.length,
                  parOperateur: parOperateur },
     dossiers: dossiers,
     taches: taches,
     bats: bats,
-    livraisons: { enCours: courses, journal: journal }
+    livraisons: { enCours: courses, journal: journal, aConfirmer: aConfirmer }
   };
+}
+
+// « Commande #Cmwiwm526tmbe » -> « Cmwiwm526tmbe ». C'est cet ID que le journal
+// des livraisons porte en colonne ID : c'est la seule clé fiable entre un
+// dossier de production et une course. Le NumeroDossier, lui, ne s'y trouve pas.
+function _refSource_(src) {
+  var s = String(src || '');
+  var i = s.indexOf('#');
+  return (i >= 0) ? s.substring(i + 1).trim() : '';
 }

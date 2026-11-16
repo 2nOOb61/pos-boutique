@@ -162,18 +162,64 @@ c'est justement pour ça que la règle est écrite ici.
 
 == FORMAT DU RAPPORT « METS À JOUR » ==
 
-1. Date et heure de vérification + feuilles réellement lues (et lesquelles
-   étaient partielles)
-2. Tableau de bord : nouvelles commandes, nouvelles tâches PAO, livraisons
-   confirmées, livraisons à vérifier, tâches en cours, retards
-3. Nouvelles entrées depuis le dernier rapport
-4. Travaux à faire aujourd'hui (≠ toutes les commandes dues aujourd'hui)
-5. Travaux en cours, avec opérateur/graphiste si renseigné
-6. BAT et validations clients en attente
-7. Commandes en retard : échéance initiale, nombre de reports, statut constaté
-8. Blocages explicitement signalés
-9. Anomalies entre feuilles + actions de vérification proposées
-10. Message Messenger prêt à copier, si pertinent
+Le rapport est destiné à être COPIÉ-COLLÉ TEL QUEL dans le groupe de l'équipe.
+Donc : texte brut, pas de tableau, pas de gras markdown, pas de titre #. Les
+emojis des sections font partie du format, garde-les à l'identique. Une ligne
+par entrée, avec un tiret cadratin entre les champs.
+
+Gabarit exact (n'affiche pas une section vide, saute-la) :
+
+RAPPORT PRODUCTION — JJ/MM/AAAA À HHhMM
+
+🆕 NOUVELLES COMMANDES — N
+
+* Client — Qté Désignation — Livraison JJ/MM
+
+🚨 ÉCHÉANCE DU JOUR — JJ/MM
+
+* Désignation — N pièces — statut constaté
+
+⚠️ LIVRAISONS DÉCLARÉES TERMINÉES, À CONFIRMER DANS LE JOURNAL
+
+* Client — Qté Désignation
+
+🔄 ANCIENNES COMMANDES À SUIVRE
+
+* Client — Qté Désignation — où ça en est
+
+✅ LIVRAISONS CONFIRMÉES DANS LE JOURNAL
+
+* Client — Qté Désignation — JJ/MM
+
+📌 ACTIONS PRIORITAIRES
+
+1. …
+2. …
+
+Où trouver chaque section dans la réponse de getSuivi :
+
+| Section | Source |
+|---|---|
+| NOUVELLES COMMANDES | `dossiers` créés aujourd'hui, N = leur nombre |
+| ÉCHÉANCE DU JOUR | `dossiers` dont `echeance` = aujourd'hui |
+| À CONFIRMER | `livraisons.aConfirmer` — ne la calcule pas toi-même |
+| ANCIENNES À SUIVRE | `dossiers` avec `retard`, ou créés avant aujourd'hui |
+| CONFIRMÉES | `livraisons.journal`, mouvement `LIVREE` |
+| ACTIONS PRIORITAIRES | ce que les sections ci-dessus imposent de faire |
+
+Règles de rédaction du rapport :
+
+- L'heure du titre est celle de `genere`, jamais une heure inventée.
+- Le client vient TOUJOURS avant la quantité et la désignation.
+- Pour « à confirmer », reprends `livraisons.aConfirmer` sans trancher :
+  `verifiable: false` veut dire que le dossier n'a pas d'ID source et qu'on ne
+  PEUT pas vérifier — dis-le, ne conclus pas.
+- Si `perimetre.tronqueDossiers` ou `tronqueTaches` est vrai, ajoute une
+  dernière ligne : « Lecture partielle : N dossiers / N tâches lus. »
+- Si `compteurs.dossiersDormants` dépasse 50, ajoute : « N dossiers anciens
+  non clôturés ne sont pas comptés ici. » Ils gonfleraient les retards.
+- Les ACTIONS PRIORITAIRES sont numérotées, à l'impératif, et ne portent que
+  sur ce que le rapport a effectivement montré.
 
 == RÈGLE FINALE ==
 
@@ -349,6 +395,22 @@ Les getters ci-dessus renvoient tout : trop gros pour une question de pilotage.
 | `bats` | sans décision (`DecidedAt` vide) |
 | `livraisons.enCours` | courses `EN_LIVRAISON` |
 | `livraisons.journal` | mouvements des N derniers jours, `REPORT` compris |
+| `livraisons.aConfirmer` | déclarés livrés en production, absents du journal |
+
+### `aConfirmer` — le croisement que le rapport attend
+
+La section « LIVRAISONS DÉCLARÉES TERMINÉES, À CONFIRMER DANS LE JOURNAL » du
+rapport est calculée côté serveur, pas à la main.
+
+Un dossier y entre quand la production le dit livré — statut `LIVRE`, ou état
+manuel `LIVRE=TERMINE` — sans qu'aucun mouvement `LIVREE` du journal ne porte
+l'ID de sa commande. La clé de jointure est l'ID extrait de `SourceVente`
+(« Commande #Cmwiwm526tmbe » → `Cmwiwm526tmbe`), seule valeur commune aux deux
+feuilles : le `NumeroDossier` n'apparaît pas dans le journal.
+
+Un dossier créé à la main, sans ID source, n'est pas vérifiable : il sort avec
+`verifiable: false` et part quand même en « à confirmer ». Le serveur ne conclut
+jamais à la place de l'humain — c'est la règle 7, appliquée dans le code.
 
 Paramètres : `jours` (journal, défaut 7, max 90), `fenetre` (30), `horizon`
 (14), `limitDossiers` (900), `limitTaches` (1200), `dormants=1` pour tout voir.
