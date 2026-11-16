@@ -4616,7 +4616,7 @@ function _suiviPayload_(data) {
       if (livreDeclare && ((cree && cree >= neufTxt) || (ech && ech >= neufTxt))) {
         candidatsLivres.push({ num: String(r[1] || ''), client: String(r[2] || ''),
           produit: String(r[3] || ''), qte: Number(r[4]) || 0, echeance: ech,
-          srcId: _refSource_(r[10]) });
+          etape: statut, srcId: _refSource_(r[10]), origine: _origineSource_(r[10]) });
       }
       if (statut === 'LIVRE') continue;
 
@@ -4748,6 +4748,10 @@ function _suiviPayload_(data) {
     }
   }
   aConfirmer.reverse();
+  // compteurs.livraisonsDeclarees dit combien de dossiers ont été CONTRÔLÉS.
+  // Sans lui, « 0 à confirmer » serait ambigu : tout va bien, ou le contrôle
+  // n'a rien trouvé à contrôler ? Le rapport doit pouvoir dire « 73 vérifiées,
+  // 0 anomalie » plutôt qu'un zéro muet.
 
   return {
     ok: true,
@@ -4758,6 +4762,7 @@ function _suiviPayload_(data) {
                  tronqueDossiers: tronqueDossiers, tronqueTaches: tronqueTaches },
     compteurs: { dossiersOuverts: dossiers.length, dossiersEnRetard: retards,
                  dossiersDormants: dossiersDormants, tachesDormantes: tachesDormantes,
+                 livraisonsDeclarees: candidatsLivres.length,
                  livraisonsAConfirmer: aConfirmer.length,
                  tachesOuvertes: taches.length, batsEnAttente: bats.length,
                  coursesEnCours: courses.length, mouvementsJournal: journal.length,
@@ -4776,4 +4781,17 @@ function _refSource_(src) {
   var s = String(src || '');
   var i = s.indexOf('#');
   return (i >= 0) ? s.substring(i + 1).trim() : '';
+}
+
+// D'où vient le dossier : 'commande', 'reservation' ou 'vente'. Seules les deux
+// premières donnent lieu à une course (le journal ne connaît que ces `kind`).
+// Une vente POS est retirée au comptoir : l'absence de mouvement LIVREE n'y est
+// pas une anomalie, et le rapport doit pouvoir le dire au lieu de la compter
+// comme une livraison douteuse.
+function _origineSource_(src) {
+  var s = String(src || '').toLowerCase();
+  if (s.indexOf('vente') === 0)       return 'vente';
+  if (s.indexOf('réservation') === 0 || s.indexOf('reservation') === 0) return 'reservation';
+  if (s.indexOf('commande') === 0)    return 'commande';
+  return '';
 }
