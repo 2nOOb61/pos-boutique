@@ -417,6 +417,7 @@ function doGet(e) {
     if (action === 'getDossiers')     return jsonResp(handleGetDossiers(e.parameter));
     if (action === 'getTaches')       return jsonResp(handleGetTaches(e.parameter));
     if (action === 'getDashboard')    return jsonResp(handleGetDashboard());
+    if (action === 'getSuivi')        return jsonResp(handleGetSuivi(e.parameter));
     if (action === 'getControlPatron') return jsonResp(handleGetControlPatron(e.parameter));
     if (action === 'migrateCommandeIds') return jsonResp(migrateCommandeIds());
     if (action === 'migrateDedupDossiers') return jsonResp(migrateDedupDossiers());
@@ -4503,4 +4504,178 @@ function handleMouvementMatiere(data) {
     return { ok:true, stock:apres, stockAvant:avant, delta:delta,
              alerte:(apres <= 0 ? 'RUPTURE' : (m.seuil > 0 && apres <= m.seuil ? 'FAIBLE' : '')) };
   } finally { try { lock.releaseLock(); } catch(e) {} }
+}
+
+// ============================================================
+// SUIVI À DISTANCE — un seul appel, charge utile compacte
+// ============================================================
+// Pensé pour un assistant interrogé depuis un téléphone (« où en est-on ? »).
+// Les getters existants renvoient TOUT : getDossiers = 300 dossiers,
+// getTaches = 500 tâches, getLivraisonsJournal = 2 000 mouvements. Illisible
+// et coûteux pour une question de pilotage.
+//
+// Ici on ne renvoie QUE ce qui est encore ouvert :
+//   - dossiers dont le statut n'est pas LIVRE (le statut porte l'étape en cours)
+//   - tâches dont le statut n'est pas TERMINE
+//   - BAT sans décision (DecidedAt vide) — pas de valeur de statut en dur,
+//     la colonne Statut est un texte libre
+//   - courses EN_LIVRAISON + le journal des N derniers jours
+//
+// Lecture seule, aucune écriture, aucun cache : l'appel est rare et doit être
+// frais. Un rapport servi depuis un cache serait un rapport faux.
+//
+// Les lignes de test historiques (clé commençant par TEST) sont exclues.
+// `perimetre.tronque*` dit si la pagination a coupé : le consommateur doit
+// l'annoncer au lieu de conclure sur une lecture partielle.
+//
+// Paramètres : jours (journal, défaut 7, max 90), limitDossiers (900),
+// limitTaches (1200).
+function handleGetSuivi(data) {
+  data = data || {};
+  var ss  = getSS();
+  var tz  = ss.getSpreadsheetTimeZone();
+  var now = new Date();
+  var jours = Math.max(1, Math.min(90, Number(data.jours) || 7));
+
+  var jourTxt   = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
+  var depuisTxt = Utilities.formatDate(new Date(now.getTime() - jours * 86400000), tz, 'yyyy-MM-dd');
+
+  var dossiers = [], taches = [], bats = [], courses = [], journal = [];
+  var retards = 0, parOperateur = {};
+  var dossiersLus = 0, tachesLues = 0;
+  var tronqueDossiers = false, tronqueTaches = false;
+
+  // ── Dossiers encore ouverts ───────────────────────────────
+  var shD = ss.getSheetByName(SHEET_DOSSIERS);
+  if (shD && shD.getLastRow() > 1) {
+    var lastD  = shD.getLastRow();
+    var limD   = Math.max(50, Math.min(3000, Number(data.limitDossiers) || 900));
+    var startD = Math.max(2, lastD - limD + 1);
+    var nColsD = Math.max(12, Math.min(shD.getLastColumn(), COL_INSTALLATION));
+    var rowsD  = shD.getRange(startD, 1, lastD - startD + 1, nColsD).getValues();
+    dossiersLus     = rowsD.length;
+    tronqueDossiers = (lastD - 1) > dossiersLus;
+    for (var i = 0; i < rowsD.length; i++) {
+      var r = rowsD[i];
+      if (!r[0]) continue;
+      var statut = String(r[5] || '');
+      if (statut === 'LIVRE') continue;
+      var ech = _fmtDateCell_(r[8]);
+      var d = {
+        num: String(r[1] || ''), client: String(r[2] || ''),
+        produit: String(r[3] || ''), qte: Number(r[4]) || 0,
+        etape: statut, prog: Number(r[6]) || 0,
+        echeance: ech, priorite: String(r[9] || ''), source: String(r[10] || '')
+      };
+      if (ech && ech < jourTxt) { d.retard = true; retards++; }
+      var inst = _installationFromCell_(r[COL_INSTALLATION - 1]);
+      if (inst && inst.on) d.installation = true;
+      // Étapes validées à la main : elles REMPLACENT le pointage, donc une étape
+      // sans tâche pointée n'est pas forcément une étape non faite.
+      var em = _etatsManuelsFromCell_(r[COL_ETATS_MANUELS - 1]);
+      var emTxt = [];
+      for (var code in em) {
+        if (em.hasOwnProperty(code)) emTxt.push(code + '=' + String((em[code] && em[code].st) || ''));
+      }
+      if (emTxt.length) d.etatsManuels = emTxt.join(' ');
+      dossiers.push(d);
+    }
+    dossiers.reverse();
+  }
+
+  // ── Tâches non terminées ──────────────────────────────────
+  var shT = ss.getSheetByName(SHEET_TACHES);
+  if (shT && shT.getLastRow() > 1) {
+    var lastT  = shT.getLastRow();
+    var limT   = Math.max(50, Math.min(4000, Number(data.limitTaches) || 1200));
+    var startT = Math.max(2, lastT - limT + 1);
+    var nColsT = Math.max(12, shT.getLastColumn());
+    var rowsT  = shT.getRange(startT, 1, lastT - startT + 1, nColsT).getValues();
+    tachesLues    = rowsT.length;
+    tronqueTaches = (lastT - 1) > tachesLues;
+    for (var j = 0; j < rowsT.length; j++) {
+      var t = rowsT[j];
+      if (!t[0]) continue;
+      if (String(t[6] || '') === 'TERMINE') continue;
+      var op = String(t[5] || '');
+      var o = { num: String(t[2] || ''), etape: String(t[3] || ''),
+                operateur: op, statut: String(t[6] || '') };
+      var da = t[7] ? new Date(t[7]) : null;
+      if (da && !isNaN(da.getTime())) o.assignee = Utilities.formatDate(da, tz, 'yyyy-MM-dd');
+      if (t[13]) o.echeance = (t[13] instanceof Date)
+        ? Utilities.formatDate(t[13], tz, 'yyyy-MM-dd') : String(t[13]);
+      if (t[15]) o.equipe = String(t[15]);
+      taches.push(o);
+      if (op) parOperateur[op] = (parOperateur[op] || 0) + 1;
+    }
+    taches.reverse();
+  }
+
+  // ── BAT en attente de décision ────────────────────────────
+  var shB = ss.getSheetByName(SHEET_BATS);
+  if (shB && shB.getLastRow() > 1) {
+    var lastB  = shB.getLastRow();
+    var startB = Math.max(2, lastB - 399);
+    var widthB = Math.min(BAT_HEADERS_.length, shB.getLastColumn());
+    var rowsB  = shB.getRange(startB, 1, lastB - startB + 1, widthB).getValues();
+    for (var k = 0; k < rowsB.length; k++) {
+      var b = rowsB[k];
+      if (!b[0]) continue;
+      if (String(b[15] || '').trim()) continue;   // DecidedAt rempli = déjà tranché
+      bats.push({ num: String(b[2] || ''), version: Number(b[3]) || 1,
+                  statut: String(b[4] || ''), envoyeLe: String(b[13] || ''),
+                  kind: (String(b[17] || '').toLowerCase() === 'simulation') ? 'simulation' : 'bat' });
+    }
+    bats.reverse();
+  }
+
+  // ── Courses encore en rue ─────────────────────────────────
+  var shL = ss.getSheetByName(SHEET_LIVRAISONS);
+  if (shL && shL.getLastRow() > 1) {
+    var widthL = Math.min(LIVRAISON_HEADERS_.length, shL.getLastColumn());
+    var rowsL  = shL.getRange(2, 1, shL.getLastRow() - 1, widthL).getValues();
+    for (var m = 0; m < rowsL.length; m++) {
+      var l = rowsL[m];
+      if (!l[0] || String(l[0]).indexOf('TEST') === 0) continue;
+      if (String(l[5] || '') !== 'EN_LIVRAISON') continue;
+      courses.push({ ref: String(l[3] || ''), client: String(l[4] || ''),
+                     coursier: String(l[6] || ''), depart: String(l[7] || '') });
+    }
+  }
+
+  // ── Journal des N derniers jours ──────────────────────────
+  var shJ = ss.getSheetByName(SHEET_LIV_JOURNAL);
+  if (shJ && shJ.getLastRow() > 1) {
+    var lastJ  = shJ.getLastRow();
+    var startJ = Math.max(2, lastJ - 999);
+    var widthJ = Math.min(LIV_JOURNAL_HEADERS_.length, shJ.getLastColumn());
+    var rowsJ  = shJ.getRange(startJ, 1, lastJ - startJ + 1, widthJ).getValues();
+    for (var n = 0; n < rowsJ.length; n++) {
+      var g = rowsJ[n];
+      if (!g[3] || String(g[3]).indexOf('TEST') === 0) continue;
+      var dIso = _fmtDateCell_(g[1]);
+      if (dIso && dIso < depuisTxt) continue;
+      journal.push({ date: dIso, heure: _cellTxt_(g[2], 'HH:mm'),
+                     ref: String(g[6] || ''), client: String(g[7] || ''),
+                     mouvement: String(g[8] || ''), coursier: String(g[9] || ''),
+                     note: String(g[10] || '') });
+    }
+    journal.reverse();
+  }
+
+  return {
+    ok: true,
+    genere: Utilities.formatDate(now, tz, "yyyy-MM-dd'T'HH:mm:ss"),
+    fuseau: tz,
+    perimetre: { jours: jours, dossiersLus: dossiersLus, tachesLues: tachesLues,
+                 tronqueDossiers: tronqueDossiers, tronqueTaches: tronqueTaches },
+    compteurs: { dossiersOuverts: dossiers.length, dossiersEnRetard: retards,
+                 tachesOuvertes: taches.length, batsEnAttente: bats.length,
+                 coursesEnCours: courses.length, mouvementsJournal: journal.length,
+                 parOperateur: parOperateur },
+    dossiers: dossiers,
+    taches: taches,
+    bats: bats,
+    livraisons: { enCours: courses, journal: journal }
+  };
 }

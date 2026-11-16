@@ -121,6 +121,21 @@ c'est justement pour ça que la règle est écrite ici.
 12. Les dossiers anciens jamais clôturés gonflent les totaux de retard. Si tu
     donnes un total, précise son périmètre et signale les dossiers dormants.
 
+12bis. Les en-têtes réels du classeur ne correspondent pas toujours aux noms
+    de l'annexe : les feuilles créées avant une évolution gardent leurs
+    anciens en-têtes (`Taches` affiche `Etape` et non `EtapeCode`, `Commandes`
+    a 30 colonnes dont 6 sans titre). Le backend lit par POSITION, pas par
+    nom. Fie-toi donc à l'ordre des colonnes de l'annexe, pas à leur
+    intitulé, et signale tout décalage au lieu de deviner.
+
+12ter. Ne lis jamais la feuille `Utilisateurs` : elle contient des mots de
+    passe chiffrés. Elle n'a aucun intérêt pour le suivi.
+
+12quater. Les feuilles `Livraisons` et `LivraisonsJournal` commencent par une
+    ligne de test (`TESTHIST` / « TEST historique »). Exclue-la de tous les
+    comptages. Les feuilles `Feuille 1` (vide) et `Operateurs` existent aussi
+    dans le classeur.
+
 == PRÉSENTATION ==
 
 13. Pour chaque commande, toujours dans cet ordre :
@@ -172,6 +187,17 @@ qu'un rapport détaillé fondé sur des suppositions.
 ## 3. Annexe technique — carte réelle du POS
 
 Relevé dans `Code.gs` le 16/11/2026. À revérifier si le backend évolue.
+
+> ⚠️ **Ces noms sont ceux que le code POSE à la création d'une feuille, pas
+> forcément ceux du classeur en service.** `ensureSheet()` (ligne 544) n'écrit
+> les en-têtes que si la feuille n'existe pas : une feuille créée avant une
+> évolution garde ses anciens titres. Constaté le 16/11/2026 sur le classeur
+> réel : `Taches` affiche `Etape` au lieu de `EtapeCode` et porte une colonne
+> `Equipe`, `Commandes` a 30 colonnes dont 6 sans en-tête.
+>
+> Ce n'est pas un bug : le backend lit **par position** (`r[3]`, `r[7]`…),
+> jamais par nom. Les tableaux ci-dessous donnent donc le bon ORDRE des
+> colonnes ; les intitulés peuvent différer à l'écran.
 
 ### Les 10 étapes de production (`ETAPES_PROD`)
 
@@ -268,23 +294,92 @@ Matieres · MouvementsMatieres
 
 ---
 
-## 4. Alternative non retenue — l'API `/exec`
+## 4. La limite du connecteur Drive — et la sortie par l'API
 
-Le backend expose une trentaine d'actions GET en lecture seule
-(`getDossiers`, `getTaches`, `getLivraisonsJournal`, `getLivraisonsEtats`,
-`getBats`, `getFinition`, `getMachineSessions`, `getCommandes`, `getDashboard`,
-`getControlPatron`…) qui renvoient du JSON propre, sans compte Google.
+### Ce qui a été constaté le 16/11/2026
 
-Ce serait techniquement plus fiable que la lecture du classeur comme texte.
-Deux raisons de ne pas l'utiliser pour l'instant :
+Classeur partagé et accessible en lecture seule (`canEdit: false`), 27 feuilles
+vues. Mais le connecteur ne renvoie que **la structure de chaque feuille et une
+seule ligne d'exemple** — pas les données ligne à ligne. L'export CSV ne sort
+que la première feuille (vide). Le classeur fait 1,6 Mo.
 
-1. L'URL `/exec` est publique et le même déploiement expose des actions
-   **d'écriture** (`doPost`) sans aucun contrôle de rôle côté serveur. Y
-   brancher un agent élargit la surface d'exposition.
-2. Claude ne peut pas appeler cette URL depuis un projet claude.ai.
+Volumes relevés : `Notifications` 18 078 lignes, `JournalAcces` 5 000,
+`Taches` 3 395, `Dossiers` 2 561, `Commentaires` 2 031, `Ventes` 1 511,
+`MouvementsStock` 1 501, `Encaissements` 1 343, `Commandes` 1 044,
+`BATs` 613, `LivraisonsJournal` 178, `Livraisons` 152.
 
-À reconsidérer seulement si un jour le backend gagne un vrai contrôle d'accès
-côté serveur, ou un déploiement séparé en lecture seule avec jeton.
+**Conclusion : le connecteur Drive seul ne permet pas le suivi quotidien.**
+
+### La bonne sortie : l'API `/exec`
+
+Le backend expose une trentaine d'actions GET en lecture seule qui renvoient du
+JSON propre, sans compte Google :
+
+| Action | Contenu | Pagination |
+|---|---|---|
+| `getDossiers` | dossiers de production | `limit`, défaut 300 |
+| `getTaches` | tâches assignées | `limit`, défaut 500 |
+| `getLivraisonsJournal` | historique des mouvements | `limit`, défaut 2000 |
+| `getLivraisonsEtats` | état courant des courses | — |
+| `getBats` · `getFinition` · `getMachineSessions` | ateliers | — |
+| `getCommandes` · `getDashboard` · `getControlPatron` | commercial et KPI | — |
+
+Toutes lisent **par position de colonne**, jamais par nom : elles sont donc
+immunisées contre les en-têtes hérités qui piègent la lecture du classeur.
+Toutes paginent depuis la FIN de la feuille, donc les lignes les plus récentes.
+
+Exemple : `…/exec?action=getDossiers&limit=100`
+
+### `getSuivi` — l'action dédiée (ajoutée le 16/11/2026)
+
+Les getters ci-dessus renvoient tout : trop gros pour une question de pilotage.
+`getSuivi` fait l'inverse — **un appel, et seulement ce qui est encore ouvert** :
+
+```
+…/exec?action=getSuivi&jours=7
+```
+
+| Clé | Contenu |
+|---|---|
+| `genere` · `fuseau` | horodatage réel de la lecture, fuseau du classeur |
+| `perimetre` | `jours`, lignes lues, et `tronqueDossiers` / `tronqueTaches` |
+| `compteurs` | ouverts, en retard, BAT en attente, courses, par opérateur |
+| `dossiers` | statut ≠ `LIVRE`, avec `retard`, `installation`, `etatsManuels` |
+| `taches` | statut ≠ `TERMINE`, avec opérateur, échéance, équipe |
+| `bats` | sans décision (`DecidedAt` vide) |
+| `livraisons.enCours` | courses `EN_LIVRAISON` |
+| `livraisons.journal` | mouvements des N derniers jours, `REPORT` compris |
+
+Paramètres : `jours` (défaut 7, max 90), `limitDossiers` (900),
+`limitTaches` (1200).
+
+Trois choix de conception à connaître :
+
+- **Aucun cache.** Les autres endpoints en ont un ; celui-ci doit être frais,
+  un rapport servi depuis un cache serait un rapport faux.
+- **`perimetre.tronque*`** dit si la pagination a coupé. Quand c'est `true`,
+  l'assistant DOIT l'annoncer au lieu de conclure sur une lecture partielle.
+- **Les BAT sont filtrés sur `DecidedAt` vide**, pas sur une valeur de statut :
+  la colonne `Statut` est un texte libre, aucune valeur n'est codée en dur.
+
+Les lignes de test (`TEST…`) sont exclues des livraisons et du journal.
+
+### Ce qui reste à trancher
+
+Une réserve :
+
+1. **La surface d'exposition.** L'URL `/exec` est publique et le même
+   déploiement sert les `doPost`, qui n'ont aucun contrôle de rôle côté
+   serveur. Ajouter une action GET n'aggrave pas cette exposition — elle existe
+   déjà — mais elle reste la vraie dette de sécurité du projet, à traiter un
+   jour pour elle-même.
+
+### Repli si l'API n'est pas joignable depuis claude.ai
+
+Un classeur de vues séparé, alimenté par `IMPORTRANGE` + `QUERY`, avec **un
+fichier par vue** (l'export CSV ne sort que la première feuille) : dossiers non
+clôturés, tâches non terminées, 30 derniers jours du journal. Plus de
+maintenance, mais aucune dépendance au réseau.
 
 ---
 
