@@ -343,20 +343,40 @@ Les getters ci-dessus renvoient tout : trop gros pour une question de pilotage.
 |---|---|
 | `genere` · `fuseau` | horodatage réel de la lecture, fuseau du classeur |
 | `perimetre` | `jours`, lignes lues, et `tronqueDossiers` / `tronqueTaches` |
-| `compteurs` | ouverts, en retard, BAT en attente, courses, par opérateur |
-| `dossiers` | statut ≠ `LIVRE`, avec `retard`, `installation`, `etatsManuels` |
-| `taches` | statut ≠ `TERMINE`, avec opérateur, échéance, équipe |
+| `compteurs` | ouverts, en retard, **dormants**, BAT, courses, par opérateur |
+| `dossiers` | statut ≠ `LIVRE` et vivants, avec `retard`, `installation`, `etatsManuels` |
+| `taches` | statut ≠ `TERMINE` et vivantes, avec opérateur, échéance, équipe |
 | `bats` | sans décision (`DecidedAt` vide) |
 | `livraisons.enCours` | courses `EN_LIVRAISON` |
 | `livraisons.journal` | mouvements des N derniers jours, `REPORT` compris |
 
-Paramètres : `jours` (défaut 7, max 90), `limitDossiers` (900),
-`limitTaches` (1200).
+Paramètres : `jours` (journal, défaut 7, max 90), `fenetre` (30), `horizon`
+(14), `limitDossiers` (900), `limitTaches` (1200), `dormants=1` pour tout voir.
 
-Trois choix de conception à connaître :
+### Dossiers vivants vs dormants
+
+« Ouvert » ne suffit pas comme critère. Mesuré le 16/11/2026 : **855 dossiers
+non clôturés**, dont la plupart au statut `CREE` sans aucune tâche, parfois
+vieux de plusieurs mois. Les renvoyer tous donne un JSON illisible **et** fausse
+la lecture.
+
+Un dossier est **vivant** si son échéance tombe dans les `horizon` jours (ou est
+déjà dépassée), ou s'il a été créé il y a moins de `fenetre` jours. Les autres
+sont **comptés** dans `compteurs.dossiersDormants`, jamais listés — et jamais
+cachés non plus : un dossier dormant reste un dossier à fermer, mais ce n'est
+pas le travail du jour. Même tri pour les tâches (`tachesDormantes`).
+
+Effet mesuré : 855 ouverts → **413 vivants + 442 dormants**, et 749 tâches →
+461 + 288.
+
+### Quatre choix de conception
 
 - **Aucun cache.** Les autres endpoints en ont un ; celui-ci doit être frais,
   un rapport servi depuis un cache serait un rapport faux.
+- **Réessai sur contention.** La boutique écrit toute la journée : deux appels
+  sur trois tombaient sur « Invocations simultanées trop nombreuses ». Trois
+  tentatives espacées avant d'abandonner, pour ne pas faire passer de la
+  contention pour une panne.
 - **`perimetre.tronque*`** dit si la pagination a coupé. Quand c'est `true`,
   l'assistant DOIT l'annoncer au lieu de conclure sur une lecture partielle.
 - **Les BAT sont filtrés sur `DecidedAt` vide**, pas sur une valeur de statut :

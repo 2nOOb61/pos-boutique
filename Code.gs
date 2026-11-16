@@ -4528,21 +4528,63 @@ function handleMouvementMatiere(data) {
 // `perimetre.tronque*` dit si la pagination a coupé : le consommateur doit
 // l'annoncer au lieu de conclure sur une lecture partielle.
 //
-// Paramètres : jours (journal, défaut 7, max 90), limitDossiers (900),
-// limitTaches (1200).
+// ── Dossiers DORMANTS ─────────────────────────────────────────────────────
+// « Ouvert » ne suffit pas comme critère : au 16/11/2026 le classeur compte
+// 855 dossiers non clôturés, dont la plupart sont au statut CREE sans aucune
+// tâche, parfois vieux de plusieurs mois. Les renvoyer tous produit un JSON
+// illisible ET fausse la lecture : 230 « retards » dont l'immense majorité
+// sont des dossiers que personne n'a jamais fermés.
+//
+// On ne renvoie donc que les dossiers VIVANTS :
+//   - échéance renseignée et pas au-delà de `horizon` jours (défaut 14), OU
+//   - créés depuis moins de `fenetre` jours (défaut 30)
+// Les autres sont COMPTÉS dans compteurs.dossiersDormants, jamais cachés :
+// un dossier dormant reste un dossier à fermer, mais ce n'est pas du suivi
+// du jour. Même logique pour les tâches (tachesDormantes).
+//
+// Paramètres : jours (journal, défaut 7, max 90), fenetre (30), horizon (14),
+// limitDossiers (900), limitTaches (1200), dormants=1 pour tout voir.
+//
+// ── Réessai ───────────────────────────────────────────────────────────────
+// La boutique écrit dans le classeur toute la journée. Une lecture de cinq
+// feuilles tombe régulièrement sur « Invocations simultanées trop nombreuses »
+// (constaté deux fois sur trois appels le 16/11/2026). Ce n'est pas une panne,
+// c'est de la contention : on réessaie, au lieu de renvoyer une erreur que le
+// consommateur prendrait pour un POS en vrac.
 function handleGetSuivi(data) {
+  var dernier = null;
+  for (var essai = 0; essai < 3; essai++) {
+    try {
+      return _suiviPayload_(data);
+    } catch (err) {
+      dernier = err;
+      if (essai < 2) Utilities.sleep(1200 * (essai + 1));
+    }
+  }
+  return { ok:false, error:'Lecture impossible apres 3 essais : ' + (dernier && dernier.message) };
+}
+
+function _suiviPayload_(data) {
   data = data || {};
   var ss  = getSS();
   var tz  = ss.getSpreadsheetTimeZone();
   var now = new Date();
-  var jours = Math.max(1, Math.min(90, Number(data.jours) || 7));
+  var jours   = Math.max(1, Math.min(90,  Number(data.jours)   || 7));
+  var fenetre = Math.max(1, Math.min(365, Number(data.fenetre) || 30));
+  var horizon = Math.max(1, Math.min(365, Number(data.horizon) || 14));
+  var toutVoir = String(data.dormants || '') === '1';
 
+  function jourPlus_(n) {
+    return Utilities.formatDate(new Date(now.getTime() + n * 86400000), tz, 'yyyy-MM-dd');
+  }
   var jourTxt   = Utilities.formatDate(now, tz, 'yyyy-MM-dd');
-  var depuisTxt = Utilities.formatDate(new Date(now.getTime() - jours * 86400000), tz, 'yyyy-MM-dd');
+  var depuisTxt = jourPlus_(-jours);
+  var neufTxt   = jourPlus_(-fenetre);   // créé après cette date = récent
+  var horizonTxt = jourPlus_(horizon);   // échéance avant cette date = imminente
 
   var dossiers = [], taches = [], bats = [], courses = [], journal = [];
   var retards = 0, parOperateur = {};
-  var dossiersLus = 0, tachesLues = 0;
+  var dossiersLus = 0, tachesLues = 0, dossiersDormants = 0, tachesDormantes = 0;
   var tronqueDossiers = false, tronqueTaches = false;
 
   // ── Dossiers encore ouverts ───────────────────────────────
@@ -4561,6 +4603,10 @@ function handleGetSuivi(data) {
       var statut = String(r[5] || '');
       if (statut === 'LIVRE') continue;
       var ech = _fmtDateCell_(r[8]);
+      var cree = _fmtDateCell_(r[7]);
+      // Vivant = échéance dans l'horizon (ou déjà dépassée), ou créé récemment.
+      var vivant = (ech && ech <= horizonTxt) || (cree && cree >= neufTxt);
+      if (!vivant && !toutVoir) { dossiersDormants++; continue; }
       var d = {
         num: String(r[1] || ''), client: String(r[2] || ''),
         produit: String(r[3] || ''), qte: Number(r[4]) || 0,
@@ -4604,6 +4650,10 @@ function handleGetSuivi(data) {
       if (da && !isNaN(da.getTime())) o.assignee = Utilities.formatDate(da, tz, 'yyyy-MM-dd');
       if (t[13]) o.echeance = (t[13] instanceof Date)
         ? Utilities.formatDate(t[13], tz, 'yyyy-MM-dd') : String(t[13]);
+      // Même tri que les dossiers : une tâche assignée il y a trois mois et
+      // jamais pointée n'est pas le travail du jour.
+      var vivante = o.echeance ? true : (o.assignee ? (o.assignee >= neufTxt) : false);
+      if (!vivante && !toutVoir) { tachesDormantes++; continue; }
       if (t[15]) o.equipe = String(t[15]);
       taches.push(o);
       if (op) parOperateur[op] = (parOperateur[op] || 0) + 1;
@@ -4667,9 +4717,11 @@ function handleGetSuivi(data) {
     ok: true,
     genere: Utilities.formatDate(now, tz, "yyyy-MM-dd'T'HH:mm:ss"),
     fuseau: tz,
-    perimetre: { jours: jours, dossiersLus: dossiersLus, tachesLues: tachesLues,
+    perimetre: { jours: jours, fenetre: fenetre, horizon: horizon,
+                 dossiersLus: dossiersLus, tachesLues: tachesLues,
                  tronqueDossiers: tronqueDossiers, tronqueTaches: tronqueTaches },
     compteurs: { dossiersOuverts: dossiers.length, dossiersEnRetard: retards,
+                 dossiersDormants: dossiersDormants, tachesDormantes: tachesDormantes,
                  tachesOuvertes: taches.length, batsEnAttente: bats.length,
                  coursesEnCours: courses.length, mouvementsJournal: journal.length,
                  parOperateur: parOperateur },
