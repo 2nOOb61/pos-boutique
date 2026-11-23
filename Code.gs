@@ -190,8 +190,19 @@ function _etatsManuelsDossier_(ss, dossierId) {
 // dossier à LIVRE en sautant la finition, qui n'a par construction aucune tâche.
 // Les autres étapes sans état restent sur leurs pointages : poser un état sur la
 // validation commande n'invente pas neuf étapes au dossier.
+// Vrai si AU MOINS UNE étape porte un état réellement posé (`st`). Une entrée qui
+// ne contient qu'une note ou des collaborateurs marqués n'est pas un pilotage :
+// elle annote l'étape sans retirer son pointage. ⇔ `_aEtatsManuels` côté app.js.
+function _aEtatPose_(etats) {
+  if (!etats) return false;
+  return Object.keys(etats).some(function(k) { return etats[k] && etats[k].st; });
+}
+
 function _overlayEtatsManuels_(byEtape, etats) {
-  if (!etats || !Object.keys(etats).length) return byEtape;
+  // Une entrée peut ne porter qu'une note / des collaborateurs, sans état posé :
+  // elle ne doit alors PAS faire entrer les étapes d'atelier dans le pipeline.
+  // On ne regarde donc que les entrées qui ont un `st`.
+  if (!etats || !_aEtatPose_(etats)) return byEtape;
   ETAPES_PILOTABLES.forEach(function(code) {
     const st = etats[code] && etats[code].st;
     if (st) byEtape[code] = [st];
@@ -278,6 +289,7 @@ function doPost(e) {
     else if (action === 'updateDossier')     result = handleUpdateDossier(data);
     else if (action === 'cloturerDossier')   result = handleCloturerDossier(data);
     else if (action === 'setEtapeManuelle')  result = handleSetEtapeManuelle(data);
+    else if (action === 'setEtapeNote')      result = handleSetEtapeNote(data);
     else if (action === 'setDossierInstallation') result = handleSetDossierInstallation(data);
     else if (action === 'creerDossierManuel') result = handleCreerDossierManuel(data);
     else if (action === 'saveTacheLibre')    result = handleSaveTacheLibre(data);
@@ -360,6 +372,7 @@ function doGet(e) {
       else if (action === 'updateDossier')     result = handleUpdateDossier(data);
       else if (action === 'cloturerDossier')   result = handleCloturerDossier(data);
       else if (action === 'setEtapeManuelle')  result = handleSetEtapeManuelle(data);
+      else if (action === 'setEtapeNote')      result = handleSetEtapeNote(data);
       else if (action === 'setDossierInstallation') result = handleSetDossierInstallation(data);
       else if (action === 'attribuerTache')    result = handleAttribuerTache(data);
       else if (action === 'changerOperateurTache') result = handleChangerOperateurTache(data);
@@ -2619,8 +2632,22 @@ function handleSetEtapeManuelle(data) {
 
   _ensureEtatsManuelsCol_(sh);
   const etats = _etatsManuelsRow_(sh, rowNum);
-  if (st) etats[code] = { st:st, par:String(data.par || ''), le:new Date().toISOString() };
-  else    delete etats[code];
+  // Préserver la note et les collaborateurs : ils vivent sur la même entrée mais
+  // ne sont pas l'état. Retirer l'état rend l'étape au pointage sans perdre ce qui
+  // a été écrit dessus ; l'entrée n'est supprimée que si elle devient vide.
+  const prev = etats[code] || {};
+  if (st) {
+    etats[code] = { st:st, par:String(data.par || ''), le:new Date().toISOString(),
+                    note:prev.note || '', collabs:prev.collabs || [],
+                    noteePar:prev.noteePar || '', noteeLe:prev.noteeLe || '' };
+  } else if ((prev.note && String(prev.note).trim()) ||
+             (Array.isArray(prev.collabs) && prev.collabs.length)) {
+    etats[code] = { st:'', par:'', le:'',
+                    note:prev.note || '', collabs:prev.collabs || [],
+                    noteePar:prev.noteePar || '', noteeLe:prev.noteeLe || '' };
+  } else {
+    delete etats[code];
+  }
   // Format texte imposé : sans ça Sheets prendrait le JSON pour une formule.
   sh.getRange(rowNum, COL_ETATS_MANUELS).setNumberFormat('@')
     .setValue(Object.keys(etats).length ? JSON.stringify(etats) : '');
@@ -2635,6 +2662,78 @@ function handleSetEtapeManuelle(data) {
   CacheService.getScriptCache().remove('dashboard_v1');
   return { ok:true, etatsManuels:etats,
            statut:prog.statut, progression:prog.progression };
+}
+
+// ── NOTE + COLLABORATEURS MARQUÉS SUR UNE ÉTAPE ────────────────
+// Le pilotage des étapes ne disait que « où en est l'étape ». Il manquait le
+// POURQUOI (pourquoi elle bloque, ce qui reste à faire) et le QUI pour les étapes
+// d'atelier, jamais pointées et donc sans opérateur attribué : la finition faite à
+// trois n'apparaissait nulle part.
+// Les deux vivent sur la MÊME entrée JSON que l'état (colonne EtatsManuels), dans
+// des clés distinctes : aucune colonne à créer, et `getDossiers` les renvoie déjà.
+//   note / collabs / noteePar / noteeLe  ≠  st / par / le
+// La note est une ANNOTATION, pas un état : elle ne touche ni la progression ni le
+// statut du dossier, et une entrée qui ne porte qu'une note ne « pilote » pas le
+// dossier (cf. _aEtatPose_). C'est ce qui permet de commenter une étape en la
+// laissant sous son pointage.
+function handleSetEtapeNote(data) {
+  if (!data || !data.id) return { ok:false, error:'id requis' };
+  const code = String(data.etapeCode || '');
+  if (ETAPES_PILOTABLES.indexOf(code) < 0) {
+    return { ok:false, error:'Étape inconnue : ' + code };
+  }
+  // Note bornée : la cellule EtatsManuels porte TOUT le pipeline et Sheets s'arrête
+  // à 50 000 caractères. 1 000 par étape laisse large sous la limite à dix étapes.
+  const note = String(data.note == null ? '' : data.note).trim().slice(0, 1000);
+  const collabs = Array.isArray(data.collabs)
+    ? data.collabs.map(function(c) { return String(c || '').trim(); })
+                  .filter(function(c, i, a) { return c && a.indexOf(c) === i; })
+                  .slice(0, 20)
+    : [];
+
+  const ss = getSS();
+  const sh = ss.getSheetByName(SHEET_DOSSIERS);
+  if (!sh) return { ok:false, error:'Feuille Dossiers introuvable' };
+  const lastRow = sh.getLastRow();
+  if (lastRow <= 1) return { ok:false, error:'Dossier introuvable' };
+  const match = sh.getRange(2, 1, lastRow - 1, 1)
+    .createTextFinder(String(data.id)).matchEntireCell(true).findNext();
+  if (!match) return { ok:false, error:'Dossier introuvable' };
+  const rowNum = match.getRow();
+
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(8000);
+    _ensureEtatsManuelsCol_(sh);
+    const etats = _etatsManuelsRow_(sh, rowNum);
+    const prev  = etats[code] || {};
+
+    if (!note && !collabs.length) {
+      // Plus rien à annoter : on retire l'entrée si elle ne portait que ça,
+      // sinon on ne vide que les clés d'annotation et l'état reste en place.
+      if (prev.st) etats[code] = { st:prev.st, par:prev.par || '', le:prev.le || '',
+                                   note:'', collabs:[], noteePar:'', noteeLe:'' };
+      else delete etats[code];
+    } else {
+      etats[code] = {
+        st:  prev.st  || '', par: prev.par || '', le: prev.le || '',
+        note: note, collabs: collabs,
+        noteePar: String(data.par || ''), noteeLe: new Date().toISOString()
+      };
+    }
+    // Format texte imposé : sans ça Sheets prendrait le JSON pour une formule.
+    sh.getRange(rowNum, COL_ETATS_MANUELS).setNumberFormat('@')
+      .setValue(Object.keys(etats).length ? JSON.stringify(etats) : '');
+
+    _logAction_('ETAPE_NOTE', data.par || 'frontend',
+      'Dossier ' + data.id + ' — ' + code + ' : ' +
+      (note ? 'note (' + note.length + ' car.)' : 'note effacée') +
+      (collabs.length ? ' · collaborateurs : ' + collabs.join(', ') : ''));
+    // Pas de recalcul de progression : une annotation ne change pas l'avancement.
+    return { ok:true, etatsManuels:etats };
+  } finally {
+    try { lock.releaseLock(); } catch(e) {}
+  }
 }
 
 // Marque (ou retire) la POSE SUR SITE sur un dossier. Porté par le dossier et non
@@ -2677,7 +2776,11 @@ function _cloreEtatsManuels_(sh, rowNum, par) {
   const etats = _etatsManuelsRow_(sh, rowNum);
   const le    = new Date().toISOString();
   ETAPES_ATELIER.concat(Object.keys(etats)).forEach(function(code) {
-    etats[code] = { st:'TERMINE', par:String(par || ''), le:le };
+    const prev = etats[code] || {};
+    // La clôture pose l'état, elle n'efface pas ce qui a été écrit sur l'étape.
+    etats[code] = { st:'TERMINE', par:String(par || ''), le:le,
+                    note:prev.note || '', collabs:prev.collabs || [],
+                    noteePar:prev.noteePar || '', noteeLe:prev.noteeLe || '' };
   });
   sh.getRange(rowNum, COL_ETATS_MANUELS).setNumberFormat('@').setValue(JSON.stringify(etats));
 }

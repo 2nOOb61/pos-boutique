@@ -97,7 +97,7 @@ function _purgeLocalPlainPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '232 · 2026-11-23';
+const APP_VERSION = '233 · 2026-11-23';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -9707,7 +9707,27 @@ function _etapeVerrouillee(d, code){
   return !!_etatManuel(d, code) || (_estEtapeAtelier(code) && _aEtatsManuels(d));
 }
 function _etatManuelMeta(d, code){ return _etatsManuels(d)[code] || null; }
-function _aEtatsManuels(d){ return Object.keys(_etatsManuels(d)).length > 0; }
+// ⚠️ Ne compter QUE les étapes qui portent un état réellement posé (`st`).
+// Une entrée peut n'avoir qu'une note ou des collaborateurs marqués : annoter une
+// étape ne doit pas faire basculer le dossier en « piloté » (ce qui ferait entrer
+// les étapes d'atelier dans son pipeline avec « à faire » par défaut et changerait
+// sa progression). Même règle que `_aEtatPose_` côté Code.gs.
+function _aEtatsManuels(d){
+  const em = _etatsManuels(d);
+  return Object.keys(em).some(k => em[k] && em[k].st);
+}
+
+// ── Annotation d'une étape : note libre + collaborateurs marqués ──────
+// Portées par la même entrée que l'état, dans des clés distinctes, donc lisibles
+// même sur une étape restée au pointage.
+function _etapeNote(d, code){ return String((_etatsManuels(d)[code] || {}).note || ''); }
+function _etapeCollabs(d, code){
+  const c = (_etatsManuels(d)[code] || {}).collabs;
+  return Array.isArray(c) ? c.filter(Boolean) : [];
+}
+function _aEtapeAnnotation(d, code){
+  return !!_etapeNote(d, code) || _etapeCollabs(d, code).length > 0;
+}
 function _etatManuelConf(st){ return ETATS_MANUELS.find(x => x.code === st) || null; }
 
 // ── INSTALLATION SUR SITE ──────────────────────────────────────────────
@@ -23433,6 +23453,177 @@ function _etatManuelDate(iso){
        + ' ' + d.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
 }
 
+// ══ NOTE + COLLABORATEURS MARQUÉS SUR UNE ÉTAPE ══════════════════════
+// Le pilotage ne disait que « où en est l'étape ». Il manquait le POURQUOI
+// (ce qui bloque, ce qui reste à faire) et le QUI pour les étapes d'atelier :
+// jamais pointées, elles n'ont pas d'opérateur attribué, donc la finition faite
+// à trois n'apparaissait nulle part. Les deux se posent ici, sur la même entrée
+// JSON que l'état (colonne EtatsManuels) mais dans des clés distinctes — donc
+// sans toucher à la progression et sans faire passer le dossier en « piloté ».
+// Lecture pour tout le monde, écriture pour l'admin et le chef d'atelier
+// (_peutPiloterEtapes), la même règle que les boutons d'état juste au-dessus.
+let pendingEtapeNote = null;
+
+function _etapeAnnotationHtml(d, code, etapeLabel, peut) {
+  const note    = _etapeNote(d, code);
+  const collabs = _etapeCollabs(d, code);
+  const meta    = _etatManuelMeta(d, code) || {};
+  const lblArg  = _pcokEsc(String(etapeLabel || code)).replace(/'/g, "\\'");
+  const bouton  = peut
+    ? `<button class="emanu-note-edit" title="Commenter cette étape et marquer les collaborateurs"
+         onclick="openEtapeNote('${d.id}','${code}','${lblArg}')">${note || collabs.length ? 'Modifier' : '+ Commenter'}</button>`
+    : '';
+  if (!note && !collabs.length) {
+    // Rien d'écrit : un simple lien, pas un bloc vide. Et rien du tout pour un
+    // rôle en lecture seule, qui n'a aucune action à y faire.
+    return peut ? `<div class="emanu-annot emanu-annot--empty">${bouton}</div>` : '';
+  }
+  const chips = collabs.length
+    ? `<div class="emanu-collabs">${collabs.map(c =>
+        `<span class="emanu-collab">${_pcokEsc(c)}</span>`).join('')}</div>`
+    : '';
+  const sig = meta.noteePar
+    ? `<div class="emanu-note-sig">${_pcokEsc(meta.noteePar)}${meta.noteeLe ? ' · ' + _etatManuelDate(meta.noteeLe) : ''}</div>`
+    : '';
+  return `<div class="emanu-annot">
+    <div class="emanu-annot-head">
+      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <span>Note d'étape</span>
+      ${bouton}
+    </div>
+    ${note ? `<div class="emanu-note-txt">${_pcokEsc(note)}</div>` : ''}
+    ${chips}
+    ${sig}
+  </div>`;
+}
+
+function openEtapeNote(dossierId, code, etapeLabel) {
+  if (!_peutPiloterEtapes()) {
+    showToast("Seul l'admin ou le responsable de production peut annoter une étape.", 'error');
+    return;
+  }
+  const d = _dossierParId(dossierId);
+  if (!d) { showToast('Dossier introuvable', 'error'); return; }
+  pendingEtapeNote = { dossierId, code, etapeLabel: etapeLabel || code };
+
+  const ctx = document.getElementById('etapeNoteContext');
+  if (ctx) ctx.textContent = `${d.numeroDossier || dossierId} — ${etapeLabel || code}`;
+  const ta = document.getElementById('etapeNoteText');
+  if (ta) ta.value = _etapeNote(d, code);
+  _renderEtapeCollabList(_etapeCollabs(d, code));
+  openModal('etapeNoteModal');
+  // Liste complète des comptes : la même source que l'attribution.
+  if (APPS_SCRIPT_URL) {
+    loadUsersFromScript()
+      .then(() => _renderEtapeCollabList(_etapeCollabs(_dossierParId(dossierId) || d, code)))
+      .catch(() => {});
+  }
+}
+
+function _renderEtapeCollabList(selected) {
+  const list = document.getElementById('etapeCollabList');
+  if (!list) return;
+  const sel   = (selected || []).map(x => String(x).trim().toLowerCase());
+  const users = localUsers.filter(u => u.actif !== false);
+  list.innerHTML = users.length ? users.map(u => {
+    const displayName = u.label || u.username;
+    const on = sel.includes(String(displayName).trim().toLowerCase());
+    return `
+    <label style="display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;font-size:13px;color:var(--color-text-primary);transition:background .12s" onmouseover="this.style.background='var(--color-primary-light)'" onmouseout="this.style.background=''">
+      <input type="checkbox" value="${displayName}" ${on ? 'checked' : ''} style="accent-color:var(--color-primary);width:15px;height:15px;flex-shrink:0;cursor:pointer">
+      <span>${displayName} <span style="color:var(--color-text-muted);font-size:11px">(${ROLE_LABELS[u.role] || u.role})</span></span>
+    </label>`;
+  }).join('')
+  : '<div style="color:var(--color-text-muted);font-size:13px;padding:12px">Aucun utilisateur actif</div>';
+}
+
+async function saveEtapeNote() {
+  if (!pendingEtapeNote) return;
+  const { dossierId, code, etapeLabel } = pendingEtapeNote;
+  const d = _dossierParId(dossierId);
+  if (!d) { showToast('Dossier introuvable', 'error'); return; }
+
+  const note    = (document.getElementById('etapeNoteText')?.value || '').trim().slice(0, 1000);
+  const collabs = [...document.querySelectorAll('#etapeCollabList input[type=checkbox]:checked')].map(c => c.value);
+  const par     = currentUser?.label || currentUser?.username || 'admin';
+
+  const avantNote    = _etapeNote(d, code);
+  const avantCollabs = _etapeCollabs(d, code);
+  if (note === avantNote && collabs.join('|') === avantCollabs.join('|')) {
+    closeModal('etapeNoteModal'); pendingEtapeNote = null; return;
+  }
+
+  // Écriture optimiste puis rollback si le serveur refuse — le même schéma que
+  // setEtapeManuelle, pour que l'atelier voie sa note tout de suite.
+  const avantEtats = _etatsManuels(d);
+  const etats = Object.assign({}, avantEtats);
+  const prev  = etats[code] || {};
+  if (!note && !collabs.length) {
+    if (prev.st) etats[code] = { ...prev, note:'', collabs:[], noteePar:'', noteeLe:'' };
+    else delete etats[code];
+  } else {
+    etats[code] = { st:prev.st || '', par:prev.par || '', le:prev.le || '',
+                    note, collabs, noteePar:par, noteeLe:new Date().toISOString() };
+  }
+  d.etatsManuels = etats;
+  _refreshEtapesUI(dossierId);
+
+  if (APPS_SCRIPT_URL) {
+    const req = { action:'setEtapeNote', id:dossierId, etapeCode:code, note, collabs, par };
+    let r = await apiCall(req).catch(() => null);
+    // Dossier encore absent du Sheet (créé en local) : on l'enregistre puis on réessaie.
+    if (r && !r.ok && /introuvable/i.test(String(r.error || ''))) {
+      await apiCall({ action:'saveDossier', dossier:d, createdBy:par }).catch(() => {});
+      r = await apiCall(req).catch(() => null);
+    }
+    if (!r || !r.ok) {
+      d.etatsManuels = avantEtats;
+      _refreshEtapesUI(dossierId);
+      showToast('Enregistrement impossible : ' + ((r && r.error) || 'réseau'), 'error');
+      return;
+    }
+    d.etatsManuels = r.etatsManuels || etats;
+  }
+
+  // Les collaborateurs nouvellement marqués sont prévenus : « marquer » quelqu'un
+  // sans qu'il le sache ne servirait à rien. Ceux déjà marqués ne le sont pas deux fois.
+  const nouveaux = collabs.filter(c => !avantCollabs.some(a => _sameOp(a, c)));
+  if (nouveaux.length) {
+    _addNotification({
+      dossierId,
+      numeroDossier: d.numeroDossier || dossierId,
+      etapeCode:     code,
+      etapeLabel,
+      operateur:     par,
+      message:       `${par} a marqué ${nouveaux.join(', ')} sur l'étape "${etapeLabel}" — dossier ${d.numeroDossier || dossierId}`
+    });
+  }
+  if (note && note !== avantNote) {
+    _addNotification({
+      dossierId,
+      numeroDossier: d.numeroDossier || dossierId,
+      etapeCode:     code,
+      etapeLabel,
+      operateur:     par,
+      message:       `${par} a noté sur "${etapeLabel}" : ${note.length > 90 ? note.slice(0, 90) + '…' : note} — dossier ${d.numeroDossier || dossierId}`
+    });
+  }
+
+  closeModal('etapeNoteModal');
+  pendingEtapeNote = null;
+  _refreshEtapesUI(dossierId);
+  showToast(note || collabs.length ? `Note enregistrée sur « ${etapeLabel} »` : `Note retirée de « ${etapeLabel} »`);
+}
+
+// Vide la note ET les marquages : saveEtapeNote lit ensuite des champs vides,
+// ce qui supprime l'annotation côté serveur.
+function clearEtapeNote() {
+  const ta = document.getElementById('etapeNoteText');
+  if (ta) ta.value = '';
+  document.querySelectorAll('#etapeCollabList input[type=checkbox]:checked').forEach(c => { c.checked = false; });
+  saveEtapeNote();
+}
+
 function _etapesManuellesHtml(dossierId){
   const d = _dossierParId(dossierId);
   if (!d) return '';
@@ -23461,7 +23652,11 @@ function _etapesManuellesHtml(dossierId){
       ? `<button class="emanu-clear" title="Retirer l'état manuel : l'étape repasse sous le pointage"
            onclick="setEtapeManuelle('${dossierId}','${code}','')">Retirer</button>`
       : '';
-    return `<div class="emanu-row${st ? ' emanu-row--on' : ''}">
+    // Note + collaborateurs marqués sur l'étape. Lecture pour tous (c'est de
+    // l'information d'atelier), écriture pour ceux qui pilotent. Le bloc ne prend
+    // de la place que s'il dit quelque chose : sinon un simple lien d'ajout.
+    const annot = _etapeAnnotationHtml(d, code, e.label, peut);
+    return `<div class="emanu-row${st || _aEtapeAnnotation(d, code) ? ' emanu-row--on' : ''}">
       <div class="emanu-head">
         <span class="emanu-num" style="background:${e.color||'#78716c'}18;color:${e.color||'#78716c'}">${i+1}</span>
         <span class="emanu-lbl" style="color:${e.color||'var(--color-text-primary)'}">${_pcokEsc(e.label)}</span>
@@ -23470,6 +23665,7 @@ function _etapesManuellesHtml(dossierId){
       </div>
       <div class="emanu-btns">${btns}</div>
       ${trace}
+      ${annot}
       ${code === 'LIVRE' ? _etapeLivraisonActions(d) : ''}
     </div>`;
   }).join('');
@@ -23607,8 +23803,17 @@ async function setEtapeManuelle(dossierId, code, statut){
   const avant = { etats: _etatsManuels(d), statut: d.statut, progression: d.progression };
 
   const etats = Object.assign({}, avant.etats);
-  if (statut) etats[code] = { st:statut, par:par, le:new Date().toISOString() };
-  else        delete etats[code];
+  // Note et collaborateurs vivent sur la même entrée que l'état mais n'en font pas
+  // partie : poser ou retirer un état ne doit pas effacer ce qui a été écrit sur
+  // l'étape. L'entrée n'est supprimée que si elle ne porte plus rien.
+  // ⇔ même règle que handleSetEtapeManuelle côté Code.gs.
+  const prevE = etats[code] || {};
+  const garde = { note:prevE.note || '', collabs:prevE.collabs || [],
+                  noteePar:prevE.noteePar || '', noteeLe:prevE.noteeLe || '' };
+  const aGarder = !!(String(garde.note).trim() || garde.collabs.length);
+  if (statut)      etats[code] = Object.assign({ st:statut, par:par, le:new Date().toISOString() }, garde);
+  else if (aGarder) etats[code] = Object.assign({ st:'', par:'', le:'' }, garde);
+  else              delete etats[code];
   d.etatsManuels = etats;
   d.progression  = _dossierPct(_tachesEff(d), d);
   _refreshEtapesUI(dossierId);
