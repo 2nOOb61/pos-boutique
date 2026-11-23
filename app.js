@@ -97,7 +97,7 @@ function _purgeLocalPlainPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '231 · 2026-10-28';
+const APP_VERSION = '232 · 2026-11-23';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
