@@ -283,6 +283,7 @@ function doPost(e) {
     else if (action === 'saveTacheLibre')    result = handleSaveTacheLibre(data);
     else if (action === 'setTacheLibrePhotos') result = handleSetTacheLibrePhotos(data);
     else if (action === 'attribuerTache')    result = handleAttribuerTache(data);
+    else if (action === 'changerOperateurTache') result = handleChangerOperateurTache(data);
     else if (action === 'getTaches')         result = handleGetTaches(data);
     else if (action === 'deleteTache')       result = handleDeleteTache(data);
     else if (action === 'deleteTachesDossier') result = handleDeleteTachesDossier(data);
@@ -361,6 +362,7 @@ function doGet(e) {
       else if (action === 'setEtapeManuelle')  result = handleSetEtapeManuelle(data);
       else if (action === 'setDossierInstallation') result = handleSetDossierInstallation(data);
       else if (action === 'attribuerTache')    result = handleAttribuerTache(data);
+      else if (action === 'changerOperateurTache') result = handleChangerOperateurTache(data);
       else if (action === 'pointerAction')     result = handlePointerAction(data);
       else if (action === 'deleteTache')       result = handleDeleteTache(data);
       else if (action === 'deleteTachesDossier') result = handleDeleteTachesDossier(data);
@@ -2756,6 +2758,81 @@ function handleAttribuerTache(data) {
   }
 }
 
+// ── Réaffectation d'une tâche déjà attribuée ────────
+// Change SEULEMENT la colonne Operateur (6) d'une tâche existante : l'ID, l'étape et
+// l'historique de pointage restent les mêmes. Deux usages, distingués par resetPointage :
+//   • passation de relais (opérateur absent en cours de route) → on garde le pointage,
+//     le nouvel opérateur reprend la tâche où elle en est ;
+//   • correction d'une erreur d'attribution → resetPointage:true remet la tâche à A_FAIRE
+//     et efface DateDebut/DateFin, puis recalcule la progression du dossier (sinon le
+//     dossier resterait figé sur l'avance d'une étape qui n'a en réalité pas été faite).
+// Refuse la réaffectation vers un opérateur déjà présent sur la même étape du même
+// dossier : deux lignes identiques compteraient l'étape deux fois dans la progression.
+function handleChangerOperateurTache(data) {
+  const tacheId = data && data.tacheId;
+  const nouveau = String((data && data.operateur) || '').trim();
+  if (!tacheId) return { ok:false, error:'tacheId requis' };
+  if (!nouveau) return { ok:false, error:'operateur requis' };
+
+  const ss = getSS();
+  const sh = ss.getSheetByName(SHEET_TACHES);
+  if (!sh || sh.getLastRow() <= 1) return { ok:false, error:'Tâche introuvable' };
+
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(8000);
+    const rows = sh.getDataRange().getValues();
+    let idx = -1;
+    for (let i = 1; i < rows.length; i++) {
+      if (String(rows[i][0]) === String(tacheId)) { idx = i; break; }
+    }
+    if (idx < 0) return { ok:false, error:'Tâche introuvable' };
+
+    const ancien    = String(rows[idx][5] || '');
+    const dossierId = String(rows[idx][1] || '');
+    const etapeCode = String(rows[idx][3] || '');
+
+    if (ancien.trim().toLowerCase() === nouveau.toLowerCase() && !data.resetPointage) {
+      return { ok:true, changed:false, ancien:ancien, operateur:ancien };
+    }
+    for (let i = 1; i < rows.length; i++) {
+      if (i === idx) continue;
+      if (String(rows[i][1]) !== dossierId) continue;
+      if (String(rows[i][3]) !== etapeCode) continue;
+      if (String(rows[i][5] || '').trim().toLowerCase() === nouveau.toLowerCase()) {
+        return { ok:false, error:nouveau + ' est déjà assigné à cette étape' };
+      }
+    }
+
+    sh.getRange(idx + 1, 6).setValue(nouveau);
+    // Équipe (col 16) : ne bouge que si le front l'envoie explicitement.
+    if (data.shift === 'Jour' || data.shift === 'Nuit') {
+      if (sh.getLastColumn() < 16) sh.getRange(1, 16).setValue('Equipe');
+      sh.getRange(idx + 1, 16).setValue(data.shift);
+    }
+    if (data.resetPointage) {
+      // Statut(7), DateDebut(9), DateFin(10) — DateAssignation(8) reste la trace de
+      // la première attribution, la réaffectation est journalisée à part.
+      sh.getRange(idx + 1, 7).setValue('A_FAIRE');
+      sh.getRange(idx + 1, 9, 1, 2).setValues([['', '']]);
+    }
+    if (data.commentaire != null) sh.getRange(idx + 1, 11).setValue(String(data.commentaire));
+
+    _logAction_('TACHE_REASSIGN', (data.assignePar || 'admin'),
+      'Tâche:' + tacheId + ' ' + (ancien || '(vide)') + ' → ' + nouveau +
+      ' (étape:' + etapeCode + ' dossier:' + dossierId + ')' +
+      (data.resetPointage ? ' [pointage remis à zéro]' : ''));
+
+    if (data.resetPointage && dossierId && dossierId !== 'LIBRE') {
+      majProgressionDossier_(ss, dossierId, etapeCode);
+    }
+    CacheService.getScriptCache().remove('dashboard_v1');
+    return { ok:true, changed:true, ancien:ancien, operateur:nouveau };
+  } finally {
+    try { lock.releaseLock(); } catch(e) {}
+  }
+}
+
 // ── Tâche libre (indépendante) — sync depuis app.js ────────
 function handleSaveTacheLibre(data) {
   const t = data.tache;
@@ -2942,14 +3019,29 @@ function handleGetTaches(data) {
 }
 
 function handleDeleteTache(data) {
-  const sh = getSS().getSheetByName(SHEET_TACHES);
+  const ss = getSS();
+  const sh = ss.getSheetByName(SHEET_TACHES);
   const rows = sh.getDataRange().getValues();
   for (let i = rows.length-1; i >= 1; i--) {
     if (rows[i][0]===data.id) {
+      const dossierId = String(rows[i][1] || '');
+      const etapeCode = String(rows[i][3] || '');
+      const operateur = String(rows[i][5] || '');
       // Nettoyer les fichiers Drive référencés par la tâche (photos des tâches libres)
       // AVANT de supprimer la ligne — sinon ils resteraient orphelins dans POS_PiecesJointes.
       _deleteTacheDriveFiles_(rows[i][14]);
       sh.deleteRow(i+1);
+      // Retirer un opérateur d'une étape change ce qui reste à faire : sans ce recalcul,
+      // le dossier restait figé sur l'avance que la tâche supprimée lui donnait (et une
+      // étape redevenue vide continuait à compter comme terminée). majProgressionDossier_
+      // ne touche rien si le dossier n'a plus aucune tâche (statut null).
+      if (dossierId && dossierId !== 'LIBRE') {
+        majProgressionDossier_(ss, dossierId, etapeCode);
+        _logAction_('TACHE_DELETE', (data.assignePar || data.operateur || 'admin'),
+          'Tâche:' + String(data.id) + ' ' + operateur + ' retiré de ' + etapeCode +
+          ' (dossier:' + dossierId + ')');
+      }
+      CacheService.getScriptCache().remove('dashboard_v1');
       return {ok:true};
     }
   }

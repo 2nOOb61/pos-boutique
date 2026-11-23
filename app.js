@@ -9606,6 +9606,7 @@ let taches = [];
 // tachesLibres est déclaré avant le bloc INIT (ligne ~4116) pour éviter la TDZ
 let selectedDossier = null;
 let pendingAttrib = null;
+let pendingReassign = null; // tâche en cours de réaffectation d'opérateur
 let _dossierView = 'list'; // 'list' | 'card'
 let pendingPointage = null;
 let prodFilter = 'TOUS';
@@ -16684,7 +16685,13 @@ function renderAttrPanel(tachesD, commentsD = []) {
               ? `<span class="prod-badge" style="background:var(--color-warning-bg);color:var(--color-warning)">En cours</span>`
               : `<span class="prod-badge" style="background:var(--color-info-bg);color:var(--color-info)">Assigné</span>`;
             const _name = (_seeAllOps || _sameOp(t.operateur, currentUser?.label)) ? t.operateur : 'Opérateur';
-            return `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:6px;margin-bottom:2px">${_name} ${badge}</span>`;
+            // Crayon : change l'opérateur de CETTE ligne de tâche (ou le retire).
+            // Seuls admin / chef d'atelier, et pas sur un dossier clôturé — même garde
+            // que le bouton « Assigner », puisque c'est la même décision.
+            const _pencil = (canAssign && !dossierClos)
+              ? `<button class="btn-attr-reassign" title="Modifier l'opérateur de cette étape" aria-label="Modifier l'opérateur" onclick="event.stopPropagation();openReassignOperateur('${t.id}')"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>`
+              : '';
+            return `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:6px;margin-bottom:2px">${_name} ${badge}${_pencil}</span>`;
           }).join('')
         : (dossierClos
             ? '<em style="color:var(--color-success)">Clôturé (sans attribution)</em>'
@@ -17225,6 +17232,160 @@ async function confirmAttribution() {
   if (allOk) showToast(`${checked.length} opérateur(s) assigné(s)`);
   closeModal('attribModal');
   selectDossier(selectedDossier.id);
+}
+
+// ══ MODIFIER L'OPÉRATEUR D'UNE TÂCHE DÉJÀ ATTRIBUÉE ═══════════════════
+// Jusqu'ici une attribution était définitive : pour corriger un nom il fallait
+// « Réinitialiser les tâches » du dossier entier (donc perdre le pointage des autres
+// étapes). On change ici la ligne de tâche en place — même ID, même étape — ce qui
+// suffit pour que la vue opérateur bascule d'un poste à l'autre au prochain polling.
+// Réservé (front) aux rôles qui peuvent attribuer : admin et chef d'atelier.
+function _peutReaffecterTache() {
+  return ['admin','chef_atelier'].includes(currentUser?.role || '');
+}
+
+function openReassignOperateur(tacheId) {
+  if (!_peutReaffecterTache()) { showToast("Réservé à l'admin et au chef d'atelier", 'error'); return; }
+  const t = taches.find(x => String(x.id) === String(tacheId));
+  if (!t) { showToast('Tâche introuvable', 'error'); return; }
+  pendingReassign = { tacheId: t.id, ancien: t.operateur, etapeCode: t.etapeCode,
+                      etapeLabel: t.etapeLabel || t.etapeCode, dossierId: t.dossierId,
+                      numeroDossier: t.numeroDossier, statut: t.statut };
+
+  const ctx = document.getElementById('reassignContextText');
+  if (ctx) ctx.textContent = `${t.numeroDossier || t.dossierId} — ${t.etapeLabel || t.etapeCode} · actuellement ${t.operateur}`;
+  const cmt = document.getElementById('reassignComment');
+  if (cmt) cmt.value = '';
+
+  // L'équipe déjà enregistrée sur la tâche, sinon celle de l'heure courante.
+  const _shift = (t.shift === 'Jour' || t.shift === 'Nuit') ? t.shift : _defaultShift();
+  document.querySelectorAll('#reassignShiftSel input[name=reassignShift]').forEach(r => { r.checked = (r.value === _shift); });
+
+  // Case « remettre l'étape à faire » : seulement si un pointage existe déjà — sur une
+  // tâche jamais démarrée il n'y a rien à effacer. Pré-cochée si l'étape est terminée :
+  // réaffecter une étape close sans effacer la fin créditerait le nouveau d'un travail
+  // qu'il n'a pas fait.
+  const aPointage = !!(t.dateDebut || t.dateFin || t.statut === 'EN_COURS' || t.statut === 'TERMINE');
+  const wrap = document.getElementById('reassignResetWrap');
+  const chk  = document.getElementById('reassignReset');
+  if (wrap) wrap.style.display = aPointage ? '' : 'none';
+  if (chk)  chk.checked = aPointage && t.statut === 'TERMINE';
+
+  _renderReassignUserList(t.operateur);
+  openModal('reassignModal');
+  if (APPS_SCRIPT_URL) {
+    loadUsersFromScript().then(() => _renderReassignUserList(t.operateur)).catch(() => {});
+  }
+}
+
+function _renderReassignUserList(current) {
+  const list = document.getElementById('reassignOpList');
+  if (!list) return;
+  const users = localUsers.filter(u => u.actif !== false);
+  list.innerHTML = users.length ? users.map(u => {
+    const displayName = u.label || u.username;
+    const isCur = _sameOp(displayName, current);
+    return `
+    <label style="display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;font-size:13px;color:var(--color-text-primary);transition:background .12s" onmouseover="this.style.background='var(--color-primary-light)'" onmouseout="this.style.background=''">
+      <input type="radio" name="reassignOp" value="${displayName}" ${isCur ? 'checked' : ''} style="accent-color:var(--color-primary);width:15px;height:15px;flex-shrink:0;cursor:pointer">
+      <span>${displayName} <span style="color:var(--color-text-muted);font-size:11px">(${ROLE_LABELS[u.role] || u.role})</span></span>
+      ${isCur ? '<span style="margin-left:auto;font-size:10px;font-weight:600;color:var(--color-text-muted);background:var(--color-bg);padding:2px 8px;border-radius:20px">actuel</span>' : ''}
+    </label>`;
+  }).join('')
+  : '<div style="color:var(--color-text-muted);font-size:13px;padding:12px">Aucun utilisateur actif</div>';
+}
+
+async function confirmReassign() {
+  if (!pendingReassign) return;
+  const pick = document.querySelector('#reassignOpList input[name=reassignOp]:checked');
+  if (!pick) { showToast('Sélectionnez un opérateur', 'error'); return; }
+  const nouveau = pick.value;
+  const reset   = !!document.getElementById('reassignReset')?.checked;
+  const shift   = document.querySelector('#reassignShiftSel input[name=reassignShift]:checked')?.value || _defaultShift();
+  const commentaire = document.getElementById('reassignComment')?.value || '';
+  const { tacheId, ancien, etapeLabel, etapeCode, dossierId, numeroDossier } = pendingReassign;
+
+  if (_sameOp(nouveau, ancien) && !reset) { closeModal('reassignModal'); return; }
+
+  // Doublon côté front : le serveur refuse aussi, mais autant le dire tout de suite.
+  const dejaLa = taches.some(x => String(x.id) !== String(tacheId) &&
+    x.dossierId === dossierId && x.etapeCode === etapeCode && _sameOp(x.operateur, nouveau));
+  if (dejaLa) { showToast(`${nouveau} est déjà assigné à cette étape`, 'error'); return; }
+
+  let r = { ok:true };
+  if (APPS_SCRIPT_URL) {
+    r = await apiCall({
+      action:        'changerOperateurTache',
+      tacheId,
+      operateur:     nouveau,
+      shift,
+      resetPointage: reset,
+      commentaire,
+      assignePar:    currentUser?.username || 'Admin'
+    });
+  }
+  if (!(r && r.ok)) { showToast(`Erreur : ${r?.error || 'inconnu'}`, 'error'); return; }
+
+  // Miroir local : la page Production et le tableau de bord lisent taches[] sans
+  // attendre le prochain getTaches.
+  const t = taches.find(x => String(x.id) === String(tacheId));
+  if (t) {
+    t.operateur = nouveau;
+    t.shift = shift;
+    if (commentaire) t.commentaire = commentaire;
+    if (reset) { t.statut = 'A_FAIRE'; t.dateDebut = ''; t.dateFin = ''; t.startTs = null; t.endTs = null; }
+    saveTaches();
+  }
+
+  _addNotification({
+    dossierId, numeroDossier,
+    etapeCode:  'ATTRIBUTION',
+    etapeLabel,
+    operateur:  currentUser?.label || 'Admin',
+    message:    `${currentUser?.label || 'Admin'} a changé l'opérateur de "${etapeLabel}" : ${ancien} → ${nouveau}${reset ? ' (étape remise à faire)' : ''} — ${numeroDossier}`
+  });
+
+  showToast(`${etapeLabel} : ${ancien} → ${nouveau}`);
+  closeModal('reassignModal');
+  pendingReassign = null;
+  if (selectedDossier?.id === dossierId) selectDossier(dossierId);
+  else if (typeof _refreshApresCloture === 'function') _refreshApresCloture(dossierId);
+}
+
+// Retire complètement l'opérateur de l'étape (supprime la ligne de tâche). Le backend
+// recalcule la progression du dossier : une étape redevenue vide ne compte plus comme
+// faite. Si c'était la seule tâche de l'étape, celle-ci repasse « Non assigné ».
+async function retirerOperateurTache() {
+  if (!pendingReassign) return;
+  const { tacheId, ancien, etapeLabel, dossierId, numeroDossier, statut } = pendingReassign;
+  const avert = (statut === 'EN_COURS' || statut === 'TERMINE')
+    ? `\n\nAttention : cette étape est ${statut === 'TERMINE' ? 'terminée' : 'en cours'} — le pointage sera perdu.`
+    : '';
+  if (!confirm(`Retirer ${ancien} de l'étape « ${etapeLabel} » ?${avert}`)) return;
+
+  let r = { ok:true };
+  if (APPS_SCRIPT_URL) {
+    r = await apiCall({ action:'deleteTache', id:tacheId,
+                        assignePar: currentUser?.username || 'Admin' });
+  }
+  if (!(r && r.ok)) { showToast(`Erreur : ${r?.error || 'inconnu'}`, 'error'); return; }
+
+  const i = taches.findIndex(x => String(x.id) === String(tacheId));
+  if (i >= 0) { taches.splice(i, 1); saveTaches(); }
+
+  _addNotification({
+    dossierId, numeroDossier,
+    etapeCode:  'ATTRIBUTION',
+    etapeLabel,
+    operateur:  currentUser?.label || 'Admin',
+    message:    `${currentUser?.label || 'Admin'} a retiré ${ancien} de "${etapeLabel}" — ${numeroDossier}`
+  });
+
+  showToast(`${ancien} retiré de « ${etapeLabel} »`);
+  closeModal('reassignModal');
+  pendingReassign = null;
+  if (selectedDossier?.id === dossierId) selectDossier(dossierId);
+  else if (typeof _refreshApresCloture === 'function') _refreshApresCloture(dossierId);
 }
 
 async function selfAssign(etapeCode, etapeLabel) {

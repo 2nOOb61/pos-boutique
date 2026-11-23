@@ -26,7 +26,7 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20261029-report-livraison">
+<link rel="stylesheet" href="./style.css?v=20261123-modif-operateur">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
@@ -100,6 +100,11 @@
 .etape-row-attr:last-child { border-bottom:none; }
 .btn-attr-assign { padding:5px 12px; border-radius:7px; background:var(--color-primary-light); color:var(--color-primary); border:1px solid rgba(26,74,58,.2); cursor:pointer; font-size:12px; font-weight:600; transition:.15s; white-space:nowrap; }
 .btn-attr-assign:hover { background:rgba(26,74,58,.15); }
+/* Crayon de réaffectation, collé au badge de statut de l'opérateur : discret au repos
+   (le nom reste l'information principale), orange FOREVER MG au survol. */
+.btn-attr-reassign { display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; padding:0; margin-left:2px; border:none; border-radius:5px; background:transparent; color:var(--color-text-muted); cursor:pointer; transition:.15s; flex-shrink:0; vertical-align:middle; }
+.btn-attr-reassign:hover { background:var(--color-secondary-light); color:var(--color-secondary); }
+.btn-attr-reassign:focus-visible { outline:2px solid var(--color-primary); outline-offset:1px; }
 .tache-row { display:flex; align-items:center; gap:14px; padding:14px 16px; background:var(--color-surface); border:1.5px solid var(--color-border); border-radius:12px; margin-bottom:8px; transition:border-color .15s; }
 .tache-row--encours { border-color:var(--color-warning); background:var(--color-warning-bg); }
 .tache-row--done { opacity:.55; }
@@ -189,6 +194,11 @@
 .etape-row-attr:last-child { border-bottom:none; }
 .btn-attr-assign { padding:5px 11px; border-radius:7px; background:var(--color-primary-light); color:var(--color-primary); border:1px solid rgba(26,74,58,.2); cursor:pointer; font-size:11px; font-weight:600; transition:.15s; white-space:nowrap; }
 .btn-attr-assign:hover { background:rgba(26,74,58,.15); }
+/* Crayon de réaffectation, collé au badge de statut de l'opérateur : discret au repos
+   (le nom reste l'information principale), orange FOREVER MG au survol. */
+.btn-attr-reassign { display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; padding:0; margin-left:2px; border:none; border-radius:5px; background:transparent; color:var(--color-text-muted); cursor:pointer; transition:.15s; flex-shrink:0; vertical-align:middle; }
+.btn-attr-reassign:hover { background:var(--color-secondary-light); color:var(--color-secondary); }
+.btn-attr-reassign:focus-visible { outline:2px solid var(--color-primary); outline-offset:1px; }
 
 /* ══ PATRON DASHBOARD ══ */
 .pdb-kpi-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:12px; margin-bottom:24px; }
@@ -4192,7 +4202,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20261029-report-livraison"></script>
+<script src="./app.js?v=20261123-modif-operateur"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
@@ -4226,6 +4236,52 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
         <button class="btn-logout" onclick="closeModal('attribModal')">Annuler</button>
         <button class="btn-login" style="width:auto;padding:12px 20px;margin-top:0" onclick="confirmAttribution()">Attribuer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL RÉAFFECTATION D'OPÉRATEUR -->
+  <div class="modal-overlay" id="reassignModal">
+    <div class="modal">
+      <div class="modal-title">
+        Modifier l'opérateur
+        <button class="modal-close" onclick="closeModal('reassignModal')">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div id="reassignContextText" style="padding:10px 12px;background:var(--color-primary-light);border-radius:8px;margin-bottom:16px;font-size:13px;color:var(--color-primary);font-weight:500"></div>
+      <div class="form-group">
+        <label>Nouvel opérateur <span style="font-weight:400;font-size:11px;color:var(--color-text-muted)">(un seul)</span></label>
+        <div id="reassignOpList" style="max-height:190px;overflow-y:auto;border:1px solid var(--color-border);border-radius:8px;padding:4px 0;background:#fff"></div>
+      </div>
+      <div class="form-group">
+        <label>Équipe</label>
+        <div id="reassignShiftSel" style="display:flex;gap:8px">
+          <label class="attrib-shift-opt" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;border:1px solid var(--color-border);border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;background:#fff">
+            <input type="radio" name="reassignShift" value="Jour" checked style="accent-color:var(--color-primary)"> Jour
+          </label>
+          <label class="attrib-shift-opt" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;border:1px solid var(--color-border);border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;background:#fff">
+            <input type="radio" name="reassignShift" value="Nuit" style="accent-color:var(--color-primary)"> Nuit
+          </label>
+        </div>
+      </div>
+      <div class="form-group" id="reassignResetWrap" style="display:none">
+        <label style="display:flex;align-items:flex-start;gap:9px;cursor:pointer;font-weight:500;text-transform:none;letter-spacing:0">
+          <input type="checkbox" id="reassignReset" style="accent-color:var(--color-secondary);width:15px;height:15px;margin-top:2px;flex-shrink:0;cursor:pointer">
+          <span style="font-size:13px;color:var(--color-text-primary)">Remettre l'étape à faire
+            <span style="display:block;font-size:11px;color:var(--color-text-muted);font-weight:400;margin-top:1px">Efface le pointage (début / fin) de l'opérateur précédent — à cocher si l'attribution était une erreur.</span>
+          </span>
+        </label>
+      </div>
+      <div class="form-group">
+        <label>Commentaire <span style="font-weight:400;text-transform:none">(optionnel)</span></label>
+        <input type="text" id="reassignComment" placeholder="Motif du changement...">
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;margin-top:20px">
+        <button class="btn-logout" style="color:var(--color-danger);border-color:rgba(220,38,38,.3)" onclick="retirerOperateurTache()">Retirer</button>
+        <div style="flex:1"></div>
+        <button class="btn-logout" onclick="closeModal('reassignModal')">Annuler</button>
+        <button class="btn-login" style="width:auto;padding:12px 20px;margin-top:0" onclick="confirmReassign()">Enregistrer</button>
       </div>
     </div>
   </div>

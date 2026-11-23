@@ -5,7 +5,7 @@
 //             ex. data mobile à quelques Ko/s) + mise à jour en arrière-plan.
 //             Cache First pour icônes/manifest.
 // ============================================================
-const CACHE_NAME = 'boutique-pos-v232';
+const CACHE_NAME = 'boutique-pos-v233';
 const OFFLINE_URL = './index.html';
 
 const STATIC_ASSETS = [
