@@ -26,7 +26,7 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20261123-note-etape">
+<link rel="stylesheet" href="./style.css?v=20261123-annul-dossier">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
@@ -1194,6 +1194,22 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 .emanu-collabs { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
 .emanu-collab { font-size:10px; font-weight:600; color:var(--color-primary); background:var(--color-primary-light); padding:2px 8px; border-radius:20px; }
 .emanu-note-sig { font-size:10px; color:var(--color-text-muted); margin-top:5px; }
+/* Abandon d'un dossier : bannière en tête du pilotage + bouton en pied. Rouge franc,
+   parce que c'est l'état qui invalide tout ce que le bloc affiche au-dessus. */
+.emanu--annule { border-color:rgba(220,38,38,.35); background:#fff7f7; }
+.emanu--annule .emanu-btns, .emanu--annule .emanu-row { opacity:.6; }
+.emanu-annule { margin:4px 0 10px; padding:8px 10px; background:var(--color-danger-bg); border:1px solid rgba(220,38,38,.3); border-radius:9px; }
+.emanu-annule-head { display:flex; align-items:center; gap:6px; font-size:11.5px; font-weight:800; color:var(--color-danger); }
+.emanu-annule-head svg { flex-shrink:0; }
+.emanu-annule-undo { margin-left:auto; background:none; border:none; padding:0; font-family:inherit; font-size:11px; font-weight:700; color:var(--color-danger); cursor:pointer; text-decoration:underline; }
+.emanu-annule-motif { font-size:11.5px; color:var(--color-text-primary); margin-top:5px; white-space:pre-wrap; word-break:break-word; }
+.emanu-annule-sig { font-size:10px; color:var(--color-text-secondary); margin-top:4px; }
+.emanu-annule-bar { margin-top:10px; padding-top:9px; border-top:1px solid var(--color-border); display:flex; justify-content:flex-end; }
+.emanu-annule-btn { display:inline-flex; align-items:center; gap:5px; padding:6px 12px; font-family:inherit; font-size:11.5px; font-weight:700; color:var(--color-danger); background:var(--color-surface); border:1px solid rgba(220,38,38,.3); border-radius:8px; cursor:pointer; transition:.15s; }
+.emanu-annule-btn:hover { background:var(--color-danger-bg); }
+/* Ligne d'un dossier abandonné dans la liste d'Attribution : présente mais en retrait. */
+.pcok-row--annule { opacity:.55; }
+.pcok-row--annule .pcok-client { text-decoration:line-through; }
 .emanu-liv { margin-top:8px; padding-top:8px; border-top:1px dashed var(--color-border); }
 .emanu-liv-head { display:flex; align-items:baseline; gap:6px; flex-wrap:wrap; font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; color:var(--color-text-muted); margin-bottom:6px; }
 .emanu-liv-head span { text-transform:none; letter-spacing:0; font-size:10.5px; font-weight:600; color:var(--color-text-secondary); }
@@ -4215,7 +4231,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20261123-note-etape"></script>
+<script src="./app.js?v=20261123-annul-dossier"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
@@ -4249,6 +4265,39 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
         <button class="btn-logout" onclick="closeModal('attribModal')">Annuler</button>
         <button class="btn-login" style="width:auto;padding:12px 20px;margin-top:0" onclick="confirmAttribution()">Attribuer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL ANNULATION DE DOSSIER -->
+  <div class="modal-overlay" id="annulDossierModal">
+    <div class="modal">
+      <div class="modal-title">
+        Annuler le dossier
+        <button class="modal-close" onclick="closeModal('annulDossierModal')">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div id="annulDossierContext" style="padding:10px 12px;background:var(--color-danger-bg);border-radius:8px;margin-bottom:16px;font-size:13px;color:var(--color-danger);font-weight:600"></div>
+      <div class="form-group">
+        <label>Raison de l'abandon</label>
+        <div id="annulSourceList" style="border:1px solid var(--color-border);border-radius:8px;background:#fff;overflow:hidden"></div>
+      </div>
+      <div class="form-group" id="annulSrcWrap" style="display:none">
+        <label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-weight:500;text-transform:none;letter-spacing:0">
+          <input type="checkbox" id="annulSrcAussi" style="accent-color:var(--color-danger);width:15px;height:15px;flex-shrink:0;cursor:pointer">
+          <span id="annulSrcLabel" style="font-size:13px;color:var(--color-text-primary)"></span>
+        </label>
+        <p style="font-size:11px;color:var(--color-text-muted);margin:4px 0 0 24px">Le stock des articles en catalogue est restitué et la vente passe à « Annulée » dans tout le POS.</p>
+      </div>
+      <div class="form-group">
+        <label>Motif <span style="font-weight:400;text-transform:none">(optionnel)</span></label>
+        <input type="text" id="annulMotif" maxlength="500" placeholder="Client s'est rétracté, doublon, erreur de saisie…">
+      </div>
+      <div id="annulDossierWarn" style="padding:9px 11px;background:var(--color-warning-bg);border-radius:8px;font-size:12px;color:#92400e;line-height:1.45"></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
+        <button class="btn-logout" onclick="closeModal('annulDossierModal')">Retour</button>
+        <button class="btn-login" style="width:auto;padding:12px 20px;margin-top:0;background:var(--color-danger)" onclick="confirmAnnulDossier()">Annuler le dossier</button>
       </div>
     </div>
   </div>

@@ -97,7 +97,7 @@ function _purgeLocalPlainPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '233 · 2026-11-23';
+const APP_VERSION = '234 · 2026-11-23';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -12304,9 +12304,11 @@ function _sviCommercialMap(){
 function _sviRows(){
   const idx = _tachesParDossier();
   const comm = _sviCommercialMap();
-  const rows = (Array.isArray(dossiers) ? dossiers : []).map(d => {
-    const r = _sviRow(d, idx); r.commercial = comm(d); return r;
-  });
+  const rows = (Array.isArray(dossiers) ? dossiers : [])
+    .filter(d => !_dossierAnnule(d))   // le suivi montre ce qui avance, pas ce qui est abandonné
+    .map(d => {
+      const r = _sviRow(d, idx); r.commercial = comm(d); return r;
+    });
   // Les commandes actives d'abord (plus récemment démarrées), les livrées à la fin.
   rows.sort((a,b) => (a.done?1:0) - (b.done?1:0) || (b.startMs||0) - (a.startMs||0));
   return rows;
@@ -14648,17 +14650,24 @@ function _buildAttrRow(d, idx) {
   const prio = d.priorite || 'Normale';
   const prioRank = prio === 'Urgente' ? 0 : prio === 'Haute' ? 1 : 2;
   const etapeIdx = ETAPES_CONFIG.findIndex(e => e.code === d.statut);
+  // L'Attribution est le SEUL écran qui garde les dossiers abandonnés : c'est de là
+  // qu'on les retrouve et qu'on les rétablit. Ils y portent donc un marqueur, et
+  // _attrMatch les sort des filtres de travail (à attribuer / en cours / retard).
+  const annule = _dossierAnnule(d);
   return {
     d, id: d.id, ref: d.numeroDossier || d.id, client: d.client || '—',
     produit: d.produit || '', quantite: d.quantite || '',
-    priorite: prio, prioRank, curStep, assigned, needsAssign,
-    pct, isDone, hasEnCours, taskRetard, ymd, days, deadlineLate,
+    priorite: prio, prioRank, curStep, assigned, needsAssign: needsAssign && !annule,
+    pct, isDone, hasEnCours: hasEnCours && !annule, taskRetard: taskRetard && !annule,
+    ymd, days, deadlineLate: deadlineLate && !annule, annule,
     etapeIdx: etapeIdx < 0 ? 99 : etapeIdx,
   };
 }
 
 function _attrMatch(r, k) {
   if (k === 'TOUS')        return true;
+  if (r.annule)            return k === 'ANNULE';   // visible seulement sous son propre onglet
+  if (k === 'ANNULE')      return false;
   if (k === 'A_ATTRIBUER') return r.needsAssign;
   if (k === 'EN_COURS')    return !r.isDone && r.hasEnCours;
   if (k === 'RETARD')      return !r.isDone && (r.deadlineLate || r.taskRetard);
@@ -14691,7 +14700,7 @@ function _renderAttrCockpit(list) {
   const page = filtered.slice(0, _attrLimit);
 
   const chips = [
-    ['TOUS','Tous'], ['A_ATTRIBUER','À attribuer'], ['EN_COURS','En cours'], ['RETARD','En retard'], ['TERMINE','Terminés']
+    ['TOUS','Tous'], ['A_ATTRIBUER','À attribuer'], ['EN_COURS','En cours'], ['RETARD','En retard'], ['TERMINE','Terminés'], ['ANNULE','Annulés']
   ].map(([k,lbl]) => `<button class="pcok-chip ${_attrFilter===k?'pcok-chip--active':''} ${(k==='A_ATTRIBUER'||k==='RETARD')?'pcok-chip--warn':''}" onclick="_attrSetFilter('${k}')">${lbl}<span class="pcok-chip-n">${cnt(k)}</span></button>`).join('');
   const sortOpts = [
     ['echeance','Échéance'], ['retard','Retard'], ['progression','Progression'], ['client','Client'], ['priorite','Priorité'], ['etape','Étape']
@@ -14854,10 +14863,13 @@ function _attrRow(r) {
   const prio = `<span class="pcok-prio" style="background:${prioC}" title="${r.priorite}"></span>`;
   const stC = r.curStep ? r.curStep.color : (r.isDone ? '#16a34a' : '#a8a29e');
   const stLbl = r.curStep ? (r.curStep.short || r.curStep.label) : (r.isDone ? 'Livré' : 'Créé');
-  const stepChip = `<span class="pcok-step" style="color:${stC};background:${stC}15;border-color:${stC}55">${_pcokEsc(stLbl)}</span>`;
+  const stepChip = r.annule
+    ? `<span class="pcok-step" style="color:#dc2626;background:#fee2e2;border-color:#dc262655">Abandonné</span>`
+    : `<span class="pcok-step" style="color:${stC};background:${stC}15;border-color:${stC}55">${_pcokEsc(stLbl)}</span>`;
   const ech = r.ymd ? new Date(r.ymd+'T00:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'}) : '—';
   let retC='#78716c', retTxt='—';
-  if (r.isDone)            { retC='#16a34a'; retTxt='Terminé'; }
+  if (r.annule)            { retC='#dc2626'; retTxt='Annulé'; }
+  else if (r.isDone)       { retC='#16a34a'; retTxt='Terminé'; }
   else if (r.days==null)  { retC = r.taskRetard?'#dc2626':'#a8a29e'; retTxt = r.taskRetard?'Retard':'—'; }
   else if (r.days<0)      { retC='#dc2626'; retTxt=`+${Math.abs(r.days)}j`; }
   else if (r.days===0)    { retC='#e8834a'; retTxt='Auj.'; }
@@ -14871,7 +14883,7 @@ function _attrRow(r) {
   const pctC = r.pct===100?'#16a34a':r.pct>0?'#e8834a':'#a8a29e';
   const prog = `<div class="pcok-prog"><div class="pcok-prog-bar"><div style="width:${r.pct}%;background:${pctC}"></div></div><span class="pcok-prog-n" style="color:${pctC}">${r.pct}%</span></div>`;
   const accent = r.isDone ? '' : r.needsAssign ? 'inset 3px 0 0 #e8834a' : (r.days!=null&&r.days<0) ? 'inset 3px 0 0 #dc2626' : r.hasEnCours ? 'inset 3px 0 0 #2563eb' : '';
-  const sel = selectedDossier?.id === r.id ? 'pcok-row--sel' : '';
+  const sel = (selectedDossier?.id === r.id ? 'pcok-row--sel' : '') + (r.annule ? ' pcok-row--annule' : '');
   const _dots = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>';
   // Menu << ... >> construit A LA DEMANDE (voir _attrKebab) : pre-generer un menu
   // par ligne representait 29 noeuds DOM et 70 % du HTML de chaque ligne.
@@ -15028,6 +15040,7 @@ function renderBlocages() {
   if (!container) return;
   const _idxBl = _tachesParDossier();
   const base = (Array.isArray(dossiers) ? dossiers : [])
+    .filter(d => !_dossierAnnule(d))   // abandonné ≠ bloqué : rien à débloquer dessus
     .map(d => _buildAttrRow(d, _idxBl))
     .map(_buildBlocRow)
     // Un blocage = dossier non terminé ET (échéance dépassée OU délai interne dépassé OU non attribué)
@@ -22754,13 +22767,20 @@ function _pcokEsc(v){ return String(v==null?'':v).replace(/[&<>"]/g,c=>({'&':'&a
 // Une ligne par dossier ayant des tâches (hors LIBRE), avec toutes les
 // métriques d'affichage/tri. Source = tâches fusionnées + méta dossier.
 function _buildDossierRows() {
-  const merged = _allTachesMerged().filter(t => t.dossierId && t.dossierId !== 'LIBRE');
+  // Dossiers abandonnés écartés d'entrée : le cockpit, le Tableau, les Blocages et
+  // le Suivi en vivent, et un dossier annulé n'est plus de la charge d'atelier. Ses
+  // tâches ouvertes ont déjà été retirées ; seules ses tâches TERMINÉES subsistent, et
+  // sans ce filtre elles le feraient réapparaître comme un dossier en cours.
+  const annules = new Set((Array.isArray(dossiers) ? dossiers : [])
+    .filter(d => _dossierAnnule(d)).map(d => String(d.id)));
+  const merged = _allTachesMerged()
+    .filter(t => t.dossierId && t.dossierId !== 'LIBRE' && !annules.has(String(t.dossierId)));
   const byDossier = {};
   merged.forEach(t => { (byDossier[t.dossierId] = byDossier[t.dossierId] || []).push(t); });
   // Un dossier dont le responsable a posé un état d'étape entre dans le cockpit même
   // sans aucune tâche attribuée : c'est justement le cas « piloté à la main ».
   (Array.isArray(dossiers) ? dossiers : []).forEach(d => {
-    if (d && d.id && !byDossier[d.id] && _aEtatsManuels(d)) byDossier[d.id] = [];
+    if (d && d.id && !byDossier[d.id] && _aEtatsManuels(d) && !_dossierAnnule(d)) byDossier[d.id] = [];
   });
 
   return Object.entries(byDossier).map(([dossierId, dt0]) => {
@@ -23624,10 +23644,233 @@ function clearEtapeNote() {
   saveEtapeNote();
 }
 
+// ══ ABANDON D'UN DOSSIER ════════════════════════════════════════════
+// Deux situations, une seule mécanique : la commande a été annulée par le client,
+// ou l'atelier arrête la production du dossier. Dans les deux cas le dossier sort
+// des écrans actifs et ses tâches ouvertes disparaissent des postes opérateurs.
+// L'abandon est un MARQUEUR porté par le dossier (col Annulation), pas un statut :
+// la colonne Statut est recalculée d'après les tâches à chaque pointage, un
+// « ANNULE » écrit là ne tiendrait pas. ⇔ même modèle que Code.gs.
+let pendingAnnulDossier = null;
+
+function _dossierAnnulation(d) {
+  const a = d && d.annulation;
+  if (!a) return null;
+  if (typeof a === 'string') { try { return JSON.parse(a) || null; } catch(e) { return null; } }
+  return (a && a.on) ? a : null;
+}
+function _dossierAnnule(d) { return !!_dossierAnnulation(d); }
+// Qui peut abandonner un dossier : les mêmes que le pilotage des étapes.
+function _peutAnnulerDossier() { return ['admin','chef_atelier'].includes(currentUser?.role); }
+
+const _ANNUL_SOURCES = [
+  ['COMMANDE',   'La commande a été annulée',
+   'Le client a annulé sa commande — la production n\'a plus d\'objet.'],
+  ['PRODUCTION', 'Arrêter la production du dossier',
+   'L\'atelier arrête ce dossier (impossible à produire, doublon, erreur de saisie…). La commande, elle, peut tenir.'],
+];
+
+// Bandeau affiché en tête du Pilotage des étapes quand le dossier est abandonné :
+// il doit se voir avant les boutons d'état, qui n'ont plus de sens.
+function _dossierAnnuleBanniereHtml(d) {
+  const a = _dossierAnnulation(d);
+  if (!a) return '';
+  const quoi = a.source === 'COMMANDE' ? 'Commande annulée' : 'Production arrêtée';
+  const peut = _peutAnnulerDossier();
+  return `<div class="emanu-annule">
+    <div class="emanu-annule-head">
+      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+      <span>Dossier abandonné — ${quoi}</span>
+      ${peut ? `<button class="emanu-annule-undo" onclick="retablirDossier('${d.id}')">Rétablir</button>` : ''}
+    </div>
+    ${a.motif ? `<div class="emanu-annule-motif">${_pcokEsc(a.motif)}</div>` : ''}
+    <div class="emanu-annule-sig">${_pcokEsc(a.par || '—')}${a.le ? ' · ' + _etatManuelDate(a.le) : ''}</div>
+  </div>`;
+}
+
+// Bouton d'abandon, en pied du bloc Pilotage. Absent si le dossier est déjà
+// abandonné (la bannière porte alors « Rétablir »).
+function _dossierAnnuleBoutonHtml(d) {
+  if (!_peutAnnulerDossier() || _dossierAnnule(d)) return '';
+  return `<div class="emanu-annule-bar">
+    <button class="emanu-annule-btn" onclick="openAnnulDossier('${d.id}')">
+      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+      Annuler le dossier
+    </button>
+  </div>`;
+}
+
+function openAnnulDossier(dossierId) {
+  if (!_peutAnnulerDossier()) {
+    showToast("Seul l'admin ou le responsable de production peut annuler un dossier.", 'error');
+    return;
+  }
+  const d = _dossierParId(dossierId);
+  if (!d) { showToast('Dossier introuvable', 'error'); return; }
+  if (_dossierAnnule(d)) { showToast('Dossier déjà abandonné', 'info'); return; }
+  pendingAnnulDossier = { dossierId };
+
+  const src = _dossierSourceLiv(d);
+  const ctx = document.getElementById('annulDossierContext');
+  if (ctx) ctx.textContent = `${d.numeroDossier || dossierId}${src ? ' — ' + src.ref : ''} · ${d.client || d.clientName || 'Client'}`;
+
+  // Choix de la raison : c'est elle qui décide si la commande suit ou non.
+  const host = document.getElementById('annulSourceList');
+  if (host) host.innerHTML = _ANNUL_SOURCES.map(([code, label, aide], i) => `
+    <label style="display:flex;align-items:flex-start;gap:9px;padding:10px 12px;cursor:pointer;border-bottom:1px solid var(--color-border);text-transform:none;letter-spacing:0;font-weight:400">
+      <input type="radio" name="annulSource" value="${code}" ${i === 0 ? 'checked' : ''}
+        onchange="_majAnnulSourceUI()" style="accent-color:var(--color-primary);width:15px;height:15px;margin-top:2px;flex-shrink:0;cursor:pointer">
+      <span><span style="font-size:13px;font-weight:600;color:var(--color-text-primary)">${label}</span>
+      <span style="display:block;font-size:11px;color:var(--color-text-muted);margin-top:1px">${aide}</span></span>
+    </label>`).join('');
+
+  const mot = document.getElementById('annulMotif');
+  if (mot) mot.value = '';
+
+  // Nombre de tâches ouvertes : l'avertissement doit être chiffré, pas vague.
+  const ouvertes = (Array.isArray(taches) ? taches : [])
+    .filter(t => t.dossierId === dossierId && t.statut !== 'TERMINE').length;
+  const finies = (Array.isArray(taches) ? taches : [])
+    .filter(t => t.dossierId === dossierId && t.statut === 'TERMINE').length;
+  const warn = document.getElementById('annulDossierWarn');
+  const _nTache = (n, sing, plur) => n > 1 ? `${n} ${plur}` : `${n} ${sing}`;
+  const _gardees = finies
+    ? ` ${_nTache(finies, 'tâche déjà terminée reste', 'tâches déjà terminées restent')} au compte de ceux qui les ont faites.`
+    : '';
+  if (warn) warn.innerHTML = ouvertes
+    ? `${_nTache(ouvertes, 'tâche encore ouverte sera retirée', 'tâches encore ouvertes seront retirées')} des postes opérateurs.${_gardees}`
+    : (finies ? `Aucune tâche ouverte.${_gardees}`
+              : 'Aucune tâche attribuée sur ce dossier.');
+
+  _majAnnulSourceUI();
+  openModal('annulDossierModal');
+}
+
+// La case « annuler aussi la commande » n'a de sens que si une commande est
+// réellement liée au dossier, et elle est cochée d'office quand la raison de
+// l'abandon EST l'annulation de la commande.
+function _majAnnulSourceUI() {
+  if (!pendingAnnulDossier) return;
+  const d   = _dossierParId(pendingAnnulDossier.dossierId);
+  const src = d ? _dossierSourceLiv(d) : null;
+  const code = document.querySelector('#annulSourceList input[name=annulSource]:checked')?.value || 'PRODUCTION';
+  const wrap = document.getElementById('annulSrcWrap');
+  const chk  = document.getElementById('annulSrcAussi');
+  const lbl  = document.getElementById('annulSrcLabel');
+  if (!wrap || !chk) return;
+  if (!src) { wrap.style.display = 'none'; chk.checked = false; return; }
+  wrap.style.display = '';
+  if (lbl) lbl.textContent = `Annuler aussi ${src.kind === 'reservation' ? 'la réservation' : 'la commande'} ${src.ref}`;
+  chk.checked = (code === 'COMMANDE');
+}
+
+async function confirmAnnulDossier() {
+  if (!pendingAnnulDossier) return;
+  const { dossierId } = pendingAnnulDossier;
+  const d = _dossierParId(dossierId);
+  if (!d) { showToast('Dossier introuvable', 'error'); return; }
+
+  const source = document.querySelector('#annulSourceList input[name=annulSource]:checked')?.value || 'PRODUCTION';
+  const motif  = (document.getElementById('annulMotif')?.value || '').trim().slice(0, 500);
+  const aussi  = !!document.getElementById('annulSrcAussi')?.checked;
+  const par    = currentUser?.label || currentUser?.username || 'admin';
+
+  let r = { ok:true, annulation:{ on:true, par, le:new Date().toISOString(), motif, source } };
+  if (APPS_SCRIPT_URL) {
+    const req = { action:'annulerDossier', id:dossierId, par, motif, source };
+    r = await apiCall(req).catch(() => null);
+    if (r && !r.ok && /introuvable/i.test(String(r.error || ''))) {
+      await apiCall({ action:'saveDossier', dossier:d, createdBy:par }).catch(() => {});
+      r = await apiCall(req).catch(() => null);
+    }
+    if (!r || !r.ok) { showToast('Annulation impossible : ' + ((r && r.error) || 'réseau'), 'error'); return; }
+  }
+
+  // Miroir local : marqueur + retrait des tâches ouvertes, comme le serveur.
+  d.annulation = r.annulation || { on:true, par, le:new Date().toISOString(), motif, source };
+  const avant = taches.length;
+  taches = taches.filter(t => !(t.dossierId === dossierId && t.statut !== 'TERMINE'));
+  if (taches.length !== avant) saveTaches();
+
+  // Propagation à la vente d'origine, si l'utilisateur l'a demandé. On passe par
+  // _applyCommandeCancel / cancelReservation plutôt que de réécrire le statut ici :
+  // ce sont eux qui restituent le stock, synchronisent le Sheet et préviennent.
+  let srcTxt = '';
+  if (aussi) {
+    const src = _dossierSourceLiv(d);
+    if (src && src.kind === 'commande') {
+      const c = (Array.isArray(commandes) ? commandes : []).find(x => String(x.id) === String(src.id));
+      if (c && c.status === 'pending') { _applyCommandeCancel(c); srcTxt = ` · ${src.ref} annulée`; }
+    } else if (src && src.kind === 'reservation') {
+      const res = (Array.isArray(reservations) ? reservations : []).find(x => String(x.id) === String(src.id));
+      if (res && res.status === 'pending') {
+        // Même traitement que cancelReservation, sans sa confirmation : l'utilisateur
+        // vient de confirmer l'abandon du dossier, on ne lui redemande pas.
+        (Array.isArray(res.items) ? res.items : []).forEach(item => {
+          if (item.custom) return;
+          const prod = products.find(pr => pr.name === item.name);
+          if (prod) prod.stock = (prod.stock || 0) + (Number(item.qty) || 0);
+        });
+        res.status = 'cancelled';
+        saveData();
+        try { renderProducts(); renderStockTable(); renderReservations(); updateResBadge(); } catch(e) {}
+        try { syncReservationCompleteToSheets(res); } catch(e) {}
+        srcTxt = ` · ${src.ref} annulée`;
+      }
+    }
+  }
+
+  _addNotification({
+    dossierId,
+    numeroDossier: d.numeroDossier || dossierId,
+    etapeCode:     'ANNULE',
+    etapeLabel:    source === 'COMMANDE' ? 'Commande annulée' : 'Production arrêtée',
+    operateur:     par,
+    message:       `${par} a abandonné le dossier ${d.numeroDossier || dossierId}${motif ? ' : ' + motif : ''}${srcTxt}`
+  });
+  logActivity('DOSSIER_ANNULE', `${d.numeroDossier || dossierId} — ${source}${motif ? ' : ' + motif : ''}`);
+
+  closeModal('annulDossierModal');
+  pendingAnnulDossier = null;
+  _refreshApresCloture(dossierId);
+  showToast(`Dossier ${d.numeroDossier || dossierId} abandonné${srcTxt}`);
+}
+
+// Rétablit un dossier abandonné. Les tâches ouvertes supprimées ne reviennent pas :
+// il faut les réattribuer, et le message le dit pour éviter la mauvaise surprise.
+async function retablirDossier(dossierId) {
+  if (!_peutAnnulerDossier()) { showToast("Réservé à l'admin et au responsable de production", 'error'); return; }
+  const d = _dossierParId(dossierId);
+  if (!d || !_dossierAnnule(d)) return;
+  if (!confirm('Rétablir ce dossier ?\n\nLes tâches ouvertes retirées à l\'annulation ne reviennent pas : il faudra les réattribuer.')) return;
+
+  const par = currentUser?.label || currentUser?.username || 'admin';
+  if (APPS_SCRIPT_URL) {
+    const r = await apiCall({ action:'annulerDossier', id:dossierId, par, retablir:true }).catch(() => null);
+    if (!r || !r.ok) { showToast('Rétablissement impossible : ' + ((r && r.error) || 'réseau'), 'error'); return; }
+  }
+  d.annulation = null;
+  _addNotification({
+    dossierId,
+    numeroDossier: d.numeroDossier || dossierId,
+    etapeCode:     'ANNULE',
+    etapeLabel:    'Dossier rétabli',
+    operateur:     par,
+    message:       `${par} a rétabli le dossier ${d.numeroDossier || dossierId} — tâches à réattribuer`
+  });
+  logActivity('DOSSIER_RETABLI', String(d.numeroDossier || dossierId));
+  _refreshApresCloture(dossierId);
+  showToast('Dossier rétabli — pensez à réattribuer les étapes');
+}
+
 function _etapesManuellesHtml(dossierId){
   const d = _dossierParId(dossierId);
   if (!d) return '';
-  const peut   = _peutPiloterEtapes();
+  // Dossier abandonné : les boutons d'état et d'annotation sont neutralisés. Son
+  // avancement est figé côté serveur (majProgressionDossier_ sort sur le marqueur),
+  // les laisser actifs ferait croire à un pilotage qui ne serait jamais enregistré.
+  const annule = _dossierAnnule(d);
+  const peut   = _peutPiloterEtapes() && !annule;
   const pilote = _aEtatsManuels(d);
   const lignes = ETAPES_PILOTABLES.map((code, i) => {
     const e    = ETAPES_CONFIG.find(x => x.code === code) || { code, label:code, short:code };
@@ -23669,16 +23912,19 @@ function _etapesManuellesHtml(dossierId){
       ${code === 'LIVRE' ? _etapeLivraisonActions(d) : ''}
     </div>`;
   }).join('');
-  const note = !peut
+  const note = annule
+    ? "Dossier abandonné — son avancement est figé."
+    : !peut
     ? "États posés par l'admin ou le responsable de production."
     : _dossierClosed(d)
       ? 'Dossier livré — une correction rouvre son avancement.'
       : "Posez l'état de n'importe quelle étape : il remplace le pointage et met à "
         + "jour tout le système. Recliquez-le pour rendre l'étape au pointage.";
-  return `<div class="emanu">
+  return `<div class="emanu${annule ? ' emanu--annule' : ''}">
     <div class="emanu-title">Pilotage des étapes</div>
-    <div class="emanu-note">${note}</div>
+    ${annule ? _dossierAnnuleBanniereHtml(d) : `<div class="emanu-note">${note}</div>`}
     ${lignes}
+    ${_dossierAnnuleBoutonHtml(d)}
   </div>`;
 }
 

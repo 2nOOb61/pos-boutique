@@ -59,7 +59,7 @@ const MACHINE_HEADERS  = ['ID','Machine','RefType','RefID','RefLabel','Client','
 // feuille déjà en place.
 const DOSSIER_HEADERS = ['ID','NumeroDossier','Client','Produit','Quantite','Statut',
   'Progression','DateCreation','DateLivraison','Priorite','SourceVente','Notes',
-  'ClientPrevenuLe','ClientPrevenuPar','EtatsManuels','Installation'];
+  'ClientPrevenuLe','ClientPrevenuPar','EtatsManuels','Installation','Annulation'];
 
 // Feuille Finitions : fiche d'atelier de l'étape FINITION (traçabilité seule pour
 // l'instant — pas de déduction de stock). Une ligne par dossier (upsert sur ID).
@@ -127,6 +127,13 @@ const COL_ETATS_MANUELS     = 15;   // col O de la feuille Dossiers
 // livraison simple ne vaut pas installation.
 const COL_INSTALLATION      = 16;   // col P de la feuille Dossiers
 
+// Col Q = Annulation : le dossier est ABANDONNé — commande annulée par le client,
+// ou production arrêtée. Marqueur dédié et NON un statut : la colonne Statut est
+// recalculée d'après les tâches à chaque pointage (_computeDossierProgress_), donc
+// un « ANNULE » écrit là serait effacé au premier recalcul venu. Le marqueur, lui,
+// survit, et c'est lui qui fait sortir le dossier des vues actives.
+const COL_ANNULATION        = 17;   // col Q de la feuille Dossiers
+
 // Crée la colonne EtatsManuels sur les classeurs antérieurs (14 colonnes).
 function _ensureEtatsManuelsCol_(sh) {
   if (sh.getLastColumn() < COL_ETATS_MANUELS) {
@@ -139,6 +146,38 @@ function _ensureInstallationCol_(sh) {
   if (sh.getLastColumn() < COL_INSTALLATION) {
     sh.getRange(1, COL_INSTALLATION).setValue('Installation');
   }
+}
+
+// Crée la colonne Annulation sur les classeurs antérieurs (16 colonnes).
+function _ensureAnnulationCol_(sh) {
+  if (sh.getLastColumn() < COL_ANNULATION) {
+    sh.getRange(1, COL_ANNULATION).setValue('Annulation');
+  }
+}
+
+// Cellule Annulation -> { on, par, le, motif, source } ou null si le dossier est actif.
+// `source` dit d'où vient l'abandon : 'COMMANDE' (la vente a été annulée) ou
+// 'PRODUCTION' (l'atelier arrête le dossier) — les deux cas n'ont pas le même sens
+// pour le commercial, qui doit savoir si la commande tient toujours.
+function _annulationFromCell_(cell) {
+  if (cell === true) return { on:true, par:'', le:'', motif:'', source:'' };
+  const raw = String(cell == null ? '' : cell).trim();
+  if (!raw) return null;
+  if (raw.charAt(0) !== '{') {
+    const up = raw.toUpperCase();
+    return (up === 'OUI' || up === 'TRUE' || up === 'ANNULE')
+      ? { on:true, par:'', le:'', motif:'', source:'' } : null;
+  }
+  try {
+    const o = JSON.parse(raw);
+    return (o && o.on) ? o : null;
+  } catch (e) { return null; }
+}
+
+// Dossier abandonné ? Lecture directe d'une ligne déjà localisée.
+function _dossierAnnuleRow_(sh, rowNum) {
+  if (sh.getLastColumn() < COL_ANNULATION) return null;
+  return _annulationFromCell_(sh.getRange(rowNum, COL_ANNULATION).getValue());
 }
 
 // Cellule Installation -> { on, par, le, note } ou null quand aucune pose n'est
@@ -288,6 +327,7 @@ function doPost(e) {
     else if (action === 'saveDossier')       result = handleSaveDossier(data);
     else if (action === 'updateDossier')     result = handleUpdateDossier(data);
     else if (action === 'cloturerDossier')   result = handleCloturerDossier(data);
+    else if (action === 'annulerDossier')    result = handleAnnulerDossier(data);
     else if (action === 'setEtapeManuelle')  result = handleSetEtapeManuelle(data);
     else if (action === 'setEtapeNote')      result = handleSetEtapeNote(data);
     else if (action === 'setDossierInstallation') result = handleSetDossierInstallation(data);
@@ -371,6 +411,7 @@ function doGet(e) {
       else if (action === 'addArretCaisse')    result = handleAddArretCaisse(data);
       else if (action === 'updateDossier')     result = handleUpdateDossier(data);
       else if (action === 'cloturerDossier')   result = handleCloturerDossier(data);
+      else if (action === 'annulerDossier')    result = handleAnnulerDossier(data);
       else if (action === 'setEtapeManuelle')  result = handleSetEtapeManuelle(data);
       else if (action === 'setEtapeNote')      result = handleSetEtapeNote(data);
       else if (action === 'setDossierInstallation') result = handleSetDossierInstallation(data);
@@ -2445,7 +2486,7 @@ function handleGetDossiers(data) {
   const nRows  = lastRow - start + 1;
   // 12 colonnes historiques + les 2 du « client prévenu » et les états manuels
   // d'étapes quand le classeur les a déjà.
-  const nCols  = Math.max(12, Math.min(sh.getLastColumn(), COL_INSTALLATION));
+  const nCols  = Math.max(12, Math.min(sh.getLastColumn(), COL_ANNULATION));
   const rows   = sh.getRange(start, 1, nRows, nCols).getValues();
 
   let list   = [];
@@ -2458,7 +2499,8 @@ function handleGetDossiers(data) {
       dateCreation:dc, dateLivraison:dl, priorite:r[9], sourceVente:r[10], notes:r[11],
       clientPrevenuLe: _prevenuIso_(r[12]), clientPrevenuPar: r[13] ? String(r[13]) : '',
       etatsManuels: _etatsManuelsFromCell_(r[COL_ETATS_MANUELS - 1]),
-      installation: _installationFromCell_(r[COL_INSTALLATION - 1]) });
+      installation: _installationFromCell_(r[COL_INSTALLATION - 1]),
+      annulation:   _annulationFromCell_(r[COL_ANNULATION - 1]) });
   }
 
   if (data && data.statut && data.statut !== 'TOUS') {
@@ -2765,6 +2807,91 @@ function handleSetDossierInstallation(data) {
     'Dossier ' + data.id + ' — ' + (on ? ('pose sur site' + (val.note ? ' : ' + val.note : '')) : 'pose retirée'));
   CacheService.getScriptCache().remove('dashboard_v1');
   return { ok:true, installation: val };
+}
+
+// ══ ABANDON D'UN DOSSIER ═══════════════════════════════════
+// Deux situations, une seule mécanique :
+//   • source 'COMMANDE'   — le client a annulé la vente, la production n'a plus d'objet ;
+//   • source 'PRODUCTION' — l'atelier arrête le dossier (impossible à produire, doublon…)
+//     alors que la commande, elle, peut tenir.
+// L'abandon est un MARQUEUR (col Annulation), pas un statut : la colonne Statut est
+// recalculée d'après les tâches à chaque pointage, un « ANNULE » écrit là ne tiendrait
+// pas. majProgressionDossier_ et handleRecalcProgression sortent dès qu'ils voient le
+// marqueur : l'avancement reste figé dans l'état où l'abandon l'a trouvé.
+//
+// Les tâches NON TERMINÉES sont supprimées — c'est ce qui fait disparaître le dossier
+// des écrans d'atelier (operateur.html reconstruit ses listes à chaque getTaches).
+// Les tâches TERMINÉES restent : le travail déjà fait a eu lieu, il doit rester au
+// compte de l'opérateur qui l'a fait. On ne les passe PAS à TERMINE en bloc comme le
+// fait la clôture : un abandon ne crédite personne d'un travail qui n'aura pas lieu.
+function handleAnnulerDossier(data) {
+  if (!data || !data.id) return { ok:false, error:'id requis' };
+  const ss = getSS();
+  const sh = ss.getSheetByName(SHEET_DOSSIERS);
+  if (!sh) return { ok:false, error:'Feuille Dossiers introuvable' };
+  const lastRow = sh.getLastRow();
+  if (lastRow <= 1) return { ok:false, error:'Dossier introuvable' };
+  const match = sh.getRange(2, 1, lastRow - 1, 1)
+    .createTextFinder(String(data.id)).matchEntireCell(true).findNext();
+  if (!match) return { ok:false, error:'Dossier introuvable' };
+  const rowNum = match.getRow();
+
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(8000);
+    _ensureAnnulationCol_(sh);
+
+    // ── Rétablissement ──
+    if (data.retablir) {
+      const avant = _dossierAnnuleRow_(sh, rowNum);
+      if (!avant) return { ok:true, annulation:null, retabli:false };
+      sh.getRange(rowNum, COL_ANNULATION).setNumberFormat('@').setValue('');
+      // Les tâches supprimées ne reviennent pas : il faut les réattribuer. On
+      // recalcule donc l'avancement sur ce qu'il reste réellement.
+      majProgressionDossier_(ss, data.id, '');
+      _logAction_('DOSSIER_RETABLI', data.par || 'admin', 'Dossier ' + data.id + ' rétabli');
+      CacheService.getScriptCache().remove('dashboard_v1');
+      return { ok:true, annulation:null, retabli:true };
+    }
+
+    // ── Abandon ──
+    const src = (data.source === 'COMMANDE' || data.source === 'PRODUCTION')
+      ? data.source : 'PRODUCTION';
+    const val = { on:true, par:String(data.par || ''), le:new Date().toISOString(),
+                  motif:String(data.motif || '').slice(0, 500), source:src };
+    // Format texte imposé : sans ça Sheets prendrait le JSON pour une formule.
+    sh.getRange(rowNum, COL_ANNULATION).setNumberFormat('@').setValue(JSON.stringify(val));
+
+    const supprimees = _supprimerTachesOuvertes_(ss, data.id);
+
+    _logAction_('DOSSIER_ANNULE', data.par || 'admin',
+      'Dossier ' + data.id + ' — ' + (src === 'COMMANDE' ? 'commande annulée' : 'production arrêtée')
+      + (val.motif ? ' : ' + val.motif : '')
+      + ' — ' + supprimees + ' tâche(s) ouverte(s) retirée(s)');
+    CacheService.getScriptCache().remove('dashboard_v1');
+    return { ok:true, annulation:val, tachesSupprimees:supprimees };
+  } finally {
+    try { lock.releaseLock(); } catch(e) {}
+  }
+}
+
+// Supprime les tâches ENCORE OUVERTES d'un dossier (statut ≠ TERMINE) et rend le
+// nombre retiré. Parcours descendant : supprimer une ligne décale celles du dessous.
+// Pas de recalcul de progression ici — l'appelant vient de poser le marqueur
+// d'abandon, qui fige justement l'avancement.
+function _supprimerTachesOuvertes_(ss, dossierId) {
+  const sh = ss.getSheetByName(SHEET_TACHES);
+  if (!sh || sh.getLastRow() <= 1) return 0;
+  const rows = sh.getDataRange().getValues();
+  let n = 0;
+  for (let i = rows.length - 1; i >= 1; i--) {
+    if (String(rows[i][1]) !== String(dossierId)) continue;   // col B = DossierID
+    if (String(rows[i][6]) === 'TERMINE') continue;           // col G = Statut
+    _deleteTacheDriveFiles_(rows[i][14]);
+    sh.deleteRow(i + 1);
+    n++;
+  }
+  return n;
 }
 
 // Clôture d'un dossier : passe à TERMINE ses étapes d'atelier (jamais pointées) et
@@ -3538,6 +3665,11 @@ function majProgressionDossier_(ss, dossierId, etapeCode) {
   if (!match) return;
   const rowNum = match.getRow();
 
+  // Dossier abandonné : son avancement est figé. Sans cette sortie, le premier
+  // pointage venu (une tâche qu'un opérateur termine sans avoir vu l'annulation)
+  // réécrirait Statut/Progression et le dossier repartirait dans les vues actives.
+  if (_dossierAnnuleRow_(sh, rowNum)) return;
+
   // Recalcule d'après les tâches réelles (et non la position de l'étape terminée),
   // états manuels du responsable de production inclus.
   const prog = _computeDossierProgress_(ss, dossierId, _etatsManuelsRow_(sh, rowNum));
@@ -3579,6 +3711,8 @@ function handleRecalcProgression() {
   for (let i = 1; i < rows.length; i++) {
     const oldStatut = String(rows[i][5]);
     if (oldStatut === 'LIVRE') { skipped++; continue; } // ne pas rouvrir un dossier livré/clôturé
+    // Dossier abandonné : même raison, la maintenance ne doit pas le remettre en route.
+    if (_annulationFromCell_(rows[i][COL_ANNULATION - 1])) { skipped++; continue; }
     const id   = String(rows[i][0]);
     const prog = _progressFromByEtape_(byDossier[id] || {});
     if (prog.statut === null) { skipped++; continue; }  // aucune tâche → laisser tel quel
@@ -3624,14 +3758,21 @@ function handleGetDashboard() {
   }
 
   // Dossiers : lire les 500 derniers
-  const kpi = { total:0, cree:0, enCours:0, livre:0 };
+  const kpi = { total:0, cree:0, enCours:0, livre:0, annule:0 };
   const shDoss = ss.getSheetByName(SHEET_DOSSIERS);
   if (shDoss && shDoss.getLastRow() > 1) {
     const dLast  = shDoss.getLastRow();
     const dStart = Math.max(2, dLast - 499);
-    const dossRows = shDoss.getRange(dStart, 1, dLast - dStart + 1, 6).getValues();
+    const dCols    = Math.max(6, Math.min(shDoss.getLastColumn(), COL_ANNULATION));
+    const dossRows = shDoss.getRange(dStart, 1, dLast - dStart + 1, dCols).getValues();
     for (let i = 0; i < dossRows.length; i++) {
-      const r = dossRows[i]; if (!r[0]) continue; kpi.total++;
+      const r = dossRows[i]; if (!r[0]) continue;
+      // Dossier abandonné : compté à part, jamais dans « en cours » — sinon il
+      // gonflerait éternellement la charge d'atelier affichée au patron.
+      if (dCols >= COL_ANNULATION && _annulationFromCell_(r[COL_ANNULATION - 1])) {
+        kpi.annule++; continue;
+      }
+      kpi.total++;
       const s = String(r[5]);
       if (s === 'CREE') kpi.cree++;
       else if (s === 'LIVRE') kpi.livre++;
