@@ -59,7 +59,7 @@ const MACHINE_HEADERS  = ['ID','Machine','RefType','RefID','RefLabel','Client','
 // feuille déjà en place.
 const DOSSIER_HEADERS = ['ID','NumeroDossier','Client','Produit','Quantite','Statut',
   'Progression','DateCreation','DateLivraison','Priorite','SourceVente','Notes',
-  'ClientPrevenuLe','ClientPrevenuPar','EtatsManuels','Installation','Annulation'];
+  'ClientPrevenuLe','ClientPrevenuPar','EtatsManuels','Installation','Annulation','Urgent'];
 
 // Feuille Finitions : fiche d'atelier de l'étape FINITION (traçabilité seule pour
 // l'instant — pas de déduction de stock). Une ligne par dossier (upsert sur ID).
@@ -134,6 +134,15 @@ const COL_INSTALLATION      = 16;   // col P de la feuille Dossiers
 // survit, et c'est lui qui fait sortir le dossier des vues actives.
 const COL_ANNULATION        = 17;   // col Q de la feuille Dossiers
 
+// Col R = Urgent : le dossier est à traiter DANS LES PLUS BREFS DÉLAIS. Marqueur
+// dédié et pas seulement la colonne Priorite : celle-ci est posée à la création du
+// dossier (Normale / Haute / Urgente) et n'enregistre ni qui ni quand, alors que
+// passer un dossier en urgence est une DÉCISION d'atelier, qui doit être tracée et
+// pouvoir se retirer. handleSetDossierUrgent pose le marqueur ET reporte
+// « Urgente » sur Priorite, que toutes les vues lisent déjà.
+const COL_URGENT            = 18;   // col R de la feuille Dossiers
+const COL_PRIORITE          = 10;   // col J de la feuille Dossiers (Normale|Haute|Urgente)
+
 // Crée la colonne EtatsManuels sur les classeurs antérieurs (14 colonnes).
 function _ensureEtatsManuelsCol_(sh) {
   if (sh.getLastColumn() < COL_ETATS_MANUELS) {
@@ -153,6 +162,30 @@ function _ensureAnnulationCol_(sh) {
   if (sh.getLastColumn() < COL_ANNULATION) {
     sh.getRange(1, COL_ANNULATION).setValue('Annulation');
   }
+}
+
+// Crée la colonne Urgent sur les classeurs antérieurs (17 colonnes).
+function _ensureUrgentCol_(sh) {
+  if (sh.getLastColumn() < COL_URGENT) {
+    sh.getRange(1, COL_URGENT).setValue('Urgent');
+  }
+}
+
+// Cellule Urgent -> { on, par, le, note, prioAvant } ou null quand le dossier suit
+// le cours normal. Accepte aussi les valeurs simples ('OUI', true, 'URGENT') qu'une
+// saisie directe dans le classeur pourrait y laisser.
+function _urgentFromCell_(cell) {
+  if (cell === true) return { on:true, par:'', le:'', note:'' };
+  const raw = String(cell == null ? '' : cell).trim();
+  if (!raw) return null;
+  if (raw.charAt(0) === '{') {
+    try {
+      const o = JSON.parse(raw);
+      if (!o || typeof o !== 'object' || !o.on) return null;
+      return { on:true, par:String(o.par || ''), le:String(o.le || ''), note:String(o.note || '') };
+    } catch (e) { return null; }
+  }
+  return /^(oui|yes|true|1|x|urgent|urgente)$/i.test(raw) ? { on:true, par:'', le:'', note:'' } : null;
 }
 
 // Cellule Annulation -> { on, par, le, motif, source } ou null si le dossier est actif.
@@ -331,6 +364,7 @@ function doPost(e) {
     else if (action === 'setEtapeManuelle')  result = handleSetEtapeManuelle(data);
     else if (action === 'setEtapeNote')      result = handleSetEtapeNote(data);
     else if (action === 'setDossierInstallation') result = handleSetDossierInstallation(data);
+    else if (action === 'setDossierUrgent')  result = handleSetDossierUrgent(data);
     else if (action === 'creerDossierManuel') result = handleCreerDossierManuel(data);
     else if (action === 'saveTacheLibre')    result = handleSaveTacheLibre(data);
     else if (action === 'setTacheLibrePhotos') result = handleSetTacheLibrePhotos(data);
@@ -415,6 +449,7 @@ function doGet(e) {
       else if (action === 'setEtapeManuelle')  result = handleSetEtapeManuelle(data);
       else if (action === 'setEtapeNote')      result = handleSetEtapeNote(data);
       else if (action === 'setDossierInstallation') result = handleSetDossierInstallation(data);
+      else if (action === 'setDossierUrgent')  result = handleSetDossierUrgent(data);
       else if (action === 'attribuerTache')    result = handleAttribuerTache(data);
       else if (action === 'changerOperateurTache') result = handleChangerOperateurTache(data);
       else if (action === 'pointerAction')     result = handlePointerAction(data);
@@ -1653,6 +1688,7 @@ const _JMETA_ = {
   DOSSIER_CLOTURE:['Production','Dossier clôturé'],
   ETAPE_MANUELLE:['Production','État d\'étape modifié'],
   DOSSIER_INSTALLATION:['Production','Installation sur site'],
+  DOSSIER_URGENT:['Production','Dossier urgent'],
   TACHE_ATTRIB:['Production','Tâche attribuée'], TACHE_LIBRE_CREATE:['Production','Tâche créée'],
   TACHE_START:['Production','Tâche démarrée'], TACHE_FIN:['Production','Tâche terminée'],
   TACHES_RESET:['Production','Tâches réinitialisées'],
@@ -2486,7 +2522,7 @@ function handleGetDossiers(data) {
   const nRows  = lastRow - start + 1;
   // 12 colonnes historiques + les 2 du « client prévenu » et les états manuels
   // d'étapes quand le classeur les a déjà.
-  const nCols  = Math.max(12, Math.min(sh.getLastColumn(), COL_ANNULATION));
+  const nCols  = Math.max(12, Math.min(sh.getLastColumn(), COL_URGENT));
   const rows   = sh.getRange(start, 1, nRows, nCols).getValues();
 
   let list   = [];
@@ -2500,7 +2536,8 @@ function handleGetDossiers(data) {
       clientPrevenuLe: _prevenuIso_(r[12]), clientPrevenuPar: r[13] ? String(r[13]) : '',
       etatsManuels: _etatsManuelsFromCell_(r[COL_ETATS_MANUELS - 1]),
       installation: _installationFromCell_(r[COL_INSTALLATION - 1]),
-      annulation:   _annulationFromCell_(r[COL_ANNULATION - 1]) });
+      annulation:   _annulationFromCell_(r[COL_ANNULATION - 1]),
+      urgent:       _urgentFromCell_(r[COL_URGENT - 1]) });
   }
 
   if (data && data.statut && data.statut !== 'TOUS') {
@@ -2776,6 +2813,53 @@ function handleSetEtapeNote(data) {
   } finally {
     try { lock.releaseLock(); } catch(e) {}
   }
+}
+
+// Marque (ou retire) l'URGENCE sur un dossier : a traiter dans les plus brefs
+// delais. Comme l'installation, c'est une consigne d'atelier portee par le DOSSIER
+// et non par la commande, et elle ressort en grand sur les fiches imprimees.
+// `urgent` faux = on efface le marqueur (le dossier reprend son cours normal).
+function handleSetDossierUrgent(data) {
+  if (!data || !data.id) return { ok:false, error:'id requis' };
+  const ss = getSS();
+  const sh = ss.getSheetByName(SHEET_DOSSIERS);
+  if (!sh) return { ok:false, error:'Feuille Dossiers introuvable' };
+  const lastRow = sh.getLastRow();
+  if (lastRow <= 1) return { ok:false, error:'Dossier introuvable' };
+  const match = sh.getRange(2, 1, lastRow - 1, 1)
+    .createTextFinder(String(data.id)).matchEntireCell(true).findNext();
+  if (!match) return { ok:false, error:'Dossier introuvable' };
+  const rowNum = match.getRow();
+
+  _ensureUrgentCol_(sh);
+  const on   = data.urgent === true || data.urgent === 'true';
+  const prev = (sh.getLastColumn() >= COL_URGENT)
+    ? _urgentFromCell_(sh.getRange(rowNum, COL_URGENT).getValue()) : null;
+  // Priorité au moment de la décision : mémorisée dans le marqueur pour être rendue
+  // au dossier quand on retire l'urgence (un dossier « Haute » ne doit pas finir
+  // « Normale » après un aller-retour sur le bouton).
+  const prioActuelle = String(sh.getRange(rowNum, COL_PRIORITE).getValue() || '').trim();
+  const prioAvant = (prev && prev.prioAvant)
+    || ((prioActuelle && prioActuelle !== 'Urgente') ? prioActuelle : '');
+  const val = on
+    ? { on:true, par:String(data.par || ''), le:new Date().toISOString(),
+        note:String(data.note || ''), prioAvant:prioAvant }
+    : null;
+  // Format texte imposé : sans ça Sheets prendrait le JSON pour une formule.
+  sh.getRange(rowNum, COL_URGENT).setNumberFormat('@')
+    .setValue(val ? JSON.stringify(val) : '');
+
+  // Report sur la colonne Priorite : c'est elle que lisent déjà toutes les vues
+  // (listes, cockpit, tri, écran opérateur), donc l'urgence remonte dans tout le
+  // système sans qu'aucun écran n'ait à connaître le marqueur.
+  const prioCible = on ? 'Urgente' : (prioAvant || 'Normale');
+  sh.getRange(rowNum, COL_PRIORITE).setValue(prioCible);
+
+  _logAction_('DOSSIER_URGENT', data.par || 'frontend',
+    'Dossier ' + data.id + ' — ' + (on ? ('URGENT' + (val.note ? ' : ' + val.note : ''))
+      : ('urgence retirée → ' + prioCible)));
+  CacheService.getScriptCache().remove('dashboard_v1');
+  return { ok:true, urgent: val, priorite: prioCible };
 }
 
 // Marque (ou retire) la POSE SUR SITE sur un dossier. Porté par le dossier et non
@@ -4930,7 +5014,7 @@ function _suiviPayload_(data) {
     var lastD  = shD.getLastRow();
     var limD   = Math.max(50, Math.min(3000, Number(data.limitDossiers) || 900));
     var startD = Math.max(2, lastD - limD + 1);
-    var nColsD = Math.max(12, Math.min(shD.getLastColumn(), COL_INSTALLATION));
+    var nColsD = Math.max(12, Math.min(shD.getLastColumn(), COL_URGENT));
     var rowsD  = shD.getRange(startD, 1, lastD - startD + 1, nColsD).getValues();
     dossiersLus     = rowsD.length;
     tronqueDossiers = (lastD - 1) > dossiersLus;
@@ -4968,6 +5052,8 @@ function _suiviPayload_(data) {
       if (ech && ech < jourTxt) { d.retard = true; retards++; }
       var inst = _installationFromCell_(r[COL_INSTALLATION - 1]);
       if (inst && inst.on) d.installation = true;
+      var urg = _urgentFromCell_(r[COL_URGENT - 1]);
+      if (urg && urg.on) d.urgent = true;
       // Étapes validées à la main : elles REMPLACENT le pointage, donc une étape
       // sans tâche pointée n'est pas forcément une étape non faite.
       var emTxt = [];

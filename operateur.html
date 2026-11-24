@@ -327,6 +327,13 @@
       color:var(--secondary); padding:2px 7px; border-radius:8px; margin-left:6px;
       vertical-align:middle;
     }
+    /* Dossier urgent : l'opérateur doit le repérer sans lire la ligne de détails. */
+    .circ-urgent-tag {
+      display:inline-block; font-size:9px; font-weight:800; background:#fee2e2;
+      color:#b91c1c; padding:2px 7px; border-radius:8px; margin-left:6px;
+      vertical-align:middle; text-transform:uppercase; letter-spacing:.06em;
+    }
+    .circ-card.urgent { border-left:4px solid #dc2626; }
 
     /* Frise des etapes */
     .circ-flow { display:flex; align-items:flex-start; overflow-x:auto; margin-top:14px; padding-bottom:4px; }
@@ -1397,6 +1404,27 @@ function _circFocusFlows() {
   });
 }
 
+// Dossier urgent : le marqueur posé depuis l'Attribution (col Urgent de la feuille
+// Dossiers) ou la priorité « Urgente ». Les deux disent la même chose à l'atelier.
+function _circUrgent(d) {
+  const raw = d && d.urgent;
+  if (raw === true) return true;
+  if (typeof raw === 'string') {
+    const t = raw.trim();
+    if (t.charAt(0) === '{') { try { return !!(JSON.parse(t) || {}).on; } catch (e) { return false; } }
+    if (/^(oui|yes|true|1|x|urgent|urgente)$/i.test(t)) return true;
+  } else if (raw && typeof raw === 'object' && raw.on) return true;
+  return d && d.priorite === 'Urgente';
+}
+function _circUrgentNote(d) {
+  const raw = d && d.urgent;
+  if (raw && typeof raw === 'object') return String(raw.note || '');
+  if (typeof raw === 'string' && raw.trim().charAt(0) === '{') {
+    try { return String((JSON.parse(raw) || {}).note || ''); } catch (e) { return ''; }
+  }
+  return '';
+}
+
 function _circCard(row) {
   const d = row.d, steps = row.steps, pct = row.pct;
   const open = !!circOpen[d.id];
@@ -1417,13 +1445,16 @@ function _circCard(row) {
   if (d.produit)       bits.push(_esc(d.produit));
   if (d.quantite)      bits.push(_esc(d.quantite) + ' u');
   if (d.dateLivraison) bits.push('livraison ' + _circDateFr(d.dateLivraison));
-  if (d.priorite && d.priorite !== 'Normale') bits.push(_esc(d.priorite));
+  const urgent = _circUrgent(d);
+  if (d.priorite && d.priorite !== 'Normale' && !urgent) bits.push(_esc(d.priorite));
+  if (urgent && _circUrgentNote(d)) bits.push(_esc(_circUrgentNote(d)));
   if (d._partiel)      bits.push('fiche hors fenêtre de lecture');
 
   const head = `
     <div class="circ-head" onclick="toggleCirc('${_esc(d.id)}')">
       <div style="min-width:0">
         <div class="circ-num">${_esc(d.numeroDossier || d.id)}${
+          urgent ? '<span class="circ-urgent-tag">Urgent</span>' : ''}${
           myIdx >= 0 ? '<span class="circ-mine-tag">VOUS</span>' : ''}</div>
         <div class="circ-client">${_esc(d.client || '—')}</div>
         ${bits.length ? `<div class="circ-sub">${bits.join(' · ')}</div>` : ''}
@@ -1462,7 +1493,7 @@ function _circCard(row) {
     ? `<div class="circ-detail">${steps.map((s, i) => _circRow(d, s, i, myIdx)).join('')}</div>`
     : '';
 
-  return `<div class="circ-card${myIdx >= 0 ? ' mine' : ''}">${head}${flow}${curLine}${detail}</div>`;
+  return `<div class="circ-card${urgent ? ' urgent' : (myIdx >= 0 ? ' mine' : '')}">${head}${flow}${curLine}${detail}</div>`;
 }
 
 function _circRow(d, s, i, myIdx) {

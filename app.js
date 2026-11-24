@@ -97,7 +97,7 @@ function _purgeLocalPlainPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '234 · 2026-11-23';
+const APP_VERSION = '235 · 2026-11-24';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -3272,6 +3272,7 @@ function _kebabIcon(name){
   if(name==='eye')   return s+'<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
   if(name==='print') return s+'<polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>';
   if(name==='reset') return s+'<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.2"/></svg>';
+  if(name==='alert') return s+'<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
   return '';
 }
 function toggleHistDetail(uid){
@@ -9811,6 +9812,120 @@ function _installBannerPrint(d){
     </div>`;
 }
 
+
+// Entrée de menu kebab : même bascule que le bouton, pour marquer l'urgence
+// depuis la LISTE d'Attribution sans ouvrir le panneau du dossier.
+function _urgentKebabItem(dossierId){
+  if (!_peutMarquerUrgent()) return '';
+  const on = _estUrgent(_dossierParId(dossierId));
+  return `<button class="kebab-item" role="menuitem" style="${on ? 'color:#b91c1c;font-weight:700' : ''}"
+    onclick="event.stopPropagation();closeAllKebabs();toggleUrgentDossier('${dossierId}')">${_kebabIcon('alert')}<span>${
+    on ? "Retirer l'urgence" : 'Marquer URGENT'}</span></button>`;
+}
+
+// ── DOSSIER URGENT — « à traiter dans les plus brefs délais » ───────
+// Décision prise au moment où l'on distribue le travail : le bouton vit donc
+// dans l'en-tête d'Attribution (et dans la barre d'actions du cockpit
+// Production, d'où l'on suit le même dossier). Marqueur porté par le DOSSIER
+// (col R de la feuille Dossiers) ET report sur sa colonne Priorite :
+//   • le marqueur garde QUI a décidé, QUAND et POURQUOI (note d'atelier) et
+//     sort en grand sur les fiches imprimées ;
+//   • la colonne Priorite est ce que lisent déjà toutes les vues (listes,
+//     cockpit, tri, écran opérateur) — la mettre à « Urgente » fait remonter
+//     le dossier partout sans écran à part.
+// Retirer l'urgence rend au dossier la priorité qu'il avait avant (mémorisée
+// dans le marqueur), et non « Normale » par défaut : un dossier « Haute » ne
+// doit pas être rétrogradé par un aller-retour sur le bouton.
+function _urgentInfo(d){
+  const raw = d && d.urgent;
+  if (!raw) return null;
+  if (raw === true) return { on:true, par:'', le:'', note:'', prioAvant:'' };
+  if (typeof raw === 'string'){
+    const t = raw.trim();
+    if (!t) return null;
+    if (t.charAt(0) === '{'){
+      try { const o = JSON.parse(t); return (o && o.on) ? { on:true, par:o.par||'', le:o.le||'', note:o.note||'', prioAvant:o.prioAvant||'' } : null; }
+      catch(e){ return null; }
+    }
+    return /^(oui|yes|true|1|x|urgent|urgente)$/i.test(t) ? { on:true, par:'', le:'', note:'', prioAvant:'' } : null;
+  }
+  return (typeof raw === 'object' && raw.on)
+    ? { on:true, par:raw.par||'', le:raw.le||'', note:raw.note||'', prioAvant:raw.prioAvant||'' } : null;
+}
+// Urgent À L'AFFICHAGE : le marqueur, ou la priorité « Urgente » posée à la
+// création du dossier. Les deux disent la même chose à l'atelier.
+function _estUrgent(d){ return !!(_urgentInfo(d) || (d && d.priorite === 'Urgente')); }
+function _urgentNote(d){ return (_urgentInfo(d) || {}).note || ''; }
+// Priorité effective : sert partout où un libellé de priorité s'affiche.
+function _prioriteEff(d){ return _estUrgent(d) ? 'Urgente' : ((d && d.priorite) || 'Normale'); }
+// Qui peut passer un dossier en urgence : toute personne qui a la page
+// Attribution, c'est-à-dire celle qui distribue le travail — c'est elle qui sait
+// qu'un dossier doit passer devant. Contrairement aux états d'étapes, ce n'est
+// pas une validation de production mais une consigne de file d'attente.
+function _peutMarquerUrgent(){
+  try { return _effectivePages(currentUser).includes('attribution'); } catch(e){ return false; }
+}
+
+const _URGENT_ICO = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+
+// Bandeau écran : même message que la fiche imprimée, pour savoir avant
+// d'imprimer ce qui va sortir en grand. Styles en ligne — comme le bandeau
+// d'installation, il doit s'afficher pareil dans le panneau d'Attribution et
+// dans le tiroir du cockpit Production, qui n'ont aucune classe commune.
+function _urgentBannerEcran(d){
+  if (!_estUrgent(d)) return '';
+  const inf  = _urgentInfo(d);
+  const note = (inf && inf.note) || '';
+  const qui  = (inf && inf.par) ? inf.par : '';
+  return `<div style="margin-top:10px;display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:10px;background:#fee2e2;border:2px solid #dc2626">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#dc2626" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:1px"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:15px;font-weight:900;color:#b91c1c;text-transform:uppercase;letter-spacing:.06em;line-height:1.15">Urgent</div>
+        <div style="font-size:11.5px;color:#1c1917;margin-top:2px">À traiter dans les plus brefs délais — passe devant les autres dossiers.${qui ? ' Décidé par ' + escapeHtml(qui) + '.' : ''}</div>
+        ${note ? `<div style="font-size:12px;font-weight:700;color:#1c1917;margin-top:4px;white-space:pre-wrap">${escapeHtml(note)}</div>` : ''}
+      </div>
+    </div>`;
+}
+
+// Bouton de bascule. `variant` 'pcok' = barre d'actions du cockpit Production
+// (classe maison), sinon bouton autonome pour l'en-tête d'Attribution.
+function _urgentToggleBtn(dossierId, variant){
+  if (!_peutMarquerUrgent()) return '';
+  const on  = _estUrgent(_dossierParId(dossierId));
+  const ti  = on ? "Retirer l'urgence : le dossier reprend son rang normal"
+                 : "Marquer « URGENT » : à traiter dans les plus brefs délais — ressort en grand et en rouge sur les fiches imprimées";
+  const lbl = `${_URGENT_ICO} Urgent`;
+  if (variant === 'pcok') {
+    const sty = on ? 'color:#b91c1c;border-color:#dc2626;background:#fee2e2;font-weight:800' : '';
+    return `<button class="pcok-btn" style="${sty}" title="${ti}" onclick="toggleUrgentDossier('${dossierId}')">${lbl}</button>`;
+  }
+  const sty = on
+    ? 'background:#fee2e2;color:#b91c1c;border:1.5px solid #dc2626;font-weight:800'
+    : 'background:var(--surface2);color:var(--text);border:1px solid var(--border)';
+  return `<button onclick="toggleUrgentDossier('${dossierId}')" title="${ti}"
+    style="display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:7px;cursor:pointer;font-size:11px;font-weight:600;flex-shrink:0;${sty}">${lbl}</button>`;
+}
+
+// Bandeau d'alerte IMPRIMÉ : le mot URGENT en très grand et en rouge, comme
+// demandé à l'atelier. Cadre épais + gros texte volontaires : les fonds de
+// couleur sautent dès qu'on imprime sans « graphiques d'arrière-plan », un
+// cadre et du 40pt gras sortent toujours.
+function _urgentBannerPrint(d){
+  if (!_estUrgent(d)) return '';
+  const inf  = _urgentInfo(d) || {};
+  const note = inf.note || '';
+  const ico = '<svg viewBox="0 0 24 24" width="52" height="52" fill="none" stroke="#dc2626" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+  return `<div style="display:flex;align-items:center;gap:18px;border:5px solid #dc2626;background:#fee2e2;border-radius:12px;padding:14px 20px;margin-bottom:18px">
+      ${ico}
+      <div style="flex:1">
+        <div style="font-size:40pt;line-height:1;font-weight:900;color:#dc2626;letter-spacing:.06em;text-transform:uppercase">URGENT</div>
+        <div style="font-size:12pt;font-weight:700;color:#1c1917;margin-top:6px">À traiter <strong>dans les plus brefs délais</strong> — ce dossier passe devant les autres.</div>
+        ${note ? `<div style="font-size:12pt;font-weight:700;color:#b91c1c;margin-top:5px">${escapeHtml(note)}</div>` : ''}
+        ${inf.par ? `<div style="font-size:9.5pt;color:#78716c;margin-top:4px">Décidé par ${escapeHtml(inf.par)}${inf.le ? ' le ' + _dispDate(String(inf.le).slice(0,10)) : ''}</div>` : ''}
+      </div>
+    </div>`;
+}
+
 // Tâches « effectives » d'un dossier : les pointages réels, sauf sur les étapes où
 // le responsable a posé un état — il REMPLACE alors les pointages sous la forme
 // d'une tâche virtuelle, sur n'importe quelle étape du pipeline. Tous les
@@ -11898,6 +12013,7 @@ function printFicheFinition(dossierId){
   _printWindow('Fiche de finition — ' + (d.numeroDossier||d.id||''),
     `${style}<div class="rpt-title">Fiche de finition — ${cfg.icon} ${_finEsc(cfg.label)}</div>
      <div class="rpt-period">Dossier ${_finEsc(d.numeroDossier||d.id||'')} · ${_finEsc(d.client||'')}</div>
+     ${_urgentBannerPrint(d)}
      ${ident}
      <div style="margin-top:14px">${sections || '<em style="color:#a8a29e">Aucun consommable coché.</em>'}</div>
      ${attHtml}
@@ -12272,6 +12388,7 @@ function _sviRow(d, idx){
     etapes, frise, dt, pct, done, started, cur, curIdx, nbDone, nbAppl, startMs, endMs,
     totalMs: startMs ? ((endMs || Date.now()) - startMs) : 0,
     retard: _sviRetard(d, dt, done),
+    urgent: _estUrgent(d), urgentNote: _urgentNote(d),
     dateProd: d.dateLivraisonProd || '',
     prodLate: _sviProdLate(d, done),
     prevenu:  _sviPrevenu(d),
@@ -12309,8 +12426,12 @@ function _sviRows(){
     .map(d => {
       const r = _sviRow(d, idx); r.commercial = comm(d); return r;
     });
-  // Les commandes actives d'abord (plus récemment démarrées), les livrées à la fin.
-  rows.sort((a,b) => (a.done?1:0) - (b.done?1:0) || (b.startMs||0) - (a.startMs||0));
+  // Les commandes actives d'abord (urgentes en tête, puis les plus récemment
+  // démarrées), les livrées à la fin : l'urgence posée à l'Attribution doit se voir
+  // ici sans avoir à chercher la commande dans la liste.
+  rows.sort((a,b) => (a.done?1:0) - (b.done?1:0)
+    || (b.urgent?1:0) - (a.urgent?1:0)
+    || (b.startMs||0) - (a.startMs||0));
   return rows;
 }
 
@@ -12765,6 +12886,14 @@ function _sviBande(r){
     ? '<span class="svi-badge" style="background:' + cur.color + '1a;color:' + cur.color + '">● ' + _sviEsc(cur.short) + '</span>'
     : '<span class="svi-badge svi-badge--todo">○ Pas démarrée</span>';
 
+  // Pastille « URGENT » : même décision que le bouton de l'Attribution, affichée
+  // ici parce que le commercial doit pouvoir répondre au client sans ouvrir la
+  // production. Elle passe AVANT le badge d'étape : c'est ce qui se lit d'abord.
+  const chipUrg = r.urgent
+    ? '<span class="svi-chip-urg" title="' + _sviEsc('À traiter dans les plus brefs délais'
+        + (r.urgentNote ? ' — ' + r.urgentNote : '')) + '">⚠ Urgent</span>'
+    : '';
+
   // Pastille « ⚠ Retard » réservée au retard d'ATELIER (étape plus lente que son rythme
   // cible). Quand c'est l'échéance qui est dépassée, la pilule rouge du bloc livraison
   // le dit déjà avec le nombre de jours : deux fois le mot « retard » sur la même carte
@@ -12815,7 +12944,7 @@ function _sviBande(r){
     +   ' onclick="sviToggle(\'' + _sviEsc(r.id) + '\')"'
     +   ' onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();sviToggle(\'' + _sviEsc(r.id) + '\')}">'
     +   '<div class="svi-acc-id">'
-    +     '<div class="svi-acc-t">' + _sviEsc(r.numero) + etat + chip + chipEp + etiq + '</div>'
+    +     '<div class="svi-acc-t">' + _sviEsc(r.numero) + chipUrg + etat + chip + chipEp + etiq + '</div>'
     +     ligne('user',    'Client',     _sviEsc(r.client || '—'))
     +     ligne('article', 'Article',    _sviEsc(r.produit || '—') + (r.quantite ? ' <b>×' + _sviEsc(r.quantite) + '</b>' : ''))
     +     (r.commercial ? ligne('user', 'Commercial', '<b>' + _sviEsc(r.commercial) + '</b>') : '')
@@ -12925,7 +13054,8 @@ function _sviScope(){
   const q = (_sviSearch||'').trim().toLowerCase();
   let rows = _sviRows().filter(r => _sviMatchTab(r, _sviFilter));
   if (_sviCommercial) rows = rows.filter(r => _sameOp(r.commercial, _sviCommercial));
-  if (q) rows = rows.filter(r => (r.numero+' '+r.client+' '+r.produit+' '+r.commercial).toLowerCase().includes(q));
+  if (q) rows = rows.filter(r => (r.numero+' '+r.client+' '+r.produit+' '+r.commercial
+    + (r.urgent ? ' urgent ' + (r.urgentNote||'') : '')).toLowerCase().includes(q));
   return rows;
 }
 
@@ -12962,6 +13092,7 @@ function _sviRenderBody(){
   const groupes = _sviGroupes(rows, codes).filter(g => g.rows.length || montrerVides);
   host.innerHTML = groupes.map(g => {
     const n = g.rows.length;
+    const nUrg = g.rows.filter(r => r.urgent).length;
     const ferme = n ? _sviGrpFermes.has(g.code) : true;
     return '<section class="svi-grp' + (n ? '' : ' svi-grp--vide') + '" style="--gc:' + g.color + '">'
       + '<button class="svi-grp-head" aria-expanded="' + (!ferme) + '"'
@@ -12971,6 +13102,9 @@ function _sviRenderBody(){
       +   '<span class="svi-grp-t">' + _sviEsc(g.short) + '</span>'
       +   '<span class="svi-grp-lab">' + _sviEsc(g.label) + '</span>'
       +   '<span class="svi-grp-n">' + (n ? n + ' commande' + (n>1?'s':'') : 'Aucune commande dans cette étape') + '</span>'
+      +   (nUrg ? '<span class="svi-chip-urg" title="' + nUrg + ' commande'
+            + (nUrg>1?'s':'') + ' à traiter dans les plus brefs délais">⚠ '
+            + nUrg + ' urgent' + (nUrg>1?'s':'') + '</span>' : '')
       +   '<span class="svi-grp-chev">' + (ferme ? '⌄' : '⌃') + '</span>'
       + '</button>'
       + (ferme ? '' : '<div class="svi-grp-body">' + g.rows.map(_sviBande).join('') + '</div>')
@@ -13251,6 +13385,10 @@ function _sviInjectStyle(){
   .svi-badge--done{background:#e3f1e8;color:#2e7d52}
   .svi-badge--todo{background:var(--color-bg,#f5f4f2);color:#78716c}
   .svi-chip-late{font-family:'DM Sans',sans-serif;font-size:10.5px;font-weight:800;letter-spacing:.02em;padding:3px 9px;border-radius:999px;background:#fdeaea;color:#b91c1c;white-space:nowrap}
+  /* Pastille « urgent » : rouge PLEIN, volontairement plus forte que celle du retard.
+     Un retard est un constat, l'urgence est une consigne — elle doit gagner l'oeil. */
+  .svi-chip-urg{flex:none;font-family:'DM Sans',sans-serif;font-size:10.5px;font-weight:900;letter-spacing:.06em;
+    text-transform:uppercase;padding:3px 9px;border-radius:999px;background:#dc2626;color:#fff;white-space:nowrap}
   /* Pastille d'épreuve : couleur portée en style inline (celle de BAT_STATES), pour que
      Suivi commande, Attribution et Suivi BAT parlent la même langue de couleurs. */
   .svi-chip-ep{font-family:'DM Sans',sans-serif;font-size:10.5px;font-weight:800;letter-spacing:.02em;
@@ -13374,7 +13512,7 @@ function printAttributionReport() {
   const total    = list.length;
   const enCours  = list.filter(d => d.progression > 0 && d.progression < 100).length;
   const termine  = list.filter(d => d.progression === 100 || d.statut === 'LIVRE').length;
-  const urgent   = list.filter(d => d.priorite === 'Urgente').length;
+  const urgent   = list.filter(d => _estUrgent(d)).length;
 
   const kpis = `<div class="kpi-row">
     <div class="kpi-box"><div class="kl">Total dossiers</div><div class="kv">${total}</div></div>
@@ -13387,7 +13525,7 @@ function printAttributionReport() {
     const pct    = d.progression || 0;
     const etape  = ETAPES_CONFIG.find(e => e.code === d.statut);
     const etapeLbl = etape?.label || d.statut || '—';
-    const prioBadge = d.priorite === 'Urgente' ? '<span class="badge badge-red">Urgente</span>'
+    const prioBadge = _estUrgent(d) ? '<span class="badge badge-red">Urgente</span>'
       : d.priorite === 'Haute' ? '<span class="badge badge-amber">Haute</span>'
       : '<span class="badge badge-stone">Normale</span>';
     const pctBadge = pct === 100
@@ -13554,12 +13692,13 @@ function printFeuilleTravail(shiftFilter) {
         const prod = d.produit ? `${d.produit}${d.quantite ? ' ×' + d.quantite : ''}` : (t.titre || '—');
         const ech  = d.echeance || d.dateLivraisonProd || d.dateLivraison || t.echeance || '';
         const echStr = ech ? (_dispDate ? _dispDate(ech) : ech) : '—';
-        const prio = t.priorite || d.priorite || 'Normale';
+        const urg  = _estUrgent(d);
+        const prio = urg ? 'Urgente' : (t.priorite || d.priorite || 'Normale');
         const prioBadge = prio === 'Urgente' ? '<span class="badge badge-red">Urgente</span>'
           : prio === 'Haute' ? '<span class="badge badge-amber">Haute</span>' : '';
         const statut = t.statut === 'EN_COURS' ? '<span class="badge badge-amber">En cours</span>' : '';
-        return `<tr>
-          <td><strong>${ref}</strong></td>
+        return `<tr${urg ? ' class="ft-urgent"' : ''}>
+          <td>${urg ? '<div class="ft-urgent-tag">URGENT</div>' : ''}<strong>${ref}</strong></td>
           <td>${d.client || '—'}</td>
           <td>${prod}</td>
           <td>${t.etapeLabel || t.titre || '—'} ${statut}</td>
@@ -13602,6 +13741,10 @@ function printFeuilleTravail(shiftFilter) {
       table.ft-table td { border:1px solid #e7e5e4; padding:6px; vertical-align:top; }
       td.ctrl-box, td.ctrl-visa { height:26px; }
       td.ctrl-box { background:repeating-linear-gradient(45deg,#fff,#fff 6px,#fafafa 6px,#fafafa 7px); }
+      /* Dossier urgent : cadre rouge + mention en grand, lisible de loin a l'atelier. */
+      table.ft-table tr.ft-urgent td { border-color:#dc2626; border-width:1.5px; }
+      .ft-urgent-tag { display:inline-block; font-size:15px; font-weight:900; color:#dc2626;
+        letter-spacing:.1em; border:2.5px solid #dc2626; border-radius:4px; padding:0 5px; margin-bottom:3px; }
     </style>
     <div class="rpt-title">Feuille de Travail — Contrôle</div>
     <div class="rpt-period">${dateStr} · éditée à ${heureStr}${!isAdminOrChef ? ' · ' + myLabel : ''}</div>
@@ -14499,8 +14642,8 @@ function _renderDossierRow(d) {
   const _dotsRow = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>';
   const etape      = ETAPES_CONFIG.find(e => e.code === d.statut);
   const pct        = d.progression || 0;
-  const isUrgent   = d.priorite === 'Urgente';
-  const isHaute    = d.priorite === 'Haute';
+  const isUrgent   = _estUrgent(d);
+  const isHaute    = !isUrgent && d.priorite === 'Haute';
   const prioColor  = isUrgent ? '#dc2626' : isHaute ? '#d97706' : '#d6d3d1';
   const pctColor   = pct === 100 ? '#16a34a' : pct > 0 ? '#e8834a' : '#d6d3d1';
   const isSelected = selectedDossier?.id === d.id;
@@ -14564,6 +14707,7 @@ function _renderDossierRow(d) {
       <button class="kebab-btn" aria-label="Plus d'actions" aria-haspopup="true" onclick="toggleKebab('dos${d.id}',event)">${_dotsRow}</button>
       <div class="kebab-menu" id="kb-dos${d.id}" role="menu">
         <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();selectDossier('${d.id}')">${_kebabIcon('eye')}<span>Ouvrir / attribuer</span></button>
+        ${_urgentKebabItem(d.id)}
         <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printFicheTravailDossier('${d.id}')">${_kebabIcon('print')}<span>Fiche de travail (à remplir)</span></button>
         <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printDossier('${d.id}')">${_kebabIcon('print')}<span>Imprimer le dossier</span></button>
         ${_clotKebabItem(d.id)}
@@ -14647,7 +14791,7 @@ function _buildAttrRow(d, idx) {
   const days = ymd ? _daysUntil(ymd) : null;
   const deadlineLate = days != null && days < 0;
   const hasEnCours = dt.some(t => t.statut === 'EN_COURS');
-  const prio = d.priorite || 'Normale';
+  const prio = _prioriteEff(d);
   const prioRank = prio === 'Urgente' ? 0 : prio === 'Haute' ? 1 : 2;
   const etapeIdx = ETAPES_CONFIG.findIndex(e => e.code === d.statut);
   // L'Attribution est le SEUL écran qui garde les dossiers abandonnés : c'est de là
@@ -14843,6 +14987,7 @@ function _attrThead() {
 function _attrKebabMenu(id) {
   return `<div class="kebab-menu" id="kb-dos${id}" role="menu">
     <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();selectDossier('${id}')">${_kebabIcon('eye')}<span>Ouvrir / attribuer</span></button>
+    ${_urgentKebabItem(id)}
     <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printFicheTravailDossier('${id}')">${_kebabIcon('print')}<span>Fiche de travail (à remplir)</span></button>
     <button class="kebab-item" role="menuitem" onclick="event.stopPropagation();closeAllKebabs();printDossier('${id}')">${_kebabIcon('print')}<span>Imprimer le dossier</span></button>
     ${_clotKebabItem(id)}
@@ -15241,8 +15386,8 @@ function _renderDossierCardGrid(list) {
   }
 
   const cards = list.map(d => {
-    const isUrgent  = d.priorite === 'Urgente';
-    const isHaute   = d.priorite === 'Haute';
+    const isUrgent  = _estUrgent(d);
+    const isHaute   = !isUrgent && d.priorite === 'Haute';
     // Clôture admin : 100 % et pipeline complet même sans la moindre tâche (_dossierClosed).
     const closD     = _dossierClosed(d);
     const pct       = closD ? 100 : (d.progression || 0);
@@ -16592,8 +16737,9 @@ function renderAttrPanel(tachesD, commentsD = []) {
     }
   }
 
-  const prioColor = d.priorite==='Urgente'?'var(--color-danger)':d.priorite==='Haute'?'var(--color-warning)':'var(--color-text-muted)';
-  const prioBg    = d.priorite==='Urgente'?'var(--color-danger-bg)':d.priorite==='Haute'?'var(--color-warning-bg)':'var(--color-bg)';
+  const prioEff   = _prioriteEff(d);
+  const prioColor = prioEff==='Urgente'?'var(--color-danger)':prioEff==='Haute'?'var(--color-warning)':'var(--color-text-muted)';
+  const prioBg    = prioEff==='Urgente'?'var(--color-danger-bg)':prioEff==='Haute'?'var(--color-warning-bg)':'var(--color-bg)';
   const pct       = d.progression || 0;
   const pctColor  = pct===100?'var(--color-success)':pct>0?'var(--color-secondary)':'var(--color-text-muted)';
 
@@ -16627,6 +16773,7 @@ function renderAttrPanel(tachesD, commentsD = []) {
             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
             Imprimer
           </button>
+          ${_urgentToggleBtn(d.id)}
           ${_installToggleBtn(d.id)}
           ${['admin','chef_atelier'].includes(currentUser?.role) ? `<div class="kebab-wrap">
             <button class="kebab-btn" aria-label="Plus d'actions" aria-haspopup="true" onclick="toggleKebab('attrh${d.id}',event)"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>
@@ -16643,8 +16790,9 @@ function renderAttrPanel(tachesD, commentsD = []) {
         <span style="color:var(--color-border)">·</span>
         <span>Qté : <strong style="color:var(--color-text-primary)">${d.quantite}</strong></span>
         <span style="color:var(--color-border)">·</span>
-        <span style="background:${prioBg};color:${prioColor};font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px">${d.priorite}</span>
+        <span style="background:${prioBg};color:${prioColor};font-size:10px;font-weight:700;padding:2px 7px;border-radius:8px">${prioEff}</span>
       </div>
+      ${_urgentBannerEcran(d)}
       ${_installBannerEcran(d)}
       ${_commercial ? `<div style="margin-top:8px;display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:9px;background:var(--color-primary-light);border:1px solid rgba(26,74,58,.2)">
         <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="#1a4a3a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -16865,6 +17013,7 @@ function printFicheTravailDossier(dossierId) {
   const body = `
     <div class="rpt-title">Fiche de travail${d.numeroDossier ? ' — ' + escapeHtml(d.numeroDossier) : ''}</div>
     <div class="rpt-period">Collaborateurs ayant travaillé sur le dossier — à remplir et signer à la main</div>
+    ${_urgentBannerPrint(d)}
     ${_installBannerPrint(d)}
     <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
       <tr>${infoCell('Nom du client', escapeHtml(client))}${infoCell('Commercial', escapeHtml(commercial))}</tr>
@@ -17052,6 +17201,7 @@ function printDossier(dossierId) {
       </div>
     </div>
 
+    ${_urgentBannerPrint(d)}
     ${_installBannerPrint(d)}
 
     <!-- BANDEAU : CLIENT · STATUT · CONSIGNES -->
@@ -18254,7 +18404,7 @@ function _renderChargeView() {
         : (ETAPES_CONFIG.find(e => e.code === t.etapeCode) || { color:'#888', label: t.etapeLabel || '?' });
       const dotBg  = isEC ? '#d97706' : isDone ? '#16a34a' : '#2563eb';
       const d = dossiers.find(x => x.id === t.dossierId);
-      const isUrgent = d?.priorite === 'Urgente';
+      const isUrgent = _estUrgent(d);
       const btn = isEC && (isAdminOrChef || _sameOp(op, myLabel))
         ? `<button class="charge-task-btn" onclick="openPointage('${t.id}','${t.etapeCode||''}','${((t.dossierId==='LIBRE'?(t.titre||t.etapeLabel):t.numeroDossier)||'').replace(/'/g,"\\'")}'); event.stopPropagation();" style="background:var(--color-success-bg);color:var(--color-success)"></button>`
         : t.statut === 'A_FAIRE' && (isAdminOrChef || _sameOp(op, myLabel))
@@ -22682,8 +22832,8 @@ function renderTaches() {
 
   const groupsHtml = Object.entries(groups).map(([dossierId, g]) => {
     const d          = dossiers.find(x => x.id === dossierId);
-    const isUrgent   = d?.priorite === 'Urgente';
-    const isHaute    = d?.priorite === 'Haute';
+    const isUrgent   = _estUrgent(d);
+    const isHaute    = !isUrgent && d?.priorite === 'Haute';
     const prio       = isUrgent?`<span style="background:#fee2e2;color:#dc2626;font-size:9px;font-weight:700;padding:1px 5px;border-radius:6px">URGENT</span>`:isHaute?`<span style="background:#fef3c7;color:#d97706;font-size:9px;font-weight:700;padding:1px 5px;border-radius:6px">HAUTE</span>`:'';
     const client     = d?.client ? `<span class="prod-group-info">${d.client}</span>` : '';
     const produit    = d?.produit ? `<span style="font-size:11px;color:var(--color-text-secondary)">${d.produit}</span>` : '';
@@ -24169,6 +24319,74 @@ async function toggleInstallationDossier(dossierId){
     : 'Installation sur site retirée');
 }
 
+// Marque (ou retire) l'URGENCE sur un dossier : à traiter dans les plus brefs
+// délais. Ouverte à toute personne qui distribue le travail (page Attribution) :
+// c'est elle qui sait qu'un dossier doit passer devant, et attendre un admin
+// ferait perdre la demi-journée que l'urgence cherche à gagner.
+// L'écran est mis à jour tout de suite, puis le Sheet tranche — en cas d'échec
+// réseau on remet l'état précédent plutôt que de laisser croire que c'est
+// enregistré. Le report sur la colonne Priorite est fait par le serveur
+// (handleSetDossierUrgent) ; on l'anticipe ici pour que les listes réagissent
+// sans attendre le prochain chargement.
+async function toggleUrgentDossier(dossierId){
+  if (!_peutMarquerUrgent()) {
+    showToast("Accès à l'attribution requis pour passer un dossier en urgence.", 'error');
+    return;
+  }
+  const d = _dossierParId(dossierId) || (selectedDossier && selectedDossier.id === dossierId ? selectedDossier : null);
+  if (!d) { showToast('Dossier introuvable', 'error'); return; }
+  const avantMarq = d.urgent || null;
+  const avantPrio = d.priorite || 'Normale';
+  const on = !_estUrgent(d);
+  let note = '';
+  if (on) {
+    const v = prompt("URGENT — pourquoi ce dossier passe devant ? (client qui attend, échéance avancée…)\n(laisser vide s'il n'y a rien à préciser)", '');
+    if (v === null) return;                    // Échap = on ne touche à rien
+    note = String(v).trim();
+  }
+  const par = currentUser?.label || currentUser?.username || 'admin';
+  // Priorité à rendre au dossier le jour où l'urgence sera retirée.
+  const prioAvant = (_urgentInfo(d) || {}).prioAvant
+    || (avantPrio && avantPrio !== 'Urgente' ? avantPrio : '');
+  d.urgent   = on ? { on:true, par:par, le:new Date().toISOString(), note:note, prioAvant:prioAvant } : null;
+  d.priorite = on ? 'Urgente' : (prioAvant || 'Normale');
+  _refreshInstallUI(dossierId);
+
+  if (APPS_SCRIPT_URL) {
+    const req = { action:'setDossierUrgent', id:dossierId, urgent:on, note:note, par:par };
+    let r = await apiCall(req).catch(() => null);
+    // Dossier encore absent du Sheet (créé en local) : on l'enregistre puis on réessaie.
+    if (r && !r.ok && /introuvable/i.test(String(r.error||''))) {
+      await apiCall({ action:'saveDossier', dossier:d, createdBy:par }).catch(() => {});
+      r = await apiCall(req).catch(() => null);
+    }
+    if (!r || !r.ok) {
+      d.urgent   = avantMarq;
+      d.priorite = avantPrio;
+      _refreshInstallUI(dossierId);
+      showToast('Enregistrement impossible : ' + ((r && r.error) || 'réseau'), 'error');
+      return;
+    }
+    d.urgent = r.urgent || null;
+    if (r.priorite) d.priorite = r.priorite;
+    _refreshInstallUI(dossierId);
+  }
+
+  _addNotification({
+    dossierId:     dossierId,
+    numeroDossier: d.numeroDossier || dossierId,
+    etapeCode:     'URGENT',
+    etapeLabel:    'Urgent',
+    operateur:     par,
+    message: on
+      ? `URGENT — ${par} demande de traiter le dossier ${d.numeroDossier || dossierId} dans les plus brefs délais${note ? ' — ' + note : ''}`
+      : `${par} a retiré l'urgence du dossier ${d.numeroDossier || dossierId}`,
+  });
+  showToast(on
+    ? 'Dossier URGENT — il remonte dans les listes et sort en grand sur les fiches imprimées'
+    : 'Urgence retirée — le dossier reprend son rang normal');
+}
+
 // Rafraîchit les écrans qui montrent l'avancement du dossier (page courante +
 // panneau latéral ouvert) : l'état doit se voir partout sans recharger.
 function _refreshEtapesUI(dossierId){
@@ -24253,6 +24471,7 @@ function _cockpitDetailBody(r, avecTete) {
       <span class="pcok-drawer-ech" style="color:${dCol}">${ech}${dtxt?' · '+dtxt:''}</span>
     </div>
     ${r.produit?`<div class="pcok-drawer-prod">${_pcokEsc(r.produit)}</div>`:''}
+    ${_urgentBannerEcran(_dossierParId(r.dossierId))}
     ${_installBannerEcran(_dossierParId(r.dossierId))}
     <div class="pcok-drawer-prog"><div class="pcok-prog-bar"><div style="width:${r.pct}%;background:${r.pct===100?'#16a34a':'#e8834a'}"></div></div><span>${r.pct}%</span></div>
     <div class="pcok-drawer-pipe-title">Pipeline de production</div>
@@ -24261,6 +24480,7 @@ function _cockpitDetailBody(r, avecTete) {
     <div class="pcok-drawer-actions">
       ${canAttrib?`<button class="pcok-btn pcok-btn--primary" onclick="closeProdDrawer();openAttribForDossier('${r.dossierId}')">Gérer l'attribution →</button>`:''}
       ${_peutCloturer(_dossierParId(r.dossierId)) ? `<button class="pcok-btn" style="color:#16a34a;border-color:rgba(22,163,74,.4)" title="${_CLOT_TITRE}" onclick="cloturerDossier('${r.dossierId}')">✓ Clôturer</button>` : ''}
+      ${_urgentToggleBtn(r.dossierId, 'pcok')}
       ${_installToggleBtn(r.dossierId, 'pcok')}
       <button class="pcok-btn" onclick="printFicheTravailDossier('${r.dossierId}')">Fiche travail</button>
       <button class="pcok-btn" onclick="printDossier('${r.dossierId}')">Imprimer</button>
