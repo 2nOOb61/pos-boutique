@@ -2668,6 +2668,23 @@ html, body { overflow-x: hidden; max-width: 100%; }
 .cal-chip--prod { background:#f1effc; border-left-color:#7c3aed; color:#2b1a63; }
 .cal-chip--liv  { background:#e9f6f3; border-left-color:#0d9488; color:#0b3f39; }
 .cal-chip--pao  { background:#f3f2ff; border-left-color:#6c63ff; color:#2d2673; }
+
+/* ── Échéance d'une tâche ───────────────────────────────── */
+/* Puce posée à côté du badge de statut dans le panneau Attribution : la date
+   à laquelle CET opérateur doit avoir fini SON étape. Rouge une fois passée. */
+.btn-attr-ech { display:inline-flex; align-items:center; gap:3px; padding:1px 6px; border:1px solid var(--color-border);
+  border-radius:999px; background:var(--color-surface); color:var(--color-text-secondary);
+  font-size:10.5px; font-weight:600; line-height:1.6; cursor:pointer; transition:.15s; flex-shrink:0; vertical-align:middle; }
+button.btn-attr-ech:hover { background:var(--color-secondary-light); color:var(--color-secondary); border-color:var(--color-secondary); }
+.btn-attr-ech--empty { color:var(--color-text-muted); border-style:dashed; }
+.btn-attr-ech--late { background:#fbecec; color:#a32d2d; border-color:#f0c9c9; }
+button.btn-attr-ech:focus-visible { outline:2px solid var(--color-primary); outline-offset:1px; }
+/* Raccourcis de date, partagés par le modal d'attribution et le modal d'échéance. */
+.ech-quick { display:flex; flex-wrap:wrap; gap:6px; margin-top:7px; }
+.ech-quick button { padding:4px 10px; border:1px solid var(--color-border); border-radius:999px;
+  background:var(--color-surface); color:var(--color-text-secondary); font-family:inherit;
+  font-size:11.5px; font-weight:600; cursor:pointer; transition:.15s; }
+.ech-quick button:hover { background:var(--color-primary-light); color:var(--color-primary); border-color:var(--color-primary); }
 .cal-chip--late { background:#fef6ec; border-left-color:#d97706; color:#7c2d12; }
 .cal-chip--done { background:#f3f4f6; border-left-color:#9ca3af; color:#4b5563; }
 .cal-chip-urgent { border-left-color:#dc2626; box-shadow:inset 0 0 0 1px #f4c4c4; }

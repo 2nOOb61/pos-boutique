@@ -97,7 +97,7 @@ function _purgeLocalPlainPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '236 · 2026-11-26';
+const APP_VERSION = '237 · 2026-11-26';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -10034,11 +10034,16 @@ function _getTacheRetardInfo(t) {
 }
 
 // « En retard » au sens opérateur (cockpit + filtre) : une tâche non terminée est en
-// retard si (1) elle dépasse le rythme de production (tâche en cours trop longue) OU
-// (2) l'échéance de livraison de son dossier est passée. Source de vérité UNIQUE pour
-// le KPI « En retard » et le filtre EN_RETARD → le compteur et la liste concordent.
+// retard si (1) elle dépasse le rythme de production (tâche en cours trop longue),
+// (2) SA PROPRE échéance est passée, OU (3) l'échéance de livraison de son dossier
+// est passée. Source de vérité UNIQUE pour le KPI « En retard » et le filtre
+// EN_RETARD → le compteur et la liste concordent.
+// L'échéance de tâche est volontairement placée AVANT celle du dossier : elle est
+// plus fine et plus proche, un opérateur peut être en retard sur son jour sans que
+// le dossier le soit encore.
 function _tacheRetardFlag(t) {
   if (!t || t.statut === 'TERMINE') return false;
+  if (_tacheEchLate(t)) return true;
   if (_getTacheRetardInfo(t).isRetard) return true;
   if (t.dossierId && t.dossierId !== 'LIBRE' && Array.isArray(dossiers)) {
     const d = dossiers.find(x => x.id === t.dossierId);
@@ -16872,7 +16877,10 @@ function renderAttrPanel(tachesD, commentsD = []) {
             const _pencil = (canAssign && !dossierClos)
               ? `<button class="btn-attr-reassign" title="Modifier l'opérateur de cette étape" aria-label="Modifier l'opérateur" onclick="event.stopPropagation();openReassignOperateur('${t.id}')"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>`
               : '';
-            return `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:6px;margin-bottom:2px">${_name} ${badge}${_pencil}</span>`;
+            // Puce d'échéance : la date à laquelle CET opérateur doit avoir fini.
+            // Visible par tous (le travail de chacun se lit), modifiable par qui attribue.
+            const _ech = _tacheEchChip(t, canAssign && !dossierClos);
+            return `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:6px;margin-bottom:2px">${_name} ${badge}${_ech}${_pencil}</span>`;
           }).join('')
         : (dossierClos
             ? '<em style="color:var(--color-success)">Clôturé (sans attribution)</em>'
@@ -17328,6 +17336,16 @@ function openAttrib(etapeCode, etapeLabel) {
   pendingAttrib = { etapeCode, etapeLabel };
   document.getElementById('attribContextText').textContent = `${selectedDossier.numeroDossier} — ${etapeLabel}`;
   document.getElementById('attribComment').value = '';
+  // Échéance : volontairement VIDE par défaut. La préremplir avec la date de
+  // production du dossier donnerait à chaque étape la même date que toutes les
+  // autres — exactement ce que l'échéance par tâche sert à dépasser.
+  const _attribEch = document.getElementById('attribEcheance');
+  if (_attribEch) _attribEch.value = '';
+  const _attribEchHint = document.getElementById('attribEcheanceHint');
+  if (_attribEchHint){
+    const _ref = _toIsoDate(selectedDossier.dateLivraisonProd || '') || _toIsoDate(selectedDossier.dateLivraison || '');
+    _attribEchHint.textContent = _ref ? `Dossier attendu pour le ${_dispDate(_ref)}` : '';
+  }
   // Présélection de l'équipe selon l'heure courante (l'admin peut changer).
   const _shift = _defaultShift();
   document.querySelectorAll('#attribShiftSel input[name=attribShift]').forEach(r => { r.checked = (r.value === _shift); });
@@ -17360,6 +17378,8 @@ async function confirmAttribution() {
   const commentaire = document.getElementById('attribComment').value;
   const assignePar  = currentUser?.username || 'Admin';
   const shift = document.querySelector('#attribShiftSel input[name=attribShift]:checked')?.value || _defaultShift();
+  // Même échéance pour tous les opérateurs cochés : ils travaillent la même étape.
+  const echeance = (document.getElementById('attribEcheance')?.value || '').trim();
   let allOk = true;
   for (const cb of checked) {
     const payload = {
@@ -17370,7 +17390,8 @@ async function confirmAttribution() {
       operateur: cb.value,
       commentaire,
       assignePar,
-      shift
+      shift,
+      echeance
     };
     let r;
     if (APPS_SCRIPT_URL) { r = await apiCall(payload); }
@@ -17394,6 +17415,7 @@ async function confirmAttribution() {
           commentaire,
           assignePar,
           shift,
+          echeance,
           statut: 'A_FAIRE',
           dateAssignation: new Date().toLocaleDateString('fr-FR'),
           dateDebut: '',
@@ -17425,6 +17447,153 @@ async function confirmAttribution() {
 // Réservé (front) aux rôles qui peuvent attribuer : admin et chef d'atelier.
 function _peutReaffecterTache() {
   return ['admin','chef_atelier'].includes(currentUser?.role || '');
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// ÉCHÉANCE D'UNE TÂCHE — la date à laquelle CET opérateur doit avoir fini CETTE étape
+// ════════════════════════════════════════════════════════════════════════
+// Avant ça, une tâche de dossier n'avait que les dates du DOSSIER (production,
+// livraison, BAT) — les mêmes pour tous ses intervenants : on savait quand le
+// dossier devait être prêt, jamais quel jour tel opérateur devait le traiter.
+// La colonne 14 `Echeance` de la feuille Taches EXISTAIT déjà (les tâches libres
+// s'en servaient) et `handleGetTaches` la renvoyait déjà : aucune migration.
+// Ce qui manquait, c'était de l'écrire sur une tâche de dossier — à l'attribution
+// (`attribuerTache`) puis après coup (`setTacheEcheance`) — et de quoi la lire.
+// Format : 'yyyy-MM-dd' en texte, des deux côtés (cf. _normEcheance_ dans Code.gs).
+// Écrire l'échéance ne touche NI le pointage NI la progression du dossier :
+// replanifier n'est pas faire avancer le travail.
+function _tacheEcheance(t){ return (t && typeof t.echeance === 'string') ? t.echeance.trim() : ''; }
+
+// En retard sur SON échéance (≠ retard de rythme, ≠ échéance du dossier).
+function _tacheEchLate(t){
+  if (!t || t.statut === 'TERMINE') return false;
+  const e = _tacheEcheance(t);
+  if (!e) return false;
+  const d = _daysUntil(e);
+  return d != null && d < 0;
+}
+
+// Libellé court lisible d'un écart de jours.
+function _echJoursLabel(days){
+  if (days == null) return '';
+  if (days < 0)  return Math.abs(days) + ' j de retard';
+  if (days === 0) return "Aujourd'hui";
+  if (days === 1) return 'Demain';
+  return 'Dans ' + days + ' j';
+}
+
+// Clé de regroupement par journée — partagée par le Tableau et le poste opérateur,
+// pour que les deux écrans découpent la semaine de la même façon.
+// Les tâches TERMINÉES sortent du planning : elles ne sont plus à faire un jour donné.
+function _echBucket(t){
+  if (!t) return 'sans';
+  if (t.statut === 'TERMINE') return 'fait';
+  const e = _tacheEcheance(t);
+  if (!e) return 'sans';
+  const d = _daysUntil(e);
+  if (d == null)  return 'sans';
+  if (d < 0)      return 'retard';
+  if (d === 0)    return 'auj';
+  if (d === 1)    return 'demain';
+  return 'apres';
+}
+const _ECH_BUCKETS = [
+  { k:'retard', label:'En retard',        color:'#dc2626' },
+  { k:'auj',    label:"Aujourd'hui",      color:'#e8834a' },
+  { k:'demain', label:'Demain',           color:'#2563eb' },
+  { k:'apres',  label:'Plus tard',        color:'#1a4a3a' },
+  { k:'sans',   label:'Sans échéance',    color:'#a8a29e' },
+  { k:'fait',   label:'Terminées',         color:'#78716c' },
+];
+
+const _ECH_ICO = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>';
+
+// Puce d'échéance posée à côté d'un opérateur dans le panneau Attribution.
+// Cliquable seulement pour qui peut attribuer : c'est la même décision.
+function _tacheEchChip(t, editable){
+  const e    = _tacheEcheance(t);
+  const late = _tacheEchLate(t);
+  if (!e) {
+    return editable
+      ? `<button class="btn-attr-ech btn-attr-ech--empty" title="Poser une échéance pour cet opérateur"
+           onclick="event.stopPropagation();openTacheEcheance('${t.id}')">${_ECH_ICO} date</button>`
+      : '';
+  }
+  const days = _daysUntil(e);
+  const txt  = new Date(e + 'T00:00:00').toLocaleDateString('fr-FR', { day:'2-digit', month:'short' });
+  const tip  = `Échéance : ${_dispDate(e)}${days != null ? ' · ' + _echJoursLabel(days) : ''}`;
+  const cls  = 'btn-attr-ech' + (late ? ' btn-attr-ech--late' : '');
+  return editable
+    ? `<button class="${cls}" title="${escapeHtml(tip)}" onclick="event.stopPropagation();openTacheEcheance('${t.id}')">${_ECH_ICO} ${txt}</button>`
+    : `<span class="${cls}" title="${escapeHtml(tip)}">${_ECH_ICO} ${txt}</span>`;
+}
+
+// ── Modal : poser / changer / retirer l'échéance d'une tâche ──────────
+let pendingEcheance = null;
+
+// Les tâches LIBRES ont leur propre échéance, posée à la création et sauvée par
+// `saveTacheLibre` : passer par ici écrirait la cellule qu'une resynchro de la
+// tâche libre pourrait ensuite écraser. On ne traite donc que les tâches de dossier.
+function openTacheEcheance(tacheId){
+  if (!_peutReaffecterTache()) { showToast("Réservé à l'admin et au chef d'atelier", 'error'); return; }
+  const t = (Array.isArray(taches) ? taches : []).find(x => String(x.id) === String(tacheId));
+  if (!t) { showToast('Tâche introuvable', 'error'); return; }
+  if (t.dossierId === 'LIBRE') { showToast("L'échéance d'une tâche libre se change sur la tâche elle-même", 'info'); return; }
+  pendingEcheance = { tacheId: t.id, dossierId: t.dossierId };
+  const ctx = document.getElementById('echeanceContextText');
+  if (ctx) ctx.textContent = `${t.numeroDossier || t.dossierId} — ${t.etapeLabel || t.etapeCode} · ${t.operateur || 'non assigné'}`;
+  const inp = document.getElementById('echeanceDate');
+  if (inp) inp.value = _tacheEcheance(t);
+  // Repère : l'échéance du DOSSIER reste la limite à ne pas dépasser.
+  const hint = document.getElementById('echeanceHint');
+  if (hint){
+    const d = _dossierParId(t.dossierId);
+    const ref = d ? (_toIsoDate(d.dateLivraisonProd || '') || _toIsoDate(d.dateLivraison || '')) : '';
+    hint.textContent = ref
+      ? `Le dossier est attendu pour le ${_dispDate(ref)} — l'échéance de l'étape doit tomber avant.`
+      : "Ce dossier n'a pas de date de production : l'échéance de l'étape est la seule repère.";
+  }
+  const del = document.getElementById('echeanceRetirer');
+  if (del) del.style.display = _tacheEcheance(t) ? '' : 'none';
+  openModal('echeanceModal');
+}
+
+// Raccourcis de date : aujourd'hui, +1, +2, +7 jours. Le champ visé est celui du
+// MÊME bloc que le bouton cliqué — les mêmes raccourcis servent le modal
+// d'attribution et le modal d'échéance, viser un id en dur remplirait le mauvais.
+function setEcheanceQuick(btn, days){
+  const inp = btn && btn.closest ? btn.closest('.form-group')?.querySelector('input[type=date]') : null;
+  if (!inp) return;
+  const d = new Date(); d.setDate(d.getDate() + (Number(days) || 0));
+  inp.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+async function saveTacheEcheance(retirer){
+  if (!pendingEcheance) return;
+  const val = retirer ? '' : ((document.getElementById('echeanceDate')?.value) || '').trim();
+  if (!retirer && !val) { showToast('Choisissez une date', 'error'); return; }
+  const t = (Array.isArray(taches) ? taches : []).find(x => String(x.id) === String(pendingEcheance.tacheId));
+  if (!t) { showToast('Tâche introuvable', 'error'); closeModal('echeanceModal'); return; }
+
+  let ok = true;
+  if (APPS_SCRIPT_URL){
+    const r = await apiCall({ action:'setTacheEcheance', tacheId: t.id, echeance: val,
+                              par: currentUser?.label || currentUser?.username || 'admin' });
+    ok = !!(r && r.ok);
+    if (!ok) showToast('Échéance non enregistrée : ' + ((r && r.error) || 'serveur injoignable'), 'error');
+  }
+  // Écriture locale même hors ligne : le planning du jour doit rester lisible sur
+  // le poste, et la prochaine lecture de `getTaches` fera foi.
+  if (ok || !APPS_SCRIPT_URL){
+    t.echeance = val;
+    if (typeof saveTaches === 'function') saveTaches();
+    showToast(val ? `Échéance : ${_dispDate(val)}` : 'Échéance retirée');
+  }
+  closeModal('echeanceModal');
+  pendingEcheance = null;
+  ['renderAttrPanel','renderKanbanPage','renderProduction'].forEach(fn => {
+    try { if (typeof window[fn] === 'function') window[fn](); } catch(e){}
+  });
 }
 
 function openReassignOperateur(tacheId) {
@@ -28881,6 +29050,19 @@ const KB_POLES = [
 const _KB_POLE_OF = (() => { const m = {}; KB_POLES.forEach(p => p.etapes.forEach(e => { m[e] = p.k; })); return m; })();
 function _kbPoleOf(t){ return _KB_POLE_OF[(t && t.etapeCode) || ''] || 'AUTRES'; }
 
+// Groupement des bandes : par metier (qui fait quoi) ou par journee (quand).
+// « jour » lit l'echeance de chaque tache — la date a laquelle SON operateur doit
+// l'avoir finie — et non les dates du dossier, qui sont les memes pour toutes ses
+// etapes et ne disent donc rien de la charge d'une personne un jour donne.
+// Memorise par poste : le chef garde « par jour », l'operateur garde son metier.
+let _kbGroup = 'metier';   // 'metier' | 'jour'
+try { const _g = localStorage.getItem('pos-kb-group'); if (_g === 'jour' || _g === 'metier') _kbGroup = _g; } catch(e) {}
+function _kbSetGroup(v){
+  _kbGroup = (v === 'jour') ? 'jour' : 'metier';
+  try { localStorage.setItem('pos-kb-group', _kbGroup); } catch(e) {}
+  renderKanbanPage();
+}
+
 // Bandes repliees, memorisees par poste (un finisseur replie Commercial/PAO).
 let _kbPoleClosed = {};
 try { _kbPoleClosed = JSON.parse(localStorage.getItem('pos-kb-poles') || '{}') || {}; } catch(e) { _kbPoleClosed = {}; }
@@ -28991,7 +29173,9 @@ function _kbCardHtml(t){
     if (isNaN(dt)) return '';
     const days = Math.round((dt - new Date(new Date().toDateString())) / 86400000);
     const late = days < 0 && t.statut !== 'TERMINE';
-    return `<span class="kb-chip ${late?'kb-chip--late':''}">📅 ${dt.toLocaleDateString('fr-FR',{day:'2-digit',month:'short'})}</span>`;
+    // Icône au trait, pas d'emoji (CLAUDE.md) : cette puce était rare tant que seules
+    // les tâches libres portaient une échéance, elle est désormais sur presque chaque carte.
+    return `<span class="kb-chip ${late?'kb-chip--late':''}">${_ECH_ICO} ${dt.toLocaleDateString('fr-FR',{day:'2-digit',month:'short'})}</span>`;
   })() : '';
 
   const prio = t.priorite ? `<span class="kb-chip kb-chip--prio">${_kbEsc(t.priorite)}</span>` : '';
@@ -29065,6 +29249,13 @@ function renderKanbanPage(reload){
       <button role="tab" aria-selected="${_kbScope==='all'}"  onclick="_kbSetScope('all')">Toute l'équipe</button>
     </div>` : '';
 
+  // Metier (qui fait quoi) ou journee (quand) : les memes cartes, regroupees autrement.
+  const groupSeg = `
+    <div class="kb-seg" role="tablist" aria-label="Regroupement des bandes">
+      <button role="tab" aria-selected="${_kbGroup==='metier'}" onclick="_kbSetGroup('metier')">Par métier</button>
+      <button role="tab" aria-selected="${_kbGroup==='jour'}"   onclick="_kbSetGroup('jour')">Par jour</button>
+    </div>`;
+
   host.innerHTML = `
     <div class="kb-kpis">
       <div class="kb-kpi" style="--k:#78716c"><div class="v">${all.length}</div><div class="l">Tâches affichées</div></div>
@@ -29075,6 +29266,7 @@ function renderKanbanPage(reload){
     </div>
     <div class="kb-bar">
       ${scopeSeg}
+      ${groupSeg}
       <select class="kb-select" onchange="_kbSetEtape(this.value)">${etOpts}</select>
       <select class="kb-select" onchange="_kbSetOp(this.value)">${opOpts}</select>
       <input class="kb-search" type="search" placeholder="Rechercher (dossier, client, étape)…"
@@ -29091,16 +29283,26 @@ function _kbRenderBoard(){
   const all = _kbAllVisible();
   _kbBuildComCounts();
 
-  // Un seul passage pour repartir les taches dans les bandes.
+  // Un seul passage pour repartir les taches dans les bandes, selon le groupement
+  // choisi : par metier (pole d'etapes) ou par journee (echeance de la tache).
+  const parJour = _kbGroup === 'jour';
+  const modele  = parJour ? _ECH_BUCKETS : KB_POLES;
+  const cle     = parJour ? _echBucket : _kbPoleOf;
   const par = {};
-  KB_POLES.forEach(p => { par[p.k] = []; });
-  all.forEach(t => { par[_kbPoleOf(t)].push(t); });
+  modele.forEach(p => { par[p.k] = []; });
+  all.forEach(t => { const k = cle(t); (par[k] = par[k] || []).push(t); });
 
   // Vue pilotage (« toute l'équipe ») : on garde les bandes vides, l'absence de
-  // carte est elle-même une information (personne n'a de travail à cette étape).
-  // Vue opérateur : on masque les métiers qui ne le concernent pas.
+  // carte est elle-même une information (personne n'a de travail à cette étape,
+  // ou rien n'est prévu ce jour-là).
+  // Vue opérateur : on masque ce qui ne le concerne pas.
   const pilotage = _kbScope === 'all' && _kbCanSeeAll();
-  const bandes = KB_POLES.filter(p => par[p.k].length || (pilotage && p.k !== 'AUTRES'));
+  // Par jour, les bandes toujours visibles en pilotage sont celles qui engagent
+  // la journée en cours ; « Sans échéance » et « Terminées » n'apparaissent que
+  // si elles portent quelque chose.
+  const _toujours = parJour ? ['retard','auj','demain'] : null;
+  const bandes = modele.filter(p => par[p.k].length
+    || (pilotage && (parJour ? _toujours.includes(p.k) : p.k !== 'AUTRES')));
   if (!bandes.length) { host.innerHTML = `<div class="kb-empty">Aucune tâche</div>`; return; }
 
   host.innerHTML = bandes.map(p => {
@@ -29116,10 +29318,16 @@ function _kbRenderBoard(){
         <div class="kb-list">${cl.length ? cl.map(_kbCardHtml).join('') : `<div class="kb-empty">Aucune tâche</div>`}</div>
       </section>`;
     }).join('') + `</div>`;
+    // Groupé par jour, la date exacte de la bande évite d'avoir à ouvrir une carte
+    // pour savoir de quel « plus tard » on parle.
+    const sousTitre = (parJour && list.length)
+      ? [...new Set(list.map(t => _tacheEcheance(t)).filter(Boolean))].sort()
+          .slice(0, 3).map(e => _dispDate(e)).join(' · ')
+      : '';
     return `<section class="kb-lane ${closed?'kb-lane--closed':''}" style="--kp:${p.color}">
       <button type="button" class="kb-lanehead" aria-expanded="${!closed}" onclick="_kbTogglePole('${p.k}')">
         <span class="kb-lanedot"></span>
-        <span class="kb-lanelbl">${_kbEsc(p.label)}</span>
+        <span class="kb-lanelbl">${_kbEsc(p.label)}${sousTitre ? ` <span class="kb-lanedate">${_kbEsc(sousTitre)}</span>` : ''}</span>
         <span class="kb-lanen">${list.length}</span>
         <span class="kb-lanemini">${n('A_FAIRE')} à faire · ${n('EN_COURS')} en cours · ${nt} terminé${nt>1?'es':'e'}</span>
         ${late ? `<span class="kb-lanelate">${late} en retard</span>` : ''}
@@ -29561,6 +29769,7 @@ function _kbInjectStyle(){
   .kb-lanehead:hover{background:var(--color-bg,#f7f4ef)}
   .kb-lanedot{width:9px;height:9px;border-radius:50%;background:var(--kp);flex:none}
   .kb-lanelbl{font-size:13px;font-weight:800;color:var(--color-text,#1c1917);text-transform:uppercase;letter-spacing:.03em}
+  .kb-lanedate{font-weight:600;font-size:11px;letter-spacing:0;text-transform:none;color:var(--color-text-muted,#78716c)}
   .kb-lanen{background:var(--kp);color:#fff;border-radius:20px;padding:1px 9px;font-size:11.5px;font-weight:800;flex:none}
   .kb-lanemini{font-size:11.5px;color:var(--color-text-muted,#78716c);font-weight:600;white-space:nowrap;
     overflow:hidden;text-overflow:ellipsis}

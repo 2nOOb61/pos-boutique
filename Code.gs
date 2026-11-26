@@ -370,6 +370,7 @@ function doPost(e) {
     else if (action === 'setTacheLibrePhotos') result = handleSetTacheLibrePhotos(data);
     else if (action === 'attribuerTache')    result = handleAttribuerTache(data);
     else if (action === 'changerOperateurTache') result = handleChangerOperateurTache(data);
+    else if (action === 'setTacheEcheance')  result = handleSetTacheEcheance(data);
     else if (action === 'getTaches')         result = handleGetTaches(data);
     else if (action === 'deleteTache')       result = handleDeleteTache(data);
     else if (action === 'deleteTachesDossier') result = handleDeleteTachesDossier(data);
@@ -452,6 +453,7 @@ function doGet(e) {
       else if (action === 'setDossierUrgent')  result = handleSetDossierUrgent(data);
       else if (action === 'attribuerTache')    result = handleAttribuerTache(data);
       else if (action === 'changerOperateurTache') result = handleChangerOperateurTache(data);
+      else if (action === 'setTacheEcheance')  result = handleSetTacheEcheance(data);
       else if (action === 'pointerAction')     result = handlePointerAction(data);
       else if (action === 'deleteTache')       result = handleDeleteTache(data);
       else if (action === 'deleteTachesDossier') result = handleDeleteTachesDossier(data);
@@ -1690,6 +1692,7 @@ const _JMETA_ = {
   DOSSIER_INSTALLATION:['Production','Installation sur site'],
   DOSSIER_URGENT:['Production','Dossier urgent'],
   TACHE_ATTRIB:['Production','Tâche attribuée'], TACHE_LIBRE_CREATE:['Production','Tâche créée'],
+  TACHE_ECHEANCE:['Production','Échéance de tâche'],
   TACHE_START:['Production','Tâche démarrée'], TACHE_FIN:['Production','Tâche terminée'],
   TACHES_RESET:['Production','Tâches réinitialisées'],
   RECALC_PROGRESSION:['Système','Recalcul progression'],
@@ -3057,16 +3060,76 @@ function handleAttribuerTache(data) {
     // si la feuille prod est antérieure à la colonne Equipe (avait 15 colonnes).
     const shift = (data.shift === 'Nuit' || data.shift === 'Jour') ? data.shift : '';
     if (sh.getLastColumn() < 16) sh.getRange(1, 16).setValue('Equipe');
-    // Ligne complète 16 colonnes : les colonnes 13-15 (Priorite/Echeance/Photos) restent
-    // vides pour une tâche de dossier, seul Equipe (16) est renseigné.
+    // Échéance de la tâche (col 14) : la date à laquelle CET opérateur doit avoir
+    // fini CETTE étape. Les tâches libres l'utilisaient déjà ; une tâche de dossier
+    // la laissait vide, et le « qui fait quoi quel jour » ne se déduisait que des
+    // dates du DOSSIER (production, livraison, BAT) — les mêmes pour tout le monde.
+    const ech = _normEcheance_(data.echeance);
+    // Ligne complète 16 colonnes : Priorite (13) et Photos (15) restent vides pour une
+    // tâche de dossier, Echeance (14) et Equipe (16) sont renseignées si fournies.
     sh.appendRow([tId, data.dossierId, data.numeroDossier, data.etapeCode, etape.label,
       data.operateur, 'A_FAIRE', now, '', '', data.commentaire||'', data.assignePar||'Admin',
-      '', '', '', shift]);
+      '', ech, '', shift]);
+    // Format texte : sans ça Sheets reconvertit « 2026-11-27 » en Date et le fuseau
+    // du script peut la décaler d'un jour à la relecture.
+    if (ech) sh.getRange(sh.getLastRow(), TACHE_ECHEANCE_COL).setNumberFormat('@').setValue(ech);
 
     _logAction_('TACHE_ATTRIB', data.assignePar||'admin',
       data.operateur + ' → ' + data.etapeCode + ' (dossier:' + data.dossierId + ')');
     CacheService.getScriptCache().remove('dashboard_v1'); // invalider le dashboard
     return { ok:true, tacheId:tId };
+  } finally {
+    try { lock.releaseLock(); } catch(e) {}
+  }
+}
+
+// ── ÉCHÉANCE D'UNE TÂCHE — colonne 14 `Echeance` ─────────────────────
+// La colonne existe depuis les tâches libres : rien à migrer, et handleGetTaches
+// la renvoie déjà (`t.echeance`). Ce qui manquait, c'était de l'ÉCRIRE sur une
+// tâche de dossier — à l'attribution, puis après coup quand le planning bouge.
+// Format imposé : 'yyyy-MM-dd' en TEXTE. Toute autre forme est refusée plutôt que
+// devinée : une date mal lue décalerait la journée d'un opérateur sans rien dire.
+const TACHE_ECHEANCE_COL = 14;
+function _normEcheance_(v) {
+  if (v === null || v === undefined) return '';
+  const s = String(v).trim();
+  if (!s) return '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return '';
+  const d = new Date(s + 'T00:00:00');
+  return isNaN(d.getTime()) ? '' : s;
+}
+
+// Pose, change ou retire (echeance:'') l'échéance d'UNE tâche. N'écrit que la
+// colonne 14 : ni le pointage, ni l'opérateur, ni la progression du dossier ne
+// bougent — replanifier n'est pas faire avancer le travail.
+function handleSetTacheEcheance(data) {
+  const tacheId = data && data.tacheId;
+  if (!tacheId) return { ok:false, error:'tacheId requis' };
+  const brut = (data.echeance === null || data.echeance === undefined) ? '' : String(data.echeance).trim();
+  const ech  = _normEcheance_(brut);
+  if (brut && !ech) return { ok:false, error:'échéance invalide (attendu yyyy-MM-dd) : ' + brut };
+
+  const sh = getSS().getSheetByName(SHEET_TACHES);
+  if (!sh) return { ok:false, error:'Feuille Taches introuvable' };
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(6000);
+    // En-tête des colonnes 13-15 sur une feuille antérieure aux tâches libres.
+    if (sh.getLastColumn() < 15) {
+      sh.getRange(1, 13, 1, 3).setValues([['Priorite','Echeance','Photos']]);
+    }
+    const n = Math.max(0, sh.getLastRow() - 1);
+    if (!n) return { ok:false, error:'Tâche introuvable' };
+    const ids = sh.getRange(2, 1, n, 1).getValues();
+    for (let i = 0; i < n; i++) {
+      if (String(ids[i][0]) !== String(tacheId)) continue;
+      sh.getRange(i + 2, TACHE_ECHEANCE_COL).setNumberFormat('@').setValue(ech);
+      _logAction_('TACHE_ECHEANCE', (data.par) || 'admin',
+        String(tacheId) + ' → ' + (ech || '(retirée)'));
+      CacheService.getScriptCache().remove('dashboard_v1');
+      return { ok:true, echeance:ech };
+    }
+    return { ok:false, error:'Tâche introuvable' };
   } finally {
     try { lock.releaseLock(); } catch(e) {}
   }

@@ -26,7 +26,7 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20261126-calendrier-pao">
+<link rel="stylesheet" href="./style.css?v=20261126-echeance-tache">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
@@ -4253,7 +4253,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20261126-calendrier-pao"></script>
+<script src="./app.js?v=20261126-echeance-tache"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
@@ -4280,6 +4280,14 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
           </label>
         </div>
       </div>
+      <!-- Échéance de l'ÉTAPE, pas du dossier : le jour où CET opérateur doit
+           avoir fini. Facultative — une étape peut se faire au fil de l'eau. -->
+      <div class="form-group">
+        <label>Échéance de l'étape <span style="font-weight:400;text-transform:none">(optionnel)</span></label>
+        <input type="date" id="attribEcheance">
+        <div class="ech-quick"><button type="button" onclick="setEcheanceQuick(this,0)">Aujourd'hui</button><button type="button" onclick="setEcheanceQuick(this,1)">Demain</button><button type="button" onclick="setEcheanceQuick(this,2)">+2 j</button><button type="button" onclick="setEcheanceQuick(this,7)">+1 sem.</button></div>
+        <p id="attribEcheanceHint" style="font-size:11px;color:var(--color-text-muted);margin:6px 0 0"></p>
+      </div>
       <div class="form-group">
         <label>Commentaire <span style="font-weight:400;text-transform:none">(optionnel)</span></label>
         <input type="text" id="attribComment" placeholder="Instructions, précisions...">
@@ -4287,6 +4295,33 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px">
         <button class="btn-logout" onclick="closeModal('attribModal')">Annuler</button>
         <button class="btn-login" style="width:auto;padding:12px 20px;margin-top:0" onclick="confirmAttribution()">Attribuer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL ÉCHÉANCE D'UNE TÂCHE — poser, changer ou retirer le jour où un
+       opérateur doit avoir fini SON étape (col. 14 de la feuille Taches). -->
+  <div class="modal-overlay" id="echeanceModal">
+    <div class="modal" style="max-width:420px">
+      <div class="modal-title">
+        Échéance de l'étape
+        <button class="modal-close" onclick="closeModal('echeanceModal')">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div id="echeanceContextText" style="padding:10px 12px;background:var(--color-primary-light);border-radius:8px;margin-bottom:16px;font-size:13px;color:var(--color-primary);font-weight:500"></div>
+      <div class="form-group">
+        <label>Date</label>
+        <input type="date" id="echeanceDate">
+        <div class="ech-quick"><button type="button" onclick="setEcheanceQuick(this,0)">Aujourd'hui</button><button type="button" onclick="setEcheanceQuick(this,1)">Demain</button><button type="button" onclick="setEcheanceQuick(this,2)">+2 j</button><button type="button" onclick="setEcheanceQuick(this,7)">+1 sem.</button></div>
+        <p id="echeanceHint" style="font-size:11px;color:var(--color-text-muted);margin:6px 0 0"></p>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:space-between;align-items:center;margin-top:20px">
+        <button class="btn-logout" id="echeanceRetirer" style="display:none" onclick="saveTacheEcheance(true)">Retirer</button>
+        <div style="display:flex;gap:10px;margin-left:auto">
+          <button class="btn-logout" onclick="closeModal('echeanceModal')">Annuler</button>
+          <button class="btn-login" style="width:auto;padding:12px 20px;margin-top:0" onclick="saveTacheEcheance(false)">Enregistrer</button>
+        </div>
       </div>
     </div>
   </div>

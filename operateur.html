@@ -154,7 +154,22 @@
       display:grid; grid-template-columns:repeat(2,1fr); gap:10px;
       margin-bottom:16px;
     }
-    @media(min-width:480px) { .kpi-grid { grid-template-columns:repeat(4,1fr); } }
+    @media(min-width:480px) { .kpi-grid { grid-template-columns:repeat(auto-fit,minmax(118px,1fr)); } }
+
+    /* Échéance de tâche : la liste se lit par journée, pas comme un tas. */
+    .task-sep {
+      display:flex; align-items:center; gap:8px; margin:16px 2px 8px;
+      font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; color:var(--muted);
+    }
+    .task-sep:first-child { margin-top:2px; }
+    .task-sep i { width:8px; height:8px; border-radius:50%; background:currentColor; flex:none; }
+    .task-sep b { font-weight:800; }
+    .task-sep s { margin-left:auto; text-decoration:none; font-weight:700; opacity:.7; }
+    .task-ech {
+      display:inline-flex; align-items:center; gap:4px; padding:1px 7px; border-radius:999px;
+      background:#eef2ff; color:#4338ca; font-size:10px; font-weight:700; white-space:nowrap;
+    }
+    .task-ech.late { background:#fee2e2; color:#b91c1c; }
 
     .kpi-card {
       background:white; border-radius:14px;
@@ -568,6 +583,13 @@
           <div class="kpi-value" id="kpiDone">—</div>
           <div class="kpi-sub">aujourd'hui</div>
         </div>
+        <!-- À rendre aujourd'hui : compte les échéances de tâche du jour ET celles
+             déjà dépassées — un retard reste du travail à sortir maintenant. -->
+        <div class="kpi-card todo">
+          <div class="kpi-label">À rendre</div>
+          <div class="kpi-value" id="kpiEchAuj">—</div>
+          <div class="kpi-sub" id="kpiEchSub">aujourd'hui</div>
+        </div>
       </div>
 
       <!-- Progression globale -->
@@ -951,6 +973,15 @@ function renderDashboard() {
   document.getElementById('kpiTodo').textContent     = todo;
   document.getElementById('kpiRunning').textContent  = running;
   document.getElementById('kpiDone').textContent     = done;
+  // « À rendre » : les échéances du jour, plus les retards (toujours à sortir).
+  // Le sous-titre le dit, sinon un compteur gonflé par d'anciens retards
+  // passerait pour la charge du jour.
+  const echAuj    = tasks.filter(t => _opEchBucket(t) === 'auj').length;
+  const echRetard = tasks.filter(t => _opEchBucket(t) === 'retard').length;
+  const elEch = document.getElementById('kpiEchAuj');
+  if (elEch) elEch.textContent = echAuj + echRetard;
+  const elEchSub = document.getElementById('kpiEchSub');
+  if (elEchSub) elEchSub.textContent = echRetard ? `dont ${echRetard} en retard` : "aujourd'hui";
 
   // Badge tâches actives
   const activeCnt = todo + running;
@@ -1021,6 +1052,55 @@ function renderDashboard() {
 // ════════════════════════════════════════
 // TASK LIST
 // ════════════════════════════════════════
+// ══ ÉCHÉANCE D'UNE TÂCHE ════════════════════════════════════════
+// `echeance` ('yyyy-MM-dd', col. 14 de la feuille Taches) est posée par le chef
+// à l'attribution : le jour où CETTE étape doit être finie. Le poste ne l'écrit
+// jamais — l'opérateur pointe, il ne replanifie pas. Il la LIT pour que la liste
+// se range par journée au lieu d'être un tas trié par statut.
+// Ce fichier est autonome (aucun app.js) : ces trois fonctions doublent celles
+// de l'app, volontairement, et doivent découper la semaine de la MÊME façon.
+function _opEcheance(t){ return (t && typeof t.echeance === 'string') ? t.echeance.trim() : ''; }
+function _opDaysUntil(iso){
+  if (!iso) return null;
+  const d = new Date(iso + 'T00:00:00');
+  if (isNaN(d.getTime())) return null;
+  const today = new Date(); today.setHours(0,0,0,0);
+  return Math.round((d - today) / 86400000);
+}
+function _opEchBucket(t){
+  if (!t) return 'sans';
+  if (t.statut === 'TERMINE') return 'fait';
+  const d = _opDaysUntil(_opEcheance(t));
+  if (d == null) return 'sans';
+  if (d < 0)     return 'retard';
+  if (d === 0)   return 'auj';
+  if (d === 1)   return 'demain';
+  return 'apres';
+}
+const _OP_BUCKETS = [
+  { k:'retard', label:'En retard',     color:'#dc2626' },
+  { k:'auj',    label:"Aujourd'hui",   color:'#e8834a' },
+  { k:'demain', label:'Demain',        color:'#2563eb' },
+  { k:'apres',  label:'Plus tard',     color:'#1a4a3a' },
+  { k:'sans',   label:'Sans échéance', color:'#a8a29e' },
+  { k:'fait',   label:'Terminées',      color:'#78716c' },
+];
+function _opEchBadge(t){
+  const e = _opEcheance(t);
+  if (!e) return '';
+  const d    = _opDaysUntil(e);
+  const late = d != null && d < 0 && t.statut !== 'TERMINE';
+  // Une tâche terminée porte sa date au passé : « 2 j de retard » sur du travail
+  // déjà rendu se lirait comme un reproche permanent.
+  const txt  = d == null ? e
+    : t.statut === 'TERMINE' ? 'Était pour le ' + new Date(e + 'T00:00:00').toLocaleDateString('fr-FR', { day:'2-digit', month:'short' })
+    : d < 0   ? Math.abs(d) + ' j de retard'
+    : d === 0 ? "Pour aujourd'hui"
+    : d === 1 ? 'Pour demain'
+    : 'Pour le ' + new Date(e + 'T00:00:00').toLocaleDateString('fr-FR', { day:'2-digit', month:'short' });
+  return `<span class="task-ech${late ? ' late' : ''}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>${txt}</span>`;
+}
+
 function renderTaskList() {
   const active = tasks.filter(t => t.statut !== 'TERMINE');
   const done   = tasks.filter(t => t.statut === 'TERMINE');
@@ -1043,7 +1123,24 @@ function renderTaskList() {
       </div>`;
     return;
   }
-  container.innerHTML = [...active, ...done].map(renderTaskCard).join('');
+  // Regroupement par journée. Les tâches sans échéance ne disparaissent pas :
+  // elles ont leur propre bande, après les journées datées. À l'intérieur d'une
+  // bande, l'ordre reste celui du tri d'origine (en cours, à faire, terminé).
+  const par = {};
+  [...active, ...done].forEach(t => { const k = _opEchBucket(t); (par[k] = par[k] || []).push(t); });
+  const bandes = _OP_BUCKETS.filter(b => (par[b.k] || []).length);
+  // Une seule bande et pas d'échéance du tout : inutile de coiffer la liste d'un
+  // titre « Sans échéance » qui n'oppose rien à rien.
+  if (bandes.length === 1 && bandes[0].k === 'sans'){
+    container.innerHTML = [...active, ...done].map(renderTaskCard).join('');
+    return;
+  }
+  container.innerHTML = bandes.map(b => {
+    const list = par[b.k];
+    const nb   = list.length + ' tâche' + (list.length > 1 ? 's' : '');
+    return `<div class="task-sep" style="color:${b.color}"><i></i><b>${b.label}</b><s>${nb}</s></div>`
+      + list.map(renderTaskCard).join('');
+  }).join('');
 }
 
 function renderTaskCard(t) {
@@ -1090,7 +1187,10 @@ function renderTaskCard(t) {
           <div class="task-etape" style="color:${color}">${etapeLabel}</div>
           ${t.commentaire ? `<div class="task-client">${t.commentaire}</div>` : ''}
         </div>
-        <span class="badge ${badgeClass}">${badgeLabel}</span>
+        <span style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+          <span class="badge ${badgeClass}">${badgeLabel}</span>
+          ${_opEchBadge(t)}
+        </span>
       </div>
       ${meta.length ? `<div class="task-meta">${meta.join('')}</div>` : ''}
       ${actionsHtml}
