@@ -97,7 +97,7 @@ function _purgeLocalPlainPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '235 · 2026-11-24';
+const APP_VERSION = '236 · 2026-11-26';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -342,7 +342,7 @@ const PAGE_ACCESS = {
   blocages:       ['admin','chef_atelier','commerciale','gestionnaire'],
   production:     ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
   machines:       ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','gestionnaire','commerciale'],
-  calendrier:     ['admin','commerciale','chef_atelier','gestionnaire'],
+  calendrier:     ['admin','commerciale','chef_atelier','gestionnaire','pao'],
   'suivi-bat':    ['admin','commerciale','chef_atelier','pao','gestionnaire'],
   finitions:      ['admin','chef_atelier','finition','operateur_prod','machiniste','pao','gestionnaire','commerciale'],
   messagerie:     ['admin','chef_atelier','operateur_prod','machiniste','pao','finition','livreur','caissier','commerciale','utilisateur','gestionnaire','comptable'],
@@ -19558,6 +19558,7 @@ function _calRenderKpis(){
   set('calKpiProdAuj',    k.prodAuj);
   set('calKpiLivAuj',     k.livAuj);
   set('calKpiSansDate',   k.sansDate);
+  set('calKpiPaoAuj',     _calPaoKpi().auj);
 }
 
 function calShift(delta){ _calRef = new Date(_calRef.getFullYear(), _calRef.getMonth()+delta, 1); renderCalendrier(); }
@@ -19654,6 +19655,232 @@ function _calRenderMonth(kind){
   return head + '<div class="cal-days">'+grid+'</div>';
 }
 
+// ════════════════════════════════════════════════════════════════════════
+// CALENDRIER — GRILLE PAO (travaux de conception)
+// ════════════════════════════════════════════════════════════════════════
+// Troisième grille de la page, à côté de Production et Livraison client.
+// AXE DE DATE = `dateBAT` de la commande (col X de la feuille Commandes, saisie
+// à la commande et recopiée sur le dossier par _syncDossierDates) : c'est la
+// SEULE échéance propre à la PAO que le système capture déjà. On ne réutilise
+// PAS l'échéance de livraison — c'est ce que fait le calendrier du Suivi BAT
+// (renderBatCalendar), qui répond à « ce BAT doit être validé avant telle
+// livraison », pas à « qu'est-ce que la PAO a à faire ce jour-là ».
+// Un dossier dont la PAO est ouverte mais SANS date BAT n'est pas posé sur une
+// date voisine inventée : il va dans le bandeau « sans date de BAT » sous la
+// grille (même parti que `bcal-nodate` du Suivi BAT).
+// Les filtres de la barre sticky (client, statut, responsable, type, pôle,
+// recherche) s'appliquent tels quels : les événements PAO portent les mêmes
+// champs que ceux des deux autres grilles.
+// ════════════════════════════════════════════════════════════════════════
+const _CAL_PAO_CODES = ['PAO','MODIFICATIONS','BAT'];
+// Au-delà de cette étape, la conception est derrière le dossier.
+const _CAL_PAO_LAST  = ETAPES_CONFIG.findIndex(e => e.code === 'BAT');
+let _calPaoOn = true;                    // puce « PAO » de la barre d'affichage
+
+function setCalPao(on){
+  _calPaoOn = !!on;
+  const btn = document.getElementById('calPaoToggle');
+  if (btn){ btn.classList.toggle('cal-vt--on', _calPaoOn); btn.setAttribute('aria-pressed', String(_calPaoOn)); }
+  renderCalendrier();
+}
+
+// Statut effectif d'une étape PAO sur un dossier — pointages ET états manuels,
+// via les tâches effectives (`eff` = _tachesEff du dossier, calculé une seule
+// fois par dossier par l'appelant). null quand l'étape est terminée : elle n'a
+// plus rien à faire afficher.
+function _calPaoEtape(code, eff){
+  const ts = eff.filter(t => t.etapeCode === code);
+  if (ts.length && ts.every(t => t.statut === 'TERMINE')) return null;
+  const conf = ETAPES_CONFIG.find(e => e.code === code) || { short:code, label:code, color:'#6c63ff' };
+  const open = ts.filter(t => t.statut !== 'TERMINE');
+  return {
+    code, short: conf.short, label: conf.label, color: conf.color,
+    statut: open.some(t => t.statut === 'EN_COURS') ? 'EN_COURS' : (ts.length ? 'A_FAIRE' : 'NON_ATTRIBUE'),
+    operateurs: [...new Set(open.map(t => _resolveOperatorLabel(t.operateur) || t.operateur).filter(Boolean))]
+  };
+}
+
+// La PAO de ce dossier est-elle encore d'actualité ? Ni abandonné, ni clôturé,
+// et son statut n'a pas dépassé l'étape BAT — sinon des dossiers en production
+// ou déjà livrés reviendraient encombrer la grille de conception.
+function _calPaoActive(d){
+  if (!d || _dossierAnnule(d) || _dossierClosed(d)) return false;
+  const i = ETAPES_CONFIG.findIndex(e => e.code === d.statut);
+  return (i < 0 ? 0 : i) <= _CAL_PAO_LAST;
+}
+
+// Dossier « déjà vu par la PAO » : une épreuve déposée, ou une étape PAO
+// attribuée / pilotée à la main. Sans ce filet, le bandeau « sans date de BAT »
+// listerait TOUS les jeunes dossiers : rien ne distingue un dossier qui attend
+// la conception d'un dossier qui n'en demande pas (il n'existe pas de drapeau
+// « sans PAO »). Dans la grille, la date BAT fait elle-même ce tri.
+function _calPaoTouched(d, eff){
+  if (_dossierBats(d.id).length) return true;
+  return eff.some(t => _CAL_PAO_CODES.includes(t.etapeCode));
+}
+
+// Ce qu'on montre des étapes ouvertes : celles réellement ENGAGées (une tâche
+// attribuée ou un état posé à la main), sinon la première seule. Sans ce tri,
+// tout dossier d'avant le BAT afficherait « PAO · Modifs · BAT » : des
+// modifications qu'on n'a pas encore demandées et une épreuve qui n'existe pas
+// ne sont pas du travail à faire ce jour-là.
+function _calPaoVisibles(etapes){
+  const engagees = etapes.filter(s => s.statut !== 'NON_ATTRIBUE');
+  return engagees.length ? engagees : etapes.slice(0, 1);
+}
+
+// Un événement PAO = un dossier dont au moins une étape de conception reste
+// ouverte, positionné sur sa date de BAT.
+function _calPaoEvents(){
+  const dossById = {};
+  (Array.isArray(dossiers) ? dossiers : []).forEach(d => { if (d && d.id) dossById[d.id] = d; });
+  const idx = _tachesParDossier();
+  const out = [];
+  _collectDeliveries().forEach(x => {
+    if (x.status === 'cancelled') return;
+    const d = x.dossierId ? dossById[x.dossierId] : null;
+    if (!_calPaoActive(d)) return;
+    const eff = _tachesEff(d, idx.get(d.id) || []);
+    const ouvertes = _CAL_PAO_CODES.map(c => _calPaoEtape(c, eff)).filter(Boolean);
+    if (!ouvertes.length) return;
+    const etapes = _calPaoVisibles(ouvertes);
+    out.push({
+      ymd: _toIsoDate(d.dateBAT || ''),
+      client: x.client, ref: d.numeroDossier || x.ref || '',
+      total: x.total, status: x.status, kind: x.kind, id: x.id,
+      dossierId: d.id, commercial: x.commercial || '',
+      items: x.items || [], poles: x.poles || [],
+      etapes, touched: _calPaoTouched(d, eff),
+      batSt: _dossierBats(d.id).length ? _batBallState(d.id) : null
+    });
+  });
+  return out;
+}
+
+// Groupe les travaux PAO par jour du mois affiché ; met de côté ceux dont la
+// date de BAT manque (impossible de les poser sur une case).
+function _calPaoByDay(){
+  const year = _calRef.getFullYear(), month = _calRef.getMonth();
+  const byDay = {}, noDate = [];
+  _calPaoEvents().forEach(e => {
+    if (!_calMatchesBase(e)) return;
+    if (!_calMatchesStatus(e)) return;
+    const dt = e.ymd ? new Date(e.ymd + 'T00:00:00') : null;
+    if (!dt || isNaN(dt.getTime())){ if (e.touched) noDate.push(e); return; }
+    if (dt.getFullYear() !== year || dt.getMonth() !== month) return;
+    (byDay[e.ymd] = byDay[e.ymd] || []).push(e);
+  });
+  return { byDay, noDate };
+}
+
+// Couleur de pastille : retard d'abord, puis l'état du travail.
+function _calPaoDot(e, late){
+  if (late) return '#dc2626';
+  if (e.etapes.some(s => s.statut === 'EN_COURS')) return '#d97706';
+  if (e.etapes.every(s => s.statut === 'NON_ATTRIBUE')) return '#a8a29e';
+  return '#6c63ff';
+}
+
+function _calPaoChip(e, iso, todayIso){
+  const late = !!iso && iso < todayIso && e.status !== 'completed';
+  const dot  = _calPaoDot(e, late);
+  const ops  = [...new Set(e.etapes.reduce((a, s) => a.concat(s.operateurs), []))];
+  const steps = e.etapes.map(s =>
+    `<span class="cal-pao-step" style="background:${s.color}1f;color:${s.color}">${escapeHtml(s.short)}</span>`).join('');
+  const tip = `${e.ref || '—'} — ${e.client}\nÉtapes PAO : ${e.etapes.map(s => s.label).join(' · ')}`
+    + (ops.length ? `\nGraphiste : ${ops.join(', ')}` : '\nAucun graphiste attribué')
+    + (e.batSt ? `\n${e.batSt.label}` : '')
+    + (late ? '\nDate de BAT dépassée' : '');
+  return `<button type="button" class="cal-chip cal-chip--pao${late ? ' cal-chip-urgent' : ''}" style="border-left:3px solid ${dot}"
+      onclick="openAttribForDossier('${e.dossierId}')" title="${escapeHtml(tip)}">
+      <span class="cal-chip-head"><span class="cal-chip-client">${escapeHtml(e.ref || e.client)}</span>
+        <span class="cal-chip-badges"><span class="cal-dot" style="background:${dot}"></span></span></span>
+      <span class="cal-chip-items">${escapeHtml(e.client)}</span>
+      <span class="cal-pao-steps">${steps}</span>
+      <span class="cal-chip-foot">${ops.length
+        ? `<span class="cal-pao-op">${escapeHtml(ops.join(', '))}</span>`
+        : '<span class="cal-chip-warn">Non attribué</span>'}</span></button>`;
+}
+
+// Grille mensuelle de la PAO — même géométrie et mêmes classes que
+// _calRenderMonth (plafond de 4 par case, journée dépliable).
+function _calRenderPaoMonth(byDay){
+  const year = _calRef.getFullYear(), month = _calRef.getMonth();
+  const todayIso = _calTodayIso();
+  const first = new Date(year, month, 1);
+  const startDow = (first.getDay()+6)%7;
+  const dim = new Date(year, month+1, 0).getDate();
+  const totalCells = Math.ceil((startDow+dim)/7)*7;
+  let grid = '';
+  let day = 1 - startDow;
+  for (let i=0;i<totalCells;i++,day++){
+    if (day<1 || day>dim){ grid += '<div class="cal-day cal-day-out"></div>'; continue; }
+    const iso = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    const evs = byDay[iso] || [];
+    const expanded = _calExpanded.has('pao:'+iso);
+    const shown = expanded ? evs : evs.slice(0,4);
+    const chips = shown.map(e => _calPaoChip(e, iso, todayIso)).join('');
+    let more = '';
+    if (evs.length > 4){
+      more = expanded
+        ? `<span class="cal-more cal-more-less" onclick="calToggleDay('pao','${iso}')">▲ Réduire</span>`
+        : `<span class="cal-more" onclick="calToggleDay('pao','${iso}')">+${evs.length-4} autres</span>`;
+    }
+    grid += `<div class="cal-day${iso===todayIso?' cal-day-today':''}${evs.length?' cal-day-has':''}${expanded?' cal-day-open':''}">
+      <span class="cal-daynum">${day}</span>
+      <div class="cal-chips">${chips}${more}</div>
+    </div>`;
+  }
+  const head = '<div class="cal-week-head">'+_CAL_DOWS.map(d=>`<div class="cal-dow">${d}</div>`).join('')+'</div>';
+  return head + '<div class="cal-days">'+grid+'</div>';
+}
+
+// Bandeau des travaux PAO sans date de BAT : ils existent, ils ne peuvent pas
+// être planifiés. C'est de là qu'on va renseigner la date manquante.
+function _calPaoNoDateHtml(noDate){
+  if (!noDate.length) return '';
+  const rows = noDate.map(e => {
+    const ops = [...new Set(e.etapes.reduce((a, s) => a.concat(s.operateurs), []))];
+    const st  = e.etapes.map(s => s.short).join(' · ');
+    return `<button type="button" class="bcal-nd-row" onclick="openAttribForDossier('${e.dossierId}')"
+        title="${escapeHtml(e.etapes.map(s => s.label).join(' · '))}">
+        <span class="cal-dot" style="background:${_calPaoDot(e, false)}"></span>
+        <b>${escapeHtml(e.ref || '—')}</b><span class="bcal-nd-cli">${escapeHtml(e.client)}</span>
+        <span class="bcal-nd-state" style="color:#6c63ff">${escapeHtml(st)}${ops.length ? ' · ' + escapeHtml(ops.join(', ')) : ''}</span></button>`;
+  }).join('');
+  return `<div class="bcal-nodate">
+    <div class="bcal-nodate-h">PAO en cours sans date de BAT (${noDate.length})</div>${rows}</div>`;
+}
+
+// Compteurs PAO : à faire aujourd'hui (ligne KPI) et dates de BAT dépassées
+// (entête de la grille).
+function _calPaoKpi(){
+  const today = _calTodayIso();
+  let auj = 0, retard = 0;
+  _calPaoEvents().forEach(e => {
+    if (e.status === 'completed' || !e.ymd) return;
+    if (!_calMatchesBase(e)) return;
+    if (e.ymd === today) auj++;
+    else if (e.ymd < today) retard++;
+  });
+  return { auj, retard };
+}
+
+function _calRenderPao(){
+  const sec = document.getElementById('calPao');
+  const nd  = document.getElementById('calPaoNoDate');
+  if (sec) sec.style.display = _calPaoOn ? '' : 'none';
+  if (!_calPaoOn){ if (nd) nd.innerHTML = ''; return; }
+  const { byDay, noDate } = _calPaoByDay();
+  const m = document.getElementById('calMonthPao'); if (m) m.innerHTML = _calRenderPaoMonth(byDay);
+  if (nd) nd.innerHTML = _calPaoNoDateHtml(noDate);
+  const st = document.getElementById('calPaoStat');
+  if (st){
+    const k = _calPaoKpi();
+    st.textContent = k.retard ? `${k.retard} date${k.retard>1?'s':''} de BAT dépassée${k.retard>1?'s':''}` : '';
+  }
+}
+
 function renderCalendrier(){
   if(!document.getElementById('page-calendrier')) return;
   if(typeof _syncDossierDates==='function') _syncDossierDates();
@@ -19666,10 +19893,12 @@ function renderCalendrier(){
   // quatre commandes par case, ou le cockpit en liste (voir plus bas).
   if(_calView === 'liste'){
     _calRenderList();
+    const nd = document.getElementById('calPaoNoDate'); if(nd) nd.innerHTML = '';
   } else {
     const p = document.getElementById('calMonthProd');   if(p) p.innerHTML = _calRenderMonth('prod');
     const c = document.getElementById('calMonthClient'); if(c) c.innerHTML = _calRenderMonth('client');
     const w = document.getElementById('calListWrap');    if(w) w.innerHTML = '';
+    _calRenderPao();
   }
 }
 
@@ -19772,6 +20001,34 @@ function printCalendrier(){
     }
     return `<table><thead><tr>${_CAL_DOWS.map(d=>`<th>${d}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
   }
+  // Tableau PAO — même géométrie, mais l'événement porte les étapes de
+  // conception restantes et le graphiste, pas les articles.
+  function paoTable(){
+    const byDay = _calPaoByDay().byDay;
+    const first = new Date(year, month, 1);
+    const startDow = (first.getDay()+6)%7;
+    const dim = new Date(year, month+1, 0).getDate();
+    const totalCells = Math.ceil((startDow+dim)/7)*7;
+    let day = 1 - startDow;
+    let rows = '';
+    for(let w2=0; w2<totalCells/7; w2++){
+      let tds='';
+      for(let dd=0; dd<7; dd++, day++){
+        if(day<1||day>dim){ tds += '<td class="out"></td>'; continue; }
+        const iso = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+        const items = (byDay[iso] || []).map(e=>{
+          const late = iso < todayIso && e.status !== 'completed';
+          const ops  = [...new Set(e.etapes.reduce((a,s)=>a.concat(s.operateurs), []))];
+          return `<div class="ev ${late?'late':''}"><b>${escapeHtml(e.ref || e.client)}</b><br>${escapeHtml(e.client)}`
+            + `<br>${escapeHtml(e.etapes.map(s=>s.short).join(' · '))}`
+            + (ops.length ? '<br>'+escapeHtml(ops.join(', ')) : '') + `</div>`;
+        }).join('');
+        tds += `<td class="${iso===todayIso?'today':''}"><div class="dn">${day}</div>${items}</td>`;
+      }
+      rows += '<tr>'+tds+'</tr>';
+    }
+    return `<table><thead><tr>${_CAL_DOWS.map(d=>`<th>${d}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
+  }
   const w = window.open('', '_blank', 'width=1200,height=900');
   if(!w){ alert("Impression bloquée : autorisez les fenêtres pop-up pour ce site, puis réessayez."); return; }
   const stamp = new Date().toLocaleDateString('fr-FR')+' '+new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
@@ -19781,7 +20038,7 @@ function printCalendrier(){
     h1{font-size:15px;margin:0}
     .sub{color:#555;font-size:9.5px;margin:2px 0 6px}
     h2{font-size:12px;margin:10px 0 4px;padding:4px 8px;border-radius:4px;color:#fff}
-    h2.prod{background:#7c3aed}h2.client{background:#0f766e}
+    h2.prod{background:#7c3aed}h2.client{background:#0f766e}h2.pao{background:#6c63ff}
     table{width:100%;border-collapse:collapse;table-layout:fixed;page-break-inside:avoid}
     th{background:#e9e9e9;font-size:8px;text-transform:uppercase;border:1px solid #999;padding:2px}
     td{border:1px solid #bbb;height:78px;vertical-align:top;padding:2px 3px;width:14.28%;overflow:hidden}
@@ -19801,6 +20058,9 @@ function printCalendrier(){
     <div class="cal2"></div>
     <h2 class="client">📦 Échéances client — livraison / retrait</h2>
     ${tableFor('client')}
+    ${_calPaoOn ? `<div class="cal2"></div>
+    <h2 class="pao">PAO — dates de BAT</h2>
+    ${paoTable()}` : ''}
   </body></html>`);
   w.document.close();
 }

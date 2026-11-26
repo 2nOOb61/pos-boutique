@@ -26,7 +26,7 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20261124-urgent-dossier">
+<link rel="stylesheet" href="./style.css?v=20261126-calendrier-pao">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
@@ -1459,7 +1459,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
             <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></span>
             <span class="sidebar-label">Finitions</span>
           </button>
-          <button class="nav-btn sidebar-btn" data-roles="admin,commerciale,chef_atelier,gestionnaire" onclick="showPage('calendrier',this)" aria-label="Calendrier">
+          <button class="nav-btn sidebar-btn" data-roles="admin,commerciale,chef_atelier,gestionnaire,pao" onclick="showPage('calendrier',this)" aria-label="Calendrier">
             <span class="sidebar-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="8" y1="14" x2="8" y2="14"/><line x1="12" y1="14" x2="12" y2="14"/><line x1="16" y1="14" x2="16" y2="14"/><line x1="8" y1="18" x2="8" y2="18"/><line x1="12" y1="18" x2="12" y2="18"/></svg></span>
             <span class="sidebar-label">Calendrier</span>
           </button>
@@ -2822,7 +2822,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
     <div id="kanbanContent"></div>
   </div>
 
-  <div class="page" id="page-calendrier" data-roles="admin,commerciale,chef_atelier,gestionnaire">
+  <div class="page" id="page-calendrier" data-roles="admin,commerciale,chef_atelier,gestionnaire,pao">
     <div class="page-topbar">
       <div>
         <h1 class="page-title">Planification production &amp; livraisons</h1>
@@ -2841,7 +2841,14 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
             Liste
           </button>
         </div>
-        <button class="cal-btn cal-btn-print" onclick="printCalendrier()" title="Imprimer les deux calendriers">
+        <!-- Grille PAO : affichée par défaut, masquable pour revenir à deux
+             colonnes quand on ne travaille que la production et les livraisons -->
+        <button type="button" id="calPaoToggle" class="cal-vt-btn cal-vt--on cal-vt-solo" aria-pressed="true"
+                onclick="setCalPao(!_calPaoOn)" title="Afficher ou masquer la grille PAO">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>
+          PAO
+        </button>
+        <button class="cal-btn cal-btn-print" onclick="printCalendrier()" title="Imprimer les calendriers du mois">
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
           Imprimer
         </button>
@@ -2907,6 +2914,10 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
         <span class="cal-kpi-ic ic-gray"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.5-3 4"/><line x1="12" y1="17" x2="12" y2="17.5"/></svg></span>
         <span class="cal-kpi-txt"><b id="calKpiSansDate">0</b><small>Commandes sans date</small></span>
       </div>
+      <div class="cal-kpi">
+        <span class="cal-kpi-ic ic-indigo"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg></span>
+        <span class="cal-kpi-txt"><b id="calKpiPaoAuj">0</b><small>PAO à faire aujourd'hui</small></span>
+      </div>
     </div>
 
     <!-- Vue liste (cockpit) — remplie par _calRenderList(), vide en vue grille -->
@@ -2927,12 +2938,23 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
         </div>
         <div class="cal-month" id="calMonthClient"></div>
       </section>
+      <section class="cal-cal" id="calPao">
+        <div class="cal-cal-head cal-head-pao">
+          <span class="cal-cal-title">PAO / Conception<span class="cal-cal-stat" id="calPaoStat"></span></span>
+          <span class="cal-cal-sub">Dates de BAT — conception, modifications, épreuves</span>
+        </div>
+        <div class="cal-month" id="calMonthPao"></div>
+      </section>
     </div>
+    <!-- Travaux PAO en cours dont la date de BAT n'est pas renseignée -->
+    <div id="calPaoNoDate"></div>
 
     <!-- Légende commune -->
     <div class="cal-legend" id="calLegend">
       <span class="cal-lg"><i class="cal-lg-dot" style="background:#7c3aed"></i>Production</span>
       <span class="cal-lg"><i class="cal-lg-dot" style="background:#0d9488"></i>Livraison</span>
+      <span class="cal-lg"><i class="cal-lg-dot" style="background:#6c63ff"></i>PAO à faire</span>
+      <span class="cal-lg"><i class="cal-lg-dot" style="background:#a8a29e"></i>PAO non attribuée</span>
       <span class="cal-lg"><i class="cal-lg-dot" style="background:#dc2626"></i>Urgent</span>
       <span class="cal-lg"><i class="cal-lg-dot" style="background:#d97706"></i>En retard</span>
       <span class="cal-lg"><i class="cal-lg-dot" style="background:#9ca3af"></i>Terminé</span>
@@ -4231,7 +4253,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20261124-urgent-dossier"></script>
+<script src="./app.js?v=20261126-calendrier-pao"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
