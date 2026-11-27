@@ -97,7 +97,7 @@ function _purgeLocalPlainPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '245 · 2026-11-27';
+const APP_VERSION = '246 · 2026-11-27';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -1293,6 +1293,79 @@ function _cmdReste(c) {
   return Math.max(0, (Number(c.total) || 0) - _cmdEncaisse(c));
 }
 
+// ============================================================
+// PAIEMENT — SOURCE DE VÉRITÉ UNIQUE
+// ============================================================
+// Jumeau côté argent de _delivLivree / _delivOuverte / _delivLate, et pour la même
+// raison. La page Finances lisait les champs BRUTS `o.accompte` / `o.restant`
+// pendant que le cockpit Commandes lisait le journal d'encaissements. Or la
+// finalisation (_doCmdFinalize, _doFinalize) inscrit bien le solde au journal mais
+// ne remettait PAS ces deux champs à jour — seul validerEncaissement() le faisait.
+// Donc : une commande soldée au comptoir affichait le bon reste, la même commande
+// soldée par la finalisation restait EN ROUGE avec son reste d'origine, et le KPI
+// « Restant à percevoir » réclamait de l'argent déjà encaissé. Le serveur, lui,
+// écartait déjà les commandes finalisées de son cumul (Code.gs / getControlPatron) :
+// l'écran patron et la page Finances se contredisaient sur les mêmes données.
+// Le journal fait foi, et lui seul. Une commande arrivée du Sheet en « completed »
+// sans solde journalisé (paiement à la livraison) garde donc son reste : c'est
+// voulu, l'arrêt de caisse la cherche expressément.
+// Ces helpers sont la seule règle : filtres, compteurs, couleurs de ligne, tiroirs,
+// impressions et exports s'y branchent.
+
+// Index du journal en UN passage, les deux natures d'un coup. `_cmdReste()` refiltre
+// `encaissements` pour chaque commande : sur un millier de lignes, à chaque rendu,
+// il balaierait le journal un millier de fois. Le volet commande réutilise
+// _encaisseParCommande() (déjà écrit pour la page Livraisons) ; le volet réservation
+// applique la même logique à `source: 'reservation'`.
+function _payIndex() {
+  const res = new Map();
+  (Array.isArray(encaissements) ? encaissements : []).forEach(e => {
+    if (!e || e.source !== 'reservation') return;
+    const k = String(e.refId);
+    res.set(k, (res.get(k) || 0) + (Number(e.montant) || 0));
+  });
+  return { cmd: _encaisseParCommande(), res };
+}
+
+// Somme réellement encaissée sur une opération. Même repli que _cmdEncaisse : sans
+// aucun mouvement journalisé (opération créée avant le journal, ou chargée du Sheet),
+// l'acompte de l'enregistrement fait foi.
+function _payEncaisse(kind, o, idx) {
+  if (!o) return 0;
+  const m = idx && (kind === 'reservation' ? idx.res : idx.cmd);
+  const k = String(o.id);
+  if (m && m.has(k)) return m.get(k);
+  if (!m) {
+    // Appel isolé (une seule ligne) : pas d'index à construire pour rien.
+    const evts = (Array.isArray(encaissements) ? encaissements : [])
+      .filter(e => e && e.source === kind && String(e.refId) === k);
+    if (evts.length) return evts.reduce((a, b) => a + (Number(b.montant) || 0), 0);
+  }
+  return Number(o.accompte != null ? o.accompte : o.acompte) || 0;
+}
+
+// Reste réellement dû. Pour une commande, strictement identique à _cmdReste().
+function _payReste(kind, o, idx) {
+  if (!o) return 0;
+  return Math.max(0, (Number(o.total) || 0) - _payEncaisse(kind, o, idx));
+}
+
+// Les trois prédicats. Ils prennent une entrée DÉJÀ construite, porteuse de
+// { status, livStatut, reste } — comme _delivLate() prend une ligne porteuse de
+// `days` : recalculer le reste dans le prédicat ramènerait le balayage par ligne
+// que l'index vient d'éliminer.
+
+// Soldé : plus rien à percevoir.
+function _paySolde(e) { return !!e && (Number(e.reste) || 0) <= 0; }
+// Créance ouverte : de l'argent à percevoir sur une opération vivante.
+function _payCreance(e) { return !!e && e.status !== 'cancelled' && (Number(e.reste) || 0) > 0; }
+// Impayé réellement en retard : la marchandise est PARTIE et l'argent n'est pas
+// rentré. C'est la seule alarme qui mérite le rouge — une commande impayée encore
+// à l'atelier n'est pas un recouvrement, la boutique tient encore le gage.
+// Réutilise _delivLivree pour que « remis au client » veuille dire la même chose
+// des deux côtés de l'app.
+function _payRecouvrement(e) { return _payCreance(e) && _delivLivree(e); }
+
 // Enregistre une entrée d'argent dans le journal (+ persistance + sync best-effort)
 function _recordEncaissement(evt) {
   const montant = Math.max(0, Number(evt.montant) || 0);
@@ -1926,6 +1999,11 @@ function _doFinalize(r, method, given, change, provider, ref) {
   r.status           = 'completed';
   r.dateFinalisation = new Date().toISOString();
   r.saleId           = sale.id;
+  // Même oubli que sur les commandes : `r.restant` gardait le reste d'origine après
+  // la finalisation, et c'est lui que lisaient la page Finances, le dashboard patron
+  // et la fiche coursier. On recopie ce que le journal vient d'enregistrer.
+  r.accompte = _payEncaisse('reservation', r);
+  r.restant  = _payReste('reservation', r);
   // Qui a finalisé (≠ caissier d'origine de la réservation) : l'arrêt de caisse
   // s'en sert pour ne PAS rattacher la vente au créateur quand un autre agent a
   // encaissé le solde (même colonne que sur les commandes).
@@ -3206,11 +3284,15 @@ function renderMesVentesJour() {
     num: 'Ticket n° ' + s.id,
     print: 'reprintTicket(' + q(s.id) + ')'
   }));
+  // Reste dû lu dans le journal : un encaissement saisi depuis un AUTRE poste y est
+  // (le journal se synchronise), alors que le champ `restant` de la commande ne se
+  // met à jour que sur le poste qui a encaissé.
+  const _mvEnc = _payIndex();
   (commandes || []).filter(c => c.status === 'pending' && mine(c)).forEach(c => rows.push({
     o: c, type: 'Commande', tcol: '#0891b2', tbg: '#e0f2fe',
     client: c.clientName || '—',
     items: Array.isArray(c.items) ? c.items : [],
-    total: Number(c.total) || 0, due: Number(c.restant) || 0,
+    total: Number(c.total) || 0, due: _payReste('commande', c, _mvEnc),
     num: 'Facture n° ' + _factureNum(c),
     print: 'printCommandeTicket(commandes.find(x=>String(x.id)===' + q(c.id) + '))'
   }));
@@ -3218,7 +3300,7 @@ function renderMesVentesJour() {
     o: r, type: 'Réservation', tcol: '#7c3aed', tbg: '#f3e8ff',
     client: r.clientName || '—',
     items: Array.isArray(r.items) ? r.items : [],
-    total: Number(r.total) || 0, due: Number(r.restant) || 0,
+    total: Number(r.total) || 0, due: _payReste('reservation', r, _mvEnc),
     num: 'Réservation n° ' + _factureNum(r),
     print: 'printReservationTicket(reservations.find(x=>String(x.id)===' + q(r.id) + '))'
   }));
@@ -3445,9 +3527,12 @@ function renderHistoryList(){
   }
 
   const all=[];
+  // Le reste dû vient du journal, pas du champ `restant` : une commande finalisée y
+  // gardait son reste d'origine et l'historique la montrait encore à crédit.
+  const _hEnc=_payIndex();
   (sales||[]).forEach(s=>all.push({date:s.date,time:s.time,type:'Vente',tcol:'#1a4a3a',client:s.clientName||'',contact:s.clientContact||'',itemsArr:(Array.isArray(s.items)?s.items:[]),pay:_payLabel(s),total:Number(s.total)||0,due:Number(s.due)||0,print:`reprintTicket('${s.id}')`,kebab:isAdmin?[{label:'Modifier',icon:'edit',act:`openEditSaleModal('${s.id}')`},{label:'Supprimer',icon:'trash',danger:true,act:`openDeleteSaleModal('${s.id}')`}]:[]}));
-  (commandes||[]).filter(c=>c.status!=='cancelled').forEach(c=>all.push({date:c.date,type:'Cmd rapide',tcol:'#0891b2',client:c.clientName||'',contact:c.clientContact||'',itemsArr:(Array.isArray(c.items)?c.items:[]),pay:'Commande',total:Number(c.total)||0,due:Number(c.restant)||0,print:`printCommandeTicket(commandes.find(x=>String(x.id)==='${c.id}'))`,kebab:[{label:'Ouvrir dans Commandes',icon:'open',act:`showPage('commandes')`}]}));
-  (reservations||[]).filter(r=>r.status!=='cancelled').forEach(r=>all.push({date:r.date,type:'Réserv.',tcol:'#7c3aed',client:r.clientName||'',contact:r.clientContact||'',itemsArr:(Array.isArray(r.items)?r.items:[]),pay:'Réservation',total:Number(r.total)||0,due:Number(r.restant)||0,print:`printReservationTicket(reservations.find(x=>String(x.id)==='${r.id}'))`,kebab:[{label:'Ouvrir dans Réservations',icon:'open',act:`showPage('reservations')`}]}));
+  (commandes||[]).filter(c=>c.status!=='cancelled').forEach(c=>all.push({date:c.date,type:'Cmd rapide',tcol:'#0891b2',client:c.clientName||'',contact:c.clientContact||'',itemsArr:(Array.isArray(c.items)?c.items:[]),pay:'Commande',total:Number(c.total)||0,due:_payReste('commande',c,_hEnc),print:`printCommandeTicket(commandes.find(x=>String(x.id)==='${c.id}'))`,kebab:[{label:'Ouvrir dans Commandes',icon:'open',act:`showPage('commandes')`}]}));
+  (reservations||[]).filter(r=>r.status!=='cancelled').forEach(r=>all.push({date:r.date,type:'Réserv.',tcol:'#7c3aed',client:r.clientName||'',contact:r.clientContact||'',itemsArr:(Array.isArray(r.items)?r.items:[]),pay:'Réservation',total:Number(r.total)||0,due:_payReste('reservation',r,_hEnc),print:`printReservationTicket(reservations.find(x=>String(x.id)==='${r.id}'))`,kebab:[{label:'Ouvrir dans Réservations',icon:'open',act:`showPage('reservations')`}]}));
 
   let list=all.filter(r=>{
     if(typeF!=='all' && r.type!==typeF) return false;
@@ -7675,12 +7760,20 @@ function cmdToggleToutesCartes(){
 }
 
 function _buildCommandeRows() {
+  // Journal indexé UNE fois pour tout le tableau. `_cmdReste()` + `_cmdEncaisse()`
+  // refiltraient `encaissements` pour CHAQUE commande, soit deux balayages complets
+  // par ligne — et renderCmdCockpit() construit les lignes deux fois par rendu (une
+  // pour les compteurs, une pour le corps). À mille commandes et trois mille
+  // encaissements, le cockpit relisait le journal quatre mille fois avant d'afficher
+  // quoi que ce soit. Les montants sont identiques (même repli sur l'acompte, même
+  // normalisation de `refId`), c'est le même calcul fait une fois pour toutes.
+  const _enc = _payIndex();
   return (Array.isArray(commandes) ? commandes : []).map(c => {
     const dcmd = parseSaleDate(c.date);
     const ymd  = _toIsoDate(c.dateLivraison || '');
     const days = ymd ? _daysUntil(ymd) : null;
     const total   = Number(c.total) || 0;
-    const restant = _cmdReste(c);          // reste réel (journal d'encaissements)
+    const restant = _payReste('commande', c, _enc);   // reste réel (journal)
     const paid    = restant <= 0;
     // Progression production (si dossier lié)
     // `prodClos` = dossier de production clôturé (LIVRE / 100 %) : la commande est
@@ -7716,7 +7809,9 @@ function _buildCommandeRows() {
       mode: c.deliveryMode === 'livraison' ? 'livraison' : 'retrait',
       items: c.items || [], nItems: (c.items||[]).length,
       produit: (c.items||[]).map(i => i.name).filter(Boolean).join(', '),
-      total, accompte: _cmdEncaisse(c), restant, paid,
+      total, accompte: _payEncaisse('commande', c, _enc), restant, paid,
+      // Alias lu par les prédicats partagés (_paySolde / _payCreance / _payRecouvrement).
+      reste: restant,
       status: c.status, bucket, prodPct, prodClos,
       // Remise effective au client (pointage coursier / comptoir), indépendante
       // du règlement : une commande remise mais non soldée reste une créance
@@ -7735,10 +7830,20 @@ function _cmdBucketMatch(r, k) {
   if (k === 'RETARD')   return r.status === 'pending' && !r.remisClient && r.days != null && r.days < 0;
   if (k === 'AUJ')      return r.status === 'pending' && !r.remisClient && r.days === 0;
   if (k === 'SEMAINE')  return r.status === 'pending' && !r.remisClient && r.days != null && r.days >= 0 && r.days <= 7;
-  if (k === 'IMPAYE')   return r.status === 'pending' && r.restant > 0;
+  // Reste dû sur une commande encore en cours. Passe par le prédicat partagé pour
+  // ne plus pouvoir se contredire avec la page Finances ni avec les exports.
+  if (k === 'IMPAYE')   return r.status === 'pending' && _payCreance(r);
   // Fabriqué mais pas encaissé : la file de RECOUVREMENT (et de retrait), à ne pas
   // confondre avec « Impayés », qui mélange les commandes encore en atelier.
   if (k === 'PRODUITE') return r.status === 'pending' && r.prodClos && r.restant > 0;
+  // MARCHANDISE PARTIE, ARGENT PAS RENTRÉ. « Impayés » mélange deux risques très
+  // différents : une commande impayée encore à l'atelier laisse la boutique tenir le
+  // gage, une commande déjà remise au client ne laisse plus rien. Sans file à part,
+  // la seconde se noyait dans la première et le rouge ne voulait plus rien dire —
+  // exactement ce qui est arrivé aux retards de livraison avant « À encaisser ».
+  // Inclut les commandes finalisées dont le solde n'est jamais rentré (paiement à la
+  // livraison), que le filtre « Impayés », borné aux `pending`, ne peut pas voir.
+  if (k === 'RECOUVREMENT') return _payRecouvrement(r);
   if (k === 'LIVREE')   return r.status === 'completed';
   if (k === 'ANNULEE')  return r.status === 'cancelled';
   return true;
@@ -7820,6 +7925,7 @@ const _CMD_FILTRES = [
   ['AUJ',      "Aujourd'hui",           '#e8834a', 'reste'],
   ['SEMAINE',  'Cette semaine',         '#2563eb', 'reste'],
   ['IMPAYE',   'Impayés',             '#dc2626', 'reste'],
+  ['RECOUVREMENT', 'Remises non soldées', '#b91c1c', 'reste'],
   ['PRODUITE', 'Produites non soldées', '#16a34a', 'reste'],
   ['LIVREE',   'Livrées',              '#16a34a', 'total'],
   ['ANNULEE',  'Annulées',             '#a8a29e', ''],
@@ -8660,6 +8766,14 @@ function _doCmdFinalize(c, method, given, change, provider, ref, bankInfo) {
   c.status           = 'completed';
   c.dateFinalisation = new Date().toISOString();
   c.saleId           = sale.id;
+  // Le journal vient d'enregistrer le solde : les champs stockés de la commande
+  // doivent dire la même chose. Ils restaient à l'acompte d'origine — seul
+  // validerEncaissement() les touchait — et syncCmdUpdateToSheets repoussait ce
+  // reste périmé dans le Sheet, d'où une créance fantôme sur la page Finances et
+  // dans tous les exports. Ce n'est pas une écriture nouvelle : on recopie ce que
+  // le journal dit déjà.
+  c.accompte = _cmdEncaisse(c);
+  c.restant  = _cmdReste(c);
   // Qui a finalisé (≠ caissier d'origine de la commande) : source de vérité pour
   // la carte « Finalisations par agent » de la page Finances.
   c.finaliseParUser  = currentUser?.username || '';
@@ -8724,6 +8838,11 @@ function definaliserCommande(id) {
   c.status = 'pending';
   c.dateFinalisation = null;
   c.saleId = null;
+  // Symétrique de ce que la finalisation avait posé : l'événement de solde vient
+  // d'être retiré du journal, les champs stockés doivent le suivre, sinon la
+  // commande repasse « en cours » en se disant soldée.
+  c.accompte = _cmdEncaisse(c);
+  c.restant  = _cmdReste(c);
   c._dateEditedAt = Date.now();
   saveData();
   renderProducts(); renderStockTable(); renderStats(); renderCommandes(); updateCmdBadge();
@@ -19525,7 +19644,11 @@ function _encaisseParCommande(){
 function _collectDeliveries() {
   const out = [];
   const _seq = _buildSeqMaps();
-  const _enc = _encaisseParCommande();
+  // Les DEUX natures passent par le journal. Le volet réservation lisait encore
+  // `r.restant`, que la finalisation ne remet pas à zéro : une réservation soldée
+  // et remise réapparaissait dans « À encaisser » avec son reste d'origine.
+  const _idx = _payIndex();
+  const _enc = _idx.cmd;
   (Array.isArray(commandes) ? commandes : []).forEach(c => {
     if (!c || c.status === 'cancelled') return;
     out.push({
@@ -19568,7 +19691,7 @@ function _collectDeliveries() {
       dateProd:   '',
       poles:      _normPoles(r.poles),
       dossierId:  r.dossierId || '',
-      reste:      Math.max(0, Number(r.restant) || 0),
+      reste:      _payReste('reservation', r, _idx),
       livEtat:    _livEtat('reservation', r.id),
       livStatut:  _livStatut('reservation', r.id)
     });
@@ -21168,7 +21291,7 @@ function _delivReste(r){
     return c ? _cmdReste(c) : 0;
   }
   const v = (Array.isArray(reservations) ? reservations : []).find(x => String(x.id) === String(r.id));
-  return v ? Math.max(0, Number(v.restant) || 0) : 0;
+  return v ? _payReste('reservation', v) : 0;
 }
 
 // UN SEUL CLIC, depuis la ligne ou le tiroir : la course est arrivée chez le
@@ -21676,7 +21799,7 @@ function _ficheReste(r){
     return c ? _cmdReste(c) : 0;
   }
   const res = (typeof reservations !== 'undefined' ? reservations : []).find(x => String(x.id) === String(r.id));
-  return res ? Math.max(0, Number(res.restant) || 0) : 0;
+  return res ? _payReste('reservation', res) : 0;
 }
 
 // Valeurs par défaut d'une ligne, avant corrections manuelles. Le montant n'est
@@ -23004,9 +23127,12 @@ function updateDeliveryBadge() {
 // livraison, impression A4. UX pcf-* (hero/KPIs, scanabilité, disclosure, kebab,
 // table responsive → cartes mobile, 80/20).
 // ============================================================
-let _finState = { period: 'all', pay: 'all', q: '', from: '', to: '' };
+// `cas` = groupe du diagnostic de paiement sélectionné ('' = tous).
+let _finState = { period: 'all', pay: 'all', q: '', from: '', to: '', cas: '' };
 let _finItemOpen = new Set();
-function setFinPeriod(v) { _finState.period = v; _finState.from = ''; _finState.to = ''; renderFinances(); }
+// Changer de période ou de segment, c'est sortir du diagnostic : garder le groupe
+// sélectionné afficherait un tableau vide sans dire pourquoi.
+function setFinPeriod(v) { _finState.period = v; _finState.from = ''; _finState.to = ''; _finState.cas = ''; renderFinances(); }
 // IMPORTANT : ne PAS re-render ici. renderFinances() reconstruit tout le panneau
 // (root.innerHTML) → l'<input type=date> en cours de saisie est détruit et le curseur
 // saute (surtout au moment où l'année se complète, ce qui déclenche onchange). On met
@@ -23015,7 +23141,7 @@ function setFinFrom(v)   { _finState.from = v; _finState.period = null; }
 function setFinTo(v)     { _finState.to = v;   _finState.period = null; }
 function commitFinDates(){ renderFinances(); }
 function setFinClearDates() { _finState.from = ''; _finState.to = ''; _finState.period = 'all'; renderFinances(); }
-function setFinPay(v)    { _finState.pay = v;    renderFinances(); }
+function setFinPay(v)    { _finState.pay = v;    _finState.cas = ''; renderFinances(); }
 function setFinSearch(v) { _finState.q = v;      _debSearch('fin', renderFinances); }
 function toggleFinItem(id) { if (_finItemOpen.has(id)) _finItemOpen.delete(id); else _finItemOpen.add(id); renderFinances(); }
 
@@ -23080,37 +23206,65 @@ function _finPeriodRange() {
   return { from: null, to: null };
 }
 
-// Libellé de la période courante (pour l'en-tête des impressions).
+// Libellé de la période courante (pour l'en-tête des impressions). Les filtres
+// actifs y figurent : une sortie filtrée ne doit pas se lire comme le registre complet.
 function _finPeriodLabel() {
+  let base;
   if (_finState.from || _finState.to) {
     const f = _finState.from ? new Date(_finState.from + 'T00:00:00').toLocaleDateString('fr-FR') : '…';
     const t = _finState.to   ? new Date(_finState.to   + 'T00:00:00').toLocaleDateString('fr-FR') : "aujourd'hui";
-    return `Du ${f} au ${t}`;
+    base = `Du ${f} au ${t}`;
+  } else {
+    base = _finState.period === 'week' ? '7 derniers jours' : _finState.period === 'month' ? 'Ce mois' : 'Toutes les opérations';
   }
-  return _finState.period === 'week' ? '7 derniers jours' : _finState.period === 'month' ? 'Ce mois' : 'Toutes les opérations';
+  const seg = { unpaid: 'à solder', recouv: 'en recouvrement (déjà remises)', paid: 'soldées' }[_finState.pay];
+  if (seg) base += ' — ' + seg;
+  if (_finState.cas) base += ' — groupe : ' + _payDiagLbl(_finState.cas);
+  return base;
 }
 
 // État de livraison (commande OU réservation) dérivé du dossier de production lié.
+// Le pointage TERRAIN (feuille Livraisons, posé par le coursier ou le comptoir) compte
+// désormais autant que le dossier d'atelier : il manquait ici, et une course que le
+// client avait reçue se lisait « À traiter » sur Finances et sur le registre imprimé
+// pendant que la page Livraisons la disait « Livrée ». Même règle partout, via
+// _delivLivree — un seul endroit décide de ce que « remis au client » veut dire.
 function _finDelivState(kind, o) {
   const dos = (Array.isArray(dossiers) ? dossiers : []).find(d => d.sourceType === kind && String(d.sourceId) === String(o.id));
   const prog = dos ? (Number(dos.progression) || 0) : 0;
   const mode = o.deliveryMode === 'livraison' ? 'Livraison' : 'Retrait';
+  const remis = _delivLivree({ status: o.status, livStatut: _livStatut(kind, o.id) });
   let label, color;
-  if (o.status === 'completed' || prog >= 100 || (dos && dos.statut === 'LIVRE')) { label = 'Livrée'; color = '#16a34a'; }
+  if (remis || prog >= 100 || (dos && dos.statut === 'LIVRE')) { label = 'Livrée'; color = '#16a34a'; }
   else if (prog > 0) { label = 'En production'; color = '#e8834a'; }
   else { label = 'À traiter'; color = '#2563eb'; }
   return { label, color, prog, mode };
 }
 
 // Entrée normalisée (commande ou réservation) pour le registre financier.
-function _finEntry(kind, o, maps) {
+// `accompte` et `restant` viennent désormais du JOURNAL (_payEncaisse / _payReste),
+// plus des champs bruts de l'enregistrement : ceux-là n'étaient mis à jour que par
+// validerEncaissement(), jamais par la finalisation, et toute commande finalisée
+// restait donc affichée avec son reste d'origine en rouge (cf. le bloc PAIEMENT).
+// `restantStocke` garde le champ brut : le diagnostic s'en sert pour signaler les
+// opérations où le stock et le journal ne disent pas la même chose, au lieu de
+// trancher en silence.
+function _finEntry(kind, o, maps, idx) {
+  const accompte = _payEncaisse(kind, o, idx);
+  const reste    = Math.max(0, (Number(o.total) || 0) - accompte);
   return {
     kind, id: String(o.id), obj: o, date: o.date,
     ref: _seqRefOf(kind, o.id, maps),
     client: o.clientName || 'Client', contact: o.clientContact || '',
     total: Number(o.total) || 0,
-    accompte: Number(o.accompte != null ? o.accompte : o.acompte) || 0,
-    restant: Number(o.restant) || 0,
+    accompte,
+    restant: reste,
+    // Alias attendus par les prédicats partagés (_paySolde / _payCreance /
+    // _payRecouvrement et, à travers eux, _delivLivree).
+    reste,
+    status: o.status,
+    livStatut: _livStatut(kind, o.id),
+    restantStocke: Number(o.restant) || 0,
     deliveryMode: o.deliveryMode,
     deliveryDate: kind === 'reservation' ? o.deliveryDate : o.dateLivraison,
     address: kind === 'reservation' ? o.deliveryAddress : o.adresseLivraison,
@@ -23122,22 +23276,71 @@ function _finEntry(kind, o, maps) {
 // La numérotation (_seqRefOf) est globale/stable, indépendante des filtres.
 function _finBuild() {
   const maps = _buildSeqMaps();
+  const idx  = _payIndex();      // journal indexé UNE fois pour tout le registre
   let entries = [];
-  (Array.isArray(commandes) ? commandes : []).filter(c => c && c.status !== 'cancelled').forEach(c => entries.push(_finEntry('commande', c, maps)));
-  (Array.isArray(reservations) ? reservations : []).filter(r => r && r.status !== 'cancelled').forEach(r => entries.push(_finEntry('reservation', r, maps)));
+  (Array.isArray(commandes) ? commandes : []).filter(c => c && c.status !== 'cancelled').forEach(c => entries.push(_finEntry('commande', c, maps, idx)));
+  (Array.isArray(reservations) ? reservations : []).filter(r => r && r.status !== 'cancelled').forEach(r => entries.push(_finEntry('reservation', r, maps, idx)));
   entries.sort((a, b) => (parseSaleDate(a.date) || 0) - (parseSaleDate(b.date) || 0));
   const { from, to } = _finPeriodRange();
   const q = (_finState.q || '').trim().toLowerCase();
+  const diagIdx = _finState.cas ? _payDiagIndex() : null;
   const list = entries.filter(e => {
     const d = parseSaleDate(e.date);
     if (from && d && d < from) return false;
     if (to && d && d > to) return false;
-    if (_finState.pay === 'unpaid' && !(e.restant > 0)) return false;
-    if (_finState.pay === 'paid' && e.restant > 0) return false;
+    // Les trois segments passent par les prédicats partagés : « À solder » ne doit
+    // plus pouvoir lister une opération que le cockpit affiche soldée.
+    if (_finState.pay === 'unpaid' && !_payCreance(e)) return false;
+    if (_finState.pay === 'paid'   && !_paySolde(e))   return false;
+    // « Recouvrement » = marchandise partie, argent pas rentré. Ce rouge-là ne veut
+    // dire qu'une chose, contrairement à « À solder » qui mélange les commandes
+    // encore à l'atelier (la boutique tient le gage) et celles déjà chez le client.
+    if (_finState.pay === 'recouv' && !_payRecouvrement(e)) return false;
     if (q && !((e.client + ' ' + e.contact + ' ' + e.ref).toLowerCase().includes(q))) return false;
     return true;
   });
+  // Groupe de diagnostic sélectionné : le tableau ne montre plus que lui, pour
+  // vérifier le classement sur pièces avant d'agir (même geste que sur Livraisons).
+  if (_finState.cas) return { list: list.filter(e => _payDiagClasse(e, diagIdx) === _finState.cas) };
   return { list };
+}
+
+// ── Le geste du quotidien, à portée de pouce sur chaque ligne ──────────────
+// Encaisser un solde demandait trois étapes et deux écrans : quitter Finances,
+// retrouver la commande dans le cockpit, ouvrir son tiroir, y trouver « Encaisser ».
+// Personne ne le faisait depuis le registre, alors que c'est là qu'on voit qui doit
+// quoi. Le bouton est maintenant au bout de la ligne, dans sa propre cellule — pas
+// dans la cellule du kebab, qui se replie à droite sur mobile et finit par cacher le
+// seul geste utile. Même leçon que le pointage « Livrée » de la page Livraisons.
+// Rien ne part en silence : les deux boutons OUVRENT une fenêtre que l'opérateur
+// valide. « Encaisser » (commandes) est money-only — ni vente, ni stock, ni ticket ;
+// « Finaliser », qui crée la vente et déduit le stock, est seulement PROPOSÉ.
+function finEncaisser(kind, id) {
+  if (kind === 'commande' && typeof openEncaisseModal === 'function') openEncaisseModal(id);
+  else if (typeof openFinalizeModal === 'function') openFinalizeModal(id);
+}
+function finFinaliser(kind, id) {
+  if (kind === 'commande' && typeof openCmdFinalizeModal === 'function') openCmdFinalizeModal(id);
+  else if (typeof openFinalizeModal === 'function') openFinalizeModal(id);
+}
+
+const _finCheck = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+
+function _finPayBtn(e) {
+  if (!_DELIV_MONEY_ROLES.includes(currentUser?.role)) return '';
+  if (_payCreance(e)) {
+    const t = e.kind === 'commande'
+      ? 'Encaisser un acompte ou le solde — n\'affecte ni le stock ni le statut'
+      : 'Ouvrir la fenêtre de finalisation de la réservation';
+    return `<button class="deliv-done" title="${_pcokEsc(t)}" onclick="finEncaisser('${e.kind}','${e.id}')">${_finCheck}Encaisser</button>`;
+  }
+  // Soldée mais jamais finalisée : l'argent est rentré, la facture est restée
+  // ouverte. On le propose ici, sur la ligne, au lieu de laisser la commande
+  // traîner indéfiniment dans « En cours ».
+  if (e.status === 'pending') {
+    return `<button class="deliv-done fin-done--fin" title="Soldée — la facture n'est pas fermée : ouvrir la finalisation (crée la vente et déduit le stock)" onclick="finFinaliser('${e.kind}','${e.id}')">${_finCheck}Finaliser</button>`;
+  }
+  return '';
 }
 
 function _finPrintArg(e) {
@@ -23172,6 +23375,7 @@ function _finRow(e, colspan) {
         ${dt('Avancement', ds.prog + ' %')}
       </div>
       <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        ${_finPayBtn(e)}
         <button class="deliv-open-btn" onclick="event.stopPropagation();${printArg}">Imprimer la facture</button>
         <button class="pcf-export-btn" onclick="event.stopPropagation();showPage('${e.kind === 'reservation' ? 'reservations' : 'commandes'}')">Voir le détail</button>
       </div>
@@ -23191,6 +23395,7 @@ function _finRow(e, colspan) {
     <td class="pcf-num" data-label="Total engagé">${fmt(e.total)}</td>
     <td class="pcf-num" data-label="Acompte" style="color:#16a34a">${fmt(e.accompte)}</td>
     <td class="pcf-num" data-label="Restant" style="${reste > 0 ? 'color:#dc2626;font-weight:800' : 'color:var(--muted)'}">${fmt(reste)}</td>
+    <td class="pcf-paycell" data-label="Action" onclick="event.stopPropagation()">${_finPayBtn(e)}</td>
     <td class="pcf-c-act" onclick="event.stopPropagation()">
       <div class="kebab-wrap" style="display:inline-block;vertical-align:middle">
         <button class="kebab-btn" aria-label="Plus d'actions" onclick="toggleKebab('${kbid}',event)"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>
@@ -23265,15 +23470,263 @@ function _finFinalizersCard() {
   </div>`;
 }
 
+// ============================================================
+// DIAGNOSTIC DE PAIEMENT
+// ============================================================
+// Jumeau du « Diagnostic des retards » de la page Livraisons, et pour la même
+// raison : un total d'impayés ne dit pas quoi faire. Avant de relancer un client,
+// il faut savoir ce qu'on relance — une commande remise sans être payée n'a rien à
+// voir avec une commande dont l'atelier n'a jamais rien commencé, et appeler la
+// seconde pour réclamer de l'argent fait perdre le client. Pire, une partie du
+// rouge n'était pas de l'argent dû du tout : le champ `restant` stocké restait au
+// reste d'origine après la finalisation, donc toute commande finalisée réclamait
+// encore la moitié de son montant (cf. le bloc PAIEMENT en haut du fichier).
+// Ce panneau ne modifie RIEN : il croise ce que le système possède déjà — le
+// journal d'encaissements, le dossier de production, l'état terrain de livraison et
+// l'âge de l'opération — et range chaque ligne dans un groupe assorti de ce qu'il y
+// a à faire. Chaque groupe est cliquable (le tableau en dessous s'y limite) et
+// l'ensemble s'exporte au tableur, ligne par ligne, pour être contredit sur pièces.
+let _finDiagOpen = false;
+
+// Ordre = ordre de lecture : d'abord ce qui se corrige sans rien demander à
+// personne, ensuite l'argent qui est dehors, enfin ce qui dort.
+const _PAY_DIAG_CAS = [
+  ['ECART_SOLDE',      'Soldée — chiffre stocké périmé',   '#7c3aed',
+   "Entièrement encaissée d'après le journal, mais le reste enregistré sur la fiche réclame encore. C'est cette créance fantôme qui gonflait « Restant à percevoir ». Rien à encaisser ; le chiffre s'aligne à la prochaine écriture sur l'opération."],
+  ['SOLDEE_NON_FINAL', 'Soldée, jamais finalisée',         '#2563eb',
+   "L'argent est rentré en entier mais la facture n'a jamais été fermée : pas de vente, pas de sortie de stock. À finaliser après contrôle — le bouton le propose, rien ne part tout seul."],
+  ['LIVREE_IMPAYEE',   'Remise au client, non payée',      '#dc2626',
+   "La marchandise est partie et l'argent n'est pas rentré : plus aucun gage. C'est la file à appeler aujourd'hui."],
+  ['PRODUITE_IMPAYEE', 'Produite, non soldée',             '#d97706',
+   'Fabriquée, encore en boutique, pas soldée. Encaisser puis remettre — la plus rentable, tout est prêt.'],
+  ['ACOMPTE_SANS_SUITE','Acompte encaissé, rien de produit','#b91c1c',
+   "Le client a payé et l'atelier n'a rien commencé. À lancer en priorité : c'est de l'argent reçu sans contrepartie."],
+  ['DORMANTE',         'Sans suite depuis 90 j',           '#78716c',
+   'Pas un ariary encaissé, rien de produit, plus de trois mois : probablement abandonnée. À arbitrer, pas à relancer.'],
+  ['SANS_ACOMPTE',     'Aucun acompte encaissé',           '#a8a29e',
+   'Opération prise sans le moindre versement. Risque pur : réclamer un acompte ou annuler.'],
+  ['EN_COURS',         'En cours, acompte reçu',           '#16a34a',
+   "Acompte encaissé, production démarrée : rien d'anormal. Le solde se prendra à la remise."],
+];
+const _payDiagLbl = k => (_PAY_DIAG_CAS.find(c => c[0] === k) || ['', k])[1];
+const _payDiagAct = k => (_PAY_DIAG_CAS.find(c => c[0] === k) || ['', '', '', ''])[3];
+
+// Ce qu'il faut sous la main pour classer, construit UNE fois par appel : les tâches
+// par dossier (les relire par ligne relirait tout le tableau des tâches cent fois) et
+// le nombre d'impayés par client, qui sert à repérer les récidivistes à l'export.
+function _payDiagIndex() {
+  const taches = _tachesParDossier();
+  const parClient = new Map();
+  const add = (kind, o, enc) => {
+    if (!o || o.status === 'cancelled') return;
+    const reste = Math.max(0, (Number(o.total) || 0) - enc);
+    if (reste <= 0) return;
+    const k = String(o.clientName || '').trim().toLowerCase();
+    const cur = parClient.get(k) || { n: 0, du: 0 };
+    cur.n++; cur.du += reste; parClient.set(k, cur);
+  };
+  const idx = _payIndex();
+  (Array.isArray(commandes) ? commandes : []).forEach(c => add('commande', c, _payEncaisse('commande', c, idx)));
+  (Array.isArray(reservations) ? reservations : []).forEach(r => add('reservation', r, _payEncaisse('reservation', r, idx)));
+  return { taches, parClient };
+}
+
+// Avancement de production d'une opération, ou null si elle n'a aucun dossier.
+function _payProdPct(e, idx) {
+  const dos = e.obj && e.obj.dossierId ? _dossierParId(e.obj.dossierId) : null;
+  if (!dos) return { dos: null, pct: null, clos: false };
+  const dt = (idx && idx.taches && idx.taches.get(dos.id)) || [];
+  const clos = _dossierClosed(dos);
+  const pct = dt.length ? _dossierPct(dt, dos) : (clos ? 100 : 0);
+  return { dos, pct, clos };
+}
+
+// Le groupe d'une ligne. Premier cas qui correspond, comme _delivDiagClasse :
+// un groupe = une action, donc une ligne ne peut en occuper qu'un.
+function _payDiagClasse(e, idx) {
+  const reste = Number(e.reste) || 0;
+  if (reste <= 0) {
+    if (e.status === 'pending') return 'SOLDEE_NON_FINAL';
+    // Le champ stocké réclame encore alors que le journal dit soldé : écart de
+    // données, pas créance. Ne vaut que si le champ existe vraiment — une fiche
+    // d'avant le journal n'a pas de `restant` et ne doit pas être signalée.
+    if (e.restantStocke > 0) return 'ECART_SOLDE';
+    return 'EN_REGLE';
+  }
+  if (_delivLivree(e))                        return 'LIVREE_IMPAYEE';
+  const { pct, clos } = _payProdPct(e, idx);
+  if (clos)                                   return 'PRODUITE_IMPAYEE';
+  const encaisse = Number(e.accompte) || 0;
+  if (encaisse > 0 && !pct)                   return 'ACOMPTE_SANS_SUITE';
+  if (encaisse <= 0) {
+    const d = parseSaleDate(e.date);
+    const jours = d ? Math.floor((Date.now() - d.getTime()) / 86400000) : 0;
+    return jours > 90 ? 'DORMANTE' : 'SANS_ACOMPTE';
+  }
+  return 'EN_COURS';
+}
+
+// Toutes les lignes qui ont quelque chose à dire côté paiement, enrichies de quoi
+// décider. `EN_REGLE` (soldée, finalisée, chiffres d'accord) en est exclu : le
+// panneau n'est pas un second registre, c'est une liste de travail.
+// Hors période et hors filtres : une créance de mars reste à recouvrer en novembre.
+function _payDiagRows() {
+  const idx  = _payDiagIndex();
+  const maps = _buildSeqMaps();
+  const enc  = _payIndex();
+  const out  = [];
+  const push = (kind, o) => {
+    if (!o || o.status === 'cancelled') return;
+    const e = _finEntry(kind, o, maps, enc);
+    const cas = _payDiagClasse(e, idx);
+    if (cas === 'EN_REGLE') return;
+    const { dos, pct, clos } = _payProdPct(e, idx);
+    const d = parseSaleDate(e.date);
+    const cli = idx.parClient.get(String(e.client || '').trim().toLowerCase()) || { n: 0, du: 0 };
+    out.push(Object.assign({}, e, {
+      cas, pct, clos,
+      dossierNum: dos ? (dos.numeroDossier || dos.id) : '',
+      age: d ? Math.floor((Date.now() - d.getTime()) / 86400000) : null,
+      ecart: (Number(e.restantStocke) || 0) - (Number(e.reste) || 0),
+      cliN: cli.n, cliDu: cli.du,
+      remis: _delivLivree(e)
+    }));
+  };
+  (Array.isArray(commandes) ? commandes : []).forEach(c => push('commande', c));
+  (Array.isArray(reservations) ? reservations : []).forEach(r => push('reservation', r));
+  return out;
+}
+
+function toggleFinDiag() { _finDiagOpen = !_finDiagOpen; renderFinances(); }
+
+// Cliquer un groupe limite le registre à ce groupe : c'est là qu'on vérifie,
+// ligne par ligne, avant de décrocher le téléphone.
+function setFinDiagCas(k) {
+  _finState.cas = (_finState.cas === k ? '' : k);
+  // Un groupe traverse les périodes et les segments de paiement : les laisser en
+  // place ne montrerait qu'une partie du groupe, sans le dire.
+  if (_finState.cas) { _finState.pay = 'all'; _finState.period = 'all'; _finState.from = ''; _finState.to = ''; }
+  renderFinances();
+}
+
+function _finRenderDiag() {
+  const rows = _payDiagRows();
+  const n    = rows.length;
+  const head = `<div class="deliv-recap-head" onclick="toggleFinDiag()">
+      <div class="deliv-recap-title">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        Diagnostic de paiement — ce que chaque impayé attend
+        <span class="deliv-recap-n">${n}</span>
+        ${_finState.cas ? `<span class="deliv-recap-warn">groupe filtré : ${_pcokEsc(_payDiagLbl(_finState.cas))}</span>` : ''}
+      </div>
+      <svg class="deliv-recap-caret${_finDiagOpen ? ' open' : ''}" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>`;
+  if (!_finDiagOpen) return `<div class="deliv-recap">${head}</div>`;
+  if (!n) {
+    return `<div class="deliv-recap deliv-recap--open">${head}
+      <div class="deliv-recap-body"><div class="pcok-empty"><p>Tout est soldé et finalisé.</p></div></div></div>`;
+  }
+  const lignes = _PAY_DIAG_CAS.map(([k, lbl, col, act]) => {
+    const grp = rows.filter(r => r.cas === k);
+    if (!grp.length) return '';
+    // Le montant affiché est le RESTE DÛ, pas le total engagé : c'est l'argent que
+    // ce groupe représente, la seule somme sur laquelle on peut décider.
+    const somme = grp.reduce((a, r) => a + (Number(r.reste) || 0), 0);
+    // Pour le groupe « chiffre stocké périmé », le reste réel est nul par
+    // définition : la somme qui parle est la créance fantôme qu'il faisait afficher.
+    const fantome = k === 'ECART_SOLDE' ? grp.reduce((a, r) => a + Math.max(0, r.ecart), 0) : 0;
+    const actif = _finState.cas === k;
+    return `<tr class="deliv-diag-row${actif ? ' deliv-diag-row--active' : ''}" onclick="setFinDiagCas('${k}')" title="Ne montrer que ce groupe dans le registre">
+        <td>
+          <div class="deliv-diag-nom"><span class="deliv-diag-dot" style="background:${col}"></span>${lbl}</div>
+          <div class="deliv-diag-act">${act}</div>
+        </td>
+        <td class="pcok-num deliv-diag-n"><b style="color:${col}">${grp.length}</b></td>
+        <td class="pcok-num deliv-diag-sum">${fantome > 0 ? fmt(fantome) + ' <span style="color:var(--muted);font-weight:600">fantôme</span>' : somme > 0 ? fmt(somme) : '—'}</td>
+      </tr>`;
+  }).join('');
+  return `<div class="deliv-recap deliv-recap--open">
+      ${head}
+      <div class="deliv-recap-body">
+        <p class="deliv-diag-intro">Croisement du journal d'encaissements, du dossier de production, de l'état de livraison et de l'âge de l'opération.
+          Ce panneau ne modifie rien. Cliquez un groupe pour n'afficher que ses lignes dans le registre ci-dessous.</p>
+        <div class="deliv-recap-actions">
+          ${_finState.cas ? `<button class="pcok-iconbtn" onclick="setFinDiagCas('${_finState.cas}')">Voir tous les groupes</button>` : ''}
+          <button class="deliv-fiche-btn" onclick="exportFinDiag()">Exporter le détail (tableur)</button>
+        </div>
+        <div class="pcok-tablewrap"><table class="pcok-table deliv-recap-table">
+          <thead><tr>
+            <th class="pcok-th">Groupe — et ce qu'il y a à faire</th>
+            <th class="pcok-th pcok-num">Lignes</th>
+            <th class="pcok-th pcok-num">Reste dû</th>
+          </tr></thead>
+          <tbody>${lignes}</tbody>
+        </table></div>
+      </div>
+    </div>`;
+}
+
+// Une ligne par impayé, avec TOUT ce sur quoi le classement s'appuie — y compris le
+// chiffre stocké et son écart avec le journal, et le nombre d'impayés du client :
+// le verdict doit pouvoir être contredit sur pièces, pas cru sur parole.
+function exportFinDiag() {
+  const rows = _payDiagRows();
+  if (!rows.length) { showToast('Aucun impayé à exporter', 'info'); return; }
+  const cols = ['Groupe','Que faire','Référence','Type','Client','Contact','Statut',
+                'Date','Âge (jours)','Total','Encaissé (journal)','Reste dû',
+                'Reste stocké sur la fiche','Écart stocké − journal','Remis au client',
+                'État livraison','Dossier','Production %','Dossier clôturé','Mode',
+                'Livraison prévue','Impayés du client','Total dû par le client','Articles'];
+  const L = [_calCsvQ(_calCsvShop() + ' — Diagnostic de paiement'),
+             _calCsvQ('Édité le ' + new Date().toLocaleString('fr-FR') + ' — ' + rows.length + ' ligne(s)'),
+             ''];
+  L.push(cols.map(_calCsvQ).join(_CAL_CSV_SEP));
+  // Le plus d'argent dehors d'abord ; à montant égal, le plus ancien.
+  rows.sort((a, b) => (b.reste - a.reste) || ((b.age || 0) - (a.age || 0)));
+  const stLbl = { pending: 'En cours', completed: 'Finalisée', cancelled: 'Annulée' };
+  rows.forEach(r => {
+    L.push(_calCsvRow([
+      _payDiagLbl(r.cas),
+      _payDiagAct(r.cas),
+      r.ref || '',
+      r.kind === 'reservation' ? 'Réservation' : 'Commande',
+      r.client || '', r.contact || '',
+      stLbl[r.status] || String(r.status || ''),
+      _dispDate(_toIsoDate(r.date || '')) || '',
+      r.age == null ? '' : r.age,
+      Number(r.total) || 0,
+      Number(r.accompte) || 0,
+      Number(r.reste) || 0,
+      Number(r.restantStocke) || 0,
+      Number(r.ecart) || 0,
+      r.remis ? 'Oui' : 'Non',
+      r.livStatut ? ((_LIV_LABELS[r.livStatut] || [])[2] || r.livStatut) : 'Aucun pointage',
+      r.dossierNum || '',
+      r.pct == null ? '' : r.pct,
+      r.dossierNum ? (r.clos ? 'Oui' : 'Non') : '',
+      r.deliveryMode === 'livraison' ? 'Livraison' : 'Retrait',
+      _dispDate(r.deliveryDate) || '',
+      Number(r.cliN) || 0,
+      Number(r.cliDu) || 0,
+      (r.items || []).map(i => `${i.name} ×${i.qty || 1}`).join(', '),
+    ]));
+  });
+  _calCsvDownload(L, `diagnostic-paiement-${new Date().toISOString().slice(0,10)}.csv`);
+  showToast(rows.length + ' ligne(s) exportée(s)', 'success');
+}
+
 function renderFinances() {
   const root = document.getElementById('financesContent');
   if (!root) return;
-  const colspan = 6;
+  const colspan = 7;   // + la cellule d'action (« Encaisser » / « Finaliser »)
   const { list } = _finBuild();
 
   const tEng = list.reduce((s, e) => s + e.total, 0);
   const tAcc = list.reduce((s, e) => s + e.accompte, 0);
   const tRes = list.reduce((s, e) => s + e.restant, 0);
+  // Part du reste dû dont la marchandise est DÉJÀ partie : c'est l'argent vraiment
+  // dehors, le seul chiffre qui justifie d'appeler un client aujourd'hui.
+  const tRecouv = list.filter(_payRecouvrement).reduce((s, e) => s + e.restant, 0);
   const rate = tEng > 0 ? Math.round(tAcc / tEng * 100) : 0;
   const nb = list.length;
   const panier = nb ? Math.round(tEng / nb) : 0;
@@ -23289,12 +23742,14 @@ function renderFinances() {
         <input type="date" id="finDateTo" value="${_finState.to || ''}" oninput="setFinTo(this.value)" onblur="commitFinDates()" style="border:none;background:transparent;font-size:12px;font-weight:600;color:var(--text);font-family:inherit;outline:none;width:122px" />
         ${(_finState.from || _finState.to) ? `<button onclick="setFinClearDates()" title="Effacer la plage de dates" style="border:none;background:var(--surface);color:var(--muted);cursor:pointer;font-size:15px;line-height:1;padding:2px 7px;border-radius:6px">×</button>` : ''}
       </div>
-      <div class="pcf-segs">${seg('all', _finState.pay, 'Toutes', 'setFinPay')}${seg('unpaid', _finState.pay, 'À solder', 'setFinPay')}${seg('paid', _finState.pay, 'Soldées', 'setFinPay')}</div>
+      <div class="pcf-segs">${seg('all', _finState.pay, 'Toutes', 'setFinPay')}${seg('unpaid', _finState.pay, 'À solder', 'setFinPay')}${seg('recouv', _finState.pay, 'Recouvrement', 'setFinPay')}${seg('paid', _finState.pay, 'Soldées', 'setFinPay')}</div>
       <div class="pcf-tools">
+        <button class="pcf-export-btn" onclick="toggleFinDiag()" title="Pourquoi ces impayés sont impayés — ne modifie rien"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>Diagnostic</button>
         <button class="pcf-export-btn" onclick="printFicheSortie()"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Fiche de sortie</button>
         <button class="pcf-export-btn" onclick="printFinances()"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>Imprimer</button>
       </div>
     </div>
+    ${_finRenderDiag()}
     <div class="pcf-hero">
       <div>
         <div class="pcf-hero-label">Total engagé · ${nb} opération(s)</div>
@@ -23313,7 +23768,7 @@ function renderFinances() {
     <div class="pcf-kpis">
       <div class="pcf-kpi" style="--kc:#1a4a3a"><div class="pcf-kpi-label">Total engagé</div><div class="pcf-kpi-val">${fmt(tEng)}</div><div class="pcf-kpi-sub">${nb} opération(s)</div></div>
       <div class="pcf-kpi" style="--kc:#16a34a"><div class="pcf-kpi-label">Acompte reçu</div><div class="pcf-kpi-val" style="color:#16a34a">${fmt(tAcc)}</div><div class="pcf-kpi-sub">${rate}% encaissé</div></div>
-      <div class="pcf-kpi" style="--kc:#dc2626"><div class="pcf-kpi-label">Restant à percevoir</div><div class="pcf-kpi-val" style="color:#dc2626">${fmt(tRes)}</div><div class="pcf-kpi-sub">${list.filter(e => e.restant > 0).length} à solder</div></div>
+      <div class="pcf-kpi" style="--kc:#dc2626"><div class="pcf-kpi-label">Restant à percevoir</div><div class="pcf-kpi-val" style="color:#dc2626">${fmt(tRes)}</div><div class="pcf-kpi-sub">${list.filter(_payCreance).length} à solder${tRecouv > 0 ? ` · dont ${fmt(tRecouv)} déjà remis` : ''}</div></div>
       <div class="pcf-kpi" style="--kc:#2563eb"><div class="pcf-kpi-label">Panier moyen</div><div class="pcf-kpi-val">${fmt(panier)}</div><div class="pcf-kpi-sub">par opération</div></div>
     </div>`;
 
@@ -23340,7 +23795,7 @@ function renderFinances() {
         <span class="pcf-card-badge" style="background:#1a4a3a14;color:#1a4a3a">${fmt(g.eng)}</span>
       </div>
       <table class="pcf-table">
-        <thead><tr><th>N° / Client</th><th>État livraison</th><th class="pcf-num">Total engagé</th><th class="pcf-num">Acompte</th><th class="pcf-num">Restant</th><th></th></tr></thead>
+        <thead><tr><th>N° / Client</th><th>État livraison</th><th class="pcf-num">Total engagé</th><th class="pcf-num">Acompte</th><th class="pcf-num">Restant</th><th class="pcf-paycell"></th><th></th></tr></thead>
         <tbody>${g.rows.map(e => _finRow(e, colspan)).join('')}</tbody>
       </table>
     </div>`;
@@ -27828,8 +28283,23 @@ function renderPatronDashboard() {
   const pendingCmd  = commandes.filter(c => c.status === 'pending');
   const dossiersActifs = dossiers.filter(d => d.statut !== 'LIVRE');
   const stockAlertes = products.filter(p => p.stock <= p.minStock && p.stock >= 0);
-  const resCreances  = reservations.filter(r => (Number(r.restant) || 0) > 0 && r.status === 'pending');
-  const totalResCreances = resCreances.reduce((a, r) => a + (Number(r.restant) || 0), 0);
+  // Créances : le journal fait foi, et les COMMANDES en font partie. Elles étaient
+  // purement absentes de ce KPI (seules les ventes à crédit et les réservations
+  // comptaient) alors que c'est là que vit l'essentiel des impayés — le cockpit
+  // Commandes a une file « Impayés » entière que le patron ne voyait nulle part.
+  // Le dashboard sous-évaluait donc du livre de commandes complet, pendant que la
+  // page Finances surévaluait : deux écrans faux, en sens inverse.
+  const _pidx = _payIndex();
+  const _creEntry = (kind, o) => {
+    const reste = _payReste(kind, o, _pidx);
+    return { o, kind, reste, livStatut: _livStatut(kind, o.id), status: o.status };
+  };
+  const resCreances = reservations.filter(r => r.status === 'pending')
+    .map(r => _creEntry('reservation', r)).filter(_payCreance);
+  const cmdCreances = commandes.filter(c => c.status === 'pending')
+    .map(c => _creEntry('commande', c)).filter(_payCreance);
+  const totalResCreances = resCreances.reduce((a, e) => a + e.reste, 0)
+                         + cmdCreances.reduce((a, e) => a + e.reste, 0);
 
   // Mise à jour sous-titre
   const subEl = document.getElementById('patronSubtitle');
@@ -27845,7 +28315,7 @@ function renderPatronDashboard() {
     ${_pdbKpi('Dossiers actifs', dossiersActifs.length, dossiers.filter(d => d.priorite === 'Urgente').length + ' urgent(s)', '#d97706')}
     ${_pdbKpi('Réservations', pendingRes.length, 'en attente', '#7c3aed')}
     ${_pdbKpi('Commandes', pendingCmd.length, 'en attente', '#0891b2')}
-    ${_pdbKpi('Créances', fmt(totalCreances + totalResCreances), nbCreances + resCreances.length + ' dossier(s)', '#dc2626')}
+    ${_pdbKpi('Créances', fmt(totalCreances + totalResCreances), nbCreances + resCreances.length + cmdCreances.length + ' dossier(s)', '#dc2626')}
     ${_pdbKpi('Stock alertes', stockAlertes.length, 'sous seuil minimum', '#ea580c')}
     ${_pdbKpi('Tâches en cours', taches.filter(t => t.statut === 'EN_COURS').length + tachesLibres.filter(t => t.statut === 'EN_COURS').length, 'tous opérateurs', '#16a34a')}
   </div>`;
@@ -28116,18 +28586,26 @@ function renderPatronDashboard() {
     </table>
   </div>`;
 
-  // ── Créances (ventes + réservations) ──
+  // ── Créances (ventes + réservations + COMMANDES) ──
+  // Les commandes manquaient à cette liste comme au KPI : le tableau « Restes à
+  // encaisser » du patron ne montrait pas la nature d'opération qui porte le plus
+  // d'impayés. Le reste dû vient du journal (`e.reste`), pas du champ stocké.
   const creanceSales = sales.filter(s => (Number(s.due) || 0) > 0).slice(0, 6);
+  const _creRow = (e, type) => ({
+    nom: e.o.clientName || '—', contact: e.o.clientContact || '',
+    montant: Number(e.o.total) || 0, restant: e.reste, date: e.o.date, type
+  });
   const creanceRows = [...creanceSales.map(s => ({
     nom: s.clientName || '—', contact: s.clientContact || '', montant: s.total, restant: Number(s.due) || 0, date: s.date, type: 'Vente'
-  })), ...resCreances.slice(0, 6).map(r => ({
-    nom: r.clientName || '—', contact: r.clientContact || '', montant: r.total, restant: Number(r.restant) || 0, date: r.date, type: 'Réservation'
-  }))].sort((a, b) => b.restant - a.restant);
+  })),
+  ...resCreances.slice(0, 6).map(e => _creRow(e, 'Réservation')),
+  ...cmdCreances.slice(0, 6).map(e => _creRow(e, 'Commande')),
+  ].sort((a, b) => b.restant - a.restant);
 
   const creanceHtml = creanceRows.length
     ? creanceRows.map(c => `<tr>
         <td><span style="font-weight:600">${c.nom}</span>${c.contact ? `<div style="font-size:10px;color:#78716c">${c.contact}</div>` : ''}</td>
-        <td data-label="Type"><span style="background:${c.type==='Vente'?'#e8f4f0':'#f3e8ff'};color:${c.type==='Vente'?'#1a4a3a':'#7c3aed'};font-size:10px;font-weight:700;padding:2px 6px;border-radius:8px">${c.type}</span></td>
+        <td data-label="Type"><span style="background:${c.type==='Vente'?'#e8f4f0':c.type==='Commande'?'#e0f2fe':'#f3e8ff'};color:${c.type==='Vente'?'#1a4a3a':c.type==='Commande'?'#0891b2':'#7c3aed'};font-size:10px;font-weight:700;padding:2px 6px;border-radius:8px">${c.type}</span></td>
         <td data-label="Total" style="text-align:right">${fmt(c.montant)}</td>
         <td data-label="Reste dû" style="text-align:right"><span style="font-weight:700;color:#dc2626">${fmt(c.restant)}</span></td>
       </tr>`).join('')
@@ -28374,6 +28852,9 @@ function renderMonDashboard() {
   // _isMineByCaissier : même règle d'appartenance que la réimpression
   // (username OU label, selon la façon dont la vente a été créée).
   const _isMine = name => _isMineByCaissier({ caissier: name });
+  // Même raison qu'ailleurs : le journal sait ce qui a été encaissé, y compris
+  // depuis un autre poste ; le champ `restant` de la fiche, non.
+  const _mdEnc = _payIndex();
   const mySales = [
     // `time` est conservé : pour une vente rechargée depuis Sheets l'heure vit
     // dans un champ distinct, sans lui tout retomberait à minuit.
@@ -28382,11 +28863,11 @@ function renderMonDashboard() {
       items: s.items || [], clientName: s.clientName || '', method: s.method, type: 'Vente'
     })),
     ...commandes.filter(c => _isMine(c.caissier) && c.status === 'pending').map(c => ({
-      date: c.date, total: Number(c.total) || 0, due: Number(c.restant) || 0,
+      date: c.date, total: Number(c.total) || 0, due: _payReste('commande', c, _mdEnc),
       items: c.items || [], clientName: c.clientName || '', type: 'Commande'
     })),
     ...reservations.filter(r => _isMine(r.caissier) && r.status === 'pending').map(r => ({
-      date: r.date, total: Number(r.total) || 0, due: Number(r.restant) || 0,
+      date: r.date, total: Number(r.total) || 0, due: _payReste('reservation', r, _mdEnc),
       items: r.items || [], clientName: r.clientName || '', type: 'Réservation'
     })),
   ];
@@ -28870,8 +29351,12 @@ function renderArretSoldeResults(q) {
   // Toute commande NON annulée avec un reste dû : inclut aussi les commandes
   // déjà LIVRÉES (status 'completed') dont le solde n'a pas été encaissé
   // (paiement à la livraison), qui n'apparaissaient pas avec l'ancien filtre 'pending'.
+  // Journal indexé une fois : le filtre, le total et chaque ligne demandaient
+  // chacun le reste dû, soit trois balayages complets du journal PAR commande.
+  const _enc = _payIndex();
+  const _reste = c => _payReste('commande', c, _enc);
   let list = commandes.filter(c =>
-    c.status !== 'cancelled' && _cmdReste(c) > 0 &&
+    c.status !== 'cancelled' && _reste(c) > 0 &&
     (canOthers || String(c.caissier || '') === String(uname))
   );
   if (query) {
@@ -28885,7 +29370,7 @@ function renderArretSoldeResults(q) {
   // Compteur global (indépendant de la recherche) dans l'en-tête de carte
   const cntEl = document.getElementById('arretSoldeCount');
   if (cntEl) {
-    const totalRap = list.reduce((a, c) => a + _cmdReste(c), 0);
+    const totalRap = list.reduce((a, c) => a + _reste(c), 0);
     cntEl.textContent = query ? `${list.length} résultat${list.length > 1 ? 's' : ''}` : (list.length ? `${list.length} · RAP ${fmt(totalRap)}` : '');
   }
 
@@ -28897,7 +29382,7 @@ function renderArretSoldeResults(q) {
   const VIS = 5;
   const initial = s => ((String(s || 'C').trim()[0]) || 'C').toUpperCase();
   const rows = list.map((c, i) => {
-    const reste = _cmdReste(c);
+    const reste = _reste(c);
     // Caissier d'origine (affiché quand ce n'est pas l'utilisateur courant)
     const owner = _arretCaissierLabel(c.caissier);
     const isMine = String(c.caissier || '') === String(uname);

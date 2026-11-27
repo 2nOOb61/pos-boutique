@@ -318,6 +318,11 @@
 .pcf-minibar{ display:inline-block; width:60px; height:6px; border-radius:4px; background:var(--surface2); vertical-align:middle; margin-right:8px; overflow:hidden; }
 .pcf-minibar>i{ display:block; height:100%; border-radius:4px; }
 .pcf-c-act{ width:1%; white-space:nowrap; text-align:right; }
+/* Encaissement en un clic — cellule DISTINCTE de .pcf-c-act : le kebab se replie à
+   droite sur mobile et aurait caché le seul geste utile du registre. */
+.pcf-paycell{ width:1%; white-space:nowrap; text-align:right; padding-left:6px!important; }
+.fin-done--fin{ color:#1d4ed8!important; background:#dbeafe!important; border-color:#bfdbfe!important; }
+.fin-done--fin:hover{ background:#2563eb!important; border-color:#2563eb!important; color:#fff!important; }
 .pcf-detail-row>td{ padding:0!important; border:none; }
 .pcf-detail{ display:none; padding:13px 18px 15px; background:var(--surface2); }
 .pcf-detail.open{ display:block; }
@@ -335,7 +340,13 @@
 @media(max-width:760px){
   .pcf-hero{ grid-template-columns:1fr; gap:14px; padding:18px; }
   .pcf-hero-val{ font-size:31px; }
-  .pcf-kpis{ grid-template-columns:repeat(2,1fr); }
+  /* `1fr` vaut `minmax(auto,1fr)` : la colonne ne descend pas sous la largeur de son
+     contenu, donc un montant en ariary (douze caractères) poussait la grille HORS de
+     l'écran au lieu de se faire tronquer par l'ellipse déjà prévue sur .pcf-kpi-val.
+     Le KPI de droite était coupé net sur téléphone. `minmax(0,…)` rend la troncature
+     possible, et la valeur passe à 17 px pour que « 2 310 000 Ar » tienne entier. */
+  .pcf-kpis{ grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .pcf-kpi-val{ font-size:17px; }
   .pcf-table thead{ display:none; }
   .pcf-table, .pcf-table tbody{ display:block; width:100%; }
   .pcf-row{ display:block; border:1px solid var(--border); border-radius:14px; margin:0 12px 10px; padding:3px 2px; background:var(--surface); }
@@ -346,6 +357,13 @@
   .pcf-row>td.pcf-c-main::before{ display:none; }
   .pcf-row>td.pcf-c-act{ justify-content:flex-end; }
   .pcf-row>td.pcf-c-act::before{ display:none; }
+  /* En carte, le bouton prend toute la largeur : c'est le geste du quotidien.
+     `width:auto` est indispensable — le `width:1%` de la vue tableau réduisait
+     la cellule à sa taille minimale et le bouton tombait à 22 px de large. */
+  .pcf-row>td.pcf-paycell{ display:block; width:auto; text-align:left; padding-top:4px!important; }
+  .pcf-row>td.pcf-paycell::before{ display:none; }
+  .pcf-row>td.pcf-paycell:empty{ display:none; }
+  .pcf-row>td.pcf-paycell .deliv-done{ width:100%; justify-content:center; padding:9px 10px; font-size:12.5px; }
   .pcf-minibar{ display:none; }
   .pcf-detail-row{ display:block; }
   .pcf-detail-row>td{ display:block; }
@@ -937,7 +955,7 @@
 .deliv-recap-caret { color:var(--color-text-secondary); transition:transform .18s ease; flex:none; }
 .deliv-recap-caret.open { transform:rotate(180deg); }
 .deliv-recap-body { padding:0 12px 12px; }
-.deliv-recap-actions { display:flex; justify-content:flex-end; margin-bottom:8px; }
+.deliv-recap-actions { display:flex; flex-wrap:wrap; gap:6px; justify-content:flex-end; margin-bottom:8px; }
 .deliv-recap-table td.deliv-recap-addr { white-space:normal; font-weight:600; color:var(--color-text,#1c1917); max-width:none; }
 .deliv-recap-noaddr { color:#dc2626; font-weight:700; }
 /* Itinéraire (tournée Google Maps) + zones */
@@ -4305,7 +4323,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20261127-cloture-1-clic"></script>
+<script src="./app.js?v=20261127-diagnostic-paiement"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
