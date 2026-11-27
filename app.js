@@ -97,7 +97,7 @@ function _purgeLocalPlainPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '239 · 2026-11-27';
+const APP_VERSION = '240 · 2026-11-27';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -19746,7 +19746,7 @@ function _calEvents(kind){
     return {
       ymd, client:x.client, ref:x.ref, total:x.total, status:x.status,
       kind:x.kind, id:x.id, dossierId:x.dossierId||'', commercial:x.commercial||'',
-      items:x.items||[], poles:x.poles||[],
+      items:x.items||[], poles:x.poles||[], mode:x.mode||'',
       progression: dos ? (Number(dos.progression)||0) : null
     };
   }).filter(Boolean);
@@ -20254,6 +20254,103 @@ function _calPaoPrintNoDateTable(noDate){
     <th style="width:78px">Date de BAT à fixer</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
+// ════════════════════════════════════════════════════════════════════════
+// CALENDRIER — EXPORTS TABLEUR (Excel / Google Sheets)
+// ════════════════════════════════════════════════════════════════════════
+// Les trois grilles se téléchargent en CSV. Point-virgule et directive `sep=`
+// en tête : Excel ouvre alors le fichier en colonnes quelle que soit la langue
+// de l'installation (en français il attend « ; », en anglais « , »), et Google
+// Sheets détecte le séparateur à l'import. BOM UTF-8 pour les accents, CRLF
+// pour les fins de ligne. Les exports plus anciens de l'app s'en tiennent à la
+// virgule, qui tombe en une seule colonne sur un Windows français — ces
+// fichiers-ci sont faits pour être retravaillés au tableur.
+const _CAL_CSV_SEP = ';';
+const _calCsvQ = v => '"' + String(v==null?'':v).replace(/"/g,'""') + '"';
+
+// Deux lignes de contexte puis une ligne vide : ce qu'on exporte, quand, et
+// sous quels filtres — une sortie filtrée ne doit pas se lire comme la liste
+// complète du mois.
+function _calCsvHeader(titre){
+  return ['sep=' + _CAL_CSV_SEP, _calCsvQ(titre),
+          _calCsvQ('Édité le ' + new Date().toLocaleString('fr-FR')
+                   + _calPrintFiltersLabel().replace(/^ · /, ' — ')), ''];
+}
+
+// Un nombre part sans guillemets : le tableur doit le lire comme un nombre,
+// pas comme du texte à reconvertir.
+function _calCsvRow(cells){
+  return cells.map(c => typeof c === 'number' ? c : _calCsvQ(c)).join(_CAL_CSV_SEP);
+}
+
+function _calCsvDownload(lines, filename){
+  const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type:'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function _calCsvShop(){
+  return (typeof shopConfig !== 'undefined' && shopConfig && shopConfig.name) || 'FOREVER MG';
+}
+function _calCsvMonthKey(){
+  return `${_calRef.getFullYear()}-${String(_calRef.getMonth()+1).padStart(2,'0')}`;
+}
+function _calCsvDow(iso){
+  return iso ? new Date(iso+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'long'}) : '';
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Export d'une grille de livraisons : 'prod' = dates de production,
+// 'client' = échéances de livraison / retrait. Même périmètre que la grille
+// affichée — le mois en cours et les filtres de la barre sticky — et une
+// ligne par commande, là où la case du calendrier plafonne à quatre.
+// ────────────────────────────────────────────────────────────────────────
+function exportCalendrierCsv(kind){
+  const k = kind === 'client' ? 'client' : 'prod';
+  if(typeof _syncDossierDates==='function') _syncDossierDates();
+  const monthLbl = _CAL_MONTHS[_calRef.getMonth()]+' '+_calRef.getFullYear();
+  const byDay = _calByDay(k);
+  const isos  = Object.keys(byDay).sort();
+  if(!isos.length){ showToast('Aucune échéance à exporter sur ' + monthLbl, 'error'); return; }
+  // Les montants suivent la même règle que le reste de la page : un rôle qui
+  // ne les voit pas à l'écran ne les emporte pas dans un fichier.
+  const money = _DELIV_MONEY_ROLES.includes(currentUser?.role);
+  const todayIso = _calTodayIso();
+  const titre = k === 'prod' ? 'Production planifiée' : 'Livraison / retrait client';
+  const cols = ['Date','Jour','Référence','Client','Type','Articles','Quantité',
+                'Pôles atelier','Responsable','Statut','Retard (jours)'];
+  cols.push(k === 'prod' ? 'Progression (%)' : 'Mode');
+  if(money) cols.push('Montant (Ar)');
+  const L = _calCsvHeader(_calCsvShop() + ' — ' + titre + ' — ' + monthLbl);
+  L.push(cols.map(_calCsvQ).join(_CAL_CSV_SEP));
+  let n = 0;
+  isos.forEach(iso => (byDay[iso]||[]).forEach(e => {
+    const done = e.status === 'completed';
+    const late = !done && iso < todayIso;
+    const items = e.items || [];
+    const cells = [
+      _dispDate(iso), _calCsvDow(iso), e.ref || '', e.client || '',
+      e.kind === 'reservation' ? 'Réservation' : 'Commande',
+      items.map(i => `${i.name} ×${i.qty||1}`).join(', '),
+      items.reduce((s,i) => s + (Number(i.qty)||1), 0),
+      (e.poles || []).map(_poleLabel).join(', '),
+      e.commercial || '',
+      done ? 'Terminé' : (late ? 'En retard' : 'En cours'),
+      late ? (_calGapDays(iso, todayIso) || 0) : 0
+    ];
+    cells.push(k === 'prod'
+      ? (e.progression == null ? '' : Number(e.progression) || 0)
+      : (e.mode === 'livraison' ? 'Livraison' : (e.mode === 'retrait' ? 'Retrait boutique' : '')));
+    if(money) cells.push(Number(e.total) || 0);
+    L.push(_calCsvRow(cells));
+    n++;
+  }));
+  _calCsvDownload(L, `${k === 'prod' ? 'production' : 'livraisons'}_${_calCsvMonthKey()}_${_calTodayIso()}.csv`);
+  showToast(`Export tableur — ${n} échéance${n>1?'s':''}`);
+}
+
 // ────────────────────────────────────────────────────────────────────────
 // CALENDRIER — EXPORT TABLEUR DE LA PAO (Excel / Google Sheets)
 // ────────────────────────────────────────────────────────────────────────
@@ -20273,7 +20370,7 @@ function _calPaoExportRows(section){
     const ops = [...new Set(e.etapes.reduce((a,s)=>a.concat(s.operateurs), []))];
     const late = !!iso && iso < todayIso && e.status !== 'completed';
     const retard = late ? (_calGapDays(iso, todayIso) || 0) : 0;
-    const jour = iso ? new Date(iso+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'long'}) : '';
+    const jour = _calCsvDow(iso);
     return {
       date: iso ? _dispDate(iso) : '',
       jour,
@@ -20307,36 +20404,19 @@ function exportCalendrierPaoCsv(section){
     showToast(sec==='nodate' ? 'Aucun travail PAO sans date de BAT' : 'Aucun travail PAO à exporter', 'error');
     return;
   }
-  const shop = (typeof shopConfig !== 'undefined' && shopConfig && shopConfig.name) || 'FOREVER MG';
   const monthLbl = _CAL_MONTHS[_calRef.getMonth()]+' '+_calRef.getFullYear();
-  // Point-virgule et directive sep= : Excel ouvre alors le fichier en colonnes
-  // quelle que soit sa langue (en français il attend « ; », en anglais « , »),
-  // et Google Sheets détecte le séparateur à l'import. Les exports plus anciens
-  // de l'app s'en tiennent à la virgule, qui tombe en une seule colonne sur un
-  // Windows français — celui-ci est fait pour être retravaillé au tableur.
-  const BOM = '\uFEFF', SEP = ';';
-  const q = v => '"' + String(v==null?'':v).replace(/"/g,'""') + '"';
-  const L = ['sep=' + SEP];
-  L.push(q(shop + ' — PAO / Conception' + (sec==='nodate' ? ' — travaux sans date de BAT' : ' — ' + monthLbl)));
-  L.push(q('Édité le ' + new Date().toLocaleString('fr-FR') + _calPrintFiltersLabel().replace(/^ · /, ' — ')));
-  L.push('');
-  L.push(_CAL_PAO_EXPORT_COLS.map(q).join(SEP));
-  rows.forEach(r => L.push([
-    q(r.date), q(r.jour), q(r.dossier), q(r.client), q(r.travail),
-    q(r.etapes), q(r.graphiste), q(r.responsable), q(r.statut), Number(r.retard)||0
-  ].join(SEP)));
+  const L = _calCsvHeader(_calCsvShop() + ' — PAO / Conception'
+    + (sec==='nodate' ? ' — travaux sans date de BAT' : ' — ' + monthLbl));
+  L.push(_CAL_PAO_EXPORT_COLS.map(_calCsvQ).join(_CAL_CSV_SEP));
+  rows.forEach(r => L.push(_calCsvRow([
+    r.date, r.jour, r.dossier, r.client, r.travail,
+    r.etapes, r.graphiste, r.responsable, r.statut, Number(r.retard)||0
+  ])));
   const stamp = _calTodayIso();
-  const name = sec==='nodate'
+  _calCsvDownload(L, sec==='nodate'
     ? `pao_sans-date-bat_${stamp}.csv`
-    : `pao_${_calRef.getFullYear()}-${String(_calRef.getMonth()+1).padStart(2,'0')}_${stamp}.csv`;
-  // CRLF : la fin de ligne que tous les tableurs attendent d'un CSV.
-  const blob = new Blob([BOM + L.join('\r\n')], { type:'text/csv;charset=utf-8;' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href = url; a.download = name;
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  showToast(`Export tableur — ${rows.length} travail${rows.length>1?'x':''} PAO`);
+    : `pao_${_calCsvMonthKey()}_${stamp}.csv`);
+  showToast(`Export tableur — ${rows.length} ${rows.length>1?'travaux':'travail'} PAO`);
 }
 
 // Impression de la seule PAO : la grille des dates de BAT du mois affiché et,
@@ -20357,7 +20437,7 @@ function printCalendrierPao(section){
   const stamp = new Date().toLocaleDateString('fr-FR')+' '+new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
   const titre = sec==='nodate' ? 'PAO sans date de BAT' : 'PAO / Conception';
   const sub = (sec==='nodate'
-      ? `${noDate.length} travail${noDate.length>1?'x':''} PAO en cours sans date de BAT`
+      ? `${noDate.length} ${noDate.length>1?'travaux':'travail'} PAO en cours sans date de BAT`
       : `${planned} travaux planifiés sur le mois · ${k.retard} date${k.retard>1?'s':''} de BAT dépassée${k.retard>1?'s':''} · ${noDate.length} sans date de BAT`)
     + _calPrintFiltersLabel();
   w.document.write(`<html><head><meta charset="utf-8"><title>${titre} ${monthLbl}</title><style>${_calPrintCss()}</style></head><body onload="window.print()">

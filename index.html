@@ -26,7 +26,7 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20261127-export-pao">
+<link rel="stylesheet" href="./style.css?v=20261127-export-calendriers">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
@@ -2925,16 +2925,34 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
     <div class="cal-grid-wrap" id="calGridWrap">
       <section class="cal-cal" id="calProd">
-        <div class="cal-cal-head cal-head-prod">
-          <span class="cal-cal-title">Production planifiée</span>
-          <span class="cal-cal-sub">Dates de production planifiées</span>
+        <div class="cal-cal-head cal-head-prod cal-cal-head--act">
+          <div class="cal-cal-htxt">
+            <span class="cal-cal-title">Production planifiée</span>
+            <span class="cal-cal-sub">Dates de production planifiées</span>
+          </div>
+          <div class="cal-cal-acts">
+            <button type="button" class="cal-cal-print" onclick="exportCalendrierCsv('prod')"
+                    title="Télécharger la production planifiée du mois en tableur (CSV — Excel ou Google Sheets)">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Excel
+            </button>
+          </div>
         </div>
         <div class="cal-month" id="calMonthProd"></div>
       </section>
       <section class="cal-cal" id="calClient">
-        <div class="cal-cal-head cal-head-client">
-          <span class="cal-cal-title">Livraison / retrait client</span>
-          <span class="cal-cal-sub">Dates de livraison / retrait client</span>
+        <div class="cal-cal-head cal-head-client cal-cal-head--act">
+          <div class="cal-cal-htxt">
+            <span class="cal-cal-title">Livraison / retrait client</span>
+            <span class="cal-cal-sub">Dates de livraison / retrait client</span>
+          </div>
+          <div class="cal-cal-acts">
+            <button type="button" class="cal-cal-print" onclick="exportCalendrierCsv('client')"
+                    title="Télécharger les échéances client du mois en tableur (CSV — Excel ou Google Sheets)">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Excel
+            </button>
+          </div>
         </div>
         <div class="cal-month" id="calMonthClient"></div>
       </section>
@@ -4269,7 +4287,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20261127-export-pao"></script>
+<script src="./app.js?v=20261127-export-calendriers"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
