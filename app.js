@@ -97,7 +97,7 @@ function _purgeLocalPlainPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '241 · 2026-11-27';
+const APP_VERSION = '242 · 2026-11-27';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -20278,6 +20278,45 @@ function _calCsvHeader(titre){
                    + _calPrintFiltersLabel().replace(/^ · /, ' — ')), ''];
 }
 
+// ── Livraison : ce que le système sait déjà de chaque ligne ─────────────
+// Une liste de travail vieillit mal : un dossier peut y rester alors que sa
+// commande est partie depuis longtemps. Deux sources, et elles ne disent pas
+// la même chose :
+//   • l'état terrain (feuille Livraisons, posé par le coursier) : en
+//     livraison, livrée, retour, annulée en route — absent tant que personne
+//     n'a rien saisi, ce qui ne veut PAS dire « pas livrée » ;
+//   • le statut commercial `completed`, que toute l'app affiche « Livrée »
+//     (la commande est finalisée, soldée et remise).
+// La colonne « Livré / retiré » répond oui dès que l'une des deux le dit ; les
+// colonnes suivantes montrent sur quoi cette réponse s'appuie.
+const _CAL_LIV_COLS = ['Livré / retiré','Suivi livraison','Livré le','Coursier'];
+
+function _calLivDateTxt(v){
+  if(!v) return '';
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? '' : d.toLocaleString('fr-FR',
+    { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
+}
+
+// Date de finalisation de la commande / réservation d'origine : c'est elle qui
+// date un « Livrée » venu du statut commercial, l'état terrain n'ayant alors
+// rien enregistré.
+function _calFinalisationDate(kind, id){
+  const src = kind === 'reservation' ? reservations : commandes;
+  const r = (Array.isArray(src) ? src : []).find(x => x && String(x.id) === String(id));
+  return (r && r.dateFinalisation) || '';
+}
+
+function _calLivCells(kind, id, status){
+  const e  = _livEtat(kind, id);
+  const st = (e && e.statut) || '';
+  const suivi = st ? ((_LIV_LABELS[st] || [])[2] || st) : '';
+  const livre = st === 'LIVREE' || status === 'completed';
+  const quand = (st === 'LIVREE' && e && e.retour) ? e.retour
+              : (status === 'completed' ? _calFinalisationDate(kind, id) : '');
+  return [livre ? 'Oui' : 'Non', suivi || '—', _calLivDateTxt(quand), (e && e.coursier) || ''];
+}
+
 // Un nombre part sans guillemets : le tableur doit le lire comme un nombre,
 // pas comme du texte à reconvertir.
 function _calCsvRow(cells){
@@ -20324,6 +20363,7 @@ function exportCalendrierCsv(kind){
   const cols = ['Date','Jour','Référence','Client','Type','Articles','Quantité',
                 'Pôles atelier','Responsable','Statut','Retard (jours)'];
   cols.push(k === 'prod' ? 'Progression (%)' : 'Mode');
+  cols.push(..._CAL_LIV_COLS);
   if(money) cols.push('Montant (Ar)');
   const L = _calCsvHeader(_calCsvShop() + ' — ' + titre + ' — ' + monthLbl);
   L.push(cols.map(_calCsvQ).join(_CAL_CSV_SEP));
@@ -20345,6 +20385,7 @@ function exportCalendrierCsv(kind){
     cells.push(k === 'prod'
       ? (e.progression == null ? '' : Number(e.progression) || 0)
       : (e.mode === 'livraison' ? 'Livraison' : (e.mode === 'retrait' ? 'Retrait boutique' : '')));
+    cells.push(..._calLivCells(e.kind, e.id, e.status));
     if(money) cells.push(Number(e.total) || 0);
     L.push(_calCsvRow(cells));
     n++;
@@ -20362,7 +20403,8 @@ function exportCalendrierCsv(kind){
 // BAT » vide qui les distingue, et on peut alors trier, filtrer et dater en
 // place au lieu de recopier.
 const _CAL_PAO_EXPORT_COLS = ['Date de BAT','Jour','Dossier','Client','Travail',
-  'Étapes PAO restantes','Graphiste','Responsable','Statut','Retard (jours)'];
+  'Étapes PAO restantes','Graphiste','Responsable','Statut','Retard (jours)']
+  .concat(_CAL_LIV_COLS);
 
 function _calPaoExportRows(section){
   const sec = section || 'all';
@@ -20383,7 +20425,8 @@ function _calPaoExportRows(section){
       graphiste: ops.length ? ops.join(', ') : 'Non attribué',
       responsable: e.commercial || '',
       statut: !iso ? 'Sans date de BAT' : (late ? 'En retard' : 'Planifié'),
-      retard
+      retard,
+      liv: _calLivCells(e.kind, e.id, e.status)
     };
   };
   const rows = [];
@@ -20413,7 +20456,7 @@ function exportCalendrierPaoCsv(section){
   rows.forEach(r => L.push(_calCsvRow([
     r.date, r.jour, r.dossier, r.client, r.travail,
     r.etapes, r.graphiste, r.responsable, r.statut, Number(r.retard)||0
-  ])));
+  ].concat(r.liv))));
   const stamp = _calTodayIso();
   _calCsvDownload(L, sec==='nodate'
     ? `pao_sans-date-bat_${stamp}.csv`
