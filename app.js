@@ -97,7 +97,7 @@ function _purgeLocalPlainPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '242 · 2026-11-27';
+const APP_VERSION = '243 · 2026-11-27';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -20172,6 +20172,9 @@ function _calPrintCss(){
     .ev{font-size:7.5px;line-height:1.25;margin-bottom:1.5px;padding:1px 2px;border-radius:2px;background:#eef2ff;border-left:2px solid #6366f1;word-wrap:break-word;overflow:hidden}
     .ev.late{background:#fef2f2;border-left-color:#dc2626;color:#991b1b}
     .ev.done{background:#f0fdf4;border-left-color:#16a34a;color:#166534}
+    /* Livraison : la ligne qui dit si la commande est déjà partie. */
+    .ev .liv{display:block;font-weight:bold;color:#15803d}
+    .ev .liv.pending{color:#c2410c}
     .cal2{page-break-before:always}
     /* Travaux PAO sans date de BAT : une ligne par dossier et une case vide à
        remplir à la main — c'est la feuille qu'on emporte en réunion de planning. */
@@ -20182,6 +20185,8 @@ function _calPrintCss(){
     table.nd td.fill{width:78px;background:#fff}
     table.nd tr:nth-child(even) td{background:#f7f7fb}
     table.nd td.na{color:#991b1b;font-weight:bold}
+    table.nd td.liv-ok{background:#f0fdf4;color:#166534;font-weight:bold}
+    table.nd td.liv-pending{color:#c2410c}
     .nd-empty{font-size:9px;color:#555;padding:6px 2px;font-style:italic}
     @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
   `;
@@ -20201,6 +20206,32 @@ function _calPrintFiltersLabel(){
   return out.length ? ' · Filtres : '+out.join(', ') : '';
 }
 
+// Livraison résumée pour le papier. Les mêmes deux sources que l'export (état
+// terrain du coursier, statut commercial finalisé), mais en une ligne : une
+// case de calendrier n'a pas la place d'une colonne. Vide quand le système ne
+// sait rien — mieux vaut ne rien écrire qu'un « Non » qui ferait croire à une
+// livraison en retard alors que personne n'a encore rien saisi.
+function _calLivPrintTxt(kind, id, status){
+  const [livre, suivi, quand, coursier] = _calLivCells(kind, id, status);
+  if(livre !== 'Oui' && (!suivi || suivi === '—')) return '';
+  const court = quand ? quand.replace(/\/\d{4} /, ' ') : '';   // 20/11/2026 14:30 → 20/11 14:30
+  const base  = (suivi && suivi !== '—') ? suivi : 'Livrée';
+  return base + (court ? ' ' + court : '') + (coursier ? ' · ' + coursier : '');
+}
+
+function _calLivPrintDone(kind, id, status){
+  return _calLivCells(kind, id, status)[0] === 'Oui';
+}
+
+// Le bloc d'un événement imprimé porte sa ligne de livraison quand il y en a
+// une : en vert si c'est parti et arrivé, en orange tant que c'est en route.
+function _calLivPrintLine(kind, id, status){
+  const txt = _calLivPrintTxt(kind, id, status);
+  if(!txt) return '';
+  const done = _calLivPrintDone(kind, id, status);
+  return `<span class="liv${done ? '' : ' pending'}">${escapeHtml(txt)}</span>`;
+}
+
 // Tableau mensuel de la PAO — même géométrie que les grilles production et
 // livraison, mais l'événement porte les étapes de conception restantes et le
 // graphiste, pas les articles.
@@ -20217,11 +20248,15 @@ function _calPaoPrintTable(byDay, year, month, todayIso){
       if(day<1||day>dim){ tds += '<td class="out"></td>'; continue; }
       const iso = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
       const items = (byDay[iso] || []).map(e=>{
-        const late = iso < todayIso && e.status !== 'completed';
-        const ops  = [...new Set(e.etapes.reduce((a,s)=>a.concat(s.operateurs), []))];
-        return `<div class="ev ${late?'late':''}"><b>${escapeHtml(e.ref || e.client)}</b><br>${escapeHtml(e.client)}`
+        // Une conception encore ouverte sur une commande déjà livrée : c'est ce
+        // que la ligne de livraison signale, et la case passe au vert.
+        const livre = _calLivPrintDone(e.kind, e.id, e.status);
+        const late  = !livre && iso < todayIso;
+        const ops   = [...new Set(e.etapes.reduce((a,s)=>a.concat(s.operateurs), []))];
+        return `<div class="ev ${late?'late':''}${livre?' done':''}"><b>${escapeHtml(e.ref || e.client)}</b><br>${escapeHtml(e.client)}`
           + `<br>${escapeHtml(e.etapes.map(s=>s.short).join(' · '))}`
-          + (ops.length ? '<br>'+escapeHtml(ops.join(', ')) : '') + `</div>`;
+          + (ops.length ? '<br>'+escapeHtml(ops.join(', ')) : '')
+          + _calLivPrintLine(e.kind, e.id, e.status) + `</div>`;
       }).join('');
       tds += `<td class="${iso===todayIso?'today':''}"><div class="dn">${day}</div>${items}</td>`;
     }
@@ -20239,6 +20274,14 @@ function _calPaoPrintNoDateTable(noDate){
   const rows = noDate.map(e=>{
     const ops = [...new Set(e.etapes.reduce((a,s)=>a.concat(s.operateurs), []))];
     const art = (e.items||[]).map(i=>`${i.name} ×${i.qty||1}`).join(', ');
+    // Deux colonnes plutôt qu'une : « Livré » se balaie d'un coup d'œil sur
+    // toute la colonne, le détail dit sur quoi ce oui s'appuie.
+    const [livre, suivi, quand, coursier] = _calLivCells(e.kind, e.id, e.status);
+    // Sans etat terrain, un « Oui » vient du statut commercial : on le dit,
+    // sinon la colonne n'affiche qu'une date sans savoir d'ou elle sort.
+    const source = (suivi && suivi !== '—') ? suivi : (livre === 'Oui' ? 'Livrée (finalisée)' : '');
+    const detail = [source, quand, coursier].filter(Boolean).join(' · ');
+    const livCls = livre === 'Oui' ? ' class="liv-ok"' : (detail ? ' class="liv-pending"' : '');
     return `<tr>
       <td><b>${escapeHtml(e.ref || '—')}</b></td>
       <td>${escapeHtml(e.client)}</td>
@@ -20246,11 +20289,14 @@ function _calPaoPrintNoDateTable(noDate){
       <td>${escapeHtml(e.etapes.map(s=>s.label).join(' · '))}</td>
       <td${ops.length?'':' class="na"'}>${ops.length ? escapeHtml(ops.join(', ')) : 'Non attribué'}</td>
       <td>${escapeHtml(e.commercial || '—')}</td>
+      <td${livCls}>${escapeHtml(livre)}</td>
+      <td>${escapeHtml(detail || '—')}</td>
       <td class="fill"></td></tr>`;
   }).join('');
   return `<table class="nd"><thead><tr>
     <th style="width:84px">Dossier</th><th>Client</th><th>Travail</th>
     <th>Étapes PAO restantes</th><th>Graphiste</th><th>Responsable</th>
+    <th style="width:42px">Livré</th><th style="width:140px">Livraison</th>
     <th style="width:78px">Date de BAT à fixer</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
@@ -20517,10 +20563,14 @@ function printCalendrier(){
         const iso = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
         const evs = byDay[iso] || [];
         const items = evs.map(e=>{
-          const done = e.status==='completed';
+          // « Livrée » ne vient plus seulement du statut commercial : une course
+          // close par le coursier compte aussi, sinon la case reste rouge pour
+          // une commande qui est chez le client depuis deux jours.
+          const done = _calLivPrintDone(e.kind, e.id, e.status);
           const late = !done && iso < todayIso;
           const art = (e.items||[]).map(i=>`${i.name} ×${i.qty||1}`).join(', ');
-          return `<div class="ev ${late?'late':''}${done?' done':''}"><b>${escapeHtml(e.client)}</b>${art?'<br>'+escapeHtml(art):''}</div>`;
+          const liv = _calLivPrintLine(e.kind, e.id, e.status);
+          return `<div class="ev ${late?'late':''}${done?' done':''}"><b>${escapeHtml(e.client)}</b>${art?'<br>'+escapeHtml(art):''}${liv}</div>`;
         }).join('');
         tds += `<td class="${iso===todayIso?'today':''}"><div class="dn">${day}</div>${items}</td>`;
       }
