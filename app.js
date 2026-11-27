@@ -97,7 +97,7 @@ function _purgeLocalPlainPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '246 · 2026-11-27';
+const APP_VERSION = '247 · 2026-11-27';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -23265,6 +23265,15 @@ function _finEntry(kind, o, maps, idx) {
     status: o.status,
     livStatut: _livStatut(kind, o.id),
     restantStocke: Number(o.restant) || 0,
+    // Qui RÉPOND de l'opération. Deux rôles, et ils ne se confondent pas :
+    // `commercial` = celui qui a pris la commande, donc celui qu'on va voir pour
+    // un impayé ; `finalisePar` = celui qui a fermé la facture (souvent un autre
+    // agent, cf. la carte « Finalisations par agent »). Le registre n'en portait
+    // aucun des deux : on voyait COMBIEN était dû sans savoir à qui le demander.
+    commercial: _resolveOperatorLabel(o.caissier || ''),
+    // `_finFinalizerOf` rend « — » quand il ne sait pas ; une colonne de tableur
+    // veut une case vide, pas un tiret à nettoyer à la main.
+    finalisePar: ((kind === 'commande' ? _finFinalizerOf(o) : (o.finaliseParLabel || '')) || '').replace(/^—$/, ''),
     deliveryMode: o.deliveryMode,
     deliveryDate: kind === 'reservation' ? o.deliveryDate : o.dateLivraison,
     address: kind === 'reservation' ? o.deliveryAddress : o.adresseLivraison,
@@ -23368,6 +23377,8 @@ function _finRow(e, colspan) {
       <div class="pcf-detail-grid">
         ${dt('Type', e.kind === 'reservation' ? 'Réservation' : 'Commande')}
         ${dt('Réf. facture', e.obj.numeroDossier || (e.ref))}
+        ${dt('Commercial', e.commercial)}
+        ${dt('Finalisée par', e.finalisePar)}
         ${dt('Contact', e.contact)}
         ${dt('Articles', itemsFull)}
         ${e.deliveryMode === 'livraison' ? dt('Adresse', e.address || '—') : dt('Mode', 'Retrait boutique')}
@@ -23387,7 +23398,7 @@ function _finRow(e, colspan) {
         <span class="pcf-rank" style="background:${kindColor}1a;color:${kindColor}">${seqNum}</span>
         <div style="min-width:0">
           <div class="pcf-name" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e.client}</div>
-          <div style="font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums">${e.ref}</div>
+          <div style="font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e.ref}${e.commercial ? ' · ' + _pcokEsc(e.commercial) : ''}</div>
         </div>
       </div>
     </td>
@@ -23672,7 +23683,8 @@ function _finRenderDiag() {
 function exportFinDiag() {
   const rows = _payDiagRows();
   if (!rows.length) { showToast('Aucun impayé à exporter', 'info'); return; }
-  const cols = ['Groupe','Que faire','Référence','Type','Client','Contact','Statut',
+  const cols = ['Groupe','Que faire','Référence','Type','Client','Contact',
+                'Commercial','Finalisée par','Statut',
                 'Date','Âge (jours)','Total','Encaissé (journal)','Reste dû',
                 'Reste stocké sur la fiche','Écart stocké − journal','Remis au client',
                 'État livraison','Dossier','Production %','Dossier clôturé','Mode',
@@ -23691,6 +23703,7 @@ function exportFinDiag() {
       r.ref || '',
       r.kind === 'reservation' ? 'Réservation' : 'Commande',
       r.client || '', r.contact || '',
+      r.commercial || '', r.finalisePar || '',
       stLbl[r.status] || String(r.status || ''),
       _dispDate(_toIsoDate(r.date || '')) || '',
       r.age == null ? '' : r.age,
@@ -23833,19 +23846,22 @@ function printFinances() {
       return `<tr>
         <td>${e.ref}</td>
         <td>${e.client}</td>
+        <td>${escapeHtml(e.commercial || '—')}</td>
         <td>${ds.mode} · ${ds.label}</td>
         <td class="r">${fmt(e.total)}</td>
         <td class="r g">${fmt(e.accompte)}</td>
         <td class="r ${e.restant > 0 ? 'rd' : 'muted'}">${fmt(e.restant)}</td>
       </tr>`;
     }).join('');
+    // Colonne « Commercial » : une feuille d'impayés qu'on emporte en réunion ne
+    // sert à rien si elle ne dit pas à qui demander des comptes sur chaque ligne.
     return `<h2>${_histDayLabel(g.date)} — engagé ${fmt(g.eng)} · acompte ${fmt(g.acc)} · reste ${fmt(g.res)}</h2>
-      <table><thead><tr><th>N°</th><th>Client</th><th>État livraison</th><th class="r">Total engagé</th><th class="r">Acompte</th><th class="r">Restant</th></tr></thead>
+      <table><thead><tr><th>N°</th><th>Client</th><th>Commercial</th><th>État livraison</th><th class="r">Total engagé</th><th class="r">Acompte</th><th class="r">Restant</th></tr></thead>
       <tbody>${rows}</tbody></table>`;
   }).join('');
 
   body += `<table style="margin-top:14px"><tbody><tr style="font-weight:bold;border-top:2px solid #1a4a3a">
-    <td>TOTAL GÉNÉRAL</td><td></td><td></td>
+    <td>TOTAL GÉNÉRAL</td><td></td><td></td><td></td>
     <td class="r">${fmt(tEng)}</td><td class="r g">${fmt(tAcc)}</td><td class="r rd">${fmt(tRes)}</td></tr></tbody></table>
     <div class="foot">Document interne — suivi manuel des encaissements</div>`;
 
@@ -28591,12 +28607,16 @@ function renderPatronDashboard() {
   // encaisser » du patron ne montrait pas la nature d'opération qui porte le plus
   // d'impayés. Le reste dû vient du journal (`e.reste`), pas du champ stocké.
   const creanceSales = sales.filter(s => (Number(s.due) || 0) > 0).slice(0, 6);
+  // `par` = l'operateur qui repond de l'operation. Le patron voyait le montant
+  // du sans savoir a qui le demander : la relance repartait vers l'administratif
+  // au lieu d'aller a celui qui connait le client.
   const _creRow = (e, type) => ({
     nom: e.o.clientName || '—', contact: e.o.clientContact || '',
+    par: _resolveOperatorLabel(e.o.caissier || ''),
     montant: Number(e.o.total) || 0, restant: e.reste, date: e.o.date, type
   });
   const creanceRows = [...creanceSales.map(s => ({
-    nom: s.clientName || '—', contact: s.clientContact || '', montant: s.total, restant: Number(s.due) || 0, date: s.date, type: 'Vente'
+    nom: s.clientName || '—', contact: s.clientContact || '', par: _resolveOperatorLabel(s.caissier || ''), montant: s.total, restant: Number(s.due) || 0, date: s.date, type: 'Vente'
   })),
   ...resCreances.slice(0, 6).map(e => _creRow(e, 'Réservation')),
   ...cmdCreances.slice(0, 6).map(e => _creRow(e, 'Commande')),
@@ -28604,7 +28624,7 @@ function renderPatronDashboard() {
 
   const creanceHtml = creanceRows.length
     ? creanceRows.map(c => `<tr>
-        <td><span style="font-weight:600">${c.nom}</span>${c.contact ? `<div style="font-size:10px;color:#78716c">${c.contact}</div>` : ''}</td>
+        <td><span style="font-weight:600">${c.nom}</span>${(c.contact || c.par) ? `<div style="font-size:10px;color:#78716c">${[c.contact, c.par].filter(Boolean).map(escapeHtml).join(' · ')}</div>` : ''}</td>
         <td data-label="Type"><span style="background:${c.type==='Vente'?'#e8f4f0':c.type==='Commande'?'#e0f2fe':'#f3e8ff'};color:${c.type==='Vente'?'#1a4a3a':c.type==='Commande'?'#0891b2':'#7c3aed'};font-size:10px;font-weight:700;padding:2px 6px;border-radius:8px">${c.type}</span></td>
         <td data-label="Total" style="text-align:right">${fmt(c.montant)}</td>
         <td data-label="Reste dû" style="text-align:right"><span style="font-weight:700;color:#dc2626">${fmt(c.restant)}</span></td>
