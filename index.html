@@ -968,6 +968,22 @@
 .deliv-selbar-act { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
 .deliv-fiche-btn { display:inline-flex; align-items:center; gap:6px; font-size:12.5px; font-weight:700; color:#fff; background:#1a4a3a; border:1px solid #1a4a3a; border-radius:8px; padding:7px 13px; cursor:pointer; font-family:inherit; }
 .deliv-fiche-btn:hover { background:#153d30; }
+/* Pointage en un clic — « Livrée » / « Remis », sur chaque ligne encore ouverte.
+   Cellule distincte de .pcok-td-act, que le mobile masque : c'est le geste du
+   quotidien, il doit rester sous le pouce. */
+.deliv-donecell { width:1%; white-space:nowrap; text-align:right; padding-left:6px !important; }
+.deliv-done { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:800; color:#15803d; background:#dcfce7; border:1px solid #bbf7d0; border-radius:8px; padding:5px 10px; cursor:pointer; font-family:inherit; white-space:nowrap; transition:background .15s,color .15s,border-color .15s; }
+.deliv-done:hover { background:#16a34a; border-color:#16a34a; color:#fff; }
+.deliv-done svg { flex:none; }
+/* Diagnostic des retards — tableau de groupes, une ligne cliquable par groupe */
+.deliv-diag-intro { font-size:12px; color:var(--color-text-secondary,#78716c); line-height:1.5; margin:0 0 10px; max-width:76ch; }
+.deliv-diag-row { cursor:pointer; }
+.deliv-diag-row:hover { background:#faf9f7; }
+.deliv-diag-row--active { background:var(--color-primary-light,#e8f4f0) !important; box-shadow:inset 3px 0 0 #1a4a3a; }
+.deliv-diag-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:8px; vertical-align:middle; }
+.deliv-diag-nom { font-weight:700; color:var(--color-text-primary,#1c1917); }
+.deliv-diag-act { color:var(--color-text-secondary,#78716c); white-space:normal; line-height:1.45; font-size:11.5px; margin-top:2px; padding-left:16px; }
+.deliv-diag-n, .deliv-diag-sum { vertical-align:top !important; white-space:nowrap; }
 /* Fiche coursier — fenêtre de préparation */
 .fiche-note { font-size:12.5px; color:var(--color-text-secondary,#78716c); background:#fff8f3; border:1px solid #fed7aa; border-radius:10px; padding:9px 12px; margin:0 0 14px; line-height:1.45; }
 .fiche-head { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:14px; }
@@ -1131,6 +1147,8 @@
   .pcok-td-ret, .pcok-td-step, .pcok-td-resp { display:inline-block !important; width:auto !important; margin-right:8px; }
   .pcok-td-prog { max-width:200px; padding-top:6px !important; }
   .pcok-td-act { display:none !important; }
+  .deliv-donecell { text-align:left; padding-top:8px !important; }
+  .deliv-done { width:100%; justify-content:center; padding:9px 10px; font-size:12.5px; }
   .pcok-td-prod::before { content:'Produit : '; font-size:11px; color:var(--color-text-muted); }
 }
 /* Drawer latéral détail (partagé Production + Commandes) */
@@ -4287,7 +4305,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20261127-impression-livraison"></script>
+<script src="./app.js?v=20261127-cloture-1-clic"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 

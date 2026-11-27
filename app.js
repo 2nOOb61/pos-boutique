@@ -97,7 +97,7 @@ function _purgeLocalPlainPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '243 · 2026-11-27';
+const APP_VERSION = '245 · 2026-11-27';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -1931,6 +1931,7 @@ function _doFinalize(r, method, given, change, provider, ref) {
   // encaissé le solde (même colonne que sur les commandes).
   r.finaliseParUser  = currentUser?.username || '';
   r.finaliseParLabel = currentUser?.label || currentUser?.username || '';
+  _livPointerDepuisCaisse('reservation', r.id, _factureNum(r), r.clientName);
 
   saveData();
   renderStats();
@@ -7717,6 +7718,12 @@ function _buildCommandeRows() {
       produit: (c.items||[]).map(i => i.name).filter(Boolean).join(', '),
       total, accompte: _cmdEncaisse(c), restant, paid,
       status: c.status, bucket, prodPct, prodClos,
+      // Remise effective au client (pointage coursier / comptoir), indépendante
+      // du règlement : une commande remise mais non soldée reste une créance
+      // (elle demeure dans « En cours » et « Impayés ») mais n'est plus en
+      // RETARD d'échéance — le client a reçu. Même règle que la page Livraisons.
+      livStatut: _livStatut('commande', c.id),
+      remisClient: _livStatut('commande', c.id) === 'LIVREE',
       dossierId: c.dossierId || '',
     };
   });
@@ -7725,9 +7732,9 @@ function _buildCommandeRows() {
 function _cmdBucketMatch(r, k) {
   if (k === 'TOUS')     return true;
   if (k === 'EN_COURS') return r.status === 'pending';
-  if (k === 'RETARD')   return r.status === 'pending' && r.days != null && r.days < 0;
-  if (k === 'AUJ')      return r.status === 'pending' && r.days === 0;
-  if (k === 'SEMAINE')  return r.status === 'pending' && r.days != null && r.days >= 0 && r.days <= 7;
+  if (k === 'RETARD')   return r.status === 'pending' && !r.remisClient && r.days != null && r.days < 0;
+  if (k === 'AUJ')      return r.status === 'pending' && !r.remisClient && r.days === 0;
+  if (k === 'SEMAINE')  return r.status === 'pending' && !r.remisClient && r.days != null && r.days >= 0 && r.days <= 7;
   if (k === 'IMPAYE')   return r.status === 'pending' && r.restant > 0;
   // Fabriqué mais pas encaissé : la file de RECOUVREMENT (et de retrait), à ne pas
   // confondre avec « Impayés », qui mélange les commandes encore en atelier.
@@ -7881,7 +7888,7 @@ function _cmdAlertCards(rows) {
   // n'a plus rien à rattraper, annoncer « 94 j de retard » en rouge noyait les vraies
   // urgences de fabrication. Elles restent dans la liste, pastille « Produite », et
   // ont leur propre file : le filtre « Produites non soldées ».
-  const alert = rows.filter(r => r.status==='pending' && !r.prodClos && (r.bucket==='RETARD'||r.bucket==='AUJ'||r.bucket==='DEMAIN'))
+  const alert = rows.filter(r => r.status==='pending' && !r.prodClos && !r.remisClient && (r.bucket==='RETARD'||r.bucket==='AUJ'||r.bucket==='DEMAIN'))
     .sort((a,b) => (a.days==null?1e9:a.days) - (b.days==null?1e9:b.days))
     .slice(0, 8);
   if (!alert.length) return '';
@@ -7997,6 +8004,7 @@ function _cmdSectionDe(r) {
     if (r.restant <= 0) return 'SOLDEE';
     return r.prodClos ? 'PRODNS' : 'IMPAYEE';
   }
+  if (r.remisClient) return 'LIVREE';     // remise au client : plus une échéance à tenir
   return r.ymd ? r.bucket : 'SANSDATE';  // RETARD | AUJ | DEMAIN | SEMAINE | FUTUR
 }
 
@@ -8067,11 +8075,12 @@ function _cmdCarte(r) {
   const id       = String(r.id);
   const ouvert   = _cmdExpanded.has(id);
   const prodDone = r.status === 'pending' && r.prodClos;
+  const remis    = r.status === 'pending' && r.remisClient;
 
   // Couleur du bord gauche = même lecture que le liseré des lignes du tableau.
   const accent = r.status === 'cancelled' ? '#d6d3d1'
     : r.status === 'completed' ? '#16a34a'
-    : prodDone ? (r.restant > 0 ? '#d97706' : '#16a34a')
+    : (prodDone || remis) ? (r.restant > 0 ? '#d97706' : '#16a34a')
     : (r.days != null && r.days < 0) ? '#dc2626'
     : (r.days === 0 || r.days === 1) ? '#e8834a'
     : r.restant > 0 ? '#d97706' : '#2563eb';
@@ -8093,12 +8102,16 @@ function _cmdCarte(r) {
   let pill = '', late = false, pillTitle = '';
   if (r.status === 'completed')      pill = 'Livrée';
   else if (r.status === 'cancelled') pill = 'Annulée';
+  else if (remis)                    pill = 'Remise au client';
   else if (r.days == null)           pill = 'Pas de date fixée';
   else if (r.days < 0)  { pill = 'En retard de ' + Math.abs(r.days) + ' jour' + (Math.abs(r.days)>1?'s':''); late = !prodDone; }
   else if (r.days === 0) pill = "C'est aujourd'hui";
   else if (r.days === 1) pill = 'Demain';
   else                   pill = 'Dans ' + r.days + ' jours';
   if (prodDone) pillTitle = 'Production terminée — reste à régler / remettre au client';
+  if (remis)    pillTitle = r.restant > 0
+    ? 'Remise au client — reste à encaisser ' + fmt(r.restant)
+    : 'Remise au client et soldée — finalisation à enregistrer';
 
   const resteTxt = r.restant > 0
     ? `<div class="cmdc-s" style="color:#dc2626">Restant ${fmt(r.restant)}</div>`
@@ -8144,19 +8157,22 @@ function _cmdRow(r) {
   // commande terminée. On enlève le rouge de RETARD (le nombre de jours part dans
   // l'infobulle, rien n'est caché) et on nomme l'état réel à côté du statut.
   const prodDone = r.status === 'pending' && r.prodClos;
-  const dotC = r.status==='cancelled'?'#a8a29e':r.status==='completed'?'#16a34a':prodDone?'#16a34a':(r.days!=null&&r.days<0)?'#dc2626':(r.days===0||r.days===1)?'#e8834a':'#2563eb';
+  // Remise au client : plus aucune échéance à tenir, seul le solde peut rester dû.
+  const remis    = r.status === 'pending' && r.remisClient;
+  const dotC = r.status==='cancelled'?'#a8a29e':r.status==='completed'?'#16a34a':(prodDone||remis)?'#16a34a':(r.days!=null&&r.days<0)?'#dc2626':(r.days===0||r.days===1)?'#e8834a':'#2563eb';
   const dot = `<span class="pcok-prio" style="background:${dotC}"></span>`;
   // Livraison échéance + retard
   let ech = '—', echC = 'var(--color-text-secondary)';
   if (r.ymd) {
     ech = new Date(r.ymd+'T00:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'});
-    if (r.status==='pending' && !prodDone) {
+    if (r.status==='pending' && !prodDone && !remis) {
       if (r.days<0) echC='#dc2626'; else if (r.days===0||r.days===1) echC='#e8834a';
     }
   }
   let retTxt='', retC='#78716c';
   if (r.status==='completed') { retTxt='Livrée'; retC='#16a34a'; }
   else if (r.status==='cancelled') { retTxt='Annulée'; retC='#a8a29e'; }
+  else if (remis) { retTxt='Livrée'; retC='#16a34a'; }
   else if (r.days==null) { retTxt='—'; retC='#a8a29e'; }
   else if (r.days<0) { retTxt=`+${Math.abs(r.days)}j`; retC='#dc2626'; }
   else if (r.days===0) { retTxt='Auj.'; retC='#e8834a'; }
@@ -8164,7 +8180,12 @@ function _cmdRow(r) {
   else if (r.days<=7) { retTxt=`${r.days}j`; retC='#d97706'; }
   else { retTxt=`${r.days}j`; retC='#78716c'; }
   let retTitle = '';
-  if (prodDone) {
+  if (remis) {
+    retTitle = r.restant > 0
+      ? `Remise au client — reste à encaisser ${fmt(r.restant)}`
+      : 'Remise au client et soldée — finalisation à enregistrer';
+  }
+  else if (prodDone) {
     retTitle = (r.days != null && r.days < 0)
       ? `Échéance dépassée de ${Math.abs(r.days)} j — production terminée, reste à régler / remettre au client`
       : 'Production terminée — reste à régler / remettre au client';
@@ -8190,7 +8211,7 @@ function _cmdRow(r) {
   const _livE = _livEtat('commande', r.id);
   const livChip = _livE ? `<span style="margin-left:4px">${_livBadge(_livE.statut, _livInfo(_livE))}</span>` : '';
   const accent = r.status==='cancelled' ? '' : r.status==='completed' ? ''
-    : prodDone ? (r.restant>0 ? 'inset 3px 0 0 #d97706' : 'inset 3px 0 0 #16a34a')
+    : (prodDone || remis) ? (r.restant>0 ? 'inset 3px 0 0 #d97706' : 'inset 3px 0 0 #16a34a')
     : (r.days!=null&&r.days<0) ? 'inset 3px 0 0 #dc2626' : (r.days===0||r.days===1) ? 'inset 3px 0 0 #e8834a' : r.restant>0 ? 'inset 3px 0 0 #d97706' : '';
   return `<tr class="pcok-row ${r.status==='cancelled'?'pcok-row--done':''}" ${accent?`style="box-shadow:${accent}"`:''} onclick="openCmdDrawer('${r.id}')">
     <td class="pcok-td-prio">${dot}</td>
@@ -8643,6 +8664,7 @@ function _doCmdFinalize(c, method, given, change, provider, ref, bankInfo) {
   // la carte « Finalisations par agent » de la page Finances.
   c.finaliseParUser  = currentUser?.username || '';
   c.finaliseParLabel = currentUser?.label || currentUser?.username || '';
+  _livPointerDepuisCaisse('commande', c.id, _cmdRef(c), c.clientName);
   saveData();
   renderProducts();
   renderStockTable();
@@ -8693,6 +8715,11 @@ function definaliserCommande(id) {
 
   // Annuler l'encaissement du SOLDE enregistré à la finalisation (l'acompte reste acquis)
   encaissements = encaissements.filter(e => !(e.source === 'commande' && String(e.refId) === String(c.id) && e.type === 'solde'));
+
+  // Retirer le pointage de livraison UNIQUEMENT s'il vient de la caisse : un
+  // pointage posé par le coursier décrit un fait, la facture n'y change rien.
+  { const _e = _livEtat('commande', c.id);
+    if (_e && _e.statut === 'LIVREE' && _e.note === _LIV_NOTE_CAISSE) _livSetEtat('commande', c.id, ''); }
 
   c.status = 'pending';
   c.dateFinalisation = null;
@@ -18959,6 +18986,22 @@ const _LIV_LABELS = {
   ANNULEE:      ['#78716c', '#f5f5f4', 'Annulée en route'],
 };
 
+// Note portée par le pointage que la CAISSE pose toute seule à la finalisation.
+// Elle distingue « le coursier a pointé » de « la caisse a déduit », et permet
+// à la dé-finalisation de ne retirer que ce qu'elle avait posé.
+const _LIV_NOTE_CAISSE = 'Finalisation caisse';
+
+// Encaisser le solde, c'est remettre la marchandise : on pose l'état de
+// livraison dans la foulée pour que la page Livraisons, le journal des
+// mouvements et les trajets le sachent sans second geste. Idempotent — une
+// course déjà pointée par le coursier n'est jamais réécrite.
+function _livPointerDepuisCaisse(kind, id, ref, client){
+  try {
+    if (_livStatut(kind, id) === 'LIVREE') return;
+    _livSetEtat(kind, id, 'LIVREE', { ref: ref || '', client: client || '', note: _LIV_NOTE_CAISSE });
+  } catch(e) {}
+}
+
 function _livKey(kind, id){ return String(kind) + ':' + String(id); }
 function _livEtat(kind, id){ return livEtats[_livKey(kind, id)] || null; }
 function _livStatut(kind, id){ return (_livEtat(kind, id) || {}).statut || ''; }
@@ -19464,9 +19507,25 @@ function _livSetEtat(kind, id, statut, opts){
   return livEtats[key] || null;
 }
 
+// Somme déjà encaissée par commande, en UN seul passage du journal. `_cmdReste()`
+// refiltre `encaissements` pour chaque commande : appelé sur un millier de lignes,
+// à chaque rendu de la page Livraisons, du calendrier ET de leurs KPI, il balaierait
+// le journal un millier de fois. Même repli que `_cmdEncaisse` : sans aucun
+// mouvement journalisé, l'acompte de la commande fait foi.
+function _encaisseParCommande(){
+  const m = new Map();
+  (Array.isArray(encaissements) ? encaissements : []).forEach(e => {
+    if (!e || e.source !== 'commande') return;
+    const k = String(e.refId);
+    m.set(k, (m.get(k) || 0) + (Number(e.montant) || 0));
+  });
+  return m;
+}
+
 function _collectDeliveries() {
   const out = [];
   const _seq = _buildSeqMaps();
+  const _enc = _encaisseParCommande();
   (Array.isArray(commandes) ? commandes : []).forEach(c => {
     if (!c || c.status === 'cancelled') return;
     out.push({
@@ -19485,6 +19544,8 @@ function _collectDeliveries() {
       dateProd:   _toIsoDate(c.dateLivraisonProd || ''),
       poles:      _normPoles(c.poles),
       dossierId:  c.dossierId || '',
+      reste:      Math.max(0, (Number(c.total) || 0)
+                    - (_enc.has(String(c.id)) ? _enc.get(String(c.id)) : (Number(c.accompte) || 0))),
       livEtat:    _livEtat('commande', c.id),
       livStatut:  _livStatut('commande', c.id)
     });
@@ -19507,6 +19568,7 @@ function _collectDeliveries() {
       dateProd:   '',
       poles:      _normPoles(r.poles),
       dossierId:  r.dossierId || '',
+      reste:      Math.max(0, Number(r.restant) || 0),
       livEtat:    _livEtat('reservation', r.id),
       livStatut:  _livStatut('reservation', r.id)
     });
@@ -19588,7 +19650,7 @@ function _delivBuildRows() {
     const days = ymd ? _daysUntil(ymd) : null;
     let bucket;
     if (x.status === 'cancelled')       bucket = 'ANNULEE';
-    else if (x.status === 'completed')  bucket = 'TERMINE';
+    else if (_delivLivree(x))           bucket = 'TERMINE';
     else if (!ymd)                      bucket = 'SANS_DATE';
     else if (days < 0)                  bucket = 'RETARD';
     else if (days === 0)                bucket = 'AUJ';
@@ -19681,7 +19743,7 @@ function _calComputeKpis(){
   _collectDeliveries().forEach(x=>{
     if(x.status==='cancelled') return;
     if(!_calMatchesBase(x)) return;
-    const done = x.status==='completed';
+    const done = _delivLivree(x);
     const dp = x.dateProd, dc = x.dateClient;
     if(dp && !done && dp <  today) retardProd++;
     if(dc && !done && dc <  today) retardLiv++;
@@ -19745,6 +19807,9 @@ function _calEvents(kind){
     const dos = x.dossierId ? dossById[x.dossierId] : null;
     return {
       ymd, client:x.client, ref:x.ref, total:x.total, status:x.status,
+      // Sans cet état, le calendrier ignorait les courses pointées livrées et
+      // les affichait en retard alors que le client avait reçu (cf. _delivLivree).
+      livStatut:x.livStatut||'',
       kind:x.kind, id:x.id, dossierId:x.dossierId||'', commercial:x.commercial||'',
       items:x.items||[], poles:x.poles||[], mode:x.mode||'',
       progression: dos ? (Number(dos.progression)||0) : null
@@ -19787,7 +19852,7 @@ function _calRenderMonth(kind){
     const expanded = _calExpanded.has(dayKey);
     const shown   = expanded ? evs : evs.slice(0,4);
     const chips = shown.map(e=>{
-      const done  = e.status==='completed';
+      const done  = _delivLivree(e);
       const late  = !done && iso < todayIso;
       const key   = e.kind+':'+e.id;
       const linked = !!_calPair.linked[key];
@@ -19916,7 +19981,8 @@ function _calPaoEvents(){
     out.push({
       ymd: _toIsoDate(d.dateBAT || ''),
       client: x.client, ref: d.numeroDossier || x.ref || '',
-      total: x.total, status: x.status, kind: x.kind, id: x.id,
+      total: x.total, status: x.status, livStatut: x.livStatut || '',
+      kind: x.kind, id: x.id,
       dossierId: d.id, commercial: x.commercial || '',
       items: x.items || [], poles: x.poles || [],
       etapes, touched: _calPaoTouched(d, eff),
@@ -19951,7 +20017,7 @@ function _calPaoDot(e, late){
 }
 
 function _calPaoChip(e, iso, todayIso){
-  const late = !!iso && iso < todayIso && e.status !== 'completed';
+  const late = !!iso && iso < todayIso && !_delivLivree(e);
   const dot  = _calPaoDot(e, late);
   const ops  = [...new Set(e.etapes.reduce((a, s) => a.concat(s.operateurs), []))];
   const steps = e.etapes.map(s =>
@@ -20039,7 +20105,7 @@ function _calPaoKpi(){
   const today = _calTodayIso();
   let auj = 0, retard = 0;
   _calPaoEvents().forEach(e => {
-    if (e.status === 'completed' || !e.ymd) return;
+    if (_delivLivree(e) || !e.ymd) return;
     if (!_calMatchesBase(e)) return;
     if (e.ymd === today) auj++;
     else if (e.ymd < today) retard++;
@@ -20095,7 +20161,7 @@ function _calOpenDetail(kind, id, dossierId){
   const drawer = document.getElementById('calDrawer');
   if(!x || !body || !drawer){ if(typeof _openDeliverySource==='function') _openDeliverySource(kind, id, dossierId); return; }
   const today = _calTodayIso();
-  const done  = x.status==='completed';
+  const done  = _delivLivree(x);
   const key   = x.kind+':'+x.id;
   const short = !!_calPair.short[key] && !done;
   const lateLiv = x.dateClient && !done && x.dateClient < today;
@@ -20415,7 +20481,7 @@ function exportCalendrierCsv(kind){
   L.push(cols.map(_calCsvQ).join(_CAL_CSV_SEP));
   let n = 0;
   isos.forEach(iso => (byDay[iso]||[]).forEach(e => {
-    const done = e.status === 'completed';
+    const done = _delivLivree(e);
     const late = !done && iso < todayIso;
     const items = e.items || [];
     const cells = [
@@ -20458,7 +20524,7 @@ function _calPaoExportRows(section){
   const todayIso = _calTodayIso();
   const line = (e, iso) => {
     const ops = [...new Set(e.etapes.reduce((a,s)=>a.concat(s.operateurs), []))];
-    const late = !!iso && iso < todayIso && e.status !== 'completed';
+    const late = !!iso && iso < todayIso && !_delivLivree(e);
     const retard = late ? (_calGapDays(iso, todayIso) || 0) : 0;
     const jour = _calCsvDow(iso);
     return {
@@ -20663,7 +20729,7 @@ function calListFoldAll(close)  {
 function _calMatchesStatus(e){
   const st = _calFilters.status;
   if (!st) return true;
-  const done = e.status === 'completed';
+  const done = _delivLivree(e);
   const late = !done && !!e.ymd && e.ymd < _calTodayIso();
   if (st === 'completed') return done;
   if (st === 'active')    return !done && !late;
@@ -20684,7 +20750,7 @@ function _calListRows(){
     return Object.assign({}, x, {
       ymd, other,
       days:   ymd ? _daysUntil(ymd) : null,
-      short:  !!_calPair.short[key]  && x.status !== 'completed',
+      short:  !!_calPair.short[key]  && !_delivLivree(x),
       linked: !!_calPair.linked[key]
     });
   });
@@ -20694,7 +20760,7 @@ function _calListBucketMatch(r, k){
   const inMonth = !!r.ymd
     && Number(r.ymd.slice(0,4)) === _calRef.getFullYear()
     && Number(r.ymd.slice(5,7)) === _calRef.getMonth() + 1;
-  const done = r.status === 'completed';
+  const done = _delivLivree(r);
   if (k === 'MOIS')      return inMonth;
   if (k === 'RETARD')    return !done && r.days != null && r.days < 0;
   if (k === 'AUJ')       return !done && r.days === 0;
@@ -20731,6 +20797,7 @@ function _calListVisibleRows(){
 // ligne parle d'un atelier, pas d'un coursier.
 function _calRetInfo(r){
   if (r.status === 'completed') return { txt:'Terminé',   col:'#16a34a' };
+  if (r.livStatut === 'LIVREE') return { txt:'Livrée',    col:'#16a34a' };
   if (r.days == null)           return { txt:'Sans date', col:'#a8a29e' };
   if (r.days < 0)               return { txt:'+' + Math.abs(r.days) + 'j retard', col:'#dc2626' };
   if (r.days === 0)             return { txt:'Auj.',      col:'#e8834a' };
@@ -20796,7 +20863,7 @@ function _calListCount(rows, showMoney){
   const dateLbl = _calListState.date ? ' · date ' + _dispDate(_calListState.date) : '';
   // Le rappel des retards n'a rien à dire quand on est DÉJÀ dans le chip « En retard ».
   const late = _calListState.bucket === 'RETARD' ? 0
-    : rows.filter(r => r.status !== 'completed' && r.days != null && r.days < 0).length;
+    : rows.filter(r => !_delivLivree(r) && r.days != null && r.days < 0).length;
   const sum  = rows.reduce((s,r) => s + (Number(r.total) || 0), 0);
   return `<div class="pcok-count">${rows.length} échéance${rows.length > 1 ? 's' : ''} · ${bucketLbl}${scope}${dateLbl} · date ${_calListState.axis === 'prod' ? 'production' : 'livraison client'}${late ? ` · <span style="color:#dc2626;font-weight:700">${late} en retard</span>` : ''}${showMoney ? ` · Total ${fmt(sum)}` : ''}</div>`;
 }
@@ -20832,7 +20899,7 @@ function _calListGroups(rows, showMoney){
     // Une journée entièrement soldée n'est plus « en retard » : la bande passe
     // au vert et le compte à rebours disparaît, sinon le planning alerte sur
     // du travail déjà fait.
-    const fini = g.rows.every(r => r.status === 'completed');
+    const fini = g.rows.every(_delivLivree);
     const col = fini ? '#16a34a'
       : meta.cls === 'late' ? '#dc2626' : meta.cls === 'soon' ? '#e8834a' : meta.cls === 'none' ? '#a8a29e' : axisCol;
     const ferme = _calListClosed.has(k);
@@ -20875,7 +20942,7 @@ function _calListTable(rows, showMoney, det){
 
 function _calListRow(r, showMoney, det){
   const today = _calTodayIso();
-  const done  = r.status === 'completed';
+  const done  = _delivLivree(r);
   const late  = !done && !!r.ymd && r.ymd < today;
   const axisCol = _calListState.axis === 'prod' ? '#7c3aed' : '#0d9488';
   const dotC = done ? '#16a34a' : r.short ? '#dc2626' : late ? '#d97706'
@@ -20917,7 +20984,7 @@ function printCalListe(){
   if (!rows.length) { showToast('Aucune échéance à imprimer', 'error'); return; }
   const bucketLbl = (_CAL_LIST_BUCKETS.find(b => b[0] === _calListState.bucket) || ['',''])[1];
   const suitLeMois = _calListState.bucket === 'MOIS' || _calListState.bucket === 'TERMINE';
-  const late = rows.filter(r => r.status !== 'completed' && r.days != null && r.days < 0).length;
+  const late = rows.filter(_delivLate).length;
   _planningImprime({
     rows,
     titre: 'Planning calendrier',
@@ -20936,20 +21003,42 @@ function printCalListe(){
 // reste dans « En cours » : tant qu'elle n'est pas livrée, elle nous occupe.
 function _delivEnRoute(r){ return r.livStatut === 'EN_LIVRAISON'; }
 
+// ── Ce qui ferme une ligne ─────────────────────────────────────────────────
+// Deux gestes la ferment, et ils sont indépendants : encaisser le solde (la
+// commande passe `completed`) OU pointer la course livrée (`livEtats`). Une
+// commande livrée mais non soldée reste volontairement `pending` — c'est une
+// créance — mais elle N'EST PLUS une livraison en retard : le client a reçu.
+// Ce test manquait dans RETARD / AUJ / SEMAINE / SANS_DATE alors qu'ACTIVE
+// l'avait déjà : « En retard » comptait donc des courses pointées livrées et
+// affichait plus de lignes que « En cours ». Source de vérité unique, utilisée
+// par les onglets, les compteurs, la couleur des lignes et les impressions.
+function _delivLivree(r){ return r.status === 'completed' || r.livStatut === 'LIVREE'; }
+// Course encore à faire : ni livrée, ni annulée.
+function _delivOuverte(r){ return r.status === 'pending' && !_delivLivree(r); }
+// Vrai retard : échéance dépassée, course encore ouverte et pas déjà dans la rue.
+function _delivLate(r){ return _delivOuverte(r) && !_delivEnRoute(r) && r.days != null && r.days < 0; }
+
 function _delivBucketMatch(r, k) {
   if (k === 'TOUS')     return r.status !== 'cancelled';
-  if (k === 'ACTIVE')   return r.status === 'pending' && r.livStatut !== 'LIVREE';
+  if (k === 'ACTIVE')   return _delivOuverte(r);
   if (k === 'EN_ROUTE') return _delivEnRoute(r);
-  if (k === 'RETARD')   return r.status === 'pending' && !_delivEnRoute(r) && r.days != null && r.days < 0;
-  if (k === 'AUJ')      return r.status === 'pending' && !_delivEnRoute(r) && r.days === 0;
-  if (k === 'SEMAINE')  return r.status === 'pending' && !_delivEnRoute(r) && r.days != null && r.days >= 0 && r.days <= 7;
-  if (k === 'SANS_DATE')return r.status === 'pending' && !_delivEnRoute(r) && !r.ymd;
+  if (k === 'RETARD')   return _delivLate(r);
+  if (k === 'AUJ')      return _delivOuverte(r) && !_delivEnRoute(r) && r.days === 0;
+  if (k === 'SEMAINE')  return _delivOuverte(r) && !_delivEnRoute(r) && r.days != null && r.days >= 0 && r.days <= 7;
+  if (k === 'SANS_DATE')return _delivOuverte(r) && !_delivEnRoute(r) && !r.ymd;
+  if (k === 'A_ENCAISSER') return r.status === 'pending' && r.livStatut === 'LIVREE' && _delivReste(r) > 0;
   if (k === 'TERMINE')  return r.status === 'completed' || r.livStatut === 'LIVREE';
   return true;
 }
 
 function _delivFilterRows(rows) {
   let out = rows.filter(r => _delivBucketMatch(r, _delivState.filter));
+  // Groupe de diagnostic sélectionné : le tableau ne montre plus que lui, pour
+  // vérifier le classement sur pièces avant d'agir.
+  if (_delivDiagCas) {
+    const idx = _tachesParDossier();
+    out = out.filter(r => _delivDiagClasse(r, idx) === _delivDiagCas);
+  }
   if (_delivState.mode !== 'all') out = out.filter(r => r.mode === _delivState.mode);
   if (_delivState.date) out = out.filter(r => r.ymd === _delivState.date);
   const q = (_delivState.q || '').trim().toLowerCase();
@@ -20973,6 +21062,9 @@ function _delivSortRows(rows) {
 function _delivRetInfo(r) {
   if (r.status === 'completed') return { txt: 'Livrée', col: '#16a34a' };
   if (r.status === 'cancelled') return { txt: 'Annulée', col: '#a8a29e' };
+  // Pointée par le coursier / remise au client, solde pas encore encaissé :
+  // terminée côté livraison, la créance se règle dans le cockpit Commandes.
+  if (r.livStatut === 'LIVREE') return { txt: 'Livrée', col: '#16a34a' };
   if (r.days == null)           return { txt: 'Sans date', col: '#a8a29e' };
   if (r.days < 0)               return { txt: `+${Math.abs(r.days)}j retard`, col: '#dc2626' };
   if (r.days === 0)             return { txt: "Auj.", col: '#e8834a' };
@@ -20991,10 +21083,12 @@ function renderLivraisons() {
       ${_delivAlertCards(all)}
       <div id="delivTrajets"></div>
       <div id="delivAddrRecap"></div>
+      <div id="delivDiag"></div>
       <div id="delivCockpitBody"></div>
     </div>`;
   _delivRenderTrajets();
   _delivRenderAddrRecap();
+  _delivRenderDiag();
   _delivRenderBody();
 }
 
@@ -21004,11 +21098,14 @@ function _delivRenderBody() {
   const showMoney = _DELIV_MONEY_ROLES.includes(currentUser?.role);
   const filtered = _delivSortRows(_delivFilterRows(_delivBuildRows()));
   const page = filtered.slice(0, _delivLimit);
-  const lateN = filtered.filter(r => r.status === 'pending' && r.days != null && r.days < 0).length;
-  const totalSum = filtered.reduce((s, r) => s + r.total, 0);
+  const lateN = filtered.filter(_delivLate).length;
+  // Sur la file « À encaisser », le chiffre qui compte est le reste dû, pas le
+  // montant engagé : c'est l'argent qu'il reste à aller chercher.
+  const aEncaisser = _delivState.filter === 'A_ENCAISSER';
+  const totalSum = filtered.reduce((s, r) => s + (aEncaisser ? _delivReste(r) : r.total), 0);
   const dateLbl = _delivState.date ? ` · échéance ${_dispDate(_delivState.date)}` : '';
   const filteredLbl = (_delivState.filter !== 'ACTIVE' || _delivState.mode !== 'all' || _delivState.q || _delivState.date) ? ' · filtré' : '';
-  const count = `<div class="pcok-count">${filtered.length} livraison${filtered.length > 1 ? 's' : ''}${filteredLbl}${dateLbl}${lateN ? ` · <span style="color:#dc2626;font-weight:700">${lateN} en retard</span>` : ''}${showMoney ? ` · Total ${fmt(totalSum)}` : ''}</div>`;
+  const count = `<div class="pcok-count">${filtered.length} livraison${filtered.length > 1 ? 's' : ''}${filteredLbl}${dateLbl}${lateN ? ` · <span style="color:#dc2626;font-weight:700">${lateN} en retard</span>` : ''}${showMoney ? ` · ${aEncaisser ? 'Reste à encaisser' : 'Total'} ${fmt(totalSum)}` : ''}</div>`;
   const more = filtered.length > _delivLimit
     ? `<div class="pcok-more"><button onclick="delivShowMore()">Afficher plus (${filtered.length - _delivLimit} restants)</button></div>` : '';
   body.innerHTML = count + _delivSelBar() + _delivTable(page, showMoney) + more;
@@ -21059,6 +21156,48 @@ function delivMarkLivree(){
   showToast(n ? n + ' course(s) livrée(s)' : 'Ces courses sont déjà livrées', n ? 'success' : 'info');
   renderLivraisons(); _cmdRenderBodySafe();
   return n;
+}
+
+// Reste réellement dû sur une course, quelle que soit sa nature. Sert à dire,
+// au moment du pointage, s'il faut encore encaisser quelque chose.
+function _delivReste(r){
+  if (r && r.reste != null) return Math.max(0, Number(r.reste) || 0);
+  if (!r) return 0;
+  if (r.kind === 'commande'){
+    const c = (Array.isArray(commandes) ? commandes : []).find(x => String(x.id) === String(r.id));
+    return c ? _cmdReste(c) : 0;
+  }
+  const v = (Array.isArray(reservations) ? reservations : []).find(x => String(x.id) === String(r.id));
+  return v ? Math.max(0, Number(v.restant) || 0) : 0;
+}
+
+// UN SEUL CLIC, depuis la ligne ou le tiroir : la course est arrivée chez le
+// client (ou a été retirée en boutique). Même état que le bouton « Livrées » de
+// la barre de sélection — donc même journal, même synchro, mêmes filtres — mais
+// sans cocher la case, et sans exiger un départ coursier préalable qui n'existe
+// pas pour un retrait. C'est le geste qui manquait : jusqu'ici il fallait cocher
+// la ligne PUIS trouver le bouton dans la barre qui venait d'apparaître, et le
+// tiroir n'offrait « Livrée (L) » qu'aux courses déjà parties avec un coursier.
+// Le statut commercial n'est pas touché : une course livrée non soldée reste
+// une créance, visible dans le cockpit Commandes.
+function delivMarkRemis(kind, id){
+  const r = _delivBuildRows().find(x => x.kind === kind && String(x.id) === String(id));
+  if (!r) return;
+  if (r.livStatut === 'LIVREE'){ showToast('Cette course est déjà pointée livrée', 'info'); return; }
+  _livSetEtat(kind, id, 'LIVREE', { ref:r.ref, client:r.client });
+  _delivSel.delete(_delivSelKey(r));
+  const reste = _delivReste(r);
+  showToast(r.client + ' — ' + (r.mode === 'livraison' ? 'livrée' : 'remise au client')
+    + (reste > 0 ? ' · reste ' + fmt(reste) + ' à encaisser' : ' · soldée'), 'success');
+  closeDrawers(); renderLivraisons(); _cmdRenderBodySafe();
+}
+
+// Encaisser le solde sans changer d'écran : ouvre la fenêtre de finalisation
+// habituelle (commande ou réservation), seule action qui crée la vente.
+function delivEncaisser(kind, id){
+  closeDrawers();
+  if (kind === 'commande' && typeof openCmdFinalizeModal === 'function') openCmdFinalizeModal(id);
+  else if (kind === 'reservation' && typeof openFinalizeModal === 'function') openFinalizeModal(id);
 }
 
 // Erreur de manipulation : la course n'était pas partie, ou elle n'était pas
@@ -21419,16 +21558,16 @@ function printDelivAddresses() {
   if (!stops.length) { showToast('Aucune adresse de livraison à imprimer', 'error'); return; }
   const shop = (typeof shopConfig !== 'undefined' && shopConfig && shopConfig.name) || 'FOREVER MG';
   const origin = ((typeof shopConfig !== 'undefined' && shopConfig && shopConfig.address) || '').trim();
-  const filterLbl = { ACTIVE: 'En cours', EN_ROUTE: 'En livraison', RETARD: 'En retard', AUJ: "Aujourd'hui", SEMAINE: 'Cette semaine', SANS_DATE: 'Sans date', TERMINE: 'Livrées', TOUS: 'Toutes' }[_delivState.filter] || '';
+  const filterLbl = { ACTIVE: 'En cours', EN_ROUTE: 'En livraison', RETARD: 'En retard', AUJ: "Aujourd'hui", SEMAINE: 'Cette semaine', SANS_DATE: 'Sans date', A_ENCAISSER: 'À encaisser', TERMINE: 'Livrées', TOUS: 'Toutes' }[_delivState.filter] || '';
   const zoneLbl = _delivZoneFilter ? ' · zone ' + _delivZoneLabel(_delivZoneFilter) : '';
-  const late = stops.filter(r => r.status === 'pending' && r.days != null && r.days < 0).length;
+  const late = stops.filter(_delivLate).length;
 
   let seq = 0;
   const body = stops.map(r => {
     seq++;
     const ret = _delivRetInfo(r);
     const ech = r.ymd ? new Date(r.ymd + 'T00:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) : '—';
-    const lateCls = (r.status === 'pending' && r.days != null && r.days < 0) ? ' class="late b"' : (r.status === 'pending' && (r.days === 0 || r.days === 1)) ? ' class="soon b"' : '';
+    const lateCls = _delivLate(r) ? ' class="late b"' : (_delivOuverte(r) && (r.days === 0 || r.days === 1)) ? ' class="soon b"' : '';
     const addr = (r.address || '').trim() || '⚠ Adresse manquante';
     return `<tr>
         <td class="c b">${seq}</td>
@@ -22173,12 +22312,196 @@ function printFicheRemise(){
   }, 200);
   _clibAfterPrint('remise');
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+// DIAGNOSTIC DES RETARDS — trier par faisceau d'indices avant de nettoyer
+// ══════════════════════════════════════════════════════════════════════════
+// Une ligne en retard ne dit pas POURQUOI elle l'est. Avant de clôturer un
+// arriéré en masse, il faut savoir ce qu'on clôture : une commande fabriquée et
+// soldée dont personne n'a pointé la remise n'a rien à voir avec une commande
+// jamais lancée en production depuis trois mois. Marquer la seconde « livrée »
+// inventerait une livraison qui n'a jamais eu lieu, et le journal des mouvements
+// ne se répare pas.
+// Ce panneau ne modifie RIEN : il croise trois sources que le système possède
+// déjà — le dossier de production, le journal des encaissements et l'état
+// terrain — et range chaque retard dans un groupe assorti de ce qu'il y a à
+// faire. Chaque groupe est cliquable (le tableau en dessous s'y limite) et
+// l'ensemble s'exporte au tableur, ligne par ligne, pour être vérifié à froid.
+let _delivDiagOpen = false;
+let _delivDiagCas  = '';          // '' = tous les groupes
+
+// Ordre = ordre de lecture du panneau : d'abord ce qui se clôture, ensuite ce
+// qui attend de l'argent, enfin les vrais retards d'atelier.
+const _DELIV_DIAG_CAS = [
+  ['PROD_SOLDEE',    'Produite et soldée',          '#16a34a',
+   'Fabriquée, payée en entier, mais jamais pointée : la remise a presque sûrement eu lieu. À clôturer après contrôle.'],
+  ['PROD_IMPAYEE',   'Produite, non soldée',        '#d97706',
+   'Fabriquée, argent incomplet : soit remise sans encaissement, soit le client ne vient pas. Appeler le client.'],
+  ['EN_COURS_PROD',  'Production commencée',        '#2563eb',
+   "Vrai retard d'atelier : le travail a démarré et l'échéance est passée. Reporter la date avec un motif."],
+  ['PAYEE_NON_PROD', 'Payée, rien de produit',      '#dc2626',
+   "L'argent est encaissé et l'atelier n'a rien commencé. À lancer en priorité absolue."],
+  ['DORMANTE',       'Sans suite depuis 60 j',      '#78716c',
+   "Rien de produit, rien d'encaissé, échéance dépassée de plus de 60 jours : probablement abandonnée. À arbitrer."],
+  ['A_LANCER',       'À lancer',                    '#e8834a',
+   'Rien de produit mais le retard est récent. À mettre en production ou à reporter.'],
+  ['SANS_DOSSIER',   'Sans dossier de production',  '#a8a29e',
+   "Aucun dossier d'atelier n'a jamais été créé : la commande n'est jamais partie en production. Trou de procédure."],
+];
+const _delivDiagLbl = k => (_DELIV_DIAG_CAS.find(c => c[0] === k) || ['', k])[1];
+const _delivDiagAct = k => (_DELIV_DIAG_CAS.find(c => c[0] === k) || ['', '', '', ''])[3];
+
+// Le groupe d'une ligne. `idx` = Map(dossierId -> tâches), construite une fois
+// par appel de _delivDiagRows() : la recalculer par ligne relirait tout le
+// tableau des tâches pour chacune des cent et quelques lignes en retard.
+function _delivDiagClasse(r, idx){
+  const dos = r.dossierId ? _dossierParId(r.dossierId) : null;
+  if (!dos) return 'SANS_DOSSIER';
+  const reste = _delivReste(r);
+  if (_dossierClosed(dos)) return reste > 0 ? 'PROD_IMPAYEE' : 'PROD_SOLDEE';
+  const dt  = (idx && idx.get(dos.id)) || [];
+  const pct = dt.length ? _dossierPct(dt, dos) : 0;
+  if (pct > 0)    return 'EN_COURS_PROD';
+  if (reste <= 0) return 'PAYEE_NON_PROD';
+  return (r.days != null && r.days < -60) ? 'DORMANTE' : 'A_LANCER';
+}
+
+// Toutes les lignes en retard, enrichies de quoi décider. Même définition du
+// retard que les onglets (_delivLate) : le panneau et le compteur ne peuvent
+// pas se contredire.
+function _delivDiagRows(){
+  const idx = _tachesParDossier();
+  return _delivBuildRows().filter(_delivLate).map(r => {
+    const dos = r.dossierId ? _dossierParId(r.dossierId) : null;
+    const dt  = dos ? (idx.get(dos.id) || []) : [];
+    const pct = dos ? (dt.length ? _dossierPct(dt, dos) : (_dossierClosed(dos) ? 100 : 0)) : null;
+    const rep = _livReportInfo(r.kind, r.id);
+    return Object.assign({}, r, {
+      cas: _delivDiagClasse(r, idx), reste: _delivReste(r), pct,
+      dossierNum: dos ? (dos.numeroDossier || dos.id) : '',
+      clos: !!dos && _dossierClosed(dos), reports: rep.n,
+      dernierMouv: (r.livEtat && r.livEtat.timestamp) || ''
+    });
+  });
+}
+
+function toggleDelivDiag(){ _delivDiagOpen = !_delivDiagOpen; _delivRenderDiag(); }
+
+// Cliquer un groupe limite le tableau du dessous à ce groupe : c'est là qu'on
+// vérifie, ligne par ligne, avant de décider quoi que ce soit.
+function setDelivDiagCas(k){
+  _delivDiagCas = (_delivDiagCas === k ? '' : k);
+  _delivLimit = _DELIV_PAGE;
+  // Un groupe n'a de sens qu'au regard des retards : afficher « Produite et
+  // soldée » sous l'onglet « Livrées » ne montrerait aucune ligne.
+  if (_delivDiagCas && _delivState.filter !== 'RETARD') { _delivState.filter = 'RETARD'; renderLivraisons(); return; }
+  _delivRenderDiag(); _delivRenderBody();
+}
+
+function _delivRenderDiag(){
+  const host = document.getElementById('delivDiag');
+  if (!host) return;
+  const rows = _delivDiagRows();
+  const showMoney = _DELIV_MONEY_ROLES.includes(currentUser?.role);
+  const head = `<div class="deliv-recap-head" onclick="toggleDelivDiag()">
+      <div class="deliv-recap-title">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        Diagnostic des retards — pourquoi ces lignes sont en retard
+        <span class="deliv-recap-n">${rows.length}</span>
+        ${_delivDiagCas ? `<span class="deliv-recap-warn">groupe filtré : ${_pcokEsc(_delivDiagLbl(_delivDiagCas))}</span>` : ''}
+      </div>
+      <svg class="deliv-recap-caret${_delivDiagOpen ? ' open' : ''}" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>`;
+  if (!_delivDiagOpen) { host.innerHTML = `<div class="deliv-recap">${head}</div>`; return; }
+  if (!rows.length) {
+    host.innerHTML = `<div class="deliv-recap deliv-recap--open">${head}
+      <div class="deliv-recap-body"><div class="pcok-empty"><p>Aucune livraison en retard.</p></div></div></div>`;
+    return;
+  }
+  const lignes = _DELIV_DIAG_CAS.map(([k, lbl, col, act]) => {
+    const grp = rows.filter(r => r.cas === k);
+    if (!grp.length) return '';
+    const somme = grp.reduce((a, r) => a + r.reste, 0);
+    const actif = _delivDiagCas === k;
+    return `<tr class="deliv-diag-row${actif ? ' deliv-diag-row--active' : ''}" onclick="setDelivDiagCas('${k}')" title="Ne montrer que ce groupe dans le tableau">
+        <td>
+          <div class="deliv-diag-nom"><span class="deliv-diag-dot" style="background:${col}"></span>${lbl}</div>
+          <div class="deliv-diag-act">${act}</div>
+        </td>
+        <td class="pcok-num deliv-diag-n"><b style="color:${col}">${grp.length}</b></td>
+        ${showMoney ? `<td class="pcok-num deliv-diag-sum">${somme > 0 ? fmt(somme) : '—'}</td>` : ''}
+      </tr>`;
+  }).join('');
+  host.innerHTML = `<div class="deliv-recap deliv-recap--open">
+      ${head}
+      <div class="deliv-recap-body">
+        <p class="deliv-diag-intro">Croisement du dossier de production, du journal des encaissements et de l'état terrain.
+          Ce panneau ne modifie rien. Cliquez un groupe pour n'afficher que ses lignes dans le tableau.</p>
+        <div class="deliv-recap-actions">
+          ${_delivDiagCas ? `<button class="pcok-iconbtn" onclick="setDelivDiagCas('${_delivDiagCas}')">Voir tous les groupes</button>` : ''}
+          <button class="deliv-fiche-btn" onclick="exportDelivDiag()">Exporter le détail (tableur)</button>
+        </div>
+        <div class="pcok-tablewrap"><table class="pcok-table deliv-recap-table">
+          <thead><tr>
+            <th class="pcok-th">Groupe — et ce qu'il y a à faire</th>
+            <th class="pcok-th pcok-num">Lignes</th>
+            ${showMoney ? '<th class="pcok-th pcok-num">Reste dû</th>' : ''}
+          </tr></thead>
+          <tbody>${lignes}</tbody>
+        </table></div>
+      </div>
+    </div>`;
+}
+
+// Une ligne par retard, avec tout ce sur quoi le classement s'appuie : le
+// classement doit pouvoir être contredit sur pièces, pas cru sur parole.
+function exportDelivDiag(){
+  const rows = _delivDiagRows();
+  if (!rows.length) { showToast('Aucune livraison en retard à exporter', 'info'); return; }
+  const cols = ['Groupe','Que faire','Référence','Type','Client','Contact','Commercial','Mode',
+                'Échéance','Jours de retard','Reports','Date de commande','Total','Reste dû',
+                'Dossier','Production %','Dossier clôturé','État livraison','Dernier mouvement','Articles'];
+  const L = [_calCsvQ(_calCsvShop() + ' — Diagnostic des retards de livraison'),
+             _calCsvQ('Édité le ' + new Date().toLocaleString('fr-FR') + ' — ' + rows.length + ' ligne(s) en retard'),
+             ''];
+  L.push(cols.map(_calCsvQ).join(_CAL_CSV_SEP));
+  rows.sort((a, b) => (a.days == null ? 1e9 : a.days) - (b.days == null ? 1e9 : b.days));
+  rows.forEach(r => {
+    L.push(_calCsvRow([
+      _delivDiagLbl(r.cas),
+      _delivDiagAct(r.cas),
+      r.ref || '',
+      r.kind === 'reservation' ? 'Réservation' : 'Commande',
+      r.client || '', r.contact || '', r.commercial || '',
+      r.mode === 'livraison' ? 'Livraison' : 'Retrait',
+      _dispDate(r.ymd) || '',
+      r.days == null ? '' : Math.abs(r.days),
+      r.reports || 0,
+      _dispDate(_toIsoDate(r.date || '')) || '',
+      Number(r.total) || 0,
+      Number(r.reste) || 0,
+      r.dossierNum || '',
+      r.pct == null ? '' : r.pct,
+      r.dossierNum ? (r.clos ? 'Oui' : 'Non') : '',
+      r.livStatut ? ((_LIV_LABELS[r.livStatut] || [])[2] || r.livStatut) : 'Aucun pointage',
+      _calLivDateTxt(r.dernierMouv),
+      (r.items || []).map(i => `${i.name} ×${i.qty || 1}`).join(', '),
+    ]));
+  });
+  _calCsvDownload(L, `diagnostic-retards-${new Date().toISOString().slice(0,10)}.csv`);
+  showToast(rows.length + ' ligne(s) exportée(s)', 'success');
+}
+
 function _delivToolbar(cnt) {
   const chips = [
-    ['ACTIVE', 'En cours'], ['EN_ROUTE', 'En livraison'], ['RETARD', 'En retard'], ['AUJ', "Aujourd'hui"], ['SEMAINE', 'Cette semaine'], ['SANS_DATE', 'Sans date'], ['TERMINE', 'Livrées'], ['TOUS', 'Toutes']
+    ['ACTIVE', 'En cours'], ['EN_ROUTE', 'En livraison'], ['RETARD', 'En retard'], ['AUJ', "Aujourd'hui"], ['SEMAINE', 'Cette semaine'], ['SANS_DATE', 'Sans date'],
+    // Réservé aux rôles qui voient l'argent : pour un coursier ou l'atelier,
+    // une course reçue par le client est close, le solde ne les regarde pas.
+    ...(_DELIV_MONEY_ROLES.includes(currentUser?.role) ? [['A_ENCAISSER', 'À encaisser']] : []),
+    ['TERMINE', 'Livrées'], ['TOUS', 'Toutes']
   ].map(([k, lbl]) => {
     const active = _delivState.filter === k;
-    const warn = (k === 'RETARD');
+    const warn = (k === 'RETARD' || k === 'A_ENCAISSER');
     return `<button class="pcok-chip ${active ? 'pcok-chip--active' : ''} ${warn ? 'pcok-chip--warn' : ''}" onclick="setDelivFilter('${k}')">${lbl}<span class="pcok-chip-n">${cnt(k)}</span></button>`;
   }).join('');
   const groupOpts = [['client', 'Échéance client'], ['prod', 'Échéance production']]
@@ -22208,6 +22531,7 @@ function _delivToolbar(cnt) {
       <button class="pcok-iconbtn pcok-density" title="Vue compacte / détaillée" onclick="toggleDelivDensity()">${_delivState.density === 'compact' ? 'Détaillé' : 'Compact'}</button>
       <button class="pcok-iconbtn${_delivTrajetsOpen ? ' pcok-chip--active' : ''}" title="Trajets des livreurs — ce que chaque coursier a emporté et ce qui en est revenu" onclick="toggleDelivTrajets()">Trajets livreurs</button>
       <button class="pcok-iconbtn${_delivRecapOpen ? ' pcok-chip--active' : ''}" title="Récapitulatif des adresses de livraison" onclick="toggleDelivRecap()">Récap adresses</button>
+      <button class="pcok-iconbtn${_delivDiagOpen ? ' pcok-chip--active' : ''}" title="Diagnostic des retards — pourquoi chaque ligne est en retard, et ce qu'il y a à faire" onclick="toggleDelivDiag()">Diagnostic retards<span class="pcok-chip-n">${cnt('RETARD')}</span></button>
       <button class="pcok-iconbtn" title="Fiche coursier — imprimer les courses cochées" onclick="openFicheCoursier()">Fiche coursier<span class="pcok-chip-n" id="delivSelCount" style="display:${_delivSel.size ? '' : 'none'}">${_delivSel.size}</span></button>
       ${_DELIV_MONEY_ROLES.includes(currentUser?.role) ? `<button class="pcok-iconbtn" title="Fiche de remise A5 — détail des courses cochées et somme à remettre au comptable" onclick="openFicheRemise()">Fiche remise<span class="pcok-chip-n" id="delivSelCount2" style="display:${_delivSel.size ? '' : 'none'}">${_delivSel.size}</span></button>` : ''}
       <button class="pcok-iconbtn" title="Imprimer le planning de livraison" onclick="printLivraisons()">Imprimer</button>
@@ -22256,19 +22580,20 @@ function _delivTable(rows, showMoney) {
     ${det ? th('', 'Adresse') : ''}
     ${th('commercial', 'Commercial')}
     ${showMoney ? th('total', 'Total', 'pcok-num') : ''}
+    <th class="pcok-th deliv-donecell"></th>
     <th class="pcok-th"></th>
   </tr>`;
   return `<div class="pcok-tablewrap"><table class="pcok-table"><thead>${head}</thead><tbody>${rows.map(r => _delivRow(r, showMoney, det)).join('')}</tbody></table></div>`;
 }
 
 function _delivRow(r, showMoney, det) {
-  const dotC = r.status === 'cancelled' ? '#a8a29e' : r.status === 'completed' ? '#16a34a'
+  const dotC = r.status === 'cancelled' ? '#a8a29e' : _delivLivree(r) ? '#16a34a'
     : (r.days != null && r.days < 0) ? '#dc2626' : (r.days === 0 || r.days === 1) ? '#e8834a' : r.days == null ? '#a8a29e' : '#2563eb';
   const dot = `<span class="pcok-prio" style="background:${dotC}"></span>`;
   let ech = '—', echC = 'var(--color-text-secondary)';
   if (r.ymd) {
     ech = new Date(r.ymd + 'T00:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
-    if (r.status === 'pending') { if (r.days < 0) echC = '#dc2626'; else if (r.days === 0 || r.days === 1) echC = '#e8834a'; }
+    if (_delivOuverte(r)) { if (r.days < 0) echC = '#dc2626'; else if (r.days === 0 || r.days === 1) echC = '#e8834a'; }
   }
   const ret = _delivRetInfo(r);
   const echCell = `<div style="color:${echC};font-weight:600">${ech}</div><div class="pcok-ret" style="color:${ret.col};background:${ret.col}1a;margin-top:2px">${ret.txt}</div>`;
@@ -22281,10 +22606,15 @@ function _delivRow(r, showMoney, det) {
   const _rep = _livReportInfo(r.kind, r.id);
   const repChip = _rep.n ? `<span class="pcok-badge" style="color:#2563eb;background:#dbeafe" title="${_pcokEsc('Reportée ' + _rep.n + ' fois' + (_rep.initiale ? ' — promise au départ le ' + _dispDate(_rep.initiale) : ''))}">Reportée ×${_rep.n}</span>` : '';
   const livChip = (r.livStatut || repChip) ? `<div style="margin-top:3px;display:flex;gap:4px;flex-wrap:wrap">${r.livStatut ? _livBadge(r.livStatut, _livInfo(r.livEtat)) : ''}${repChip}</div>` : '';
+  // Le geste du quotidien, à portée de pouce sur chaque ligne encore ouverte.
+  const doneLbl = r.mode === 'livraison' ? 'Livrée' : 'Remis';
+  const doneBtn = _delivOuverte(r)
+    ? `<button class="deliv-done" title="${_pcokEsc(r.mode === 'livraison' ? 'Le client a reçu la course — la sortir des échéances' : 'Le client est venu chercher sa commande — la sortir des échéances')}" onclick="delivMarkRemis('${r.kind}','${r.id}')"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>${doneLbl}</button>`
+    : '';
   const accent = _delivEnRoute(r) ? 'inset 3px 0 0 #c2410c'
-    : r.status === 'pending' && r.days != null && r.days < 0 ? 'inset 3px 0 0 #dc2626'
-    : (r.status === 'pending' && (r.days === 0 || r.days === 1)) ? 'inset 3px 0 0 #e8834a' : '';
-  return `<tr class="pcok-row ${r.status !== 'pending' ? 'pcok-row--done' : ''}" ${accent ? `style="box-shadow:${accent}"` : ''} onclick="openDelivDrawer('${r.kind}','${r.id}')">
+    : _delivLate(r) ? 'inset 3px 0 0 #dc2626'
+    : (_delivOuverte(r) && (r.days === 0 || r.days === 1)) ? 'inset 3px 0 0 #e8834a' : '';
+  return `<tr class="pcok-row ${_delivLivree(r) || r.status === 'cancelled' ? 'pcok-row--done' : ''}" ${accent ? `style="box-shadow:${accent}"` : ''} onclick="openDelivDrawer('${r.kind}','${r.id}')">
     <td class="deliv-selcell" onclick="event.stopPropagation()"><input type="checkbox" ${_delivSel.has(_delivSelKey(r)) ? 'checked' : ''} onchange="delivToggleSel('${r.kind}','${r.id}')" aria-label="Ajouter à la fiche coursier" /></td>
     <td class="pcok-td-prio">${dot}</td>
     <td class="pcok-td-client"><div class="pcok-client">${_pcokEsc(r.client)}</div><div class="pcok-ref">${_pcokEsc(r.ref)} · ${typeLabel}</div>${livChip}</td>
@@ -22294,6 +22624,7 @@ function _delivRow(r, showMoney, det) {
     ${det ? `<td class="pcok-muted" style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.mode === 'livraison' ? _pcokEsc(r.address || '—') : 'Boutique'}</td>` : ''}
     <td class="pcok-muted">${_pcokEsc(r.commercial || '—')}</td>
     ${showMoney ? `<td class="pcok-num" style="font-weight:700">${fmt(r.total)}</td>` : ''}
+    <td class="deliv-donecell" onclick="event.stopPropagation()">${doneBtn}</td>
     <td class="pcok-td-act"><svg class="pcok-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></td>
   </tr>`;
 }
@@ -22314,9 +22645,13 @@ function _delivDrawerContent(r) {
   const showMoney = _DELIV_MONEY_ROLES.includes(currentUser?.role);
   const livTxt = r.ymd ? new Date(r.ymd + 'T00:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long' }) : 'Sans date';
   const dtxt = r.days == null ? '' : r.days < 0 ? `${Math.abs(r.days)}j de retard` : r.days === 0 ? "Aujourd'hui" : r.days === 1 ? 'Demain' : `${r.days}j`;
-  const dCol = r.days != null && r.days < 0 ? '#dc2626' : (r.days === 0 || r.days === 1) ? '#e8834a' : '#16a34a';
+  const dCol = !_delivOuverte(r) ? '#16a34a' : r.days != null && r.days < 0 ? '#dc2626' : (r.days === 0 || r.days === 1) ? '#e8834a' : '#16a34a';
   const stMap = { pending: ['#d97706', '#fef3c7', 'En cours'], completed: ['#16a34a', '#dcfce7', 'Livrée'], cancelled: ['#78716c', '#f5f5f4', 'Annulée'] };
-  const [sc, sb, sl] = stMap[r.status] || ['#78716c', '#f5f5f4', '—'];
+  // Course pointée livrée dont le solde n'est pas encaissé : « Livrée », pas
+  // « En cours » — le reste dû se lit sur la ligne Restant, pas sur le statut.
+  const [sc, sb, sl] = (r.status === 'pending' && r.livStatut === 'LIVREE')
+    ? ['#16a34a', '#dcfce7', 'Livrée']
+    : (stMap[r.status] || ['#78716c', '#f5f5f4', '—']);
   const itemsHtml = (r.items || []).map(i => `<div class="pcok-drawer-item"><span>${_pcokEsc(i.name)} × ${i.qty || 1}</span>${showMoney ? `<b>${fmt((Number(i.price) || 0) * (Number(i.qty) || 1))}</b>` : ''}</div>`).join('') || '<div class="pcok-muted" style="font-size:12px">Aucun article</div>';
   const modeHtml = `<div class="pcok-drawer-item"><span>Mode</span><b>${r.mode === 'livraison' ? 'Livraison' : 'Retrait boutique'}</b></div>${r.mode === 'livraison' && r.address ? `<div class="pcok-drawer-item"><span>Adresse</span><b style="text-align:right;white-space:normal">${_pcokEsc(r.address)}</b></div>` : ''}`;
   const datesHtml = [
@@ -22361,6 +22696,17 @@ function _delivDrawerActions(r) {
   const isCmd = r.kind === 'commande';
   const canAttrib = (typeof PAGE_ACCESS !== 'undefined') && PAGE_ACCESS.attribution && PAGE_ACCESS.attribution.includes(currentUser?.role);
   const btns = [];
+  // Action n°1 du tiroir : clore la course. Elle ne dépendait d'un départ
+  // coursier que par accident d'historique (les boutons L/R/A de la fiche
+  // papier) — un retrait en boutique n'a pas de coursier et n'avait donc
+  // AUCUN moyen d'être pointé depuis ici.
+  // Pas sur une course déjà partie : le trio (L) (R) (A) plus bas dit la même
+  // chose en distinguant l'issue, deux boutons verts se marcheraient dessus.
+  if (_delivOuverte(r) && !_delivEnRoute(r))
+    btns.push(`<button class="pcok-btn pcok-btn--primary" style="background:#16a34a" onclick="delivMarkRemis('${r.kind}','${r.id}')">${r.mode === 'livraison' ? 'Livrée au client' : 'Remis au client'}</button>`);
+  const _reste = _delivReste(r);
+  if (_reste > 0 && r.status === 'pending' && _DELIV_MONEY_ROLES.includes(currentUser?.role))
+    btns.push(`<button class="pcok-btn pcok-btn--report" onclick="delivEncaisser('${r.kind}','${r.id}')">Encaisser ${fmt(_reste)}</button>`);
   btns.push(`<button class="pcok-btn pcok-btn--primary" onclick="_delivPrintOne('${r.kind}','${r.id}')">Imprimer le bon</button>`);
   // Report : l'action du quotidien quand la date promise n'a pas été tenue. En
   // orange, à côté de l'impression, parce que c'est elle qu'on vient chercher.
@@ -22449,7 +22795,7 @@ function _planningImprime({ rows, titre, sousTitre, showMoney, showProd, showDat
       const modeAddr = r.mode === 'livraison' ? ('Livraison' + (r.address ? ' — ' + r.address : '')) : 'Retrait boutique';
       const ret = _delivRetInfo(r);
       const prod = showProd ? _delivProdInfo(r.dossierId, prodIdx) : null;
-      const lateCls = (r.status === 'pending' && r.days != null && r.days < 0) ? ' class="late b"' : (r.status === 'pending' && (r.days === 0 || r.days === 1)) ? ' class="soon b"' : '';
+      const lateCls = _delivLate(r) ? ' class="late b"' : (_delivOuverte(r) && (r.days === 0 || r.days === 1)) ? ' class="soon b"' : '';
       return `<tr>
         <td class="c b">${seq}</td>
         <td${lateCls}>${ret.txt}</td>
@@ -22517,9 +22863,9 @@ function _planningImprime({ rows, titre, sousTitre, showMoney, showProd, showDat
 function printLivraisons() {
   const rows = _delivSortRows(_delivFilterRows(_delivBuildRows()));
   if (!rows.length) { showToast('Aucune livraison à imprimer', 'error'); return; }
-  const filterLbl = { ACTIVE: 'En cours', EN_ROUTE: 'En livraison', RETARD: 'En retard', AUJ: "Aujourd'hui", SEMAINE: 'Cette semaine', SANS_DATE: 'Sans date', TERMINE: 'Livrées', TOUS: 'Toutes' }[_delivState.filter] || '';
+  const filterLbl = { ACTIVE: 'En cours', EN_ROUTE: 'En livraison', RETARD: 'En retard', AUJ: "Aujourd'hui", SEMAINE: 'Cette semaine', SANS_DATE: 'Sans date', A_ENCAISSER: 'À encaisser', TERMINE: 'Livrées', TOUS: 'Toutes' }[_delivState.filter] || '';
   const modeLbl = _delivState.mode === 'all' ? 'tous modes' : (_delivState.mode === 'livraison' ? 'livraison' : 'retrait');
-  const late = rows.filter(r => r.status === 'pending' && r.days != null && r.days < 0).length;
+  const late = rows.filter(_delivLate).length;
   _planningImprime({
     rows,
     titre: 'Planning de livraison',
