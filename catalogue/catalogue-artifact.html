@@ -1,0 +1,733 @@
+<title>Catalogue Prix & Mesures</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lucide/0.447.0/lucide.min.js"></script>
+
+<style>
+/* Mise en page : bandeau d'atelier vert FOREVER MG, puis une colonne unique
+   de panneaux — reperes chiffres, filtres, tableau des articles depliable,
+   grilles au metre carre, fiches Produits. Palette et typo : CLAUDE.md. */
+:root {
+  --vert: #1a4a3a;
+  --vert-fonce: #153d30;
+  --vert-clair: #e8f4f0;
+  --orange: #e8834a;
+  --orange-clair: #fdf0e8;
+  --bg: #f8f7f4;
+  --surface: #ffffff;
+  --surface-2: #fcfbf9;
+  --bord: #e5e3df;
+  --bord-fin: #f0eee9;
+  --txt: #1c1917;
+  --txt-2: #78716c;
+  --txt-3: #a8a29e;
+  --ok: #16a34a;
+  --ok-bg: #dcfce7;
+  --attn: #d97706;
+  --attn-bg: #fef3c7;
+  --alerte: #dc2626;
+  --alerte-bg: #fee2e2;
+  --ombre: 0 1px 2px rgba(28, 25, 23, .06);
+  --fam-txt: #1a4a3a;
+  --police: "DM Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --vert: #0f2d23;
+    --vert-fonce: #0a211a;
+    --vert-clair: #16342a;
+    --orange: #f0956a;
+    --orange-clair: #2a1a12;
+    --bg: #16130f;
+    --surface: #1f1b17;
+    --surface-2: #241f1a;
+    --bord: #352f28;
+    --bord-fin: #2a251f;
+    --txt: #f5f2ee;
+    --txt-2: #b5ada4;
+    --txt-3: #857c73;
+    --ok: #4ade80;
+    --ok-bg: #11301f;
+    --attn: #fbbf24;
+    --attn-bg: #332208;
+    --alerte: #f87171;
+    --alerte-bg: #3a1413;
+    --fam-txt: #8fd3bb;
+    --ombre: 0 1px 2px rgba(0, 0, 0, .4);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --vert: #0f2d23;
+  --vert-fonce: #0a211a;
+  --vert-clair: #16342a;
+  --orange: #f0956a;
+  --orange-clair: #2a1a12;
+  --bg: #16130f;
+  --surface: #1f1b17;
+  --surface-2: #241f1a;
+  --bord: #352f28;
+  --bord-fin: #2a251f;
+  --txt: #f5f2ee;
+  --txt-2: #b5ada4;
+  --txt-3: #857c73;
+  --ok: #4ade80;
+  --ok-bg: #11301f;
+  --attn: #fbbf24;
+  --attn-bg: #332208;
+  --alerte: #f87171;
+  --alerte-bg: #3a1413;
+  --fam-txt: #8fd3bb;
+  --ombre: 0 1px 2px rgba(0, 0, 0, .4);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--txt);
+  font-family: var(--police);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+.gutter {
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1280px; margin: 0 auto; }
+
+/* ---- bandeau ---- */
+.tete {
+  background: var(--vert);
+  color: #fff;
+  margin-top: calc(-1 * env(safe-area-inset-top, 0px));
+}
+.tete-in { padding-block: calc(env(safe-area-inset-top, 0px) + 26px) 26px; }
+.tete h1 {
+  margin: 0;
+  font-size: clamp(22px, 4.4vw, 30px);
+  font-weight: 600;
+  letter-spacing: -.02em;
+  text-wrap: balance;
+}
+.tete .sous { margin: 6px 0 0; color: rgba(255,255,255,.72); font-size: 13.5px; max-width: 70ch; }
+.tete-haut { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.marque {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .14em;
+  color: rgba(255,255,255,.6);
+}
+.puce-src {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 6px;
+  background: rgba(255,255,255,.12); color: #fff;
+  padding: 5px 11px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 500;
+}
+
+/* ---- reperes ---- */
+.kpis {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  margin-top: 20px;
+}
+.kpi {
+  background: var(--surface); border: 1px solid var(--bord);
+  border-radius: 12px; padding: 16px 18px; box-shadow: var(--ombre);
+  min-width: 0;
+}
+.kpi .lab {
+  margin: 0 0 4px; font-size: 10.5px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: .13em; color: var(--txt-3);
+}
+.kpi .val {
+  margin: 0; font-size: 27px; font-weight: 700; letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
+}
+.kpi .note { margin: 2px 0 0; font-size: 11.5px; color: var(--txt-3); }
+
+/* ---- panneaux ---- */
+section { margin-top: 22px; }
+.carte {
+  background: var(--surface); border: 1px solid var(--bord);
+  border-radius: 12px; box-shadow: var(--ombre); overflow: hidden;
+}
+.carte-tete {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 14px; flex-wrap: wrap;
+  padding: 15px 18px; border-bottom: 1px solid var(--bord-fin);
+}
+.carte-tete h2 { margin: 0; font-size: 15.5px; font-weight: 600; }
+.carte-tete p { margin: 2px 0 0; font-size: 12px; color: var(--txt-3); max-width: 66ch; }
+.carte-corps { padding: 16px 18px; }
+
+/* ---- filtres ---- */
+.filtres { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.champ { position: relative; flex: 1 1 240px; min-width: 0; }
+.champ > svg {
+  position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+  width: 15px; height: 15px; color: var(--txt-3); pointer-events: none;
+}
+input[type="search"], select {
+  width: 100%; font: inherit; font-size: 13.5px; color: var(--txt);
+  background: var(--surface); border: 1px solid var(--bord);
+  border-radius: 8px; padding: 8px 11px;
+}
+input[type="search"] { padding-left: 32px; }
+input[type="search"]::placeholder { color: var(--txt-3); }
+input[type="search"]:focus-visible, select:focus-visible, button:focus-visible, .ligne-art:focus-visible {
+  outline: 2px solid var(--orange); outline-offset: 1px;
+}
+select { flex: 0 1 220px; width: auto; }
+.bascule {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 13px; color: var(--txt-2); cursor: pointer; user-select: none;
+  border: 1px solid var(--bord); border-radius: 8px; padding: 8px 11px;
+  background: var(--surface);
+}
+.bascule input { accent-color: var(--vert); margin: 0; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+.chip {
+  font: inherit; font-size: 12px; font-weight: 500;
+  border: 1px solid var(--bord); background: var(--surface); color: var(--txt-2);
+  border-radius: 999px; padding: 4px 11px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.chip:hover { background: var(--surface-2); color: var(--txt); }
+.chip[aria-pressed="true"] {
+  background: var(--vert); border-color: var(--vert); color: #fff;
+}
+.chip .n { font-variant-numeric: tabular-nums; opacity: .62; }
+
+/* ---- tableaux ---- */
+.tbl-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th {
+  text-align: left; font-size: 10.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .08em; color: var(--txt-3);
+  padding: 10px 12px; border-bottom: 1px solid var(--bord-fin); white-space: nowrap;
+}
+td { padding: 11px 12px; font-size: 13.5px; vertical-align: top; }
+tbody tr { border-top: 1px solid var(--bord-fin); }
+.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ligne-art { cursor: pointer; }
+.ligne-art:hover { background: var(--surface-2); }
+.ligne-art[aria-expanded="true"] { background: var(--vert-clair); }
+.nom-art { font-weight: 500; min-width: 15ch; }
+.nom-art .alt { display: block; font-size: 11.5px; color: var(--txt-3); margin-top: 1px; }
+.prix-ref { font-weight: 600; }
+.fourch { font-size: 12px; color: var(--txt-3); }
+.badge {
+  display: inline-block; border-radius: 999px; padding: 2px 9px;
+  font-size: 11px; font-weight: 500; white-space: nowrap;
+}
+.b-fam { background: var(--vert-clair); color: var(--fam-txt); }
+.b-mode { background: var(--ok-bg); color: var(--ok); }
+.b-med { background: var(--attn-bg); color: var(--attn); }
+.b-neutre { background: var(--bord-fin); color: var(--txt-2); }
+.b-orange { background: var(--orange); color: #fff; font-weight: 600; }
+.mes-liste { display: flex; flex-wrap: wrap; gap: 4px; max-width: 34ch; }
+.mes-tag {
+  font-size: 11px; background: var(--surface-2); border: 1px solid var(--bord);
+  color: var(--txt-2); border-radius: 6px; padding: 1px 7px;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.detail td { background: var(--surface-2); padding: 0 12px 14px; }
+.detail-in { padding-top: 10px; }
+.detail h3 {
+  margin: 0 0 8px; font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .1em; color: var(--txt-3);
+}
+.mini { width: 100%; border-collapse: collapse; }
+.mini th { padding: 6px 10px; font-size: 10px; }
+.mini td { padding: 6px 10px; font-size: 12.5px; border-top: 1px solid var(--bord-fin); }
+.meta-detail {
+  display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px;
+  font-size: 12px; color: var(--txt-3);
+}
+.meta-detail b { color: var(--txt-2); font-weight: 600; }
+.vide { padding: 34px 18px; text-align: center; }
+.vide .rond {
+  width: 46px; height: 46px; border-radius: 12px; background: var(--bord-fin);
+  display: inline-flex; align-items: center; justify-content: center; color: var(--txt-3);
+}
+.vide p { margin: 10px 0 0; font-size: 13px; color: var(--txt-2); font-weight: 500; }
+.vide span { font-size: 12px; color: var(--txt-3); }
+
+/* ---- grilles m2 ---- */
+.grilles { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.grille {
+  border: 1px solid var(--bord); border-radius: 10px; overflow: hidden;
+  background: var(--surface); min-width: 0;
+}
+.grille-tete {
+  display: flex; align-items: center; gap: 8px;
+  padding: 11px 13px; background: var(--surface-2); border-bottom: 1px solid var(--bord-fin);
+}
+.grille-tete h3 { margin: 0; font-size: 13.5px; font-weight: 600; }
+.grille-tete .m2 {
+  margin-left: auto; font-size: 11.5px; font-weight: 600; color: var(--orange);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.grille-tete svg { width: 15px; height: 15px; color: var(--vert); flex: none; }
+:root[data-theme="dark"] .grille-tete svg { color: var(--orange); }
+.barres { padding: 4px 13px 12px; }
+.barre { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 7px 0; border-bottom: 1px solid var(--bord-fin); }
+.barre:last-child { border-bottom: 0; }
+.barre .mes { font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.barre .pr { font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.barre .jauge { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--bord-fin); overflow: hidden; }
+.barre .jauge i { display: block; height: 100%; background: var(--orange); border-radius: 2px; }
+.barre .sous { grid-column: 1 / -1; font-size: 11px; color: var(--txt-3); font-variant-numeric: tabular-nums; }
+
+/* ---- methode ---- */
+.methode { font-size: 13px; color: var(--txt-2); }
+.methode h3 {
+  margin: 16px 0 6px; font-size: 12px; font-weight: 600; color: var(--txt);
+  text-transform: uppercase; letter-spacing: .09em;
+}
+.methode h3:first-child { margin-top: 0; }
+.methode ul { margin: 0; padding-left: 18px; }
+.methode li { margin: 3px 0; }
+.methode code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px; background: var(--surface-2); border: 1px solid var(--bord);
+  border-radius: 4px; padding: 0 4px;
+}
+footer {
+  margin: 26px 0 30px; padding-top: 14px; border-top: 1px solid var(--bord);
+  font-size: 11.5px; color: var(--txt-3);
+  display: flex; gap: 10px; flex-wrap: wrap; justify-content: space-between;
+}
+@media (max-width: 760px) {
+  .col-ca, .col-cl, .col-qte { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+</style>
+
+<header class="tete">
+  <div class="wrap gutter tete-in">
+    <div class="tete-haut">
+      <span class="marque"><i data-lucide="shopping-cart"></i> Forever MG &middot; POS Boutique</span>
+      <span class="puce-src"><i data-lucide="database" style="width:13px;height:13px"></i> <span id="periode">chargement…</span></span>
+    </div>
+    <h1>Catalogue Prix &amp; Mesures</h1>
+    <p class="sous">Reconstitué à partir des lignes d'articles réellement vendues et commandées
+      dans le POS. Chaque prix est un prix pratiqué, pas un tarif décidé : la fourchette
+      min–max dit à quel point l'article se négocie.</p>
+  </div>
+</header>
+
+<div class="wrap gutter">
+  <div class="kpis" id="kpis"></div>
+
+  <section>
+    <div class="carte">
+      <div class="carte-tete">
+        <div>
+          <h2>Articles</h2>
+          <p>Un article = tous les libellés qui désignent le même produit, dimensions et
+            quantités retirées du nom. Cliquez une ligne pour voir ses mesures et leurs prix.</p>
+        </div>
+      </div>
+      <div class="carte-corps">
+        <div class="filtres">
+          <label class="champ">
+            <i data-lucide="search"></i>
+            <input type="search" id="q" placeholder="Rechercher un article, une matière, une mesure…"
+                   autocomplete="off" aria-label="Rechercher un article">
+          </label>
+          <select id="tri" aria-label="Trier">
+            <option value="lignes">Trier : les plus vendus</option>
+            <option value="prix">Trier : prix décroissant</option>
+            <option value="prixAsc">Trier : prix croissant</option>
+            <option value="ca">Trier : chiffre d'affaires</option>
+            <option value="mesures">Trier : mesures connues</option>
+            <option value="nom">Trier : nom</option>
+          </select>
+          <label class="bascule">
+            <input type="checkbox" id="recurrents" checked>
+            Au moins 2 ventes
+          </label>
+          <label class="bascule">
+            <input type="checkbox" id="seulMesures">
+            Avec mesures
+          </label>
+        </div>
+        <div class="chips" id="chipsFam"></div>
+      </div>
+      <div class="tbl-wrap">
+        <table id="tblArticles">
+          <thead>
+            <tr>
+              <th>Article</th>
+              <th>Famille</th>
+              <th class="num">Prix de référence</th>
+              <th class="num">Fourchette</th>
+              <th class="num col-qte">Vendus</th>
+              <th>Mesures observées</th>
+              <th class="num col-ca">CA</th>
+              <th class="num col-cl">Clients</th>
+            </tr>
+          </thead>
+          <tbody id="corpsArticles"></tbody>
+        </table>
+      </div>
+      <div id="vide" class="vide" hidden>
+        <div class="rond"><i data-lucide="package"></i></div>
+        <p>Aucun article ne correspond</p>
+        <span>Élargissez la recherche ou retirez les filtres.</span>
+      </div>
+      <div class="carte-corps" id="pied" style="border-top:1px solid var(--bord-fin);color:var(--txt-3);font-size:12px"></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="carte">
+      <div class="carte-tete">
+        <div>
+          <h2>Grilles de mesures</h2>
+          <p>Pour les familles dont le prix suit la taille : chaque dimension observée avec son
+            prix de référence. Le prix au m² n'est calculé qu'au-delà de 0,05 m².</p>
+        </div>
+      </div>
+      <div class="carte-corps">
+        <div class="grilles" id="grilles"></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="carte">
+      <div class="carte-tete">
+        <div>
+          <h2>Fiches Produits du POS</h2>
+          <p>Les seules fiches tarifées de la base, confrontées au prix réellement pratiqué
+            sur les mêmes articles.</p>
+        </div>
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Fiche</th>
+              <th>Famille</th>
+              <th class="num">Prix fiche</th>
+              <th class="num">Prix pratiqué</th>
+              <th class="num">Écart</th>
+              <th class="num">Prix d'achat</th>
+              <th class="num">Marge fiche</th>
+              <th class="num">Stock</th>
+            </tr>
+          </thead>
+          <tbody id="corpsFiches"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="carte">
+      <div class="carte-tete"><div><h2>Méthode et limites</h2></div></div>
+      <div class="carte-corps methode" id="methode"></div>
+    </div>
+  </section>
+
+  <footer>
+    <span id="genere"></span>
+    <span>Données : feuilles Ventes, Commandes, Réservations et Produits du POS</span>
+  </footer>
+</div>
+
+<script>
+const fmt = n => (n == null || isNaN(n)) ? '—' : new Intl.NumberFormat('fr-FR').format(Math.round(n));
+const ar = n => (n == null || isNaN(n)) ? '—' : fmt(n) + ' Ar';
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const jourFr = s => {
+  if (!s) return '—';
+  const p = s.split('-');
+  return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : s;
+};
+const sansAcc = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+let DATA = null, FAM = {}, famActive = null, deplie = new Set();
+
+const el = id => document.getElementById(id);
+
+fetch('catalogue-web.json')
+  .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+  .then(d => { DATA = d; demarre(); })
+  .catch(e => {
+    el('corpsArticles').innerHTML =
+      '<tr><td colspan="8" style="padding:26px;text-align:center;color:var(--txt-2)">' +
+      'Données du catalogue indisponibles (' + esc(e.message) + ').</td></tr>';
+  });
+
+function demarre() {
+  DATA.referentiels.familles.forEach(f => { FAM[f.code] = f; });
+  DATA.familles.forEach(f => { if (FAM[f.code]) FAM[f.code].stats = f; });
+
+  const p = DATA.perimetre;
+  el('periode').textContent = jourFr(p.periode.debut) + ' → ' + jourFr(p.periode.fin);
+  el('genere').textContent = 'Catalogue généré le ' + jourFr(DATA.genere.slice(0, 10)) +
+    ' depuis ' + fmt(p.ventes) + ' ventes et ' + fmt(p.commandes) + ' commandes';
+
+  el('kpis').innerHTML = [
+    tuile("Lignes d'articles", fmt(p.lignesArticles), fmt(p.libellesDistincts) + ' libellés distincts saisis'),
+    tuile('Articles au catalogue', fmt(DATA.articles.filter(a => a.lignes >= 2).length),
+          'sur ' + fmt(p.modeles) + ' au total, ' + fmt(p.familles) + ' familles'),
+    tuile('Lignes mesurées', Math.round(p.lignesAvecMesure / p.lignesArticles * 100) + ' %',
+          fmt(p.lignesAvecMesure) + ' lignes avec une dimension lisible'),
+    tuile('Prix médian toutes familles', ar(medianeGlobale()), 'hors lignes offertes et annulées'),
+  ].join('');
+
+  construitChips();
+  construitGrilles();
+  construitFiches();
+  construitMethode();
+
+  ['q', 'tri', 'recurrents', 'seulMesures'].forEach(id => {
+    el(id).addEventListener('input', rendu);
+    el(id).addEventListener('change', rendu);
+  });
+  rendu();
+}
+
+function tuile(lab, val, note) {
+  return '<div class="kpi"><p class="lab">' + esc(lab) + '</p><p class="val">' + val +
+         '</p><p class="note">' + esc(note) + '</p></div>';
+}
+
+function medianeGlobale() {
+  const v = DATA.articles.filter(a => a.prix).map(a => a.prix.ref).sort((x, y) => x - y);
+  if (!v.length) return null;
+  const i = Math.floor(v.length / 2);
+  return v.length % 2 ? v[i] : (v[i - 1] + v[i]) / 2;
+}
+
+function construitChips() {
+  const compte = {};
+  DATA.articles.forEach(a => { compte[a.f] = (compte[a.f] || 0) + a.lignes; });
+  const ordre = DATA.familles.filter(f => compte[f.code]).sort((a, b) => compte[b.code] - compte[a.code]);
+  el('chipsFam').innerHTML =
+    '<button class="chip" data-fam="" aria-pressed="true">Toutes les familles</button>' +
+    ordre.map(f =>
+      '<button class="chip" data-fam="' + f.code + '" aria-pressed="false">' +
+      esc(f.nom) + ' <span class="n">' + compte[f.code] + '</span></button>').join('');
+  el('chipsFam').querySelectorAll('.chip').forEach(b => {
+    b.addEventListener('click', () => {
+      famActive = b.dataset.fam || null;
+      el('chipsFam').querySelectorAll('.chip').forEach(x =>
+        x.setAttribute('aria-pressed', String((x.dataset.fam || null) === famActive)));
+      rendu();
+    });
+  });
+}
+
+function filtre() {
+  const q = sansAcc(el('q').value.trim());
+  const recurrents = el('recurrents').checked;
+  const avecMes = el('seulMesures').checked;
+  let list = DATA.articles.filter(a => {
+    if (famActive && a.f !== famActive) return false;
+    if (recurrents && a.lignes < 2) return false;
+    if (avecMes && !a.mesures.length) return false;
+    if (!q) return true;
+    const foin = sansAcc([a.nom, (FAM[a.f] || {}).nom, a.alt.join(' '),
+                          a.mat.join(' '), a.opt.join(' '),
+                          a.mesures.map(m => m.l).join(' ')].join(' '));
+    return q.split(/\s+/).every(mot => foin.indexOf(mot) !== -1);
+  });
+  const tri = el('tri').value;
+  const cmp = {
+    lignes: (a, b) => b.lignes - a.lignes || b.ca - a.ca,
+    prix: (a, b) => (b.prix ? b.prix.ref : -1) - (a.prix ? a.prix.ref : -1),
+    prixAsc: (a, b) => (a.prix ? a.prix.ref : Infinity) - (b.prix ? b.prix.ref : Infinity),
+    ca: (a, b) => b.ca - a.ca,
+    mesures: (a, b) => b.mesures.length - a.mesures.length || b.lignes - a.lignes,
+    nom: (a, b) => a.nom.localeCompare(b.nom, 'fr'),
+  }[tri];
+  return list.sort(cmp);
+}
+
+function rendu() {
+  const list = filtre();
+  const max = 200;
+  const vus = list.slice(0, max);
+  el('corpsArticles').innerHTML = vus.map(ligneArticle).join('');
+  el('vide').hidden = list.length > 0;
+  el('pied').textContent = list.length
+    ? (list.length > max ? max + ' articles affichés sur ' + fmt(list.length) + ' — affinez la recherche pour voir les suivants'
+                         : fmt(list.length) + (list.length > 1 ? ' articles affichés' : ' article affiché'))
+    : '';
+  el('corpsArticles').querySelectorAll('.ligne-art').forEach(tr => {
+    tr.addEventListener('click', () => basculeDetail(tr));
+    tr.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); basculeDetail(tr); }
+    });
+  });
+  if (window.lucide) lucide.createIcons();
+}
+
+function idArt(a) { return a.f + '|' + a.nom; }
+
+function ligneArticle(a) {
+  const id = idArt(a);
+  const ouvert = deplie.has(id);
+  const p = a.prix;
+  const badgeSrc = p ? (p.src === 'mode'
+    ? '<span class="badge b-mode" title="Prix le plus souvent pratiqué">le plus pratiqué</span>'
+    : '<span class="badge b-med" title="Médiane des prix observés">médiane</span>') : '';
+  const tags = a.mesures.slice(0, 4).map(m =>
+    '<span class="mes-tag">' + esc(m.l) + '</span>').join('') +
+    (a.mesures.length > 4 ? '<span class="mes-tag">+' + (a.mesures.length - 4) + '</span>' : '');
+  return '<tr class="ligne-art" tabindex="0" role="button" aria-expanded="' + ouvert + '" data-id="' + esc(id) + '">' +
+    '<td class="nom-art">' + esc(a.nom) +
+      (a.alt.length ? '<span class="alt">aussi saisi : ' + esc(a.alt.slice(0, 2).join(' · ')) + '</span>' : '') +
+    '</td>' +
+    '<td><span class="badge b-fam">' + esc((FAM[a.f] || {}).nom || a.f) + '</span></td>' +
+    '<td class="num"><span class="prix-ref">' + ar(p && p.ref) + '</span><br>' + badgeSrc + '</td>' +
+    '<td class="num fourch">' + (p ? fmt(p.min) + ' – ' + fmt(p.max) : '—') +
+      '<br>' + (p ? '<span style="color:var(--txt-3)">' + p.n + (p.n > 1 ? ' prix relevés' : ' prix relevé') + '</span>' : '') + '</td>' +
+    '<td class="num col-qte">' + fmt(a.qte) + '</td>' +
+    '<td>' + (a.mesures.length ? '<div class="mes-liste">' + tags + '</div>'
+                               : '<span style="color:var(--txt-3);font-size:12px">aucune dimension saisie</span>') + '</td>' +
+    '<td class="num col-ca">' + fmt(a.ca) + '</td>' +
+    '<td class="num col-cl">' + fmt(a.cl) + '</td>' +
+    '</tr>' + (ouvert ? detailArticle(a) : '');
+}
+
+function detailArticle(a) {
+  const lignesMes = a.mesures.length
+    ? '<div class="tbl-wrap"><table class="mini"><thead><tr>' +
+      '<th>Mesure</th><th class="num">Relevés</th><th class="num">Prix de référence</th>' +
+      '<th class="num">Fourchette</th><th class="num">Surface</th><th class="num">Ar / m²</th><th>Lue dans</th>' +
+      '</tr></thead><tbody>' +
+      a.mesures.map(m =>
+        '<tr><td>' + esc(m.l) + '</td>' +
+        '<td class="num">' + m.n + '</td>' +
+        '<td class="num" style="font-weight:600">' + ar(m.p && m.p.ref) + '</td>' +
+        '<td class="num" style="color:var(--txt-3)">' + (m.p ? fmt(m.p.min) + ' – ' + fmt(m.p.max) : '—') + '</td>' +
+        '<td class="num">' + (m.s ? m.s.toFixed(2).replace('.', ',') + ' m²' : '—') + '</td>' +
+        '<td class="num">' + (m.m2 ? fmt(m.m2) : '—') + '</td>' +
+        '<td><span class="badge b-neutre">' + esc({ nom: 'nom de l\'article', perso: 'personnalisation', notes: 'notes de commande' }[m.src] || m.src || '—') + '</span></td></tr>').join('') +
+      '</tbody></table></div>'
+    : '<p style="margin:0;color:var(--txt-3);font-size:12.5px">Aucune dimension n\'a été saisie pour cet article : ' +
+      'ni dans son nom, ni dans la personnalisation, ni dans les notes de commande.</p>';
+
+  const meta = [
+    ['Première vente', jourFr(a.d1)],
+    ['Dernière vente', jourFr(a.d2)],
+    ['Prix moyen pondéré', a.qte ? ar(a.ca / a.qte) : '—'],
+    a.mat.length ? ['Matières', a.mat.join(', ')] : null,
+    a.opt.length ? ['Options', a.opt.join(', ')] : null,
+    a.off ? ['Lignes à 0 Ar', fmt(a.off)] : null,
+    a.ann ? ['Lignes annulées', fmt(a.ann)] : null,
+  ].filter(Boolean).map(([k, v]) => '<span><b>' + esc(k) + '</b> ' + esc(v) + '</span>').join('');
+
+  return '<tr class="detail"><td colspan="8"><div class="detail-in">' +
+    '<h3>Mesures relevées et prix correspondants</h3>' + lignesMes +
+    '<div class="meta-detail">' + meta + '</div></div></td></tr>';
+}
+
+function basculeDetail(tr) {
+  const id = tr.dataset.id;
+  if (deplie.has(id)) deplie.delete(id); else deplie.add(id);
+  rendu();
+}
+
+function construitGrilles() {
+  const fams = DATA.familles
+    .filter(f => f.mesures.filter(m => m.p && m.p.ref).length >= 3)
+    .sort((a, b) => b.lignes - a.lignes);
+  el('grilles').innerHTML = fams.map(f => {
+    const mes = f.mesures.filter(m => m.p && m.p.ref)
+      .sort((a, b) => (b.p.ref) - (a.p.ref)).slice(0, 10);
+    const top = Math.max.apply(null, mes.map(m => m.p.ref));
+    const ic = (DATA.referentiels.familles.find(x => x.code === f.code) || {}).icone || 'package';
+    return '<div class="grille">' +
+      '<div class="grille-tete"><i data-lucide="' + kebab(ic) + '"></i><h3>' + esc(f.nom) + '</h3>' +
+      (f.m2 ? '<span class="m2">' + fmt(f.m2) + ' Ar/m²</span>' : '') + '</div>' +
+      '<div class="barres">' + mes.map(m =>
+        '<div class="barre">' +
+        '<span class="mes">' + esc(m.l) + '</span>' +
+        '<span class="pr">' + ar(m.p.ref) + '</span>' +
+        '<span class="jauge"><i style="width:' + Math.max(3, Math.round(m.p.ref / top * 100)) + '%"></i></span>' +
+        '<span class="sous">' + m.n + (m.n > 1 ? ' relevés · ' : ' relevé · ') +
+          fmt(m.p.min) + ' – ' + fmt(m.p.max) + ' Ar' +
+          (m.m2 ? ' · ' + fmt(m.m2) + ' Ar/m²' : '') + '</span>' +
+        '</div>').join('') + '</div></div>';
+  }).join('');
+}
+
+function kebab(s) {
+  return String(s).replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+}
+
+function construitFiches() {
+  const lignes = DATA.fiches.map(fi => {
+    // Prix pratique : l'article du catalogue dont le nom correspond le mieux.
+    const cand = DATA.articles.filter(a => a.f === fi.famille && a.prix)
+      .sort((a, b) => b.lignes - a.lignes);
+    const cible = sansAcc(fi.nom);
+    const exact = cand.find(a => sansAcc(a.nom) && cible.indexOf(sansAcc(a.nom)) !== -1);
+    const prat = exact || cand[0] || null;
+    const ecart = (prat && fi.prixVente) ? prat.prix.ref - fi.prixVente : null;
+    const cl = ecart == null ? 'b-neutre' : (ecart > 0 ? 'b-mode' : (ecart < 0 ? 'b-med' : 'b-neutre'));
+    return '<tr>' +
+      '<td class="nom-art">' + esc(fi.nom) + (fi.mesure ? '<span class="alt">' + esc(fi.mesure) + '</span>' : '') + '</td>' +
+      '<td><span class="badge b-fam">' + esc(fi.familleNom) + '</span></td>' +
+      '<td class="num" style="font-weight:600">' + ar(fi.prixVente) + '</td>' +
+      '<td class="num">' + (prat ? ar(prat.prix.ref) + '<br><span style="font-size:11px;color:var(--txt-3)">' +
+        esc(prat.nom) + '</span>' : '—') + '</td>' +
+      '<td class="num">' + (ecart == null ? '—' :
+        '<span class="badge ' + cl + '">' + (ecart > 0 ? '+' : '') + fmt(ecart) + '</span>') + '</td>' +
+      '<td class="num">' + (fi.prixAchat ? ar(fi.prixAchat) : '<span style="color:var(--txt-3)">non saisi</span>') + '</td>' +
+      '<td class="num">' + (fi.prixAchat ? ar(fi.marge) : '—') + '</td>' +
+      '<td class="num">' + fmt(fi.stock) + '</td>' +
+      '</tr>';
+  });
+  el('corpsFiches').innerHTML = lignes.join('');
+}
+
+function construitMethode() {
+  const p = DATA.perimetre;
+  const src = p.mesureParSource || {};
+  el('methode').innerHTML =
+    '<h3>Ce que contient le catalogue</h3><ul>' +
+    '<li>' + fmt(p.lignesArticles) + ' lignes d\'articles issues de ' + fmt(p.ventes) + ' ventes, ' +
+      fmt(p.commandes) + ' commandes et ' + fmt(p.reservations) + ' réservations, du ' +
+      jourFr(p.periode.debut) + ' au ' + jourFr(p.periode.fin) + '.</li>' +
+    '<li>Les ' + fmt(p.libellesDistincts) + ' libellés saisis sont regroupés en ' + fmt(p.modeles) +
+      ' articles : le nom est mis au singulier, débarrassé des dimensions, des quantités et des ' +
+      'extensions de fichier, puis rangé dans une des ' + fmt(p.familles) + ' familles par mots-clés.</li>' +
+    '<li><b>Prix de référence</b> : le prix le plus souvent pratiqué quand il couvre au moins 35 % ' +
+      'des relevés, sinon la médiane. Les lignes à 0 Ar (' + fmt(p.lignesOffertes) + ') et les ' +
+      'lignes de commandes annulées (' + fmt(p.lignesAnnulees) + ') sortent du calcul.</li>' +
+    '<li><b>Mesures</b> : ' + fmt(p.lignesAvecMesure) + ' lignes portent une dimension lisible, lue dans ' +
+      'le nom de l\'article (' + fmt(src.nom || 0) + '), la personnalisation (' + fmt(src.perso || 0) +
+      ') ou les notes de commande (' + fmt(src.notes || 0) + '). Tout est ramené en centimètres : ' +
+      '<code>1m50*90cm</code> devient 150 × 90 cm, <code>50x8pcs</code> est écarté (c\'est une quantité).</li>' +
+    '</ul>' +
+    '<h3>À savoir avant de s\'en servir comme tarif</h3><ul>' +
+    '<li>Les trois quarts des lignes n\'ont <b>aucune dimension saisie</b> : l\'absence de mesure ne veut ' +
+      'pas dire que l\'article n\'en a pas, seulement que personne ne l\'a écrite.</li>' +
+    '<li>Un même nom couvre parfois deux produits différents (matière, finition, LED). C\'est ce qui ' +
+      'explique les fourchettes larges : regardez la colonne Fourchette avant de retenir un prix.</li>' +
+    '<li>Le prix au m² n\'est calculé que sur les pièces de plus de 0,05 m², et la valeur par famille ' +
+      'seulement à partir de trois pièces de plus de 0,25 m² : sur un trophée de 20 × 15 cm, un prix ' +
+      'au mètre carré ne veut rien dire.</li>' +
+    '<li>27 commandes portaient un sous-total sans prix sur la ligne. Quand la commande ne contient ' +
+      'qu\'un article, le prix unitaire en a été déduit ; sinon la ligne reste à 0 Ar et sort des calculs.</li>' +
+    '<li>Les prix sont des prix de vente constatés, remises déjà appliquées ligne à ligne. Ils ne ' +
+      'contiennent ni frais de livraison ni acompte.</li>' +
+    '</ul>';
+}
+</script>

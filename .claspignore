@@ -11,3 +11,6 @@ icons/**
 *.png
 *.ico
 *.md
+
+# Catalogue prix/mesures : outillage local, jamais du code serveur
+catalogue/**

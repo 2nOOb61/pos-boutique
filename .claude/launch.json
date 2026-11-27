@@ -6,6 +6,12 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": ["serve", "-l", "5500", "."],
       "port": 5500
+    },
+    {
+      "name": "catalogue",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "5501", "--directory", "catalogue"],
+      "port": 5501
     }
   ]
 }

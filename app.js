@@ -97,7 +97,7 @@ function _purgeLocalPlainPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '247 · 2026-11-27';
+const APP_VERSION = '248 · 2026-11-27';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -305,6 +305,7 @@ const PAGE_LABELS = {
   commandes:       'Commandes',
   livraisons:      'Livraisons',
   stock:           'Stock',
+  catalogue:       'Catalogue prix & mesures',
   matieres:        'Matières premières',
   achats:          'Achats',
   depenses:        'Dépenses',
@@ -326,6 +327,9 @@ const PAGE_ACCESS = {
   commandes:      ['admin','caissier','commerciale','gestionnaire','comptable','livreur'],
   livraisons:     ['admin','caissier','commerciale','gestionnaire','comptable','livreur','chef_atelier','operateur_prod','machiniste','finition'],
   stock:          ['admin','gestionnaire'],
+  // Catalogue : il affiche des prix de vente, donc le cercle de ceux qui
+  // chiffrent et devisent — l'atelier (chef) s'en sert pour les dimensions.
+  catalogue:      ['admin','gestionnaire','commerciale','caissier','comptable','chef_atelier'],
   // Matières : le chef d'atelier consomme et réceptionne, il doit pouvoir saisir.
   matieres:       ['admin','gestionnaire','chef_atelier'],
   achats:         ['admin','gestionnaire','chef_atelier'],
@@ -798,6 +802,9 @@ function showPage(id, btn, bnavBtn) {
   if (id==='finances')     { _ensureDossierLinks(); renderFinances(); if (APPS_SCRIPT_URL) loadCommandesFromScript().then(() => { _ensureDossierLinks(); renderFinances(); }).catch(()=>{}); }
   if (id==='perf')         { _ensureDossierLinks(); renderPerf(); if (APPS_SCRIPT_URL) _loadTachesQuietly().then(() => { _ensureDossierLinks(); renderPerf(); }).catch(()=>{}); }
   if (id==='depenses')     { renderDepenses(); if (APPS_SCRIPT_URL) Promise.all([loadDepensesFromScript(), loadDossiers()]).then(() => renderDepenses()).catch(()=>renderDepenses()); }
+  if (id==='catalogue')    { renderCatalogue();
+    if (APPS_SCRIPT_URL) Promise.all([loadCommandesFromScript(), loadReservationsFromScript()])
+      .then(() => { _catCache = null; renderCatalogue(); }).catch(()=>{}); }
   if (id==='matieres')     { renderMatieres(); if (APPS_SCRIPT_URL) Promise.all([loadMatieresFromScript(), loadMouvementsMatieresFromScript()]).then(() => renderMatieres()).catch(()=>renderMatieres()); }
   if (id==='achats')       { _ensureDossierLinks(); renderAchats(); if (APPS_SCRIPT_URL) Promise.all([loadDossiers(), _loadTachesQuietly(), loadDemandesAchatFromScript()]).then(() => { _ensureDossierLinks(); renderAchats(); }).catch(()=>renderAchats()); }
   // Garde d'accès (rôle ou overrides personnalisés)
@@ -31744,4 +31751,919 @@ function receptionnerAchatEnStock(demandeId) {
     return;
   }
   openMvtMatiereModal(m.id, 'ENTREE', prefill);
+}
+
+/* =====================================================================
+   CATALOGUE PRIX & MESURES
+   =====================================================================
+   Page `catalogue` : le prix pratiqué et les dimensions de chaque article,
+   reconstitués depuis les lignes de Ventes, Commandes et Réservations déjà
+   en mémoire. AUCUN appel GAS propre, AUCUNE colonne, AUCUNE feuille : la
+   page ne fait que relire ce que les autres modules ont chargé.
+
+   Pourquoi ce module existe : la feuille Produits ne porte que quelques
+   dizaines de fiches tarifées alors que la boutique vend ~930 libellés
+   différents. Le prix réel vit dans l'historique, et les dimensions sont
+   écrites à la main dans le nom de l'article, la personnalisation ou les
+   notes de commande.
+
+   ⚠️ Ce code DOUBLE volontairement `catalogue/mesures.js` et
+   `catalogue/familles.js`, qui servent au générateur hors ligne
+   (`node catalogue/build-catalogue.js`). Les deux doivent rester
+   identiques : toute règle ajoutée ici doit l'être là-bas, sinon la page
+   et les CSV ne diront plus la même chose.
+   ===================================================================== */
+
+/* ---------- normalisation ---------- */
+
+function _catSansAcc(s) {
+  return String(s == null ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+function _catNorm(s) {
+  return _catSansAcc(s).toLowerCase()
+    .replace(/[×✕]/g, 'x')
+    .replace(/ /g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function _catCle(s) {
+  return _catSansAcc(s).toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/* ---------- mesures : du texte libre vers des centimètres ---------- */
+
+const _CAT_EN_CM = { mm: 0.1, cm: 1, m: 100 };
+const _catVersCm = (v, u) => (_CAT_EN_CM[u] ? v * _CAT_EN_CM[u] : null);
+const _catNb = t => {
+  const n = parseFloat(String(t).replace(/\.\./g, '.').replace(',', '.'));
+  return isFinite(n) ? n : null;
+};
+
+// « Carte de visite 50x8pcs », « format A6 × 45 » : des quantités, pas des tailles.
+const _CAT_RE_QTE   = /^\s*(?:pcs?|pces?|pieces?|ex|exemplaires?|pages?|unites?|cartes?|pers)\b/i;
+const _CAT_RE_FMT_AV = /\b(?:a[0-9]|format)\s*$/i;
+
+function _catGroupesDims(t) {
+  const NB = '\\d+(?:[.,]\\d+)?(?:\\.\\.\\d+)?';
+  // L'unité ne doit pas être la première lettre du mot suivant : sans ce
+  // garde-fou, « atao 10x12cm mitsangana » prenait le « m » de « mitsangana »
+  // pour l'unité du groupe et lisait 1000 × 12. Seul le « x » du séparateur
+  // est toléré derrière (« 83cmx189cm »).
+  const U  = '(?:mm|cm|m)(?![a-wyz])';
+  const re = new RegExp(
+    '(' + NB + ')\\s*(' + U + ')?\\s*[x*]\\s*(' + NB + ')\\s*(' + U + ')?' +
+    '(?:\\s*[x*]\\s*(' + NB + ')\\s*(' + U + ')?)?\\s*(' + U + ')?', 'gi');
+  const out = [];
+  let m;
+  while ((m = re.exec(t)) !== null) {
+    if (_CAT_RE_QTE.test(t.slice(re.lastIndex))) continue;
+    if (_CAT_RE_FMT_AV.test(t.slice(0, m.index))) continue;
+    const vals = [_catNb(m[1]), _catNb(m[3]), m[5] != null ? _catNb(m[5]) : null];
+    const unites = [m[2], m[4], m[6]];
+    // Unité de repli : la dernière écrite dans le groupe, sinon le cm — « 110x110 »
+    // sur un écriteau, c'est des centimètres (usage constaté en boutique).
+    const uGroupe = m[7] || unites.filter(Boolean).pop() || null;
+    const dims = [];
+    for (let i = 0; i < 3; i++) {
+      if (vals[i] == null) continue;
+      let u = unites[i] || uGroupe || 'cm';
+      // Un « m » emprunté à un AUTRE terme ne s'applique pas à un nombre déjà
+      // grand : « 85*2m4 », c'est 85 cm par 2,4 m, pas 85 mètres. Personne ne
+      // commande une pièce de plus de 50 m.
+      if (!unites[i] && u === 'm' && vals[i] >= 50) u = 'cm';
+      const cm = _catVersCm(vals[i], u);
+      if (cm != null) dims.push(Math.round(cm * 10) / 10);
+    }
+    if (dims.length < 2) continue;
+    out.push(dims.slice(0, 3));
+  }
+  return out;
+}
+
+const _CAT_RE_DIAM  = /(?:diam(?:etre)?\s*:?\s*)?(\d+(?:[.,]\d+)?)\s*(mm|cm|m)?\s*(?:de\s+)?diam(?:etre|\.)?|(?:ø)\s*(\d+(?:[.,]\d+)?)\s*(mm|cm|m)?/i;
+const _CAT_RE_HAUT  = /(?:hauteur\s*(?:totale?)?\s*:?\s*(\d+(?:[.,]\d+)?)\s*(mm|cm|m)?)|(?:(\d+(?:[.,]\d+)?)\s*(mm|cm|m)?\s*\(?\s*(?:de\s+)?hauteur)/i;
+const _CAT_RE_LARG  = /(?:largeur\s*:?\s*(\d+(?:[.,]\d+)?)\s*(mm|cm|m)?)|(?:(\d+(?:[.,]\d+)?)\s*(mm|cm|m)?\s*\(?\s*(?:de\s+)?largeur)/i;
+const _CAT_RE_LONG  = /(?:longueur\s*:?\s*(\d+(?:[.,]\d+)?)\s*(mm|cm|m)?)|(?:(\d+(?:[.,]\d+)?)\s*(mm|cm|m)?\s*\(?\s*(?:de\s+)?longueur)/i;
+const _CAT_RE_EPAIS = /(\d+(?:[.,]\d+)?)\s*mm\b/i;
+const _CAT_RE_SURF  = /(\d+(?:[.,]\d+)?)\s*m\s*(?:2|²)\b/i;
+const _CAT_RE_FMT   = /\b(a[0-6])\b/i;
+const _CAT_RE_GRAM  = /(\d{2,3})\s*(?:grs?|gr|g)\b/i;
+const _CAT_RE_TAILLE= /\btaille\s*:?\s*(xxl|xl|xs|[sml])\b/i;
+
+function _catPaire(re, t) {
+  const m = re.exec(t);
+  if (!m) return null;
+  for (let i = 1; i < m.length; i += 2) {
+    if (m[i] == null) continue;
+    const v = _catNb(m[i]);
+    if (v == null) continue;
+    const cm = _catVersCm(v, m[i + 1] || 'cm');
+    if (cm != null) return Math.round(cm * 10) / 10;
+  }
+  return null;
+}
+
+/**
+ * Lit une mesure dans un texte libre. Renvoie null si rien n'est lisible.
+ * Tout sort en centimètres.
+ */
+function _catMesure(texte) {
+  const t = _catNorm(texte);
+  if (!t) return null;
+  const r = {};
+  const fmt0 = _CAT_RE_FMT.exec(t);
+
+  // Texte de travail pour les dimensions :
+  //  - « 1m50 » devient « 150cm » AVANT la recherche, sinon le moteur part de
+  //    « 50*90 » et perd le mètre ;
+  //  - un format papier est retiré : dans « A6 × 45 » le 45 est un tirage.
+  const tDim = t
+    .replace(/(\d+)\s*m\s*(\d{2})(?![\d.,])/g, (s, a, b) => (Number(a) * 100 + Number(b)) + 'cm')
+    .replace(/\ba[0-6]\b/g, ' ');
+
+  const groupes = _catGroupesDims(tDim);
+  if (groupes.length) {
+    r.dims = groupes[0];
+    if (r.dims.length === 2) {
+      r.surfaceM2 = Math.round((r.dims[0] * r.dims[1] / 10000) * 10000) / 10000;
+    }
+  }
+  const d = _catPaire(_CAT_RE_DIAM, t); if (d != null) r.diametre = d;
+  const h = _catPaire(_CAT_RE_HAUT, t); if (h != null) r.hauteur = h;
+  const l = _catPaire(_CAT_RE_LARG, t); if (l != null) r.largeur = l;
+  const L = _catPaire(_CAT_RE_LONG, t); if (L != null) r.longueur = L;
+
+  const ep = _CAT_RE_EPAIS.exec(t);
+  if (ep && !(r.dims && new RegExp('[x*]\\s*' + ep[1]).test(t))) {
+    const v = _catNb(ep[1]);
+    if (v != null && v <= 60) r.epaisseurMm = v;
+  }
+  const su = _CAT_RE_SURF.exec(t); if (su) r.surfaceDeclareeM2 = _catNb(su[1]);
+  if (fmt0) r.format = fmt0[1].toUpperCase();
+  const gr = _CAT_RE_GRAM.exec(t);
+  if (gr) { const g = Number(gr[1]); if (g >= 60 && g <= 400) r.grammage = g; }
+  const ta = _CAT_RE_TAILLE.exec(t); if (ta) r.taille = ta[1].toUpperCase();
+
+  // Cote unique (« Trophée 18cm », « Montre 40cm ») : très fréquent, et c'est LA
+  // mesure de l'article. Seulement si rien de plus précis n'a été trouvé, et
+  // jamais sur un « mm » (ça, c'est une épaisseur).
+  if (!r.dims && r.diametre == null && r.hauteur == null && r.largeur == null && r.longueur == null) {
+    const s1 = /(?:^|[^a-z0-9.,])(\d+(?:[.,]\d+)?)\s*(cm|m)(?![a-z0-9])/i.exec(t);
+    if (s1) {
+      const cm = _catVersCm(_catNb(s1[1]), s1[2]);
+      if (cm != null && cm > 0 && cm <= 2000) r.coteCm = Math.round(cm * 10) / 10;
+    }
+  }
+  if (!Object.keys(r).length) return null;
+  r.libelle = _catLibelleMesure(r);
+  return r;
+}
+
+const _catNbFr = n => (Number(n) % 1 === 0 ? String(Number(n)) : String(Number(n)).replace('.', ','));
+
+function _catLibelleMesure(m) {
+  if (!m) return '';
+  const b = [];
+  if (m.dims) b.push(m.dims.map(_catNbFr).join(' × ') + ' cm');
+  if (m.diametre != null) b.push('Ø ' + _catNbFr(m.diametre) + ' cm');
+  if (!m.dims) {
+    if (m.longueur != null) b.push('L ' + _catNbFr(m.longueur) + ' cm');
+    if (m.largeur != null) b.push('l ' + _catNbFr(m.largeur) + ' cm');
+  }
+  if (m.hauteur != null) b.push('h ' + _catNbFr(m.hauteur) + ' cm');
+  if (m.coteCm != null) b.push(_catNbFr(m.coteCm) + ' cm');
+  if (m.surfaceDeclareeM2 != null) b.push(_catNbFr(m.surfaceDeclareeM2) + ' m²');
+  if (m.epaisseurMm != null) b.push('ép. ' + _catNbFr(m.epaisseurMm) + ' mm');
+  if (m.format) b.push(m.format);
+  if (m.grammage) b.push(m.grammage + ' g');
+  if (m.taille) b.push('taille ' + m.taille);
+  return b.join(' · ');
+}
+
+const _catMesureUtile = m => !!(m && (m.dims || m.diametre != null || m.hauteur != null ||
+  m.coteCm != null || m.surfaceDeclareeM2 != null || m.format));
+
+/* ---------- familles : ranger 930 libellés libres ---------- */
+
+// L'ORDRE EST LA PRIORITÉ : première règle qui matche. Une « plaque
+// signalétique » part en Signalétique, pas en Plaque. Ne pas trier.
+const _CAT_FAMILLES = [
+  { code:'CARTE_VISITE', nom:'Cartes de visite', mots:['carte de visite','carte de vsite','carte de vistie','carte visite','cartes de visite','carte sgs','cv recto'] },
+  { code:'CARTE_DIVERSE', nom:'Cartes & badges nominatifs', mots:['carte de fidelite','carte fidelite','badge','carte membre','carte d acces','porte badge'] },
+  { code:'INVITATION', nom:'Invitations & faire-part', mots:['invitation','faire part','faire-part','carton d invitation'] },
+  { code:'ENVELOPPE', nom:'Enveloppes', mots:['enveloppe'] },
+  { code:'MENU', nom:'Menus & cartes de table', mots:['menu','nom de table','marque place','numero de table'] },
+  { code:'CALENDRIER', nom:'Calendriers', mots:['calendrier','perpetuel'] },
+  { code:'IMPRESSION', nom:'Impression & tirages', mots:['impression','impresion','imression','retirage','flyer','affiche','brochure','depliant','papier a4','papier a3','bristol','portrait','portait','quadri','photocopie','scan','marque page','bloc note','facturier','carnet','bon de commande','certificat','diplome','attestation','carte de voeux','livret','classeur','intercalaire','blocnote','note book','notebook','catalogue','planning'] },
+  { code:'AUTOCOLLANT', nom:'Autocollants & étiquettes', mots:['autocollant','autcollant','autocollany','autocolant','sticker','etiquette','adhesif','vinyle','vynile','one way','givre','microperfore','film'] },
+  { code:'ENSEIGNE', nom:'Enseignes & caissons', mots:['enseigne','caisson','comptoir','habillage','claustra','totem','lumineuse','lumineux'] },
+  { code:'LETTRAGE', nom:'Lettrages & logos 3D', mots:['lettrage','lettrine','lettre 3d','lettres 3d','logo 3d','logo signalitique','logo signaletique'] },
+  { code:'ECRITEAU', nom:'Écriteaux', mots:['ecriteau','ecriteaau','ecriteaux','ecritau','verset'] },
+  { code:'SIGNALETIQUE', nom:'Plaques & signalétique', mots:['plaque','panneau','pancarte','signalitique','signaletique','picto','numero de chambre','numero de porte','plaques','par etage','interphone','boite aux lettres','piquet','plaqe','paque carre','nom de chambre','plan de table'] },
+  { code:'MAP_MADA', nom:'Maps Madagascar', mots:['map mada','map madagascar','map monde','map','carte du monde','carte de madagascar','carte mada','carte bongolava','carte talata','carte region','madagascar led'] },
+  { code:'CADRE', nom:'Cadres & tableaux', mots:['cadre','tableau','multicouche','sous verre','sous-verre','passe partout','poster'] },
+  { code:'TROPHEE', nom:'Trophées & médailles', mots:['trophee','trophe','tropee','trophhe','medaille','coupe','pins','recompense','statuette'] },
+  { code:'MONTRE', nom:'Montres', mots:['montre','ontre'] },
+  { code:'PORTE_CLE', nom:'Porte-clés', mots:['porte cle','porte-cle','portecle','porte c '] },
+  { code:'OBJET_PUB', nom:'Mugs, gourdes & objets', mots:['mug','gourde','tasse','bouteille','thermos','verre','bol','briquet','cendrier','tapis de souris','cle usb','power bank','parapluie','eventail','decapsuleur','chope','cup ','cup gasy','tapis souris','stanley','jeton','mouchoir','echiquier','toupie'] },
+  { code:'TEXTILE', nom:'Textile & broderie', mots:['t shirt','t-shirt','tshirt','tee shirt','tee-shirt','polo','sweat','capuche','casquette','tote bag','totebag','tablier','gilet','chasuble','echarpe','bonnet','broderie','borderie','textile','uniforme','blouse','maillot','pantalon','chaussette','pochon','tool pouch','ceinture'] },
+  { code:'STYLO', nom:'Stylos & écriture', mots:['stylo','crayon','feutre','marqueur'] },
+  { code:'EMBALLAGE', nom:'Coffrets, boîtes & emballages', mots:['coffret','boite','sachet','panier','pochette','emballage','carton','bonboniere','bonbonniere','tube a epice','tube','corbeille','malette','mallette','sac '] },
+  { code:'URNE', nom:'Urnes', mots:['urne'] },
+  { code:'LIVRE_OR', nom:"Livres d'or", mots:['livre d or','livre dor','livbre d or','guest book','wedding book'] },
+  { code:'DECO', nom:'Déco & mobilier', mots:['deco','decoration','mural','murale','etagere','luisette','dock','presentoir','pose livre','porte serviette','horloge','lampe','veilleuse','miroir','range','porte photo','photophore','arche','chevalet','socle','support','pied','entretoise','magnet','aimant','luminaire','porte nom','porte document','porte addition','porte bague','porte alliance','porte mouchoir','porte manteau','porte papier','porte manette','porte telephone','porte gaciere','porte bouteille','porte boucle','porte gateau','plateau','sous plat','sous-plat','abat jour','centre de table','figurine','arbre','noeud en bois','tete de zebu','caketopper','cake topper','accroche porte','pack toilette','pack accessoire','vide poche','avion'] },
+  { code:'FUNERAIRE', nom:'Croix & funéraire', mots:['croix','stele','plaque funeraire','couronne'] },
+  { code:'GRAND_FORMAT', nom:'Bâches, oriflammes & stands', mots:['bache','oriflamme','drapeau','banderole','roll up','rollup','kakemono','photobooth','photo booth','stand','parasol','tente','backdrop','arriere plan','banniere','plv'] },
+  { code:'PRESTATION', nom:'Prestations & options', mots:['conception','graphisme','maquette','bat','gravure','decoupe','pose','installation','deplacement','transport','livraison','frais','rajout','supplement','retouche','echantillon','main d oeuvre','montage','demontage','reparation','acompte','avance','remise','service','vernissage','pelliculage','plastification','laminage','faconnage','desinstallation','prise de mesure','rectif','express','logo avec led'] },
+  // Repli de fin de liste : « Carte FRANCINE », « Carte rond »… des cartes
+  // imprimées nominatives, trop nombreuses pour rester en « Autres ».
+  { code:'CARTE_DIVERSE', nom:'Cartes & badges nominatifs', mots:['carte'] },
+];
+const _CAT_AUTRE = { code:'AUTRE', nom:'Autres articles' };
+
+const _CAT_MATIERES = [
+  { code:'BOIS_MASSIF', nom:'Bois massif', mots:['bois massif','massif'] },
+  { code:'BOIS', nom:'Bois', mots:['bois','mdf','contreplaque','ctp','bambou'] },
+  { code:'PLEXI', nom:'Plexi / acrylique', mots:['plexi','plexis','acrylique','acryique','pmma'] },
+  { code:'METAL', nom:'Métal', mots:['metal','inox','laiton','aluminium','alu '] },
+  { code:'ALUCOBOND', nom:'Alucobond', mots:['alucobond','alucobon'] },
+  { code:'PVC', nom:'PVC', mots:['pvc','forex'] },
+  { code:'PAPIER', nom:'Papier / carton', mots:['ppb','pcb','pcm','bristol','couche','offset','papier','antemoro','carton'] },
+  { code:'VINYLE', nom:'Vinyle / adhésif', mots:['vinyle','vynile','adhesif','autocollant','one way','givre'] },
+  { code:'TISSU', nom:'Tissu', mots:['coton','polyester','tissu','jersey','grs','gr '] },
+  { code:'CUIR', nom:'Cuir', mots:['cuir','simili'] },
+  { code:'VERRE', nom:'Verre / céramique', mots:['verre','ceramique','porcelaine'] },
+];
+
+const _CAT_OPTIONS = [
+  { code:'LED', nom:'LED / lumineux', mots:['led','lumineu','flash','neon','retroeclair'] },
+  { code:'TROIS_D', nom:'Relief 3D', mots:['3d','relief','multicouche','superpose'] },
+  { code:'GRAVURE', nom:'Gravure', mots:['gravure','grave','gravee'] },
+  { code:'RECTO_VERSO', nom:'Recto-verso', mots:['recto verso','r/v','recto-verso'] },
+  { code:'PERSONNALISE', nom:'Personnalisé', mots:['personnalis','perso ','sur mesure'] },
+];
+
+// Un mot-clé compte s'il commence un mot : « trophee » attrape « trophees »,
+// « map mada » attrape « map madagascar », mais « cle » n'attrape pas « boucle ».
+const _catContient = (k, mot) => (' ' + k).indexOf(' ' + _catCle(mot)) !== -1;
+
+function _catFamille(nom) {
+  const k = _catCle(nom);
+  for (const f of _CAT_FAMILLES) if (f.mots.some(m => _catContient(k, m))) return f;
+  return _CAT_AUTRE;
+}
+
+function _catTrouveTous(liste, txt) {
+  const k = _catCle(txt);
+  return liste.filter(e => e.mots.some(m => _catContient(k, m))).map(e => e.nom);
+}
+
+/**
+ * Nom de MODÈLE : le libellé débarrassé de ce qui n'identifie pas l'article
+ * (dimensions, quantités, extensions de fichier), puis mis au singulier.
+ * Deux saisies du même produit doivent tomber dessus.
+ */
+function _catModele(nom) {
+  let k = _catCle(nom)
+    .replace(/\d+(?:[.,]\d+)?\s*(?:mm|cm|m)?\s*[x*]\s*\d+(?:[.,]\d+)?\s*(?:mm|cm|m)?(?:\s*[x*]\s*\d+(?:[.,]\d+)?\s*(?:mm|cm|m)?)?/g, ' ')
+    .replace(/\d+(?:[.,]\d+)?\s*(?:mm|cm|m2|m)\b/g, ' ')
+    .replace(/\b\d+\s*(?:grs?|gr|g)\b/g, ' ')
+    .replace(/\bdimension[s]?\b|\bdimenssion\b|\bformat\b|\bsuperficie\b|\bhauteur\b|\blargeur\b|\blongueur\b|\bdiametre\b|\bepaisseur\b/g, ' ')
+    .replace(/\b\d+\s*(?:pcs?|pces?|pieces?|ex|pages?|lot|unites?)\b/g, ' ')
+    .replace(/\b(?:ai|rar|zip|pdf|cdr|psd|jpg|png)\b/g, ' ')
+    .replace(/\b\d{2,}\b/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+  k = k.split(' ').map(w => {
+    if (w.length > 5 && /aux$/.test(w)) return w.slice(0, -3) + 'au';
+    if (w.length > 4 && /s$/.test(w) && !/ss$/.test(w)) return w.slice(0, -1);
+    return w;
+  }).join(' ');
+  return k || _catCle(nom);
+}
+
+/* ---------- statistiques de prix ---------- */
+
+function _catMediane(a) {
+  if (!a.length) return null;
+  const s = a.slice().sort((x, y) => x - y);
+  const i = Math.floor(s.length / 2);
+  return s.length % 2 ? s[i] : Math.round((s[i - 1] + s[i]) / 2);
+}
+
+function _catStatsPrix(prix) {
+  if (!prix.length) return null;
+  const freq = new Map();
+  prix.forEach(p => freq.set(p, (freq.get(p) || 0) + 1));
+  let mode = null, nMode = 0;
+  for (const [p, c] of freq) if (c > nMode || (c === nMode && mode != null && p > mode)) { mode = p; nMode = c; }
+  const part = nMode / prix.length;
+  // Prix de référence : le prix le plus pratiqué s'il domine vraiment
+  // (≥ 35 % des lignes), sinon la médiane — moins sensible aux gros chantiers.
+  const domine = part >= 0.35 && nMode >= 2;
+  return {
+    n: prix.length,
+    min: Math.min.apply(null, prix),
+    max: Math.max.apply(null, prix),
+    median: _catMediane(prix),
+    ref: domine ? mode : _catMediane(prix),
+    refSrc: domine ? 'mode' : 'med',
+  };
+}
+
+/* ---------- collecte des lignes ---------- */
+
+const _CAT_RE_TEST = /^(?:test\d*|testhist|essai\d*|aaa+|xxx+)$/i;
+
+function _catDateIso(v) {
+  const s = String(v || '').trim();
+  let m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (m) return m[1] + '-' + m[2] + '-' + m[3];
+  m = /^(\d{2})\/(\d{2})\/(\d{4})/.exec(s);          // ventes : « 27/11/2026 »
+  if (m) return m[3] + '-' + m[2] + '-' + m[1];
+  const d = new Date(s);
+  return isNaN(d) ? '' : d.toISOString().slice(0, 10);
+}
+
+const _CAT_MOTS_VIDES = new Set(['avec','sans','pour','des','les','une','par','sur','aux','plus',
+  'personnalise','personnalisee','perso','bois','noir','blanc','rouge','bleu','dore','led',
+  'grand','petit','simple','mada','madagascar','logo','nom','couleur','format','dimension']);
+
+/**
+ * Mesure d'une ligne : le nom d'abord, puis la personnalisation, puis les notes
+ * de la commande. Une note couvre TOUTE la commande, on ne s'en sert donc que
+ * si l'attribution à cet article-là n'est pas douteuse : commande à un seul
+ * article, ou ligne de note qui cite un mot du nom de l'article.
+ */
+function _catMesureLigne(item, cmd) {
+  const direct = _catMesure(item.name);
+  if (_catMesureUtile(direct)) return { m: direct, src: 'nom' };
+  if (item.perso) {
+    const mp = _catMesure(item.perso);
+    if (_catMesureUtile(mp)) return { m: mp, src: 'perso' };
+  }
+  const notes = String((cmd && cmd.notes) || '') + '\n' + String((cmd && cmd.remarque) || '');
+  if (!notes.trim()) return { m: direct || null, src: direct ? 'nom' : null };
+  const lignes = notes.split(/[\n;]+/).map(s => s.trim()).filter(Boolean);
+  const nbItems = (cmd && cmd.items ? cmd.items.length : 1);
+  if (nbItems === 1) {
+    for (const l of lignes) {
+      const mm = _catMesure(l);
+      if (_catMesureUtile(mm)) return { m: mm, src: 'notes' };
+    }
+  } else {
+    const mots = _catCle(item.name).split(' ').filter(w => w.length >= 4 && !_CAT_MOTS_VIDES.has(w));
+    for (const l of lignes) {
+      const kl = _catCle(l);
+      if (!mots.some(w => kl.indexOf(w) !== -1)) continue;
+      const mm = _catMesure(l);
+      if (_catMesureUtile(mm)) return { m: mm, src: 'notes' };
+    }
+  }
+  return { m: direct || null, src: direct ? 'nom' : null };
+}
+
+function _catObservations() {
+  const obs = [];
+  (sales || []).forEach(v => (v.items || []).forEach(it => {
+    const nom = String(it.name || '').trim();
+    if (!nom || _CAT_RE_TEST.test(nom)) return;
+    obs.push({ src:'vente', date:_catDateIso(v.date), nom,
+      qty:Number(it.qty) || 1, prix:Number(it.price) || 0,
+      client:v.clientName || '', annule:false, mes:_catMesureLigne(it, null) });
+  }));
+
+  (typeof commandes !== 'undefined' ? commandes : []).forEach(c => (c.items || []).forEach(it => {
+    const nom = String(it.name || '').trim();
+    if (!nom || _CAT_RE_TEST.test(nom)) return;
+    const qty = Number(it.qty) || 1;
+    let prix = Number(it.price) || 0;
+    // Quelques commandes portent le sous-total sans prix de ligne. Quand il n'y
+    // a QU'UN article, le prix unitaire se déduit sans ambiguïté ; sinon la
+    // ligne reste à 0 et sort des statistiques.
+    if (prix <= 0 && (c.items || []).length === 1 && Number(c.subtotal) > 0) {
+      prix = Math.round(Number(c.subtotal) / qty);
+    }
+    obs.push({ src:'commande', date:_catDateIso(c.date), nom, qty, prix,
+      client:c.clientName || '',
+      annule:String(c.status || '').toLowerCase() === 'cancelled',
+      mes:_catMesureLigne(it, c) });
+  }));
+
+  (reservations || []).forEach(r => {
+    const nom = String(r.article || r.item || '').trim();
+    if (!nom || _CAT_RE_TEST.test(nom)) return;
+    obs.push({ src:'reservation', date:_catDateIso(r.date), nom,
+      qty:Number(r.qty || r.quantite) || 1,
+      prix:Number(r.price || r.prixUnitaire) || 0,
+      client:r.clientName || r.client || '',
+      annule:/annul/i.test(String(r.statut || r.status || '')),
+      mes:_catMesureLigne({ name: nom }, null) });
+  });
+
+  return obs;
+}
+
+/* ---------- agrégation ---------- */
+
+function _catCleMesure(m) {
+  if (!m) return '';
+  if (m.dims) return 'd:' + m.dims.join('x');
+  if (m.diametre != null) return 'o:' + m.diametre;
+  if (m.hauteur != null || m.largeur != null || m.longueur != null) return 'h:' + [m.longueur, m.largeur, m.hauteur].join('/');
+  if (m.coteCm != null) return 'c:' + m.coteCm;
+  if (m.surfaceDeclareeM2 != null) return 's:' + m.surfaceDeclareeM2;
+  if (m.format) return 'f:' + m.format;
+  return '';
+}
+
+function _catNouvelle(champs) {
+  return Object.assign({ lignes:0, qte:0, ca:0, prix:[], libelles:new Map(), dates:[],
+    mesures:new Map(), matieres:new Map(), options:new Map(), clients:new Set(),
+    annulees:0, offertes:0 }, champs);
+}
+
+function _catAjoute(e, o) {
+  e.lignes++;
+  e.qte += o.qty;
+  if (o.annule) { e.annulees++; return; }    // tracé, mais hors statistiques
+  e.ca += o.prix * o.qty;
+  if (o.prix > 0) e.prix.push(o.prix); else e.offertes++;
+  e.libelles.set(o.nom, (e.libelles.get(o.nom) || 0) + 1);
+  if (o.date) e.dates.push(o.date);
+  if (o.client) e.clients.add(o.client);
+  _catTrouveTous(_CAT_MATIERES, o.nom).forEach(n => e.matieres.set(n, (e.matieres.get(n) || 0) + 1));
+  _catTrouveTous(_CAT_OPTIONS, o.nom).forEach(n => e.options.set(n, (e.options.get(n) || 0) + 1));
+
+  const m = o.mes && o.mes.m;
+  const k = _catCleMesure(m);
+  if (!k) return;
+  let mm = e.mesures.get(k);
+  if (!mm) {
+    mm = { libelle:_catLibelleMesure(m), surfaceM2:m.surfaceM2 || null,
+           prix:[], lignes:0, src:o.mes.src };
+    e.mesures.set(k, mm);
+  }
+  mm.lignes++;
+  if (o.prix > 0) mm.prix.push(o.prix);
+}
+
+function _catTop(map, n) {
+  return [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, n).map(([k]) => k);
+}
+
+function _catFinalise(e) {
+  const mesures = [...e.mesures.values()].map(m => {
+    const st = _catStatsPrix(m.prix);
+    const o = { libelle:m.libelle, lignes:m.lignes, src:m.src, surfaceM2:m.surfaceM2, prix:st };
+    // Ar/m² : seulement sur les pièces assez grandes pour que le prix suive la
+    // surface. Un trophée de 20 × 15 cm donnerait 7 000 000 Ar/m², ce qui n'a
+    // aucun sens comme tarif.
+    if (st && m.surfaceM2 >= 0.05) o.arM2 = Math.round(st.ref / m.surfaceM2);
+    return o;
+  }).sort((a, b) => b.lignes - a.lignes);
+  const dates = e.dates.slice().sort();
+  const grands = mesures.filter(m => m.arM2 > 0 && m.surfaceM2 >= 0.25);
+  return {
+    nom:e.nom, famille:e.famille, familleNom:e.familleNom,
+    lignes:e.lignes, qte:e.qte, ca:e.ca, annulees:e.annulees, offertes:e.offertes,
+    clients:e.clients.size,
+    premiere:dates[0] || '', derniere:dates[dates.length - 1] || '',
+    prix:_catStatsPrix(e.prix),
+    libelle:(_catTop(e.libelles, 1)[0]) || e.nom,
+    alt:_catTop(e.libelles, 4).slice(1),
+    matieres:_catTop(e.matieres, 3), options:_catTop(e.options, 3),
+    mesures,
+    arM2Median: grands.length >= 3 ? _catMediane(grands.map(m => m.arM2)) : null,
+  };
+}
+
+let _catCache = null;
+
+/** Recalcule le catalogue, ou rend celui déjà calculé si rien n'a bougé. */
+function _catData(force) {
+  const sig = [(sales || []).length,
+               (typeof commandes !== 'undefined' ? commandes : []).length,
+               (reservations || []).length,
+               (products || []).length].join('|');
+  if (!force && _catCache && _catCache.sig === sig) return _catCache.data;
+
+  const obs = _catObservations();
+  const parFam = new Map(), parMod = new Map();
+  obs.forEach(o => {
+    const f = _catFamille(o.nom);
+    if (!parFam.has(f.code)) parFam.set(f.code, _catNouvelle({ nom:f.nom, famille:f.code, familleNom:f.nom }));
+    _catAjoute(parFam.get(f.code), o);
+    const km = f.code + '|' + (_catModele(o.nom) || _catCle(o.nom));
+    if (!parMod.has(km)) parMod.set(km, _catNouvelle({ nom:_catModele(o.nom), famille:f.code, familleNom:f.nom }));
+    _catAjoute(parMod.get(km), o);
+  });
+
+  const familles = [...parFam.values()].map(_catFinalise).sort((a, b) => b.lignes - a.lignes);
+  const articles = [...parMod.values()].map(_catFinalise)
+    .sort((a, b) => b.lignes - a.lignes || b.ca - a.ca);
+  articles.forEach((a, i) => { a.id = 'a' + i; });
+
+  const avecMes = obs.filter(o => o.mes && _catMesureUtile(o.mes.m));
+  const srcCount = {};
+  avecMes.forEach(o => { srcCount[o.mes.src] = (srcCount[o.mes.src] || 0) + 1; });
+  const dates = obs.map(o => o.date).filter(Boolean).sort();
+
+  const data = {
+    familles, articles,
+    perimetre: {
+      lignes:obs.length,
+      libelles:new Set(obs.map(o => o.nom)).size,
+      ventes:(sales || []).length,
+      commandes:(typeof commandes !== 'undefined' ? commandes : []).length,
+      reservations:(reservations || []).length,
+      annulees:obs.filter(o => o.annule).length,
+      offertes:obs.filter(o => !o.annule && o.prix <= 0).length,
+      mesurees:avecMes.length, parSource:srcCount,
+      debut:dates[0] || '', fin:dates[dates.length - 1] || '',
+    },
+  };
+  _catCache = { sig, data };
+  return data;
+}
+
+/* ---------- état de l'écran ---------- */
+
+let _catFam = '';                  // code famille filtrée, '' = toutes
+let _catOuverts = new Set();       // articles dépliés
+let _catVue = 'articles';          // articles | grilles | fiches
+
+function _catFmt(n) {
+  const v = Number(n);
+  return isNaN(v) ? '—' : v.toLocaleString('fr-MG');
+}
+const _catAr = n => (n == null || isNaN(Number(n))) ? '—' : _catFmt(Math.round(n)) + ' Ar';
+const _catJour = s => {
+  if (!s) return '—';
+  const p = String(s).split('-');
+  return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : s;
+};
+
+function setCatalogueVue(v) {
+  _catVue = v;
+  renderCatalogue();
+}
+
+function catSetFamille(code) {
+  _catFam = (_catFam === code) ? '' : code;
+  renderCatalogue();
+}
+
+function catToggleArticle(id) {
+  if (_catOuverts.has(id)) _catOuverts.delete(id); else _catOuverts.add(id);
+  renderCatalogue();
+}
+
+function catRecalculer() {
+  _catCache = null;
+  renderCatalogue();
+  showToast('Catalogue recalculé', 'success');
+}
+
+/* ---------- rendu ---------- */
+
+function renderCatalogue() {
+  const kpisEl = document.getElementById('catKpis');
+  if (!kpisEl) return;
+  const d = _catData();
+  const p = d.perimetre;
+
+  const kpi = (val, label, sous, color) => `
+    <div style="flex:1;min-width:148px;background:var(--surface);border:1px solid var(--color-border);border-radius:12px;padding:12px 14px">
+      <div style="font-size:22px;font-weight:800;color:${color || 'var(--text)'};line-height:1">${val}</div>
+      <div style="font-size:11.5px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:.03em">${label}</div>
+      ${sous ? `<div style="font-size:11px;color:var(--muted);opacity:.75;margin-top:2px">${sous}</div>` : ''}
+    </div>`;
+  const pctMes = p.lignes ? Math.round(p.mesurees / p.lignes * 100) : 0;
+  kpisEl.innerHTML =
+    kpi(_catFmt(d.articles.filter(a => a.lignes >= 2).length), 'Articles au catalogue',
+        `sur ${_catFmt(d.articles.length)} libellés regroupés`, 'var(--accent)') +
+    kpi(_catFmt(p.lignes), "Lignes analysées",
+        `${_catFmt(p.ventes)} ventes · ${_catFmt(p.commandes)} commandes`) +
+    kpi(pctMes + ' %', 'Lignes mesurées', `${_catFmt(p.mesurees)} dimensions lisibles`,
+        pctMes < 40 ? '#d97706' : 'var(--text)') +
+    kpi(_catFmt(d.familles.length), 'Familles', `${_catJour(p.debut)} → ${_catJour(p.fin)}`);
+
+  // Puces de familles : le compteur dit tout de suite où est le volume.
+  const chipsEl = document.getElementById('catChips');
+  if (chipsEl) {
+    const chip = (code, nom, n, actif) => `
+      <button onclick="catSetFamille('${code}')" style="border:1px solid ${actif ? 'var(--accent)' : 'var(--color-border)'};
+        background:${actif ? 'var(--accent)' : 'var(--surface)'};color:${actif ? '#fff' : 'var(--muted)'};
+        border-radius:999px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;gap:6px;align-items:center">
+        ${escapeHtml(nom)}<span style="opacity:.65;font-weight:700">${n}</span></button>`;
+    chipsEl.innerHTML =
+      `<button onclick="catSetFamille('')" style="border:1px solid ${!_catFam ? 'var(--accent)' : 'var(--color-border)'};
+        background:${!_catFam ? 'var(--accent)' : 'var(--surface)'};color:${!_catFam ? '#fff' : 'var(--muted)'};
+        border-radius:999px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer">Toutes</button>` +
+      d.familles.map(f => chip(f.famille, f.familleNom, f.lignes, _catFam === f.famille)).join('');
+  }
+
+  // Onglets
+  ['articles', 'grilles', 'fiches'].forEach(v => {
+    const b = document.getElementById('catTab-' + v);
+    if (!b) return;
+    const on = _catVue === v;
+    b.style.background = on ? 'var(--accent)' : 'transparent';
+    b.style.color = on ? '#fff' : 'var(--muted)';
+  });
+
+  const wrap = document.getElementById('catContenu');
+  if (!wrap) return;
+  if (_catVue === 'grilles')      wrap.innerHTML = _catGrillesHtml(d);
+  else if (_catVue === 'fiches')  wrap.innerHTML = _catFichesHtml(d);
+  else                            wrap.innerHTML = _catArticlesHtml(d);
+
+  const meth = document.getElementById('catMethode');
+  if (meth) meth.innerHTML = _catMethodeHtml(p);
+}
+
+function _catFiltres(d) {
+  const q = _catNorm(document.getElementById('catFilter')?.value || '');
+  const recurrents = document.getElementById('catRecurrents')?.checked;
+  const avecMes = document.getElementById('catMesuresOnly')?.checked;
+  const tri = document.getElementById('catTri')?.value || 'lignes';
+  let list = d.articles.filter(a => {
+    if (_catFam && a.famille !== _catFam) return false;
+    if (recurrents && a.lignes < 2) return false;
+    if (avecMes && !a.mesures.length) return false;
+    if (!q) return true;
+    const foin = _catNorm([a.libelle, a.familleNom, a.alt.join(' '), a.matieres.join(' '),
+                           a.options.join(' '), a.mesures.map(m => m.libelle).join(' ')].join(' '));
+    return q.split(' ').every(mot => foin.indexOf(mot) !== -1);
+  });
+  const cmp = {
+    lignes:  (a, b) => b.lignes - a.lignes || b.ca - a.ca,
+    prix:    (a, b) => (b.prix ? b.prix.ref : -1) - (a.prix ? a.prix.ref : -1),
+    prixAsc: (a, b) => (a.prix ? a.prix.ref : Infinity) - (b.prix ? b.prix.ref : Infinity),
+    ca:      (a, b) => b.ca - a.ca,
+    mesures: (a, b) => b.mesures.length - a.mesures.length || b.lignes - a.lignes,
+    nom:     (a, b) => String(a.libelle).localeCompare(String(b.libelle), 'fr'),
+  }[tri] || ((a, b) => b.lignes - a.lignes);
+  return list.sort(cmp);
+}
+
+function _catVide(titre, sous) {
+  return `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 24px;text-align:center">
+    <div style="width:48px;height:48px;background:var(--surface2);border-radius:13px;display:flex;align-items:center;justify-content:center;margin-bottom:12px">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 9.4 7.5 4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+    </div>
+    <p style="font-size:13.5px;font-weight:600;color:var(--muted);margin:0">${titre}</p>
+    <p style="font-size:12px;color:var(--muted);opacity:.8;margin:4px 0 0">${sous}</p>
+  </div>`;
+}
+
+function _catBadgeRef(prix) {
+  if (!prix) return '';
+  return prix.refSrc === 'mode'
+    ? `<span title="Prix le plus souvent pratiqué" style="background:#dcfce7;color:#15803d;border-radius:999px;padding:1px 8px;font-size:10.5px;font-weight:600">le plus pratiqué</span>`
+    : `<span title="Médiane des prix relevés" style="background:#fef3c7;color:#b45309;border-radius:999px;padding:1px 8px;font-size:10.5px;font-weight:600">médiane</span>`;
+}
+
+function _catArticlesHtml(d) {
+  const list = _catFiltres(d);
+  if (!list.length) return _catVide('Aucun article ne correspond', 'Élargissez la recherche ou retirez les filtres.');
+  const MAX = 250;
+  const vus = list.slice(0, MAX);
+
+  const lignes = vus.map(a => {
+    const ouvert = _catOuverts.has(a.id);
+    const p = a.prix;
+    const tags = a.mesures.slice(0, 3).map(m =>
+      `<span style="font-size:10.5px;background:var(--surface2);border:1px solid var(--color-border);border-radius:6px;padding:1px 6px;white-space:nowrap">${escapeHtml(m.libelle)}</span>`).join(' ') +
+      (a.mesures.length > 3 ? ` <span style="font-size:10.5px;color:var(--muted)">+${a.mesures.length - 3}</span>` : '');
+    return `
+      <tr onclick="catToggleArticle('${a.id}')" style="cursor:pointer;border-top:1px solid var(--color-border);${ouvert ? 'background:#e8f4f0' : ''}">
+        <td style="padding:10px 12px">
+          <div style="font-weight:600;font-size:13px">${escapeHtml(a.libelle)}</div>
+          ${a.alt.length ? `<div style="font-size:11px;color:var(--muted);margin-top:1px">aussi saisi : ${escapeHtml(a.alt.slice(0, 2).join(' · '))}</div>` : ''}
+        </td>
+        <td style="padding:10px 12px"><span style="background:#e8f4f0;color:#1a4a3a;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:600;white-space:nowrap">${escapeHtml(a.familleNom)}</span></td>
+        <td style="padding:10px 12px;text-align:right;white-space:nowrap">
+          <div style="font-weight:800;font-size:13.5px">${_catAr(p && p.ref)}</div>
+          <div style="margin-top:2px">${_catBadgeRef(p)}</div>
+        </td>
+        <td style="padding:10px 12px;text-align:right;white-space:nowrap;font-size:12px;color:var(--muted)">
+          ${p ? _catFmt(p.min) + ' – ' + _catFmt(p.max) : '—'}
+          <div style="font-size:11px;opacity:.8">${p ? p.n + (p.n > 1 ? ' prix relevés' : ' prix relevé') : ''}</div>
+        </td>
+        <td class="cat-col-opt" style="padding:10px 12px;text-align:right;font-size:12.5px">${_catFmt(a.qte)}</td>
+        <td style="padding:10px 12px">${a.mesures.length ? tags : `<span style="font-size:11.5px;color:var(--muted);opacity:.75">aucune dimension saisie</span>`}</td>
+        <td class="cat-col-opt" style="padding:10px 12px;text-align:right;font-size:12.5px">${_catFmt(a.ca)}</td>
+      </tr>
+      ${ouvert ? `<tr><td colspan="7" style="padding:0 12px 14px;background:var(--surface2)">${_catDetailHtml(a)}</td></tr>` : ''}`;
+  }).join('');
+
+  const pied = list.length > MAX
+    ? `${MAX} articles affichés sur ${_catFmt(list.length)} — affinez la recherche pour voir les suivants`
+    : `${_catFmt(list.length)} article${list.length > 1 ? 's' : ''} affiché${list.length > 1 ? 's' : ''}`;
+
+  return `
+    <div style="background:var(--surface);border:1px solid var(--color-border);border-radius:12px;overflow:hidden">
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;min-width:720px">
+          <thead><tr style="background:var(--surface2)">
+            ${['Article','Famille','Prix de référence','Fourchette','Vendus','Mesures observées','CA'].map((h, i) =>
+              `<th class="${i === 4 || i === 6 ? 'cat-col-opt' : ''}" style="text-align:${i >= 2 && i !== 5 ? 'right' : 'left'};padding:9px 12px;font-size:10.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">${h}</th>`).join('')}
+          </tr></thead>
+          <tbody>${lignes}</tbody>
+        </table>
+      </div>
+      <div style="padding:10px 14px;border-top:1px solid var(--color-border);font-size:11.5px;color:var(--muted)">${pied}</div>
+    </div>`;
+}
+
+function _catDetailHtml(a) {
+  const mes = a.mesures.length ? `
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;min-width:560px">
+        <thead><tr>
+          ${['Mesure','Relevés','Prix de référence','Fourchette','Surface','Ar / m²','Lue dans'].map((h, i) =>
+            `<th style="text-align:${i >= 1 && i <= 5 ? 'right' : 'left'};padding:6px 10px;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">${h}</th>`).join('')}
+        </tr></thead>
+        <tbody>${a.mesures.map(m => `
+          <tr style="border-top:1px solid var(--color-border)">
+            <td style="padding:6px 10px;font-size:12.5px;font-weight:600">${escapeHtml(m.libelle)}</td>
+            <td style="padding:6px 10px;font-size:12.5px;text-align:right">${m.lignes}</td>
+            <td style="padding:6px 10px;font-size:12.5px;text-align:right;font-weight:700">${_catAr(m.prix && m.prix.ref)}</td>
+            <td style="padding:6px 10px;font-size:12px;text-align:right;color:var(--muted)">${m.prix ? _catFmt(m.prix.min) + ' – ' + _catFmt(m.prix.max) : '—'}</td>
+            <td style="padding:6px 10px;font-size:12px;text-align:right">${m.surfaceM2 ? String(m.surfaceM2.toFixed(2)).replace('.', ',') + ' m²' : '—'}</td>
+            <td style="padding:6px 10px;font-size:12px;text-align:right">${m.arM2 ? _catFmt(m.arM2) : '—'}</td>
+            <td style="padding:6px 10px;font-size:11.5px;color:var(--muted)">${escapeHtml({ nom:"nom de l'article", perso:'personnalisation', notes:'notes de commande' }[m.src] || '—')}</td>
+          </tr>`).join('')}</tbody>
+      </table>
+    </div>`
+    : `<p style="margin:0;font-size:12.5px;color:var(--muted)">Aucune dimension saisie pour cet article : ni dans son nom, ni dans la personnalisation, ni dans les notes de commande.</p>`;
+
+  const meta = [
+    ['Première vente', _catJour(a.premiere)],
+    ['Dernière vente', _catJour(a.derniere)],
+    ['Prix moyen pondéré', a.qte ? _catAr(a.ca / a.qte) : '—'],
+    a.clients ? ['Clients distincts', _catFmt(a.clients)] : null,
+    a.matieres.length ? ['Matières', a.matieres.join(', ')] : null,
+    a.options.length ? ['Options', a.options.join(', ')] : null,
+    a.offertes ? ['Lignes à 0 Ar', _catFmt(a.offertes)] : null,
+    a.annulees ? ['Lignes annulées', _catFmt(a.annulees)] : null,
+  ].filter(Boolean).map(([k, v]) =>
+    `<span><b style="color:var(--text);font-weight:700">${escapeHtml(k)}</b> ${escapeHtml(String(v))}</span>`).join('');
+
+  return `<div style="padding-top:10px">
+    <div style="font-size:10.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px">Mesures relevées et prix correspondants</div>
+    ${mes}
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:11.5px;color:var(--muted)">${meta}</div>
+  </div>`;
+}
+
+function _catGrillesHtml(d) {
+  const fams = d.familles
+    .filter(f => (!_catFam || f.famille === _catFam) && f.mesures.filter(m => m.prix).length >= 3);
+  if (!fams.length) return _catVide('Aucune grille de mesures',
+    'Il faut au moins trois dimensions tarifées dans une famille pour en tracer une.');
+
+  return `<div style="display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(290px,1fr))">` +
+    fams.map(f => {
+      const mes = f.mesures.filter(m => m.prix).sort((a, b) => b.prix.ref - a.prix.ref).slice(0, 10);
+      const top = Math.max.apply(null, mes.map(m => m.prix.ref));
+      return `<div style="background:var(--surface);border:1px solid var(--color-border);border-radius:12px;overflow:hidden;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 13px;background:var(--surface2);border-bottom:1px solid var(--color-border)">
+          <div style="font-size:13px;font-weight:700">${escapeHtml(f.familleNom)}</div>
+          ${f.arM2Median ? `<div style="margin-left:auto;font-size:11.5px;font-weight:700;color:var(--accent2);white-space:nowrap">${_catFmt(f.arM2Median)} Ar/m²</div>` : ''}
+        </div>
+        <div style="padding:4px 13px 12px">${mes.map(m => `
+          <div style="padding:7px 0;border-bottom:1px solid var(--color-border)">
+            <div style="display:flex;justify-content:space-between;gap:10px">
+              <span style="font-size:12.5px">${escapeHtml(m.libelle)}</span>
+              <span style="font-size:12.5px;font-weight:700;white-space:nowrap">${_catAr(m.prix.ref)}</span>
+            </div>
+            <div style="height:4px;border-radius:2px;background:var(--surface2);margin:4px 0 3px;overflow:hidden">
+              <div style="height:100%;width:${Math.max(3, Math.round(m.prix.ref / top * 100))}%;background:var(--accent2);border-radius:2px"></div>
+            </div>
+            <div style="font-size:10.5px;color:var(--muted)">${m.lignes} relevé${m.lignes > 1 ? 's' : ''} · ${_catFmt(m.prix.min)} – ${_catFmt(m.prix.max)} Ar${m.arM2 ? ' · ' + _catFmt(m.arM2) + ' Ar/m²' : ''}</div>
+          </div>`).join('')}</div>
+      </div>`;
+    }).join('') + `</div>`;
+}
+
+function _catFichesHtml(d) {
+  const fiches = (products || []).filter(p => !_CAT_RE_TEST.test(String(p.name || '').trim()));
+  if (!fiches.length) return _catVide('Aucune fiche produit', 'La feuille Produits est vide.');
+
+  const lignes = fiches.map(fi => {
+    const fam = _catFamille(fi.name);
+    if (_catFam && fam.code !== _catFam) return '';
+    const mes = _catMesure(fi.name);
+    // Prix pratiqué : l'article du catalogue dont le nom est contenu dans la fiche,
+    // sinon le plus vendu de la même famille.
+    const cand = d.articles.filter(a => a.famille === fam.code && a.prix);
+    const cible = _catCle(fi.name);
+    const exact = cand.find(a => a.nom && cible.indexOf(a.nom) !== -1);
+    const prat = exact || cand[0] || null;
+    const pv = Number(fi.price) || 0;
+    const ecart = (prat && pv) ? prat.prix.ref - pv : null;
+    const coul = ecart == null ? 'var(--muted)' : (ecart > 0 ? '#15803d' : (ecart < 0 ? '#b45309' : 'var(--muted)'));
+    return `<tr style="border-top:1px solid var(--color-border)">
+      <td style="padding:9px 12px">
+        <div style="font-weight:600;font-size:13px">${escapeHtml(fi.name || '')}</div>
+        ${_catMesureUtile(mes) ? `<div style="font-size:11px;color:var(--muted)">${escapeHtml(mes.libelle)}</div>` : ''}
+      </td>
+      <td style="padding:9px 12px"><span style="background:#e8f4f0;color:#1a4a3a;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:600;white-space:nowrap">${escapeHtml(fam.nom)}</span></td>
+      <td style="padding:9px 12px;text-align:right;font-weight:700;white-space:nowrap">${_catAr(pv)}</td>
+      <td style="padding:9px 12px;text-align:right;white-space:nowrap">
+        ${prat ? _catAr(prat.prix.ref) + `<div style="font-size:10.5px;color:var(--muted)">${escapeHtml(prat.libelle)}</div>` : '—'}
+      </td>
+      <td style="padding:9px 12px;text-align:right;font-weight:700;color:${coul};white-space:nowrap">${ecart == null ? '—' : (ecart > 0 ? '+' : '') + _catFmt(ecart)}</td>
+      <td class="cat-col-opt" style="padding:9px 12px;text-align:right;white-space:nowrap">${fi.cost ? _catAr(fi.cost) : `<span style="color:var(--muted);font-size:11.5px">non saisi</span>`}</td>
+      <td class="cat-col-opt" style="padding:9px 12px;text-align:right;white-space:nowrap">${fi.cost ? _catAr(pv - Number(fi.cost)) : '—'}</td>
+      <td class="cat-col-opt" style="padding:9px 12px;text-align:right">${_catFmt(fi.stock || 0)}</td>
+    </tr>`;
+  }).join('');
+
+  if (!lignes.trim()) return _catVide('Aucune fiche dans cette famille', 'Choisissez une autre famille.');
+
+  return `<div style="background:var(--surface);border:1px solid var(--color-border);border-radius:12px;overflow:hidden">
+    <div style="padding:11px 14px;border-bottom:1px solid var(--color-border);font-size:12px;color:var(--muted)">
+      Les seules fiches tarifées de la base, confrontées au prix réellement pratiqué sur les mêmes articles.
+    </div>
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;min-width:720px">
+        <thead><tr style="background:var(--surface2)">
+          ${['Fiche','Famille','Prix fiche','Prix pratiqué','Écart','Prix d\'achat','Marge fiche','Stock'].map((h, i) =>
+            `<th class="${i >= 5 ? 'cat-col-opt' : ''}" style="text-align:${i >= 2 ? 'right' : 'left'};padding:9px 12px;font-size:10.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">${h}</th>`).join('')}
+        </tr></thead>
+        <tbody>${lignes}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function _catMethodeHtml(p) {
+  const s = p.parSource || {};
+  const pct = p.lignes ? Math.round(p.mesurees / p.lignes * 100) : 0;
+  return `
+    <details style="background:var(--surface);border:1px solid var(--color-border);border-radius:12px;padding:12px 14px">
+      <summary style="cursor:pointer;font-size:12.5px;font-weight:700;color:var(--text);list-style:none">
+        Comment ces prix sont calculés — et ce qu'ils ne disent pas
+      </summary>
+      <div style="font-size:12.5px;color:var(--muted);line-height:1.65;margin-top:10px">
+        <p style="margin:0 0 8px"><b style="color:var(--text)">Prix de référence</b> : le prix le plus
+        souvent pratiqué quand il couvre au moins 35 % des relevés, sinon la médiane. Les lignes à 0 Ar
+        (${_catFmt(p.offertes)}) et les lignes de commandes annulées (${_catFmt(p.annulees)}) sortent du calcul.</p>
+        <p style="margin:0 0 8px"><b style="color:var(--text)">Regroupement</b> : les ${_catFmt(p.libelles)}
+        libellés saisis sont mis au singulier, débarrassés des dimensions, des quantités et des extensions
+        de fichier, puis rangés par mots-clés. Un libellé mal orthographié rejoint quand même son article.</p>
+        <p style="margin:0 0 8px"><b style="color:var(--text)">Mesures</b> : ${_catFmt(p.mesurees)} lignes
+        (${pct} %) portent une dimension lisible, lue dans le nom de l'article (${_catFmt(s.nom || 0)}),
+        la personnalisation (${_catFmt(s.perso || 0)}) ou les notes de commande (${_catFmt(s.notes || 0)}).
+        Tout est ramené en centimètres : « 1m50*90cm » devient 150 × 90, « 50x8pcs » est écarté
+        (c'est une quantité).</p>
+        <p style="margin:0 0 8px"><b style="color:#b45309">Les ${100 - pct} % restants n'ont aucune
+        dimension saisie.</b> Une mesure absente ne veut pas dire que l'article n'en a pas : seulement
+        que personne ne l'a écrite. C'est ce qui s'améliore en notant la dimension à la commande.</p>
+        <p style="margin:0"><b style="color:var(--text)">Fourchettes larges</b> : un même nom recouvre
+        parfois deux produits (matière, finition, LED). Regardez toujours min–max avant de retenir un prix.
+        Le prix au m² n'est calculé qu'au-delà de 0,05 m² par pièce, et la valeur d'une famille demande
+        en plus trois pièces de plus de 0,25 m².</p>
+      </div>
+    </details>`;
+}
+
+/* ---------- export tableur ---------- */
+
+function _catCsvQ(v) {
+  const s = v == null ? '' : String(v);
+  return /[";\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function exportCatalogueCsv() {
+  const d = _catData();
+  const list = _catFiltres(d);
+  if (!list.length) return showToast('Rien à exporter avec ces filtres', 'error');
+  const L = [['Famille','Article','Lignes','Qte vendue','Prix de reference','Base du prix',
+              'Prix min','Prix max','Mesures observees','Matiere','Options','Ar/m2 median',
+              'CA','Clients','Premiere vente','Derniere vente'].map(_catCsvQ).join(';')];
+  list.forEach(a => {
+    L.push([a.familleNom, a.libelle, a.lignes, a.qte,
+      a.prix ? a.prix.ref : '', a.prix ? (a.prix.refSrc === 'mode' ? 'le plus pratique' : 'mediane') : '',
+      a.prix ? a.prix.min : '', a.prix ? a.prix.max : '',
+      a.mesures.slice(0, 6).map(m => m.libelle).join(' | '),
+      a.matieres.join(' '), a.options.join(' '), a.arM2Median || '',
+      a.ca, a.clients, a.premiere, a.derniere].map(_catCsvQ).join(';'));
+  });
+  const blob = new Blob(['﻿' + L.join('\r\n')], { type:'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'catalogue-prix-mesures-' + new Date().toISOString().slice(0, 10) + '.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast(list.length + ' articles exportés', 'success');
 }
