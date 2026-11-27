@@ -97,7 +97,7 @@ function _purgeLocalPlainPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '240 · 2026-11-27';
+const APP_VERSION = '241 · 2026-11-27';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -20257,13 +20257,15 @@ function _calPaoPrintNoDateTable(noDate){
 // ════════════════════════════════════════════════════════════════════════
 // CALENDRIER — EXPORTS TABLEUR (Excel / Google Sheets)
 // ════════════════════════════════════════════════════════════════════════
-// Les trois grilles se téléchargent en CSV. Point-virgule et directive `sep=`
-// en tête : Excel ouvre alors le fichier en colonnes quelle que soit la langue
-// de l'installation (en français il attend « ; », en anglais « , »), et Google
-// Sheets détecte le séparateur à l'import. BOM UTF-8 pour les accents, CRLF
-// pour les fins de ligne. Les exports plus anciens de l'app s'en tiennent à la
-// virgule, qui tombe en une seule colonne sur un Windows français — ces
-// fichiers-ci sont faits pour être retravaillés au tableur.
+// Les trois grilles se téléchargent en CSV : BOM UTF-8, séparateur
+// point-virgule, fins de ligne CRLF.
+// ⚠ PAS de directive `sep=;` en première ligne : Excel, quand il la trouve,
+// cesse de regarder le BOM et relit tout le fichier en ANSI — « Édité » devient
+// « Ã‰ditÃ© ». Le BOM seul suffit : Excel décode alors l'UTF-8, et sur une
+// installation française le séparateur de liste est déjà « ; ». Google Sheets
+// détecte le séparateur à l'import. Les exports plus anciens de l'app s'en
+// tiennent à la virgule, qui tombe en une seule colonne sur un Windows
+// français — ces fichiers-ci sont faits pour être retravaillés au tableur.
 const _CAL_CSV_SEP = ';';
 const _calCsvQ = v => '"' + String(v==null?'':v).replace(/"/g,'""') + '"';
 
@@ -20271,7 +20273,7 @@ const _calCsvQ = v => '"' + String(v==null?'':v).replace(/"/g,'""') + '"';
 // sous quels filtres — une sortie filtrée ne doit pas se lire comme la liste
 // complète du mois.
 function _calCsvHeader(titre){
-  return ['sep=' + _CAL_CSV_SEP, _calCsvQ(titre),
+  return [_calCsvQ(titre),
           _calCsvQ('Édité le ' + new Date().toLocaleString('fr-FR')
                    + _calPrintFiltersLabel().replace(/^ · /, ' — ')), ''];
 }
