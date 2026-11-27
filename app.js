@@ -97,7 +97,7 @@ function _purgeLocalPlainPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '237 · 2026-11-26';
+const APP_VERSION = '238 · 2026-11-27';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -20018,7 +20018,12 @@ function _calPaoNoDateHtml(noDate){
         <span class="bcal-nd-state" style="color:#6c63ff">${escapeHtml(st)}${ops.length ? ' · ' + escapeHtml(ops.join(', ')) : ''}</span></button>`;
   }).join('');
   return `<div class="bcal-nodate">
-    <div class="bcal-nodate-h">PAO en cours sans date de BAT (${noDate.length})</div>${rows}</div>`;
+    <div class="bcal-nodate-h">PAO en cours sans date de BAT (${noDate.length})
+      <button type="button" class="bcal-nd-print" onclick="printCalendrierPao('nodate')"
+              title="Imprimer la liste des travaux PAO sans date de BAT">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+        Imprimer
+      </button></div>${rows}</div>`;
 }
 
 // Compteurs PAO : à faire aujourd'hui (ligne KPI) et dates de BAT dépassées
@@ -20138,6 +20143,142 @@ function _calOpenDetail(kind, id, dossierId){
   document.body.classList.add('pcok-drawer-open');
 }
 
+// ════════════════════════════════════════════════════════════════════════
+// CALENDRIER — IMPRESSION (feuille de style et tableaux partagés)
+// ════════════════════════════════════════════════════════════════════════
+// Deux sorties papier utilisent les mêmes règles : l'impression complète du
+// mois (printCalendrier) et celle de la seule PAO (printCalendrierPao).
+function _calPrintCss(){
+  return `
+    @page{size:A4 landscape;margin:7mm}
+    body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;font-size:9px}
+    h1{font-size:15px;margin:0}
+    .sub{color:#555;font-size:9.5px;margin:2px 0 6px}
+    h2{font-size:12px;margin:10px 0 4px;padding:4px 8px;border-radius:4px;color:#fff}
+    h2.prod{background:#7c3aed}h2.client{background:#0f766e}h2.pao{background:#6c63ff}
+    table{width:100%;border-collapse:collapse;table-layout:fixed;page-break-inside:avoid}
+    th{background:#e9e9e9;font-size:8px;text-transform:uppercase;border:1px solid #999;padding:2px}
+    td{border:1px solid #bbb;height:78px;vertical-align:top;padding:2px 3px;width:14.28%;overflow:hidden}
+    td.out{background:#f6f6f6}
+    td.today{background:#fff7ed}
+    .dn{font-weight:bold;font-size:9px;color:#444;margin-bottom:2px}
+    .ev{font-size:7.5px;line-height:1.25;margin-bottom:1.5px;padding:1px 2px;border-radius:2px;background:#eef2ff;border-left:2px solid #6366f1;word-wrap:break-word;overflow:hidden}
+    .ev.late{background:#fef2f2;border-left-color:#dc2626;color:#991b1b}
+    .ev.done{background:#f0fdf4;border-left-color:#16a34a;color:#166534}
+    .cal2{page-break-before:always}
+    /* Travaux PAO sans date de BAT : une ligne par dossier et une case vide à
+       remplir à la main — c'est la feuille qu'on emporte en réunion de planning. */
+    table.nd{table-layout:auto;page-break-inside:auto}
+    table.nd tr{page-break-inside:avoid}
+    table.nd th{text-align:left;padding:3px 5px}
+    table.nd td{height:auto;width:auto;vertical-align:middle;padding:3px 5px;font-size:8.5px}
+    table.nd td.fill{width:78px;background:#fff}
+    table.nd tr:nth-child(even) td{background:#f7f7fb}
+    table.nd td.na{color:#991b1b;font-weight:bold}
+    .nd-empty{font-size:9px;color:#555;padding:6px 2px;font-style:italic}
+    @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+  `;
+}
+
+// Rappel des filtres de la barre sticky : une feuille filtrée ne doit pas se
+// lire comme la liste complète du mois.
+function _calPrintFiltersLabel(){
+  const f = _calFilters, out = [];
+  const stLbl = { active:'En cours', late:'En retard', completed:'Terminé' };
+  if(f.client) out.push('client '+f.client);
+  if(f.status) out.push('statut '+(stLbl[f.status]||f.status));
+  if(f.resp)   out.push('responsable '+f.resp);
+  if(f.type)   out.push('type '+f.type);
+  if(f.pole)   out.push('pôle '+_poleLabel(f.pole));
+  if(f.q)      out.push('recherche « '+f.q+' »');
+  return out.length ? ' · Filtres : '+out.join(', ') : '';
+}
+
+// Tableau mensuel de la PAO — même géométrie que les grilles production et
+// livraison, mais l'événement porte les étapes de conception restantes et le
+// graphiste, pas les articles.
+function _calPaoPrintTable(byDay, year, month, todayIso){
+  const first = new Date(year, month, 1);
+  const startDow = (first.getDay()+6)%7;
+  const dim = new Date(year, month+1, 0).getDate();
+  const totalCells = Math.ceil((startDow+dim)/7)*7;
+  let day = 1 - startDow;
+  let rows = '';
+  for(let w2=0; w2<totalCells/7; w2++){
+    let tds='';
+    for(let dd=0; dd<7; dd++, day++){
+      if(day<1||day>dim){ tds += '<td class="out"></td>'; continue; }
+      const iso = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+      const items = (byDay[iso] || []).map(e=>{
+        const late = iso < todayIso && e.status !== 'completed';
+        const ops  = [...new Set(e.etapes.reduce((a,s)=>a.concat(s.operateurs), []))];
+        return `<div class="ev ${late?'late':''}"><b>${escapeHtml(e.ref || e.client)}</b><br>${escapeHtml(e.client)}`
+          + `<br>${escapeHtml(e.etapes.map(s=>s.short).join(' · '))}`
+          + (ops.length ? '<br>'+escapeHtml(ops.join(', ')) : '') + `</div>`;
+      }).join('');
+      tds += `<td class="${iso===todayIso?'today':''}"><div class="dn">${day}</div>${items}</td>`;
+    }
+    rows += '<tr>'+tds+'</tr>';
+  }
+  return `<table><thead><tr>${_CAL_DOWS.map(d=>`<th>${d}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+// Tableau des travaux PAO en cours dont la date de BAT manque : ils n'ont
+// aucune case dans la grille, ce n'est pas une raison pour qu'ils disparaissent
+// du papier — c'est justement la liste à trancher. La dernière colonne reste
+// vide pour y écrire la date retenue.
+function _calPaoPrintNoDateTable(noDate){
+  if(!noDate.length) return '<div class="nd-empty">Aucun travail PAO en cours sans date de BAT.</div>';
+  const rows = noDate.map(e=>{
+    const ops = [...new Set(e.etapes.reduce((a,s)=>a.concat(s.operateurs), []))];
+    const art = (e.items||[]).map(i=>`${i.name} ×${i.qty||1}`).join(', ');
+    return `<tr>
+      <td><b>${escapeHtml(e.ref || '—')}</b></td>
+      <td>${escapeHtml(e.client)}</td>
+      <td>${escapeHtml(art || '—')}</td>
+      <td>${escapeHtml(e.etapes.map(s=>s.label).join(' · '))}</td>
+      <td${ops.length?'':' class="na"'}>${ops.length ? escapeHtml(ops.join(', ')) : 'Non attribué'}</td>
+      <td>${escapeHtml(e.commercial || '—')}</td>
+      <td class="fill"></td></tr>`;
+  }).join('');
+  return `<table class="nd"><thead><tr>
+    <th style="width:84px">Dossier</th><th>Client</th><th>Travail</th>
+    <th>Étapes PAO restantes</th><th>Graphiste</th><th>Responsable</th>
+    <th style="width:78px">Date de BAT à fixer</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+// Impression de la seule PAO : la grille des dates de BAT du mois affiché et,
+// en dessous, les travaux en cours sans date de BAT. `section` restreint la
+// sortie quand on imprime depuis le bandeau ('nodate') ou la grille ('grid').
+function printCalendrierPao(section){
+  const sec = section || 'all';
+  const shop = (typeof shopConfig !== 'undefined' && shopConfig && shopConfig.name) || 'FOREVER MG';
+  const monthLbl = _CAL_MONTHS[_calRef.getMonth()]+' '+_calRef.getFullYear();
+  const year = _calRef.getFullYear(), month = _calRef.getMonth();
+  const todayIso = _calTodayIso();
+  if(typeof _syncDossierDates==='function') _syncDossierDates();
+  const { byDay, noDate } = _calPaoByDay();
+  const planned = Object.keys(byDay).reduce((n,key)=>n+byDay[key].length, 0);
+  const k = _calPaoKpi();
+  const w = window.open('', '_blank', 'width=1200,height=900');
+  if(!w){ alert("Impression bloquée : autorisez les fenêtres pop-up pour ce site, puis réessayez."); return; }
+  const stamp = new Date().toLocaleDateString('fr-FR')+' '+new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+  const titre = sec==='nodate' ? 'PAO sans date de BAT' : 'PAO / Conception';
+  const sub = (sec==='nodate'
+      ? `${noDate.length} travail${noDate.length>1?'x':''} PAO en cours sans date de BAT`
+      : `${planned} travaux planifiés sur le mois · ${k.retard} date${k.retard>1?'s':''} de BAT dépassée${k.retard>1?'s':''} · ${noDate.length} sans date de BAT`)
+    + _calPrintFiltersLabel();
+  w.document.write(`<html><head><meta charset="utf-8"><title>${titre} ${monthLbl}</title><style>${_calPrintCss()}</style></head><body onload="window.print()">
+    <h1>${shop} — ${titre.toUpperCase()}${sec==='nodate'?'':' — '+monthLbl.toUpperCase()}</h1>
+    <div class="sub">Édité le ${stamp} · ${sub}</div>
+    ${sec==='nodate' ? '' : `<h2 class="pao">Grille des dates de BAT — ${monthLbl}</h2>
+    ${_calPaoPrintTable(byDay, year, month, todayIso)}`}
+    ${sec==='grid' ? '' : `<h2 class="pao">PAO en cours sans date de BAT (${noDate.length})</h2>
+    ${_calPaoPrintNoDateTable(noDate)}`}
+  </body></html>`);
+  w.document.close();
+}
+
 // Impression A4 paysage des deux calendriers du mois affiché.
 function printCalendrier(){
   const shop = (typeof shopConfig !== 'undefined' && shopConfig && shopConfig.name) || 'FOREVER MG';
@@ -20170,56 +20311,11 @@ function printCalendrier(){
     }
     return `<table><thead><tr>${_CAL_DOWS.map(d=>`<th>${d}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
   }
-  // Tableau PAO — même géométrie, mais l'événement porte les étapes de
-  // conception restantes et le graphiste, pas les articles.
-  function paoTable(){
-    const byDay = _calPaoByDay().byDay;
-    const first = new Date(year, month, 1);
-    const startDow = (first.getDay()+6)%7;
-    const dim = new Date(year, month+1, 0).getDate();
-    const totalCells = Math.ceil((startDow+dim)/7)*7;
-    let day = 1 - startDow;
-    let rows = '';
-    for(let w2=0; w2<totalCells/7; w2++){
-      let tds='';
-      for(let dd=0; dd<7; dd++, day++){
-        if(day<1||day>dim){ tds += '<td class="out"></td>'; continue; }
-        const iso = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-        const items = (byDay[iso] || []).map(e=>{
-          const late = iso < todayIso && e.status !== 'completed';
-          const ops  = [...new Set(e.etapes.reduce((a,s)=>a.concat(s.operateurs), []))];
-          return `<div class="ev ${late?'late':''}"><b>${escapeHtml(e.ref || e.client)}</b><br>${escapeHtml(e.client)}`
-            + `<br>${escapeHtml(e.etapes.map(s=>s.short).join(' · '))}`
-            + (ops.length ? '<br>'+escapeHtml(ops.join(', ')) : '') + `</div>`;
-        }).join('');
-        tds += `<td class="${iso===todayIso?'today':''}"><div class="dn">${day}</div>${items}</td>`;
-      }
-      rows += '<tr>'+tds+'</tr>';
-    }
-    return `<table><thead><tr>${_CAL_DOWS.map(d=>`<th>${d}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`;
-  }
+  const pao = _calPaoOn ? _calPaoByDay() : null;
   const w = window.open('', '_blank', 'width=1200,height=900');
   if(!w){ alert("Impression bloquée : autorisez les fenêtres pop-up pour ce site, puis réessayez."); return; }
   const stamp = new Date().toLocaleDateString('fr-FR')+' '+new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
-  w.document.write(`<html><head><meta charset="utf-8"><title>Calendrier ${monthLbl}</title><style>
-    @page{size:A4 landscape;margin:7mm}
-    body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;font-size:9px}
-    h1{font-size:15px;margin:0}
-    .sub{color:#555;font-size:9.5px;margin:2px 0 6px}
-    h2{font-size:12px;margin:10px 0 4px;padding:4px 8px;border-radius:4px;color:#fff}
-    h2.prod{background:#7c3aed}h2.client{background:#0f766e}h2.pao{background:#6c63ff}
-    table{width:100%;border-collapse:collapse;table-layout:fixed;page-break-inside:avoid}
-    th{background:#e9e9e9;font-size:8px;text-transform:uppercase;border:1px solid #999;padding:2px}
-    td{border:1px solid #bbb;height:78px;vertical-align:top;padding:2px 3px;width:14.28%;overflow:hidden}
-    td.out{background:#f6f6f6}
-    td.today{background:#fff7ed}
-    .dn{font-weight:bold;font-size:9px;color:#444;margin-bottom:2px}
-    .ev{font-size:7.5px;line-height:1.25;margin-bottom:1.5px;padding:1px 2px;border-radius:2px;background:#eef2ff;border-left:2px solid #6366f1;word-wrap:break-word;overflow:hidden}
-    .ev.late{background:#fef2f2;border-left-color:#dc2626;color:#991b1b}
-    .ev.done{background:#f0fdf4;border-left-color:#16a34a;color:#166534}
-    .cal2{page-break-before:always}
-    @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-  </style></head><body onload="window.print()">
+  w.document.write(`<html><head><meta charset="utf-8"><title>Calendrier ${monthLbl}</title><style>${_calPrintCss()}</style></head><body onload="window.print()">
     <h1>${shop} — CALENDRIER ${monthLbl.toUpperCase()}</h1>
     <div class="sub">Édité le ${stamp}</div>
     <h2 class="prod">🏭 Production — dates planifiées</h2>
@@ -20227,9 +20323,11 @@ function printCalendrier(){
     <div class="cal2"></div>
     <h2 class="client">📦 Échéances client — livraison / retrait</h2>
     ${tableFor('client')}
-    ${_calPaoOn ? `<div class="cal2"></div>
-    <h2 class="pao">PAO — dates de BAT</h2>
-    ${paoTable()}` : ''}
+    ${pao ? `<div class="cal2"></div>
+    <h2 class="pao">PAO / Conception — dates de BAT</h2>
+    ${_calPaoPrintTable(pao.byDay, year, month, todayIso)}
+    <h2 class="pao">PAO en cours sans date de BAT (${pao.noDate.length})</h2>
+    ${_calPaoPrintNoDateTable(pao.noDate)}` : ''}
   </body></html>`);
   w.document.close();
 }
