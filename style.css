@@ -1504,6 +1504,7 @@ tr:hover td {
   color:var(--color-text-secondary); font-family:'DM Sans',sans-serif; font-size:11px; font-weight:700;
   text-transform:none; letter-spacing:0; cursor:pointer; transition:.15s; }
 .bcal-nd-print:hover { background:var(--surface2); color:var(--color-text-primary); }
+.bcal-nd-acts { display:flex; align-items:center; gap:6px; flex-shrink:0; }
 .bcal-nd-row { display:flex; align-items:center; gap:9px; width:100%; text-align:left; padding:8px 10px; border:none; border-radius:8px; background:transparent; cursor:pointer; font-size:13px; color:var(--text); }
 .bcal-nd-row:hover { background:var(--surface2); }
 .bcal-nd-cli { flex:1; min-width:80px; color:var(--text); }
@@ -2621,6 +2622,7 @@ html, body { overflow-x: hidden; max-width: 100%; }
   color:#fff; font-family:'DM Sans',sans-serif; font-size:11.5px; font-weight:700;
   cursor:pointer; transition:background .15s; }
 .cal-cal-print:hover { background:rgba(255,255,255,.3); }
+.cal-cal-acts { display:flex; align-items:center; gap:6px; flex-shrink:0; }
 
 /* Le mois défile horizontalement : sur écran étroit (ou 2 calendriers côte à côte)
    les colonnes gardent une largeur minimale lisible → on scrolle gauche/droite

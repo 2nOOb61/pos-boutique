@@ -97,7 +97,7 @@ function _purgeLocalPlainPasswords() {
 //   3) index.html → app.js?v=YYYYMMDD-…  (+ style.css?v=… si CSS touché)
 // Le numéro principal suit celui du SW (ici v130).
 // ============================================================
-const APP_VERSION = '238 · 2026-11-27';
+const APP_VERSION = '239 · 2026-11-27';
 
 // ============================================================
 // PÔLES ATELIER — domaines de production. Le commercial coche un ou
@@ -20019,11 +20019,18 @@ function _calPaoNoDateHtml(noDate){
   }).join('');
   return `<div class="bcal-nodate">
     <div class="bcal-nodate-h">PAO en cours sans date de BAT (${noDate.length})
-      <button type="button" class="bcal-nd-print" onclick="printCalendrierPao('nodate')"
-              title="Imprimer la liste des travaux PAO sans date de BAT">
-        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
-        Imprimer
-      </button></div>${rows}</div>`;
+      <span class="bcal-nd-acts">
+        <button type="button" class="bcal-nd-print" onclick="exportCalendrierPaoCsv('nodate')"
+                title="Télécharger la liste en tableur (CSV — Excel ou Google Sheets)">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Excel
+        </button>
+        <button type="button" class="bcal-nd-print" onclick="printCalendrierPao('nodate')"
+                title="Imprimer la liste des travaux PAO sans date de BAT">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+          Imprimer
+        </button>
+      </span></div>${rows}</div>`;
 }
 
 // Compteurs PAO : à faire aujourd'hui (ligne KPI) et dates de BAT dépassées
@@ -20245,6 +20252,91 @@ function _calPaoPrintNoDateTable(noDate){
     <th style="width:84px">Dossier</th><th>Client</th><th>Travail</th>
     <th>Étapes PAO restantes</th><th>Graphiste</th><th>Responsable</th>
     <th style="width:78px">Date de BAT à fixer</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// CALENDRIER — EXPORT TABLEUR DE LA PAO (Excel / Google Sheets)
+// ────────────────────────────────────────────────────────────────────────
+// Même matière que la feuille imprimée, mise à plat : UNE ligne par travail,
+// les planifiés du mois affiché puis ceux qui restent à dater. Pas deux
+// tableaux comme sur le papier — dans un tableur c'est la colonne « Date de
+// BAT » vide qui les distingue, et on peut alors trier, filtrer et dater en
+// place au lieu de recopier.
+const _CAL_PAO_EXPORT_COLS = ['Date de BAT','Jour','Dossier','Client','Travail',
+  'Étapes PAO restantes','Graphiste','Responsable','Statut','Retard (jours)'];
+
+function _calPaoExportRows(section){
+  const sec = section || 'all';
+  const { byDay, noDate } = _calPaoByDay();
+  const todayIso = _calTodayIso();
+  const line = (e, iso) => {
+    const ops = [...new Set(e.etapes.reduce((a,s)=>a.concat(s.operateurs), []))];
+    const late = !!iso && iso < todayIso && e.status !== 'completed';
+    const retard = late ? (_calGapDays(iso, todayIso) || 0) : 0;
+    const jour = iso ? new Date(iso+'T00:00:00').toLocaleDateString('fr-FR',{weekday:'long'}) : '';
+    return {
+      date: iso ? _dispDate(iso) : '',
+      jour,
+      dossier: e.ref || '',
+      client: e.client || '',
+      travail: (e.items||[]).map(i=>`${i.name} ×${i.qty||1}`).join(', '),
+      etapes: e.etapes.map(s=>s.label).join(' · '),
+      graphiste: ops.length ? ops.join(', ') : 'Non attribué',
+      responsable: e.commercial || '',
+      statut: !iso ? 'Sans date de BAT' : (late ? 'En retard' : 'Planifié'),
+      retard
+    };
+  };
+  const rows = [];
+  if(sec !== 'nodate'){
+    Object.keys(byDay).sort().forEach(iso => byDay[iso].forEach(e => rows.push(line(e, iso))));
+  }
+  if(sec !== 'grid') noDate.forEach(e => rows.push(line(e, '')));
+  return rows;
+}
+
+// Télécharge la PAO en CSV (séparateur virgule + BOM, comme les autres exports
+// de l'app) : le fichier s'ouvre directement dans Excel et s'importe dans
+// Google Sheets. `section` suit celle de l'impression : 'all' depuis l'entête
+// de la grille, 'nodate' depuis le bandeau des travaux à dater.
+function exportCalendrierPaoCsv(section){
+  const sec = section || 'all';
+  if(typeof _syncDossierDates==='function') _syncDossierDates();
+  const rows = _calPaoExportRows(sec);
+  if(!rows.length){
+    showToast(sec==='nodate' ? 'Aucun travail PAO sans date de BAT' : 'Aucun travail PAO à exporter', 'error');
+    return;
+  }
+  const shop = (typeof shopConfig !== 'undefined' && shopConfig && shopConfig.name) || 'FOREVER MG';
+  const monthLbl = _CAL_MONTHS[_calRef.getMonth()]+' '+_calRef.getFullYear();
+  // Point-virgule et directive sep= : Excel ouvre alors le fichier en colonnes
+  // quelle que soit sa langue (en français il attend « ; », en anglais « , »),
+  // et Google Sheets détecte le séparateur à l'import. Les exports plus anciens
+  // de l'app s'en tiennent à la virgule, qui tombe en une seule colonne sur un
+  // Windows français — celui-ci est fait pour être retravaillé au tableur.
+  const BOM = '\uFEFF', SEP = ';';
+  const q = v => '"' + String(v==null?'':v).replace(/"/g,'""') + '"';
+  const L = ['sep=' + SEP];
+  L.push(q(shop + ' — PAO / Conception' + (sec==='nodate' ? ' — travaux sans date de BAT' : ' — ' + monthLbl)));
+  L.push(q('Édité le ' + new Date().toLocaleString('fr-FR') + _calPrintFiltersLabel().replace(/^ · /, ' — ')));
+  L.push('');
+  L.push(_CAL_PAO_EXPORT_COLS.map(q).join(SEP));
+  rows.forEach(r => L.push([
+    q(r.date), q(r.jour), q(r.dossier), q(r.client), q(r.travail),
+    q(r.etapes), q(r.graphiste), q(r.responsable), q(r.statut), Number(r.retard)||0
+  ].join(SEP)));
+  const stamp = _calTodayIso();
+  const name = sec==='nodate'
+    ? `pao_sans-date-bat_${stamp}.csv`
+    : `pao_${_calRef.getFullYear()}-${String(_calRef.getMonth()+1).padStart(2,'0')}_${stamp}.csv`;
+  // CRLF : la fin de ligne que tous les tableurs attendent d'un CSV.
+  const blob = new Blob([BOM + L.join('\r\n')], { type:'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast(`Export tableur — ${rows.length} travail${rows.length>1?'x':''} PAO`);
 }
 
 // Impression de la seule PAO : la grille des dates de BAT du mois affiché et,

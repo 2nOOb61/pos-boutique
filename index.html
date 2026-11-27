@@ -26,7 +26,7 @@
 <!-- QR/Barcode Scanner library -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="./style.css?v=20261127-impression-pao">
+<link rel="stylesheet" href="./style.css?v=20261127-export-pao">
 
 <style>
 /* ══ FOREVER MG — Modules Attribution & Production ══ */
@@ -2944,13 +2944,20 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
             <span class="cal-cal-title">PAO / Conception<span class="cal-cal-stat" id="calPaoStat"></span></span>
             <span class="cal-cal-sub">Dates de BAT — conception, modifications, épreuves</span>
           </div>
-          <!-- Imprime la PAO seule : la grille des dates de BAT du mois affiché
-               ET la liste des travaux en cours dont la date de BAT manque. -->
-          <button type="button" class="cal-cal-print" onclick="printCalendrierPao()"
-                  title="Imprimer la PAO : grille des dates de BAT + travaux sans date de BAT">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
-            Imprimer
-          </button>
+          <!-- Imprime ou télécharge la PAO seule : la grille des dates de BAT du
+               mois affiché ET les travaux en cours dont la date de BAT manque. -->
+          <div class="cal-cal-acts">
+            <button type="button" class="cal-cal-print" onclick="exportCalendrierPaoCsv()"
+                    title="Télécharger la PAO en tableur (CSV — Excel ou Google Sheets)">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Excel
+            </button>
+            <button type="button" class="cal-cal-print" onclick="printCalendrierPao()"
+                    title="Imprimer la PAO : grille des dates de BAT + travaux sans date de BAT">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+              Imprimer
+            </button>
+          </div>
         </div>
         <div class="cal-month" id="calMonthPao"></div>
       </section>
@@ -4262,7 +4269,7 @@ body.pcok-drawer-open .pcok-drawer-overlay { opacity:1; pointer-events:auto; }
 
 <div id="toast-container"></div>
 
-<script src="./app.js?v=20261127-impression-pao"></script>
+<script src="./app.js?v=20261127-export-pao"></script>
 
 <!-- Apps Script code: voir Code.gs -->
 
